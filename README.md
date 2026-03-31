@@ -13,7 +13,7 @@ Hashsmith is a modular, terminal-first toolkit for encoding, decoding, hashing, 
 ## Highlights ⚡
 - Clean CLI with guided interactive mode
 - Extensive encoding/decoding support (base* formats, morse, url, classical ciphers, and more)
-- Modern hash support (MD5/SHA/NTLM/Bcrypt/Argon2/Scrypt, etc.)
+- Modern hash support (MD5/SHA/RIPEMD-160/NTLM/Bcrypt/Argon2/Scrypt, etc.)
 - Identify mode for best-guess detection of encoding and hash types
 - File input/output and clipboard copy support
 - Themed UI with Rich
@@ -28,7 +28,10 @@ Hashsmith is a modular, terminal-first toolkit for encoding, decoding, hashing, 
 ```bash
 hashsmith encode -t base64 -i "hello"
 hashsmith decode -t base64 -i "aGVsbG8="
+hashsmith encode -t quoted-printable -i "merhaba dunya"
+hashsmith decode -t html-entities -i "&lt;b&gt;test&lt;/b&gt;"
 hashsmith hash -t sha256 -i "secret" -c
+hashsmith hash -t ripemd160 -i "secret"
 hashsmith identify -i "aGVsbG8="
 ```
 
@@ -110,6 +113,7 @@ hashsmith crack -t <type|auto> -H <hash> -M <dict|brute> [options]
 ```bash
 hashsmith crack -t md5 -H 5f4dcc3b5aa765d61d8327deb882cf99 -M dict -w wordlists/common.txt
 hashsmith crack -t sha1 -H 2aae6c35c94fcfb415dbe95f408b9ce91ee846ed -M brute -n 1 -x 4
+hashsmith crack -t ripemd160 -H 2c08e8f5884750a7b99f6f2f342fc638db25ff31 -M dict -w wordlists/common.txt
 hashsmith crack -t md5 -H 5f4dcc3b5aa765d61d8327deb882cf99 -M dict -w wordlists/common.txt -c
 ```
 
@@ -148,16 +152,16 @@ hashsmith interactive
 ### Hashing Algorithms
 | Category | Algorithms |
 | --- | --- |
-| Cryptographic | md5, md4, sha1, sha224, sha256, sha384, sha512, sha3_224, sha3_256, sha3_512 |
+| Cryptographic | md5, md4, sha1, ripemd160, sha224, sha256, sha384, sha512, sha3_224, sha3_256, sha3_512 |
 | Modern/Alt | blake2b, blake2s, ntlm, mysql323, mysql41 |
 | Password | bcrypt, argon2, scrypt, mssql2000, mssql2005, mssql2012, postgres |
 
 ### Encoding/Decoding Algorithms
 | Category | Algorithms |
 | --- | --- |
-| Base Encodings | base64, base64url, base32, base85, base58 |
+| Base Encodings | base64, base64url, base32, base85, base58, quoted-printable, uu |
 | Numeric | hex, binary, decimal, octal |
-| Text/URL | morse, url, unicode |
+| Text/URL | morse, url, unicode, html-entities |
 | Ciphers | caesar, rot13, vigenere, xor, atbash, baconian, leet, reverse, railfence, polybius |
 | Esoteric | brainf*ck |
 
@@ -191,8 +195,8 @@ See [LICENSE](LICENSE).
 Hashsmith is a modular, terminal-based Swiss Army knife for encoding, decoding, hashing, and password cracking. Built for security enthusiasts 🛠️🔐
 
 ## Features
-- Encoding/Decoding: Base64, Hex, Binary, Morse, URL, Caesar, ROT13
-- Hashing: MD5, SHA-1, SHA-256, SHA-512
+- Encoding/Decoding: Base64, Hex, Binary, Morse, URL, Quoted-printable, HTML Entities, Uuencoding, Caesar, ROT13
+- Hashing: MD5, SHA-1, RIPEMD-160, SHA-256, SHA-512
 - Cracking: Dictionary attack and basic brute-force
 - File input/output support
 - Optional salt support for hashing and cracking

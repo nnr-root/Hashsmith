@@ -1,5 +1,7 @@
 import base64
 import binascii
+import quopri
+from html import unescape
 from urllib.parse import unquote
 
 from .morse import decode_morse
@@ -43,6 +45,34 @@ def decode_base85(text: str) -> str:
         return base64.a85decode(text.encode("utf-8")).decode("utf-8")
     except (binascii.Error, UnicodeDecodeError, ValueError):
         raise ValueError("Invalid Base85 format provided")
+
+
+def decode_quoted_printable(text: str) -> str:
+    try:
+        return quopri.decodestring(text.encode("utf-8")).decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("Invalid Quoted-printable format provided")
+
+
+def decode_html_entities(text: str) -> str:
+    return unescape(text)
+
+
+def decode_uu(text: str) -> str:
+    if not text.strip():
+        return ""
+    data = bytearray()
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            data.extend(binascii.a2b_uu(line.encode("ascii")))
+        except (binascii.Error, ValueError, UnicodeEncodeError):
+            raise ValueError("Invalid Uuencoding format provided")
+    try:
+        return bytes(data).decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("Invalid Uuencoding format provided")
 
 
 def decode_base64url(text: str) -> str:

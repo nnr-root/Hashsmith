@@ -1,5 +1,7 @@
 import base64
 import binascii
+import quopri
+from html import escape
 from urllib.parse import quote
 
 from .morse import encode_morse
@@ -27,6 +29,25 @@ def encode_base32(text: str) -> str:
 
 def encode_base85(text: str) -> str:
     return base64.a85encode(text.encode("utf-8")).decode("utf-8")
+
+
+def encode_quoted_printable(text: str) -> str:
+    return quopri.encodestring(text.encode("utf-8")).decode("ascii")
+
+
+def encode_html_entities(text: str) -> str:
+    return escape(text, quote=True)
+
+
+def encode_uu(text: str) -> str:
+    data = text.encode("utf-8")
+    if not data:
+        return ""
+    lines = []
+    for i in range(0, len(data), 45):
+        chunk = data[i:i + 45]
+        lines.append(binascii.b2a_uu(chunk).decode("ascii").rstrip("\n"))
+    return "\n".join(lines)
 
 
 def encode_base64url(text: str) -> str:

@@ -24,7 +24,7 @@ def detect_hash_types(hash_value: str) -> List[str]:
     length_map = {
         16: ["mysql323"],
         32: ["md5", "md4", "ntlm"],
-        40: ["sha1", "mssql2000"],
+        40: ["sha1", "ripemd160", "mssql2000"],
         56: ["sha224", "sha3_224"],
         64: ["sha256", "sha3_256", "blake2s"],
         96: ["sha384"],

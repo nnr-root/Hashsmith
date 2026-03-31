@@ -167,6 +167,7 @@ def _postgres_md5(text: str, username: str) -> str:
 def hash_text(text: str, algorithm: str, salt: str = "", salt_mode: str = "prefix") -> str:
     algo = algorithm.lower()
     if algo not in HASH_FUNCS and algo not in {
+        "ripemd160",
         "md4",
         "ntlm",
         "mysql323",
@@ -218,6 +219,13 @@ def hash_text(text: str, algorithm: str, salt: str = "", salt_mode: str = "prefi
         else:
             salt_bytes = salt.encode("utf-8")
         return bcrypt.hashpw(text.encode("utf-8"), salt_bytes).decode("utf-8")
+    if algo == "ripemd160":
+        try:
+            h = hashlib.new("ripemd160")
+        except ValueError as exc:
+            raise ValueError("RIPEMD-160 is not available in this Python/OpenSSL build") from exc
+        h.update(text.encode("utf-8"))
+        return h.hexdigest()
     h = HASH_FUNCS[algo]()
     h.update(text.encode("utf-8"))
     return h.hexdigest()

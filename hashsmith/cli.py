@@ -22,6 +22,9 @@ from .algorithms.decoding import (
     decode_base64,
     decode_base32,
     decode_base85,
+    decode_quoted_printable,
+    decode_html_entities,
+    decode_uu,
     decode_base64url,
     decode_base58,
     decode_binary,
@@ -47,6 +50,9 @@ from .algorithms.encoding import (
     encode_base64,
     encode_base32,
     encode_base85,
+    encode_quoted_printable,
+    encode_html_entities,
+    encode_uu,
     encode_base64url,
     encode_base58,
     encode_binary,
@@ -138,6 +144,9 @@ def build_parser() -> argparse.ArgumentParser:
             "base64url",
             "base32",
             "base85",
+            "quoted-printable",
+            "html-entities",
+            "uu",
             "base58",
             "hex",
             "binary",
@@ -228,7 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     hash_params.add_argument("-t", "--type", required=True, choices=[
         "md5", "md4", "sha1", "sha224", "sha256", "sha384", "sha512", "sha3_224", "sha3_256", "sha3_512",
-        "blake2b", "blake2s", "ntlm", "mysql323", "mysql41", "bcrypt",
+        "blake2b", "blake2s", "ripemd160", "ntlm", "mysql323", "mysql41", "bcrypt",
         "argon2", "scrypt", "mssql2000", "mssql2005", "mssql2012", "postgres"
     ])
     hash_params.add_argument("-s", "--salt", default="", help="Salt value")
@@ -252,7 +261,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     crack_params.add_argument("-t", "--type", required=True, choices=[
         "auto", "md5", "md4", "sha1", "sha224", "sha256", "sha384", "sha512", "sha3_224", "sha3_256", "sha3_512",
-        "blake2b", "blake2s", "ntlm", "mysql323", "mysql41", "bcrypt",
+        "blake2b", "blake2s", "ripemd160", "ntlm", "mysql323", "mysql41", "bcrypt",
         "argon2", "scrypt", "mssql2000", "mssql2005", "mssql2012", "postgres"
     ])
     crack_params.add_argument("-M", "--mode", required=True, choices=["dict", "brute"])
@@ -293,6 +302,12 @@ def handle_encode(args: argparse.Namespace, console: Console) -> str:
         return encode_base32(text)
     if args.type == "base85":
         return encode_base85(text)
+    if args.type == "quoted-printable":
+        return encode_quoted_printable(text)
+    if args.type == "html-entities":
+        return encode_html_entities(text)
+    if args.type == "uu":
+        return encode_uu(text)
     if args.type == "base58":
         return encode_base58(text)
     if args.type == "hex":
@@ -348,6 +363,12 @@ def handle_decode(args: argparse.Namespace, console: Console) -> str:
         return decode_base32(text)
     if args.type == "base85":
         return decode_base85(text)
+    if args.type == "quoted-printable":
+        return decode_quoted_printable(text)
+    if args.type == "html-entities":
+        return decode_html_entities(text)
+    if args.type == "uu":
+        return decode_uu(text)
     if args.type == "base58":
         return decode_base58(text)
     if args.type == "hex":
@@ -758,7 +779,7 @@ def interactive_mode(console: Console, accent: str) -> None:
 
                 if action == "encode":
                     enc_options = [
-                        "base64", "base64url", "base32", "base85", "base58", "hex", "binary", "decimal", "octal",
+                        "base64", "base64url", "base32", "base85", "quoted-printable", "html-entities", "uu", "base58", "hex", "binary", "decimal", "octal",
                         "morse", "url", "caesar", "rot13", "vigenere", "xor", "atbash",
                         "baconian", "leet", "reverse", "brainf*ck", "railfence", "polybius", "unicode",
                     ]
@@ -782,7 +803,7 @@ def interactive_mode(console: Console, accent: str) -> None:
 
                 if action == "decode":
                     dec_options = [
-                        "base64", "base64url", "base32", "base85", "base58", "hex", "binary", "decimal", "octal",
+                        "base64", "base64url", "base32", "base85", "quoted-printable", "html-entities", "uu", "base58", "hex", "binary", "decimal", "octal",
                         "morse", "url", "caesar", "rot13", "vigenere", "xor", "atbash",
                         "baconian", "leet", "reverse", "brainf*ck", "railfence", "polybius", "unicode",
                     ]
@@ -806,7 +827,7 @@ def interactive_mode(console: Console, accent: str) -> None:
 
                 hash_options = [
                     "md5", "md4", "sha1", "sha224", "sha256", "sha384", "sha512", "sha3_224", "sha3_256", "sha3_512",
-                    "blake2b", "blake2s", "ntlm", "mysql323", "mysql41", "bcrypt",
+                    "blake2b", "blake2s", "ripemd160", "ntlm", "mysql323", "mysql41", "bcrypt",
                     "argon2", "scrypt", "mssql2000", "mssql2005", "mssql2012", "postgres",
                 ]
                 hash_type = choose_option("Hash type", hash_options, default_index=3)
@@ -851,7 +872,7 @@ def interactive_mode(console: Console, accent: str) -> None:
                 "Hash type",
                 [
                     "auto", "md5", "md4", "sha1", "sha224", "sha256", "sha384", "sha512", "sha3_224", "sha3_256", "sha3_512",
-                    "blake2b", "blake2s", "ntlm", "mysql323", "mysql41", "bcrypt",
+                    "blake2b", "blake2s", "ripemd160", "ntlm", "mysql323", "mysql41", "bcrypt",
                     "argon2", "scrypt", "mssql2000", "mssql2005", "mssql2012", "postgres",
                 ],
                 default_index=1,

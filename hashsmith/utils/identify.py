@@ -13,6 +13,9 @@ from ..algorithms.decoding import (
     decode_base64,
     decode_base32,
     decode_base85,
+    decode_quoted_printable,
+    decode_html_entities,
+    decode_uu,
     decode_base64url,
     decode_morse_code,
     decode_baconian,
@@ -38,6 +41,9 @@ from ..algorithms.encoding import (
     encode_base64,
     encode_base32,
     encode_base85,
+    encode_quoted_printable,
+    encode_html_entities,
+    encode_uu,
     encode_base64url,
     encode_morse_code,
     encode_baconian,
@@ -358,6 +364,33 @@ def detect_encoding_types(text: str) -> List[str]:
     except Exception:
         pass
 
+    # Quoted-printable
+    if "=" in value:
+        try:
+            decoded = decode_quoted_printable(value)
+            if encode_quoted_printable(decoded) == value:
+                strong_results.append("quoted-printable")
+        except Exception:
+            pass
+
+    # HTML entities
+    if "&" in value and ";" in value:
+        try:
+            decoded = decode_html_entities(value)
+            if encode_html_entities(decoded) == value:
+                strong_results.append("html-entities")
+        except Exception:
+            pass
+
+    # Uuencoding
+    if all(32 <= ord(ch) <= 126 or ch in "\r\n\t" for ch in value):
+        try:
+            decoded = decode_uu(value)
+            if decoded and encode_uu(decoded) == value:
+                strong_results.append("uu")
+        except Exception:
+            pass
+
     # Base58 (strict round-trip)
     try:
         decoded = decode_base58(value)
@@ -579,7 +612,7 @@ def _weights_for_hex_length(length: int) -> List[Tuple[str, float]]:
     return {
         16: [("mysql323", 1.0)],
         32: [("md5", 0.7), ("ntlm", 0.2), ("md4", 0.1)],
-        40: [("sha1", 0.85), ("mssql2000", 0.15)],
+        40: [("sha1", 0.7), ("ripemd160", 0.2), ("mssql2000", 0.1)],
         56: [("sha224", 0.8), ("sha3_224", 0.2)],
         64: [("sha256", 0.7), ("sha3_256", 0.2), ("blake2s", 0.1)],
         96: [("sha384", 1.0)],
