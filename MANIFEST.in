@@ -1,2 +1,3 @@
 prune wordlists
 recursive-exclude wordlists *
+recursive-include go_hashsmith *.go go.mod

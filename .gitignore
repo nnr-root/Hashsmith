@@ -6,3 +6,6 @@ __pycache__/
 venv/
 .env
 .DS_Store
+.hashsmith-go/
+go_hashsmith/hashsmith
+.npm-bin/
