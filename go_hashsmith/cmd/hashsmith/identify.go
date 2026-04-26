@@ -211,6 +211,14 @@ func scoreCandidates(v string) []candidate {
 // carry an unambiguous structural signature, bypassing probabilistic scoring.
 func signatureMatch(v string) []candidate {
 	switch {
+	case strings.HasPrefix(v, "$zipcrypto$"):
+		return []candidate{{"ZIP (ZipCrypto encrypted)", 1000, "$zipcrypto$ prefix — traditional PKWARE encryption hash"}}
+	case strings.HasPrefix(v, "$zipaes128$"):
+		return []candidate{{"ZIP (WinZip AES-128 encrypted)", 1000, "$zipaes128$ prefix — WinZip AES-128 hash"}}
+	case strings.HasPrefix(v, "$zipaes192$"):
+		return []candidate{{"ZIP (WinZip AES-192 encrypted)", 1000, "$zipaes192$ prefix — WinZip AES-192 hash"}}
+	case strings.HasPrefix(v, "$zipaes256$"):
+		return []candidate{{"ZIP (WinZip AES-256 encrypted)", 1000, "$zipaes256$ prefix — WinZip AES-256 hash"}}
 	case reBcrypt.MatchString(v):
 		return []candidate{{"bcrypt", 1000, "starts with $2[aby]$ cost-factor signature"}}
 	case reArgon2.MatchString(v):
@@ -967,6 +975,19 @@ func isUUStr(s string) bool {
 
 func detectHashTypes(text string) []string {
 	t := strings.TrimSpace(text)
+	// ZIP hash formats extracted by the extract-hash module.
+	if strings.HasPrefix(t, "$zipcrypto$") {
+		return []string{"zipcrypto"}
+	}
+	if strings.HasPrefix(t, "$zipaes128$") {
+		return []string{"zipaes128"}
+	}
+	if strings.HasPrefix(t, "$zipaes192$") {
+		return []string{"zipaes192"}
+	}
+	if strings.HasPrefix(t, "$zipaes256$") {
+		return []string{"zipaes256"}
+	}
 	if reBcrypt.MatchString(t) {
 		return []string{"bcrypt"}
 	}

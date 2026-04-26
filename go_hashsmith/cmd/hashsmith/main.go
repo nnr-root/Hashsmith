@@ -73,6 +73,10 @@ func main() {
 		if err := runIdentify(rest); err != nil {
 			fail(err.Error())
 		}
+	case "extract-hash", "zip2hash":
+		if err := runExtractHash(rest); err != nil {
+			fail(err.Error())
+		}
 	case "interactive":
 		if err := runInteractive(); err != nil {
 			fail(err.Error())
@@ -89,12 +93,13 @@ func printHelp() {
 	fmt.Println("  hashsmith [global-flags] <command> [options]")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  encode      -t <type> -i <text> [-f file] [-o out] [-c]")
-	fmt.Println("  decode      -t <type> -i <text> [-f file] [-o out] [-c]")
-	fmt.Println("  hash        -t <type> -i <text> [-f file] [-s salt] [-S prefix|suffix] [-e hex|base58] [-o out] [-c]")
-	fmt.Println("  crack       -t <type> -H <hash> -M dict|brute [-w wordlist] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]")
-	fmt.Println("  identify    -i <text> [-f file] [-o out] [-c]")
-	fmt.Println("  interactive  guided interactive mode")
+	fmt.Println("  encode        -t <type> -i <text> [-f file] [-o out] [-c]")
+	fmt.Println("  decode        -t <type> -i <text> [-f file] [-o out] [-c]")
+	fmt.Println("  hash          -t <type> -i <text> [-f file] [-s salt] [-S prefix|suffix] [-e hex|base58] [-o out] [-c]")
+	fmt.Println("  crack         -t <type> -H <hash> -M dict|brute [-w wordlist] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]")
+	fmt.Println("  identify      -i <text> [-f file] [-o out] [-c]")
+	fmt.Println("  extract-hash  -f <zip-file> [-o out] [-c]   (alias: zip2hash)")
+	fmt.Println("  interactive   guided interactive mode")
 	fmt.Println()
 	fmt.Println("Global flags:")
 	fmt.Println("  -N, --no-banner   suppress the banner")

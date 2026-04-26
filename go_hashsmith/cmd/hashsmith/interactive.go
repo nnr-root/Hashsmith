@@ -32,6 +32,7 @@ func runInteractive() error {
 		"3": "hash",
 		"4": "crack",
 		"5": "set-theme",
+		"6": "extract-hash",
 		"i": "identify",
 	}
 
@@ -44,6 +45,7 @@ func runInteractive() error {
 		fmt.Fprintf(os.Stderr, "  %s hash\n", acFn("3)"))
 		fmt.Fprintf(os.Stderr, "  %s crack\n", acFn("4)"))
 		fmt.Fprintf(os.Stderr, "  %s set-theme\n", acFn("5)"))
+		fmt.Fprintf(os.Stderr, "  %s extract-hash (ZIP → crack)\n", acFn("6)"))
 		fmt.Fprintf(os.Stderr, "  %s identify\n", acFn("i)"))
 		fmt.Fprintf(os.Stderr, "  %s Quit\n", acFn("q)"))
 		fmt.Fprintf(os.Stderr, "Select option %s: ", acFn("[1]"))
@@ -82,6 +84,8 @@ func runInteractive() error {
 			execErr = interactiveIdentify(reader)
 		case "crack":
 			execErr = interactiveCrack(reader)
+		case "extract-hash":
+			execErr = interactiveExtractHash(reader)
 		case "set-theme":
 			execErr = interactiveSetTheme(reader)
 		}
@@ -381,6 +385,118 @@ func interactiveCrack(reader *bufio.Reader) error {
 
 	return doCrack(targetHash, hashType, "brute", "", charset,
 		minLen, maxLen, workers, salt, saltMode, "", copyOut)
+}
+
+// interactiveExtractHash guides the user through:
+//  1. Choosing a ZIP file.
+//  2. Extracting the crackable hash from its first encrypted entry.
+//  3. Displaying the result and optionally handing off to the crack module.
+func interactiveExtractHash(reader *bufio.Reader) error {
+	zipPath, err := askText(reader, "ZIP file path", "")
+	if err != nil {
+		return err
+	}
+	if zipPath == "" {
+		return errors.New("ZIP file path is required")
+	}
+
+	clrYellow.Fprintf(os.Stderr, "Extracting hash from %s…\n", zipPath)
+	res, err := extractZipHash(zipPath)
+	if err != nil {
+		return fmt.Errorf("extraction failed: %w", err)
+	}
+	printExtractResult(res)
+
+	// Optional: copy hash to clipboard.
+	copyHash, err := askYesNo(reader, "Copy hash to clipboard?", true)
+	if err != nil {
+		return err
+	}
+	if copyHash {
+		if copyToClipboard(res.hash) {
+			clrGreen.Fprintln(os.Stderr, "Hash copied to clipboard")
+		} else {
+			clrYellow.Fprintln(os.Stderr, "Unable to copy to clipboard")
+		}
+	}
+
+	// Optional: pipe directly into the crack module.
+	sendToCrack, err := askYesNo(reader, "Send to crack module?", true)
+	if err != nil {
+		return err
+	}
+	if !sendToCrack {
+		return nil
+	}
+	return interactiveCrackKnown(reader, res.hashType, res.hash)
+}
+
+// interactiveCrackKnown is the crack flow when the hash type and hash string
+// are already known (e.g. just extracted from a ZIP).  It skips the hash-type
+// and target-hash prompts and starts directly at attack-mode selection.
+func interactiveCrackKnown(reader *bufio.Reader, hashType, targetHash string) error {
+	color.New(themeAttr).Fprintf(os.Stderr,
+		"Hash type: %s\nHash:      %s\n\n", hashType, targetHash)
+
+	mode, err := chooseOption(reader, "Attack mode", []string{"dict", "brute"}, 1)
+	if err != nil {
+		return err
+	}
+
+	workers := runtime.NumCPU()
+	workersStr, err := askText(reader, fmt.Sprintf("Workers [0=auto=%d]", runtime.NumCPU()), "0")
+	if err != nil {
+		return err
+	}
+	if n, e := strconv.Atoi(workersStr); e == nil && n > 0 {
+		workers = n
+	}
+
+	copyOut, err := askYesNo(reader, "Copy cracked password to clipboard?", true)
+	if err != nil {
+		return err
+	}
+
+	if mode == "dict" {
+		wlChoice, err := chooseOption(reader,
+			"Wordlist", []string{"wordlists/common.txt", "enter custom path"}, 1)
+		if err != nil {
+			return err
+		}
+		wordlist := "wordlists/common.txt"
+		if strings.Contains(wlChoice, "custom") || strings.Contains(wlChoice, "enter") {
+			wordlist, err = askText(reader, "Wordlist path", "")
+			if err != nil {
+				return err
+			}
+		}
+		return doCrack(targetHash, hashType, "dict", wordlist, "",
+			1, 1, workers, "", "prefix", "", copyOut)
+	}
+
+	// brute-force
+	csChoice, err := chooseOption(reader,
+		"Charset", []string{"[a-z0-9] default", "enter custom"}, 1)
+	if err != nil {
+		return err
+	}
+	charset := "abcdefghijklmnopqrstuvwxyz0123456789"
+	if strings.Contains(csChoice, "custom") || strings.Contains(csChoice, "enter") {
+		charset, err = askText(reader, "Charset", "")
+		if err != nil {
+			return err
+		}
+	}
+	minLen, err := askInt(reader, "Min length", 1)
+	if err != nil {
+		return err
+	}
+	maxLen, err := askInt(reader, "Max length", 6)
+	if err != nil {
+		return err
+	}
+	return doCrack(targetHash, hashType, "brute", "", charset,
+		minLen, maxLen, workers, "", "prefix", "", copyOut)
 }
 
 func interactiveSetTheme(reader *bufio.Reader) error {

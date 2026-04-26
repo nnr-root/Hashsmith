@@ -21,6 +21,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/schollz/progressbar/v3"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/crypto/scrypt"
 )
 
@@ -450,12 +451,84 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyScrypt(targetHash, candidate)
 	case "mssql2005", "mssql2012":
 		return verifyMSSQL2005(targetHash, candidate)
+	case "zipcrypto":
+		return verifyZipCrypto(targetHash, candidate)
+	case "zipaes128", "zipaes192", "zipaes256":
+		return verifyZipAES(targetHash, candidate)
 	}
 	got, err := hashText(candidate, algo, salt, saltMode)
 	if err != nil {
 		return false, err
 	}
 	return got == targetHash, nil
+}
+
+// ── ZIP hash verification ─────────────────────────────────────────────────────
+
+// verifyZipCrypto checks a ZipCrypto password by decrypting the 12-byte
+// encryption header and comparing the last plaintext byte to the stored
+// check byte (which is either the high byte of the CRC-32 or of ModTime,
+// depending on how the hash was extracted).
+//
+// Hash format: $zipcrypto$<check_byte_hex>$<12_byte_enc_header_hex>
+func verifyZipCrypto(targetHash, candidate string) (bool, error) {
+	parts := strings.Split(targetHash, "$")
+	// "$zipcrypto$XX$YYYYYY..." splits to ["", "zipcrypto", "XX", "YYY..."]
+	if len(parts) != 4 || parts[1] != "zipcrypto" {
+		return false, errors.New("invalid zipcrypto hash format")
+	}
+	checkBytes, err := hex.DecodeString(parts[2])
+	if err != nil || len(checkBytes) != 1 {
+		return false, errors.New("invalid check byte in zipcrypto hash")
+	}
+	encHeader, err := hex.DecodeString(parts[3])
+	if err != nil || len(encHeader) != 12 {
+		return false, errors.New("invalid encryption header in zipcrypto hash")
+	}
+	decrypted := decryptZipCryptoHeader(encHeader, candidate)
+	return decrypted[11] == checkBytes[0], nil
+}
+
+// verifyZipAES checks a WinZip AES password by re-deriving the PBKDF2 key
+// with the stored salt and comparing the last two derived bytes (the password
+// verifier) to the stored verifier.
+//
+// Hash formats:
+//
+//	$zipaes128$<salt_hex>$<verif_hex>  (8-byte salt,  keyLen=16)
+//	$zipaes192$<salt_hex>$<verif_hex>  (12-byte salt, keyLen=24)
+//	$zipaes256$<salt_hex>$<verif_hex>  (16-byte salt, keyLen=32)
+func verifyZipAES(targetHash, candidate string) (bool, error) {
+	var keyLen int
+	var rest string
+	switch {
+	case strings.HasPrefix(targetHash, "$zipaes128$"):
+		keyLen, rest = 16, targetHash[len("$zipaes128$"):]
+	case strings.HasPrefix(targetHash, "$zipaes192$"):
+		keyLen, rest = 24, targetHash[len("$zipaes192$"):]
+	case strings.HasPrefix(targetHash, "$zipaes256$"):
+		keyLen, rest = 32, targetHash[len("$zipaes256$"):]
+	default:
+		return false, errors.New("invalid zipaes hash format")
+	}
+	parts := strings.SplitN(rest, "$", 2)
+	if len(parts) != 2 {
+		return false, errors.New("invalid zipaes hash: missing verifier field")
+	}
+	salt, err := hex.DecodeString(parts[0])
+	if err != nil {
+		return false, fmt.Errorf("invalid salt in zipaes hash: %w", err)
+	}
+	expectedVerif, err := hex.DecodeString(parts[1])
+	if err != nil || len(expectedVerif) != 2 {
+		return false, fmt.Errorf("invalid verifier in zipaes hash: %w", err)
+	}
+	// WinZip AES uses PBKDF2-HMAC-SHA1 with 1000 iterations.
+	// Derived key layout: [AES key (keyLen)] [HMAC key (keyLen)] [verifier (2)]
+	// Total = 2*keyLen + 2 bytes. The verifier is at offset 2*keyLen.
+	dkLen := 2*keyLen + 2
+	dk := pbkdf2.Key([]byte(candidate), salt, 1000, dkLen, sha1.New)
+	return dk[2*keyLen] == expectedVerif[0] && dk[2*keyLen+1] == expectedVerif[1], nil
 }
 
 func verifyScrypt(targetHash, candidate string) (bool, error) {
