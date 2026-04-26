@@ -38,6 +38,7 @@ func runInteractive() error {
 	for {
 		acFn := color.New(themeAttr).Sprint
 		fmt.Fprintf(os.Stderr, "\nChoose action:\n")
+		fmt.Fprintf(os.Stderr, "  %s back\n", acFn("0)"))
 		fmt.Fprintf(os.Stderr, "  %s encode\n", acFn("1)"))
 		fmt.Fprintf(os.Stderr, "  %s decode\n", acFn("2)"))
 		fmt.Fprintf(os.Stderr, "  %s hash\n", acFn("3)"))
@@ -55,8 +56,11 @@ func runInteractive() error {
 		if input == "" {
 			input = "1"
 		}
-		if input == "q" || input == "quit" || input == "exit" || input == "bye" || input == "0" {
+		if input == "q" || input == "quit" || input == "exit" || input == "bye" {
 			color.New(themeAttr, color.Bold).Fprintln(os.Stderr, "Goodbye")
+			return nil
+		}
+		if input == "0" {
 			return nil
 		}
 
@@ -90,6 +94,9 @@ func runInteractive() error {
 		} else if execErr != nil {
 			clrRed.Fprint(os.Stderr, "Error: ")
 			fmt.Fprintln(os.Stderr, execErr.Error())
+			return nil
+		} else {
+			return nil
 		}
 	}
 	return nil

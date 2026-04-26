@@ -131,8 +131,18 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	if password != "" {
 		clrGreen.Fprint(os.Stderr, "Found: ")
 		fmt.Fprintln(os.Stderr, password)
-		if e := outputResult(password, outFile, copyResult); e != nil {
-			return e
+		if outFile != "" {
+			if e := os.WriteFile(outFile, []byte(password+"\n"), 0644); e != nil {
+				return e
+			}
+			clrGreen.Fprintf(os.Stderr, "Saved to %s\n", outFile)
+		}
+		if copyResult {
+			if copyToClipboard(password) {
+				clrGreen.Fprintln(os.Stderr, "Copied to clipboard")
+			} else {
+				clrYellow.Fprintln(os.Stderr, "Unable to copy to clipboard")
+			}
 		}
 	} else {
 		clrYellow.Fprintln(os.Stderr, "Not found")
@@ -344,11 +354,14 @@ func progressTicker(ctx context.Context, bar *progressbar.ProgressBar, atomicAtt
 }
 
 func newCrackBar(total int64) *progressbar.ProgressBar {
+	filled := color.New(themeAttr).Sprint("█")
+	head   := color.New(themeAttr, color.Bold).Sprint("▓")
+	yellow := color.New(color.FgYellow, color.Bold)
 	return progressbar.NewOptions64(
 		total,
 		progressbar.OptionSetWriter(os.Stderr),
-		progressbar.OptionSetDescription(accentSprint("Cracking")+" "),
-		progressbar.OptionSetWidth(40),
+		progressbar.OptionSetDescription(yellow.Sprint("⚡ Cracking")+" "),
+		progressbar.OptionSetWidth(14),
 		progressbar.OptionShowCount(),
 		progressbar.OptionShowIts(),
 		progressbar.OptionSetItsString("H"),
@@ -356,6 +369,13 @@ func newCrackBar(total int64) *progressbar.ProgressBar {
 		progressbar.OptionSetElapsedTime(true),
 		progressbar.OptionSetPredictTime(false),
 		progressbar.OptionUseANSICodes(true),
+		progressbar.OptionSetTheme(progressbar.Theme{
+			Saucer:        filled,
+			SaucerHead:    head,
+			SaucerPadding: "░",
+			BarStart:      "[",
+			BarEnd:        "]",
+		}),
 		progressbar.OptionOnCompletion(func() {}),
 	)
 }

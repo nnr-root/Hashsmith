@@ -64,8 +64,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"hashsmith: {exc}", file=sys.stderr)
         return 2
 
-    proc = subprocess.run([str(binary), *args])
-    return proc.returncode
+    try:
+        proc = subprocess.run([str(binary), *args])
+        return proc.returncode
+    except KeyboardInterrupt:
+        return 130
 
 
 if __name__ == "__main__":
