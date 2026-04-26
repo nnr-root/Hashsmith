@@ -280,6 +280,13 @@ func interactiveCrack(reader *bufio.Reader) error {
 		return errors.New("target hash is required")
 	}
 
+	// Preprocessing: normalize Base58/Base64 encoded hash bytes to hex.
+	if normalized, enc := normalizeHashInput(targetHash); enc != "" {
+		color.New(themeAttr).Fprintf(os.Stderr,
+			"Detected %s encoded target — normalizing for attack...\n", enc)
+		targetHash = normalized
+	}
+
 	// auto-detect
 	if hashType == "auto" {
 		candidates := detectHashTypes(targetHash)

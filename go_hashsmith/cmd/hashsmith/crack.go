@@ -34,17 +34,17 @@ const (
 func runCrack(args []string) error {
 	fs := flag.NewFlagSet("crack", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	typ        := fs.String("t", "", "hash type")
+	typ := fs.String("t", "", "hash type")
 	targetHash := fs.String("H", "", "target hash")
-	mode       := fs.String("M", "dict", "attack mode: dict|brute")
-	wordlist   := fs.String("w", "", "wordlist path (dict mode)")
-	charset    := fs.String("C", "abcdefghijklmnopqrstuvwxyz0123456789", "charset (brute mode)")
-	minLen     := fs.Int("n", 1, "min length (brute)")
-	maxLen     := fs.Int("x", 4, "max length (brute)")
-	salt       := fs.String("s", "", "salt")
-	saltMode   := fs.String("S", "prefix", "salt mode: prefix|suffix")
-	workers    := fs.Int("p", 0, "parallel workers (0 = NumCPU)")
-	outFile    := fs.String("o", "", "write result to file")
+	mode := fs.String("M", "dict", "attack mode: dict|brute")
+	wordlist := fs.String("w", "", "wordlist path (dict mode)")
+	charset := fs.String("C", "abcdefghijklmnopqrstuvwxyz0123456789", "charset (brute mode)")
+	minLen := fs.Int("n", 1, "min length (brute)")
+	maxLen := fs.Int("x", 4, "max length (brute)")
+	salt := fs.String("s", "", "salt")
+	saltMode := fs.String("S", "prefix", "salt mode: prefix|suffix")
+	workers := fs.Int("p", 0, "parallel workers (0 = NumCPU)")
+	outFile := fs.String("o", "", "write result to file")
 	copyResult := fs.Bool("c", false, "copy result to clipboard")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -55,11 +55,19 @@ func runCrack(args []string) error {
 	if *targetHash == "" {
 		return errors.New("-H target hash is required")
 	}
+
+	// Normalize Base58/Base64 encoded hash bytes to hex before the attack loop.
+	target := *targetHash
+	if normalized, enc := normalizeHashInput(target); enc != "" {
+		clrYellow.Fprintf(os.Stderr, "Detected %s encoded hash — normalizing to hex\n", enc)
+		target = normalized
+	}
+
 	w := *workers
 	if w < 1 {
 		w = runtime.NumCPU()
 	}
-	return doCrack(*targetHash, *typ, *mode, *wordlist, *charset,
+	return doCrack(target, *typ, *mode, *wordlist, *charset,
 		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult)
 }
 
@@ -172,7 +180,7 @@ func dictAttack(ctx context.Context, wordlistPath, targetHash, typ, salt, saltMo
 	defer cancel()
 
 	type batch = []string
-	batchCh  := make(chan batch, workers*4)
+	batchCh := make(chan batch, workers*4)
 	resultCh := make(chan string, 1)
 
 	// reader
@@ -262,7 +270,7 @@ func bruteAttack(ctx context.Context, targetHash, typ, charset string,
 	atomicAttempts *int64) (string, error) {
 
 	chars := []rune(charset)
-	base  := int64(len(chars))
+	base := int64(len(chars))
 	if base == 0 {
 		return "", errors.New("charset must not be empty")
 	}
@@ -354,13 +362,14 @@ func progressTicker(ctx context.Context, bar *progressbar.ProgressBar, atomicAtt
 }
 
 func newCrackBar(total int64) *progressbar.ProgressBar {
-	filled := color.New(themeAttr).Sprint("█")
-	head   := color.New(themeAttr, color.Bold).Sprint("▓")
+	filled := color.New(themeAttr).Sprint("▬")
+	head := color.New(themeAttr, color.Bold).Sprint("▬")
 	yellow := color.New(color.FgYellow, color.Bold)
+	themed := color.New(themeAttr, color.Bold)
 	return progressbar.NewOptions64(
 		total,
 		progressbar.OptionSetWriter(os.Stderr),
-		progressbar.OptionSetDescription(yellow.Sprint("⚡ Cracking")+" "),
+		progressbar.OptionSetDescription(yellow.Sprint("⚡")+" "+themed.Sprint("Cracking")+" "),
 		progressbar.OptionSetWidth(14),
 		progressbar.OptionShowCount(),
 		progressbar.OptionShowIts(),
@@ -372,7 +381,7 @@ func newCrackBar(total int64) *progressbar.ProgressBar {
 		progressbar.OptionSetTheme(progressbar.Theme{
 			Saucer:        filled,
 			SaucerHead:    head,
-			SaucerPadding: "░",
+			SaucerPadding: "▭",
 			BarStart:      "[",
 			BarEnd:        "]",
 		}),

@@ -29,12 +29,19 @@ var (
 	reScrypt    = regexp.MustCompile(`^scrypt\$`)
 	rePostgres  = regexp.MustCompile(`^md5[0-9a-fA-F]{32}$`)
 	reMySQL41   = regexp.MustCompile(`^\*[0-9a-fA-F]{40}$`)
-	reMSSQLNew  = regexp.MustCompile(`(?i)^0x0100[0-9a-fA-F]{48}$`) // 0x0100 + 4-byte salt + sha1 = 54 chars
+	reMSSQLNew  = regexp.MustCompile(`(?i)^0x0100[0-9a-fA-F]{48}$`)
 	reURLEnc    = regexp.MustCompile(`%[0-9a-fA-F]{2}`)
+	reJWT       = regexp.MustCompile(`^eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$`)
+	reUUID      = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 )
 
-// entropyPool reuses the 256-element frequency buffer across calls — avoids
-// repeated heap allocation on the hot path of entropy computation.
+// English letter frequencies (a–z), used for chi-squared analysis.
+var englishFreq = [26]float64{
+	8.17, 1.49, 2.78, 4.25, 12.70, 2.23, 2.02, 6.09, 6.97, 0.15,
+	0.77, 4.03, 2.41, 6.75, 7.51, 1.93, 0.10, 5.99, 6.33, 9.06,
+	2.76, 0.98, 2.36, 0.15, 1.97, 0.07,
+}
+
 var entropyPool = sync.Pool{
 	New: func() any { return new([256]int) },
 }
@@ -42,8 +49,9 @@ var entropyPool = sync.Pool{
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type candidate struct {
-	name  string
-	score float64 // raw, pre-normalization
+	name   string
+	score  float64 // raw, pre-normalization
+	reason string
 }
 
 // ── CLI entry ─────────────────────────────────────────────────────────────────
@@ -72,10 +80,8 @@ func runIdentify(args []string) error {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-// identifyText returns a confidence-ranked, percentage-annotated identification
-// of the input. Each line is formatted as "%<pct> <name>", sorted descending.
-// Percentages sum to 100. Candidates below 5% are suppressed; if the top
-// candidate is under 10%, "Unknown / High Entropy Data" is returned.
+// identifyText returns a confidence-ranked, percentage-annotated identification.
+// Format: "%<pct> <name> (<rationale>)", sorted descending, summing to 100.
 func identifyText(value string) string {
 	cands := scoreCandidates(value)
 	if len(cands) == 0 {
@@ -90,11 +96,11 @@ func identifyText(value string) string {
 		return "%100 Unknown / High Entropy Data"
 	}
 
-	// Compute rounded percentages for all visible candidates.
 	type row struct {
-		name string
-		pct  int
-		raw  float64
+		name   string
+		reason string
+		pct    int
+		raw    float64
 	}
 	var rows []row
 	sumPct := 0
@@ -103,17 +109,15 @@ func identifyText(value string) string {
 		if pct < 5 {
 			continue
 		}
-		rows = append(rows, row{c.name, pct, c.score})
+		rows = append(rows, row{c.name, c.reason, pct, c.score})
 		sumPct += pct
 	}
 	if len(rows) == 0 {
 		return "%100 Unknown / High Entropy Data"
 	}
 
-	// Absorb rounding drift on the highest-score entry (first after score sort).
 	rows[0].pct += 100 - sumPct
 
-	// Re-sort descending by pct, then by raw score as tiebreaker.
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].pct != rows[j].pct {
 			return rows[i].pct > rows[j].pct
@@ -126,7 +130,11 @@ func identifyText(value string) string {
 		if i > 0 {
 			sb.WriteByte('\n')
 		}
-		fmt.Fprintf(&sb, "%%%d %s", e.pct, e.name)
+		if e.reason != "" {
+			fmt.Fprintf(&sb, "%%%d %s (%s)", e.pct, e.name, e.reason)
+		} else {
+			fmt.Fprintf(&sb, "%%%d %s", e.pct, e.name)
+		}
 	}
 	return sb.String()
 }
@@ -138,37 +146,98 @@ func scoreCandidates(v string) []candidate {
 		return nil
 	}
 
-	var cands []candidate
-	add := func(name string, score float64) {
-		if score > 0 {
-			cands = append(cands, candidate{name, score})
-		}
+	// Level 0 — signature-based (definitive, synchronous)
+	if sig := signatureMatch(v); sig != nil {
+		return sig
 	}
 
-	// ── Level 0: signature-based (definitive) ────────────────────────────────
-	// These produce unambiguous results; bypass all other analysis.
-	switch {
-	case reBcrypt.MatchString(v):
-		return []candidate{{"bcrypt", 1000}}
-	case reArgon2.MatchString(v):
-		return []candidate{{"argon2", 1000}}
-	case reScrypt.MatchString(v):
-		return []candidate{{"scrypt", 1000}}
-	case rePostgres.MatchString(v):
-		return []candidate{{"PostgreSQL MD5", 1000}}
-	case reMySQL41.MatchString(v):
-		return []candidate{{"MySQL 4.1 / SHA-1", 1000}}
-	case reMSSQLNew.MatchString(v):
-		return []candidate{{"MSSQL 2005 / 2012", 1000}}
-	}
-
+	// Pre-compute shared properties once (O(n) each)
 	entropy := shannonEntropy(v)
 	lv := len(v)
 	hexStr := isHex(v)
+	lower := v == strings.ToLower(v)
+	upper := v == strings.ToUpper(v)
+	hashLenHex := hexStr && knownHashLen(lv)
 
-	// entropyBonus returns an additive bonus/penalty for hex hash candidates
-	// based on Shannon entropy: genuine hashes cluster near 3.8–4.0 bits.
-	entropyBonus := func(base float64) float64 {
+	// Four parallel analysis groups write candidates to a buffered channel.
+	ch := make(chan candidate, 32)
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scoreHashGroup(v, lv, entropy, hexStr, lower, upper, hashLenHex, ch)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scoreEncodingGroup(v, lv, entropy, hexStr, hashLenHex, ch)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scoreStructuralGroup(v, entropy, ch)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scoreCipherTextGroup(v, lv, entropy, hexStr, ch)
+	}()
+
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	var cands []candidate
+	for c := range ch {
+		if c.score > 0 {
+			cands = append(cands, c)
+		}
+	}
+
+	sort.Slice(cands, func(i, j int) bool {
+		return cands[i].score > cands[j].score
+	})
+	return cands
+}
+
+// signatureMatch returns a definitive single-candidate result for inputs that
+// carry an unambiguous structural signature, bypassing probabilistic scoring.
+func signatureMatch(v string) []candidate {
+	switch {
+	case reBcrypt.MatchString(v):
+		return []candidate{{"bcrypt", 1000, "starts with $2[aby]$ cost-factor signature"}}
+	case reArgon2.MatchString(v):
+		return []candidate{{"argon2", 1000, "starts with $argon2(i|d|id)$ signature"}}
+	case reScrypt.MatchString(v):
+		return []candidate{{"scrypt", 1000, "starts with scrypt$ signature"}}
+	case rePostgres.MatchString(v):
+		return []candidate{{"PostgreSQL MD5", 1000, "md5 prefix + 32-char hex"}}
+	case reMySQL41.MatchString(v):
+		return []candidate{{"MySQL 4.1 / SHA-1", 1000, "* prefix + 40-char hex"}}
+	case reMSSQLNew.MatchString(v):
+		return []candidate{{"MSSQL 2005 / 2012", 1000, "0x0100 prefix + 48-char hex salt+sha1"}}
+	case reJWT.MatchString(v):
+		return []candidate{{"JWT (JSON Web Token)", 1000, "eyJ header + 3-part Base64URL structure"}}
+	case reUUID.MatchString(v):
+		return []candidate{{"UUID", 1000, "8-4-4-4-12 hex groups"}}
+	}
+	return nil
+}
+
+// ── Group 1: Hex hash detection ───────────────────────────────────────────────
+
+func scoreHashGroup(v string, lv int, entropy float64, hexStr, lower, upper, hashLenHex bool, ch chan<- candidate) {
+	if !hexStr || !hashLenHex {
+		return
+	}
+
+	// Entropy bonus/penalty: genuine hash outputs cluster near 3.8–4.0 bits.
+	eb := func(base float64) float64 {
 		switch {
 		case entropy > 3.8:
 			return base + 30
@@ -179,77 +248,112 @@ func scoreCandidates(v string) []candidate {
 		case entropy > 2.5:
 			return base - 10
 		default:
-			return base - 25 // very low entropy → unlikely to be a real hash
+			return base - 25
 		}
 	}
 
-	// ── Level 1: hex hash detection (length + charset + entropy) ─────────────
-	if hexStr {
-		switch lv {
-		case 16:
-			add("MySQL 3.x", entropyBonus(75))
-		case 32:
-			// MD5 is far more prevalent than MD4/NTLM; small weight difference.
-			add("MD5",  entropyBonus(80))
-			add("NTLM", entropyBonus(68))
-			add("MD4",  entropyBonus(58))
-		case 40:
-			add("SHA-1",      entropyBonus(80))
-			add("RIPEMD-160", entropyBonus(62))
-		case 56:
-			add("SHA-224", entropyBonus(85))
-		case 64:
-			add("SHA-256",  entropyBonus(85))
-			add("SHA3-256", entropyBonus(65))
-			add("BLAKE2s",  entropyBonus(58))
-		case 96:
-			add("SHA-384", entropyBonus(85))
-		case 128:
-			add("SHA-512",  entropyBonus(85))
-			add("SHA3-512", entropyBonus(65))
-			add("BLAKE2b",  entropyBonus(58))
-		}
+	caseLabel := "mixed-case hex"
+	if lower {
+		caseLabel = "lowercase hex"
+	} else if upper {
+		caseLabel = "uppercase hex"
 	}
 
-	// ── Level 2: encoding detection (charset + decode validation) ────────────
-	// When the input matches a known hex-hash length, Base64/Base64URL are
-	// almost certainly false positives — skip them entirely.
-	hashLenHex := hexStr && knownHashLen(lv)
+	switch lv {
+	case 16:
+		ch <- candidate{"MySQL 3.x", eb(75), fmt.Sprintf("16-char %s, entropy %.2f", caseLabel, entropy)}
 
-	// Hex encoding — only meaningful outside of standard hash lengths
-	if hexStr && lv%2 == 0 {
-		if hashLenHex {
-			add("Hex", 8) // present but very low — dominated by hash candidates
-		} else {
-			s := 30.0
-			if entropy < 3.5 {
-				s += 20
-			}
-			add("Hex", s)
+	case 32:
+		// NTLM hashes are typically stored as uppercase in Windows credential stores;
+		// MD5 is conventionally lowercase in most implementations.
+		md5s := eb(80)
+		ntlm := eb(68)
+		md4s := eb(58)
+		if lower {
+			md5s += 20
+			ntlm -= 15
+		} else if upper {
+			ntlm += 20
+			md5s -= 5
 		}
-	}
+		ch <- candidate{"MD5",  math.Max(md5s, 0), fmt.Sprintf("32-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"NTLM", math.Max(ntlm, 0), fmt.Sprintf("32-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"MD4",  math.Max(md4s, 0), fmt.Sprintf("32-char %s, entropy %.2f", caseLabel, entropy)}
 
-	// Base64 standard — skip when input is a known-length hex hash
-	if !hashLenHex && reBase64Std.MatchString(v) && lv%4 == 0 {
-		s := 25.0
-		if dec, err := base64.StdEncoding.DecodeString(v); err == nil {
+	case 40:
+		ch <- candidate{"SHA-1",      eb(80), fmt.Sprintf("40-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"RIPEMD-160", eb(62), fmt.Sprintf("40-char %s, entropy %.2f", caseLabel, entropy)}
+
+	case 56:
+		ch <- candidate{"SHA-224", eb(85), fmt.Sprintf("56-char %s, entropy %.2f", caseLabel, entropy)}
+
+	case 64:
+		ch <- candidate{"SHA-256",  eb(85), fmt.Sprintf("64-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"SHA3-256", eb(65), fmt.Sprintf("64-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"BLAKE2s",  eb(58), fmt.Sprintf("64-char %s, entropy %.2f", caseLabel, entropy)}
+
+	case 96:
+		ch <- candidate{"SHA-384", eb(85), fmt.Sprintf("96-char %s, entropy %.2f", caseLabel, entropy)}
+
+	case 128:
+		ch <- candidate{"SHA-512",  eb(85), fmt.Sprintf("128-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"SHA3-512", eb(65), fmt.Sprintf("128-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"BLAKE2b",  eb(58), fmt.Sprintf("128-char %s, entropy %.2f", caseLabel, entropy)}
+	}
+}
+
+// ── Group 2: Encoding detection ───────────────────────────────────────────────
+
+func scoreEncodingGroup(v string, lv int, entropy float64, hexStr, hashLenHex bool, ch chan<- candidate) {
+	// Hex encoding — skip known hash lengths (those are handled by hash group)
+	if hexStr && lv%2 == 0 && !hashLenHex {
+		s := 30.0
+		if entropy < 3.5 {
 			s += 20
-			if allPrintable(dec) {
-				s += 25
-			}
 		}
-		add("Base64", math.Max(s, 0))
+		ch <- candidate{"Hex", s, fmt.Sprintf("%d-char hex, entropy %.2f", lv, entropy)}
 	}
 
-	// Base64 URL-safe — skip when input is a known-length hex hash
-	if !hashLenHex && reBase64URL.MatchString(v) && !strings.ContainsAny(v, "+/") {
+	// Base64 standard — skip all hex strings (hex ⊂ Base64 charset, would always match).
+	// Speculative: if decoded bytes length matches a known hash size, label specifically.
+	if !hexStr && reBase64Std.MatchString(v) && lv%4 == 0 {
+		if dec, err := base64.StdEncoding.DecodeString(v); err == nil {
+			if allPrintable(dec) {
+				ch <- candidate{"Base64", 70, "decodes to printable text"}
+			} else if algos, ok := hashByteLengths[len(dec)]; ok {
+				for _, algo := range algos {
+					ch <- candidate{
+						"Base64-encoded " + algo, 85,
+						fmt.Sprintf("decodes to %d bytes, matches %s digest size", len(dec), algo),
+					}
+				}
+			} else {
+				ch <- candidate{"Base64", 45, "decodes to binary data"}
+			}
+		} else {
+			ch <- candidate{"Base64", 25, "valid Base64 charset"}
+		}
+	}
+
+	// Base64 URL-safe — speculative hash detection; suppress generic "decodes successfully".
+	if !hexStr && reBase64URL.MatchString(v) && !strings.ContainsAny(v, "+/") {
 		padding := strings.Repeat("=", (4-lv%4)%4)
 		if dec, err := base64.URLEncoding.DecodeString(v + padding); err == nil {
-			s := 30.0
 			if allPrintable(dec) {
-				s += 25
+				ch <- candidate{"Base64 URL", 55, "decodes to printable text"}
+			} else if algos, ok := hashByteLengths[len(dec)]; ok {
+				// Require at least one Base64URL-exclusive char (_ or -) to disambiguate
+				// from Base58 strings whose charset is a strict subset of Base64URL.
+				if strings.ContainsAny(v, "_-") {
+					for _, algo := range algos {
+						ch <- candidate{
+							"Base64 URL-encoded " + algo, 85,
+							fmt.Sprintf("decodes to %d bytes, matches %s digest size", len(dec), algo),
+						}
+					}
+				}
 			}
-			add("Base64 URL", s)
+			// no generic "decodes to binary" — avoids false positives on arbitrary alphanumeric strings
 		}
 	}
 
@@ -258,122 +362,183 @@ func scoreCandidates(v string) []candidate {
 	if reBase32Std.MatchString(upper) {
 		if dec, err := base32.StdEncoding.DecodeString(upper); err == nil {
 			s := 40.0
+			reason := "decodes successfully"
 			if allPrintable(dec) {
 				s += 25
+				reason = "decodes to printable text"
 			}
-			add("Base32", s)
+			ch <- candidate{"Base32", s, reason}
 		}
 	}
 
-	// Base58 — require minimum length; skip pure-hex (already handled as hash/hex)
+	// Base58 — speculative: decode and cross-reference byte length against hash registry.
+	// Falls back to generic Base58 when no hash length matches.
 	if !hexStr && reBase58Pat.MatchString(v) && lv >= 8 {
-		s := 22.0
-		if entropy > 4.5 {
-			s += 18
-		} else if entropy > 3.5 {
-			s += 8
+		speculativeHit := false
+		if b, err := decodeBase58(v); err == nil {
+			if algos, ok := hashByteLengths[len(b)]; ok {
+				speculativeHit = true
+				for _, algo := range algos {
+					ch <- candidate{
+						"Base58-encoded " + algo, 85,
+						fmt.Sprintf("decodes to %d bytes, matches %s digest size", len(b), algo),
+					}
+				}
+			}
 		}
-		add("Base58", s)
+		if !speculativeHit {
+			s := 22.0
+			if entropy > 4.5 {
+				s += 18
+			} else if entropy > 3.5 {
+				s += 8
+			}
+			ch <- candidate{"Base58", s, fmt.Sprintf("valid Base58 charset, entropy %.2f", entropy)}
+		}
 	}
 
-	// Binary — space-separated 8-bit groups
-	if isBinaryStr(v) {
-		add("Binary", 90)
+	// Base85 (ASCII85) — '!'–'u' charset, optional <~ ~> delimiters.
+	// Without delimiters the charset overlaps heavily with hex, alpha, and Base64,
+	// so apply guards to suppress obvious false positives.
+	if isBase85, hasDelim := isBase85Str(v); isBase85 {
+		if hasDelim {
+			ch <- candidate{"Base85 (ASCII85)", 82, "has <~ ~> delimiters"}
+		} else if !hexStr && !isAllAlpha(v) &&
+			!strings.ContainsAny(v, " \t") &&
+			!(reBase64Std.MatchString(v) && lv%4 == 0) &&
+			!isBase64URLDecodable(v) {
+			ch <- candidate{"Base85 (ASCII85)", 38, "valid ASCII85 charset (!–u)"}
+		}
 	}
 
-	// Decimal — space-separated ASCII byte values (0–255)
-	if isDecimalStr(v) {
-		add("Decimal", 85)
+	// UU encoding — length-prefixed lines with ' '–'`' charset
+	if isUUStr(v) {
+		ch <- candidate{"UU Encoded", 78, "length-prefixed UU line format"}
 	}
 
-	// Octal — space-separated octal byte values
-	if isOctalStr(v) {
-		add("Octal", 80)
-	}
-
-	// Morse code
-	if isMorseStr(v) {
-		add("Morse Code", 88)
-	}
-
-	// URL-encoded — presence of %XX sequences
+	// URL-encoded
 	if reURLEnc.MatchString(v) {
 		count := len(reURLEnc.FindAllString(v, -1))
-		add("URL Encoded", math.Min(30+float64(count)*8, 80))
+		ch <- candidate{"URL Encoded",
+			math.Min(30+float64(count)*8, 80),
+			fmt.Sprintf("%d %%XX sequences", count)}
 	}
-
-	// Baconian cipher — space-separated 5-char groups of only A/B
-	if isBaconianStr(v) {
-		add("Baconian Cipher", 88)
-	}
-
-	// Polybius square — space-separated pairs of digits 1–5
-	if isPolybiusStr(v) {
-		add("Polybius Square", 88)
-	}
-
-	// Leet speak — letters mixed with leet digit/symbol substitutions
-	if isLeetStr(v) {
-		add("Leet Speak", 60)
-	}
-
-	// ── Level 3: cipher and plain-text classification ─────────────────────────
-	allAlpha := isAllAlpha(v)
-
-	// Substitution cipher (Caesar / Vigenere / ROT13 / Atbash):
-	// A string of only alphabetical characters with no spaces is statistically
-	// indistinguishable from a monoalphabetic cipher of natural-language input.
-	// Entropy drives the balance: repeated-letter patterns (low entropy) lean
-	// more toward cipher; high entropy leans more toward long/varied plain text.
-	if allAlpha && lv >= 4 {
-		var cs float64
-		switch {
-		case entropy <= 2.0:
-			cs = 62
-		case entropy <= 2.8:
-			cs = 50
-		case entropy <= 3.5:
-			cs = 30
-		case entropy <= 4.2:
-			cs = 14
-		}
-		if cs > 0 {
-			add("Substitution Cipher (Caesar / Vigenere / ROT13)", cs)
-		}
-	}
-
-	// Plain text — reduced when the string is all-alpha without spaces (ambiguous
-	// with substitution ciphers) or when the charset overlaps with encodings.
-	{
-		ratio := printableRatio(v)
-		if ratio >= 0.85 {
-			s := 18.0
-			if strings.ContainsAny(v, " \t") {
-				s += 15 // spaces are the strongest plain-text signal
-			}
-			if hexStr {
-				s -= 14
-			} else if reBase64Std.MatchString(v) {
-				s -= 10
-			}
-			if allAlpha && !strings.ContainsAny(v, " \t") {
-				s -= 8 // no spaces → ambiguous with cipher, reduce plain-text weight
-			}
-			add("Plain Text", math.Max(s, 4))
-		}
-	}
-
-	if len(cands) == 0 {
-		return nil
-	}
-
-	sort.Slice(cands, func(i, j int) bool {
-		return cands[i].score > cands[j].score
-	})
-	return cands
 }
 
-// knownHashLen reports whether l is a standard hex-hash output length.
+// ── Group 3: Structural / cipher-format detection ─────────────────────────────
+
+func scoreStructuralGroup(v string, entropy float64, ch chan<- candidate) {
+	if isBinaryStr(v) {
+		ch <- candidate{"Binary", 90, "space-separated 8-bit groups"}
+	}
+	if isDecimalStr(v) {
+		ch <- candidate{"Decimal", 85, "space-separated byte values 0–255"}
+	}
+	if isOctalStr(v) {
+		ch <- candidate{"Octal", 80, "space-separated octal byte values"}
+	}
+	morseMatch := isMorseStr(v)
+	if morseMatch {
+		ch <- candidate{"Morse Code", 88, "dot/dash/slash pattern"}
+	}
+	if isBaconianStr(v) {
+		ch <- candidate{"Baconian Cipher", 88, "5-char A/B groups"}
+	}
+	if isPolybiusStr(v) {
+		ch <- candidate{"Polybius Square", 88, "digit-pair groups (1–5)"}
+	}
+	if isLeetStr(v) {
+		ch <- candidate{"Leet Speak", 62, fmt.Sprintf("alpha + leet substitutions, entropy %.2f", entropy)}
+	}
+	if !morseMatch && isBrainfuckStr(v) {
+		ch <- candidate{"Brainf*ck", 85, "BF operator set (+-<>[].,)"}
+	}
+}
+
+// ── Group 4: Cipher and plain-text analysis ───────────────────────────────────
+
+func scoreCipherTextGroup(v string, lv int, entropy float64, hexStr bool, ch chan<- candidate) {
+	allAlpha := isAllAlpha(v)
+	hasSpaces := strings.ContainsAny(v, " \t")
+
+	// Substitution cipher (Caesar / Vigenere / ROT13 / Atbash)
+	// Signal: purely alphabetical, no spaces or digits.
+	// Chi-squared against English letter frequency provides additional signal:
+	// monoalphabetic ciphers of English preserve letter frequencies, so a low
+	// chi-squared means the input could be either English plain text or a
+	// Caesar/Atbash/ROT13 cipher of English; a high chi-squared suggests a
+	// key-heavy cipher (Vigenere with random key) or non-English source text.
+	if allAlpha && lv >= 4 {
+		chiSq := chiSquaredEnglish(v)
+		var cs float64
+		var cipherReason string
+
+		switch {
+		case entropy <= 2.0:
+			cs = 65
+			cipherReason = fmt.Sprintf("very low entropy %.2f, repetitive pattern", entropy)
+		case entropy <= 2.8:
+			cs = 52
+			cipherReason = fmt.Sprintf("low entropy %.2f", entropy)
+		case entropy <= 3.5:
+			cs = 33
+			cipherReason = fmt.Sprintf("entropy %.2f", entropy)
+		case entropy <= 4.2:
+			cs = 16
+			cipherReason = fmt.Sprintf("entropy %.2f", entropy)
+		}
+
+		if chiSq > 250 {
+			cs += 18
+			cipherReason += fmt.Sprintf(", unusual letter dist χ²=%.0f", chiSq)
+		} else if chiSq < 40 {
+			cs -= 12 // English-like distribution → plain text more likely
+			cipherReason += fmt.Sprintf(", English-like dist χ²=%.0f", chiSq)
+		}
+
+		if cs > 0 {
+			ch <- candidate{"Substitution Cipher (Caesar / Vigenere / ROT13)", cs, cipherReason}
+		}
+	}
+
+	// Plain text
+	ratio := printableRatio(v)
+	if ratio >= 0.85 {
+		s := 18.0
+		ptReason := "printable ASCII"
+
+		if hasSpaces {
+			s += 15
+			ptReason = "printable text with spaces"
+		}
+		if hexStr {
+			s -= 14
+		} else if reBase64Std.MatchString(v) {
+			s -= 10
+		}
+		if allAlpha && !hasSpaces {
+			s -= 8 // ambiguous with substitution cipher
+		}
+
+		// Entropy hard filter: for short single-token strings (no whitespace),
+		// entropy > 4.2 is a strong signal against plain text.
+		if entropy > 4.2 && !hasSpaces {
+			s = 4
+			ptReason = fmt.Sprintf("high entropy %.2f — likely not plain text", entropy)
+		} else if allAlpha {
+			chiSq := chiSquaredEnglish(v)
+			if chiSq < 30 {
+				s += 14
+				ptReason += fmt.Sprintf(", English freq match χ²=%.0f", chiSq)
+			}
+		}
+
+		ch <- candidate{"Plain Text", math.Max(s, 4), ptReason}
+	}
+}
+
+// ── knownHashLen ──────────────────────────────────────────────────────────────
+
 func knownHashLen(l int) bool {
 	switch l {
 	case 16, 32, 40, 56, 64, 96, 128:
@@ -382,8 +547,10 @@ func knownHashLen(l int) bool {
 	return false
 }
 
-// ── Shannon entropy (O(n), pool-backed) ──────────────────────────────────────
+// ── Statistical helpers ───────────────────────────────────────────────────────
 
+// shannonEntropy computes Shannon entropy in bits per character (O(n)).
+// Uses a pooled buffer to avoid repeated heap allocation.
 func shannonEntropy(s string) float64 {
 	if len(s) == 0 {
 		return 0
@@ -408,17 +575,46 @@ func shannonEntropy(s string) float64 {
 	return h
 }
 
-// ── String classifiers ────────────────────────────────────────────────────────
+// chiSquaredEnglish computes the chi-squared statistic of a string's letter
+// frequency distribution against expected English letter frequencies.
+// Lower values indicate closer resemblance to English text.
+func chiSquaredEnglish(s string) float64 {
+	var freq [26]int
+	n := 0
+	for _, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z':
+			freq[c-'a']++
+			n++
+		case c >= 'A' && c <= 'Z':
+			freq[c-'A']++
+			n++
+		}
+	}
+	if n == 0 {
+		return math.MaxFloat64
+	}
+	fn := float64(n)
+	var chi float64
+	for i := 0; i < 26; i++ {
+		expected := englishFreq[i] / 100.0 * fn
+		if expected == 0 {
+			continue
+		}
+		diff := float64(freq[i]) - expected
+		chi += diff * diff / expected
+	}
+	return chi
+}
+
+// ── Format / charset classifiers ──────────────────────────────────────────────
 
 func allPrintable(b []byte) bool {
 	if len(b) == 0 {
 		return false
 	}
 	for _, c := range b {
-		if c < 0x20 && c != '\t' && c != '\n' && c != '\r' {
-			return false
-		}
-		if c == 0x7f {
+		if (c < 0x20 && c != '\t' && c != '\n' && c != '\r') || c == 0x7f {
 			return false
 		}
 	}
@@ -437,6 +633,18 @@ func printableRatio(s string) float64 {
 		}
 	}
 	return float64(n) / float64(len(s))
+}
+
+func isAllAlpha(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
+			return false
+		}
+	}
+	return true
 }
 
 func isBinaryStr(s string) bool {
@@ -522,20 +730,6 @@ func isMorseStr(s string) bool {
 	return hasDot || hasDash
 }
 
-func isAllAlpha(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, c := range s {
-		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
-			return false
-		}
-	}
-	return true
-}
-
-// isBaconianStr checks for Baconian cipher: space-separated groups of exactly
-// 5 characters, each being only 'A' or 'B' (case-insensitive).
 func isBaconianStr(s string) bool {
 	parts := strings.Fields(s)
 	if len(parts) < 1 {
@@ -554,27 +748,19 @@ func isBaconianStr(s string) bool {
 	return true
 }
 
-// isPolybiusStr checks for Polybius square encoding: space-separated pairs of
-// digits where each digit is in the range 1–5.
 func isPolybiusStr(s string) bool {
 	parts := strings.Fields(s)
 	if len(parts) < 2 {
 		return false
 	}
 	for _, p := range parts {
-		if len(p) != 2 {
-			return false
-		}
-		if p[0] < '1' || p[0] > '5' || p[1] < '1' || p[1] > '5' {
+		if len(p) != 2 || p[0] < '1' || p[0] > '5' || p[1] < '1' || p[1] > '5' {
 			return false
 		}
 	}
 	return true
 }
 
-// isLeetStr checks for leet speak: a mix of alphabetical characters and
-// classic leet digit/symbol substitutions (3→e, 0→o, 1→i/l, 4→a, @→a, $→s).
-// Pure hex strings are excluded since they overlap in charset.
 func isLeetStr(s string) bool {
 	if len(s) < 4 || isHex(s) {
 		return false
@@ -594,17 +780,95 @@ func isLeetStr(s string) bool {
 	if total == 0 {
 		return false
 	}
-	// At least one leet char, at least one alpha char, and 80%+ are leet/alpha
 	return leet >= 1 && alpha >= 1 && (leet+alpha)*100/total >= 80
 }
 
-// ── Backward-compat helpers (used by crack auto-detection) ───────────────────
+// isBrainfuckStr detects Brainf*ck source code: the 8 operators (+ - < > [ ] . ,)
+// must constitute at least 60% of all non-whitespace characters.
+func isBrainfuckStr(s string) bool {
+	if len(s) < 4 {
+		return false
+	}
+	ops, total := 0, 0
+	for _, c := range s {
+		switch c {
+		case ' ', '\t', '\n', '\r':
+			// whitespace is not counted
+		case '+', '-', '<', '>', '[', ']', '.', ',':
+			ops++
+			total++
+		default:
+			total++
+		}
+	}
+	return ops >= 4 && total > 0 && ops*100/total >= 60
+}
 
-// detectHashTypes returns the cracker-compatible algorithm names for a given
-// hash string. Called from interactive.go and crack.go for -t auto.
+// isBase85Str validates ASCII85 encoding (range '!'–'u', special 'z'/'y' blocks).
+// Returns (isBase85, hasDelimiters) where hasDelimiters indicates <~ ~> wrapping.
+func isBase85Str(v string) (bool, bool) {
+	s := v
+	hasDelim := strings.HasPrefix(s, "<~") && strings.HasSuffix(s, "~>")
+	if hasDelim {
+		s = s[2 : len(s)-2]
+	}
+	if len(s) == 0 {
+		return false, false
+	}
+	for _, c := range s {
+		switch {
+		case c == 'z' || c == 'y':
+		case c >= '!' && c <= 'u':
+		case c == ' ' || c == '\n' || c == '\r':
+		default:
+			return false, false
+		}
+	}
+	return true, hasDelim
+}
+
+// isUUStr validates a single UU-encoded line: the first byte encodes the count
+// of decoded bytes (count + 0x20), and all subsequent bytes must be in [0x20,0x60].
+// isBase64URLDecodable returns true if v successfully decodes as Base64URL
+// (with auto-padding). Used to suppress Base85 false positives on Base64URL strings.
+func isBase64URLDecodable(v string) bool {
+	if len(v) < 8 || !reBase64URL.MatchString(v) || strings.ContainsAny(v, "+/") {
+		return false
+	}
+	padding := strings.Repeat("=", (4-len(v)%4)%4)
+	_, err := base64.URLEncoding.DecodeString(v + padding)
+	return err == nil
+}
+
+func isUUStr(s string) bool {
+	s = strings.TrimRight(s, "\r\n ")
+	if len(s) < 2 {
+		return false
+	}
+	lc := s[0]
+	if lc < 0x20 || lc > 0x60 {
+		return false
+	}
+	decodedLen := int(lc - 0x20)
+	if decodedLen == 0 {
+		return len(s) == 1
+	}
+	expectedEncLen := ((decodedLen + 2) / 3) * 4
+	if len(s) != expectedEncLen+1 {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x60 {
+			return false
+		}
+	}
+	return true
+}
+
+// ── Backward-compat (used by crack auto-detection) ────────────────────────────
+
 func detectHashTypes(text string) []string {
 	t := strings.TrimSpace(text)
-
 	if reBcrypt.MatchString(t) {
 		return []string{"bcrypt"}
 	}
@@ -646,7 +910,6 @@ func detectHashTypes(text string) []string {
 	}
 }
 
-// unique removes duplicates while preserving insertion order.
 func unique(items []string) []string {
 	seen := make(map[string]struct{}, len(items))
 	out := make([]string, 0, len(items))
