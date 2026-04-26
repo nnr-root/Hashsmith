@@ -30,6 +30,13 @@ const (
 	ctxCheckEvery = 1024 // brute-force iterations between context polls
 )
 
+// crackedResult carries the found password and an optional human-readable label
+// describing which mangling rule produced it (empty when no rule was applied).
+type crackedResult struct {
+	password  string
+	ruleLabel string
+}
+
 // ── CLI entry ────────────────────────────────────────────────────────────────
 
 func runCrack(args []string) error {
@@ -47,6 +54,7 @@ func runCrack(args []string) error {
 	workers := fs.Int("p", 0, "parallel workers (0 = NumCPU)")
 	outFile := fs.String("o", "", "write result to file")
 	copyResult := fs.Bool("c", false, "copy result to clipboard")
+	useRules := fs.Bool("r", false, "enable mangling rules in dict mode")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -69,14 +77,14 @@ func runCrack(args []string) error {
 		w = runtime.NumCPU()
 	}
 	return doCrack(target, *typ, *mode, *wordlist, *charset,
-		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult)
+		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules)
 }
 
 // ── Core engine ──────────────────────────────────────────────────────────────
 
 func doCrack(targetHash, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
-	salt, saltMode, outFile string, copyResult bool) error {
+	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
 
 	start := time.Now()
 	var atomicAttempts int64
@@ -87,6 +95,10 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	if m == "dict" && wordlist != "" {
 		if n, err := countFileLines(wordlist); err == nil {
 			total = n
+			if useRules {
+				// Each word generates up to NumManglingRules extra candidates.
+				total *= int64(1 + NumManglingRules)
+			}
 		}
 	} else if m == "brute" {
 		total = calcBruteTotal(charset, minLen, maxLen)
@@ -100,8 +112,8 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 
 	// ── attack ──────────────────────────────────────────────────────────────
 	var (
-		password string
-		err      error
+		result crackedResult
+		err    error
 	)
 	switch m {
 	case "dict":
@@ -109,15 +121,17 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			tickCancel()
 			return errors.New("-w wordlist is required for dict mode")
 		}
-		password, err = dictAttack(context.Background(), wordlist,
-			targetHash, typ, salt, saltMode, workers, &atomicAttempts)
+		result, err = dictAttack(context.Background(), wordlist,
+			targetHash, typ, salt, saltMode, workers, &atomicAttempts, useRules)
 	case "brute":
 		if minLen < 1 || maxLen < minLen {
 			tickCancel()
 			return errors.New("invalid -n/-x range")
 		}
-		password, err = bruteAttack(context.Background(), targetHash, typ,
+		var pw string
+		pw, err = bruteAttack(context.Background(), targetHash, typ,
 			charset, minLen, maxLen, workers, salt, saltMode, &atomicAttempts)
+		result = crackedResult{password: pw}
 	default:
 		tickCancel()
 		return errors.New("unknown mode: use dict or brute")
@@ -137,17 +151,21 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		rate = float64(attempts) / elapsed
 	}
 
-	if password != "" {
+	if result.password != "" {
 		clrGreen.Fprint(os.Stderr, "Found: ")
-		fmt.Fprintln(os.Stderr, password)
+		if result.ruleLabel != "" {
+			fmt.Fprintf(os.Stderr, "%s (via rule: %s)\n", result.password, result.ruleLabel)
+		} else {
+			fmt.Fprintln(os.Stderr, result.password)
+		}
 		if outFile != "" {
-			if e := os.WriteFile(outFile, []byte(password+"\n"), 0644); e != nil {
+			if e := os.WriteFile(outFile, []byte(result.password+"\n"), 0644); e != nil {
 				return e
 			}
 			clrGreen.Fprintf(os.Stderr, "Saved to %s\n", outFile)
 		}
 		if copyResult {
-			if copyToClipboard(password) {
+			if copyToClipboard(result.password) {
 				clrGreen.Fprintln(os.Stderr, "Copied to clipboard")
 			} else {
 				clrYellow.Fprintln(os.Stderr, "Unable to copy to clipboard")
@@ -169,11 +187,11 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 // workers. Context cancellation propagates through both the reader and workers.
 
 func dictAttack(ctx context.Context, wordlistPath, targetHash, typ, salt, saltMode string,
-	workers int, atomicAttempts *int64) (string, error) {
+	workers int, atomicAttempts *int64, useRules bool) (crackedResult, error) {
 
 	f, err := os.Open(wordlistPath)
 	if err != nil {
-		return "", err
+		return crackedResult{}, err
 	}
 	defer f.Close()
 
@@ -182,7 +200,7 @@ func dictAttack(ctx context.Context, wordlistPath, targetHash, typ, salt, saltMo
 
 	type batch = []string
 	batchCh := make(chan batch, workers*4)
-	resultCh := make(chan string, 1)
+	resultCh := make(chan crackedResult, 1)
 
 	// reader
 	go func() {
@@ -213,6 +231,22 @@ func dictAttack(ctx context.Context, wordlistPath, targetHash, typ, salt, saltMo
 		}
 	}()
 
+	// tryCandidate tests one candidate and fires resultCh + cancel on match.
+	// Returns true if matched so the caller can short-circuit.
+	tryCandidate := func(pw, ruleLabel string) bool {
+		atomic.AddInt64(atomicAttempts, 1)
+		matched, _ := verifyCandidate(pw, targetHash, typ, salt, saltMode)
+		if matched {
+			select {
+			case resultCh <- crackedResult{password: pw, ruleLabel: ruleLabel}:
+			default:
+			}
+			cancel()
+			return true
+		}
+		return false
+	}
+
 	// workers
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
@@ -233,15 +267,22 @@ func dictAttack(ctx context.Context, wordlistPath, targetHash, typ, salt, saltMo
 							return
 						default:
 						}
-						atomic.AddInt64(atomicAttempts, 1)
-						matched, _ := verifyCandidate(word, targetHash, typ, salt, saltMode)
-						if matched {
-							select {
-							case resultCh <- word:
-							default:
-							}
-							cancel()
+						// Test the base word first (no rule applied).
+						if tryCandidate(word, "") {
 							return
+						}
+						// Test all mangled variants when rules are enabled.
+						if useRules {
+							for _, mc := range expandRules(word) {
+								select {
+								case <-innerCtx.Done():
+									return
+								default:
+								}
+								if tryCandidate(mc.password, mc.ruleLabel) {
+									return
+								}
+							}
 						}
 					}
 				}
@@ -251,10 +292,10 @@ func dictAttack(ctx context.Context, wordlistPath, targetHash, typ, salt, saltMo
 
 	wg.Wait()
 	select {
-	case pass := <-resultCh:
-		return pass, nil
+	case res := <-resultCh:
+		return res, nil
 	default:
-		return "", nil
+		return crackedResult{}, nil
 	}
 }
 

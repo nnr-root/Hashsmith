@@ -357,8 +357,12 @@ func interactiveCrack(reader *bufio.Reader) error {
 				return err
 			}
 		}
+		useRules, err := askYesNo(reader, "Use mangling rules? (tries common variations: capitalize, leet, append digits…)", true)
+		if err != nil {
+			return err
+		}
 		return doCrack(targetHash, hashType, "dict", wordlist, "",
-			1, 1, workers, salt, saltMode, "", copyOut)
+			1, 1, workers, salt, saltMode, "", copyOut, useRules)
 	}
 
 	// brute
@@ -384,7 +388,7 @@ func interactiveCrack(reader *bufio.Reader) error {
 	}
 
 	return doCrack(targetHash, hashType, "brute", "", charset,
-		minLen, maxLen, workers, salt, saltMode, "", copyOut)
+		minLen, maxLen, workers, salt, saltMode, "", copyOut, false)
 }
 
 // interactiveExtractHash guides the user through:
@@ -470,8 +474,12 @@ func interactiveCrackKnown(reader *bufio.Reader, hashType, targetHash string) er
 				return err
 			}
 		}
+		useRules, err := askYesNo(reader, "Use mangling rules? (tries common variations: capitalize, leet, append digits…)", true)
+		if err != nil {
+			return err
+		}
 		return doCrack(targetHash, hashType, "dict", wordlist, "",
-			1, 1, workers, "", "prefix", "", copyOut)
+			1, 1, workers, "", "prefix", "", copyOut, useRules)
 	}
 
 	// brute-force
@@ -496,7 +504,7 @@ func interactiveCrackKnown(reader *bufio.Reader, hashType, targetHash string) er
 		return err
 	}
 	return doCrack(targetHash, hashType, "brute", "", charset,
-		minLen, maxLen, workers, "", "prefix", "", copyOut)
+		minLen, maxLen, workers, "", "prefix", "", copyOut, false)
 }
 
 func interactiveSetTheme(reader *bufio.Reader) error {
