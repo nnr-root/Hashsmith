@@ -6,6 +6,17 @@ import (
 	"strings"
 )
 
+// isBase62Only returns true when s uses only Base62 chars AND contains at least
+// one char that is not in the Base58 alphabet (0, O, I, l), confirming it is
+// not merely a Base58-encoded value.  Used to guard the normalisation path so
+// we don't double-decode strings that are already handled by the Base58 branch.
+func isBase62Only(s string) bool {
+	if !reBase62Pat.MatchString(s) || strings.ContainsAny(s, "+/=_-") {
+		return false
+	}
+	return hasBase62OnlyChar(s)
+}
+
 // hashByteLengths maps raw digest byte-length to the algorithm names that
 // produce that output size.  Single source of truth for both speculative
 // identify and automatic crack normalisation.
@@ -58,6 +69,14 @@ func normalizeHashInput(target string) (hexHash, format string) {
 		padding := strings.Repeat("=", (4-len(target)%4)%4)
 		if b, err := base64.URLEncoding.DecodeString(target+padding); err == nil && knownHashLen(len(b)*2) {
 			return hex.EncodeToString(b), "Base64 URL"
+		}
+	}
+
+	// Try Base62 — only when the string contains at least one char outside Base58
+	// (0, O, I, l) so we don't re-decode strings already handled by the Base58 branch.
+	if isBase62Only(target) && len(target) >= 8 {
+		if b, err := decodeBase62(target); err == nil && knownHashLen(len(b)*2) {
+			return hex.EncodeToString(b), "Base62"
 		}
 	}
 

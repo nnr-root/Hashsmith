@@ -107,8 +107,8 @@ func runInteractive() error {
 func interactiveEncode(reader *bufio.Reader) error {
 	encTypes := []string{
 		"base64", "base64url", "base32", "base85", "quoted-printable",
-		"html-entities", "uu", "base58", "hex", "binary", "decimal", "octal",
-		"morse", "url", "caesar", "rot13", "vigenere", "xor", "atbash",
+		"html-entities", "uu", "base58", "base62", "hex", "binary", "decimal", "octal",
+		"morse", "nato", "url", "caesar", "rot13", "vigenere", "xor", "atbash",
 		"baconian", "leet", "reverse", "brainf*ck", "railfence", "polybius", "unicode",
 	}
 	encType, err := chooseOption(reader, "Encoding type", encTypes, 1)
@@ -141,8 +141,8 @@ func interactiveEncode(reader *bufio.Reader) error {
 func interactiveDecode(reader *bufio.Reader) error {
 	decTypes := []string{
 		"base64", "base64url", "base32", "base85", "quoted-printable",
-		"html-entities", "uu", "base58", "hex", "binary", "decimal", "octal",
-		"morse", "url", "caesar", "rot13", "vigenere", "xor", "atbash",
+		"html-entities", "uu", "base58", "base62", "hex", "binary", "decimal", "octal",
+		"morse", "nato", "url", "caesar", "rot13", "vigenere", "xor", "atbash",
 		"baconian", "leet", "reverse", "brainf*ck", "railfence", "polybius", "unicode",
 	}
 	decType, err := chooseOption(reader, "Decoding type", decTypes, 1)

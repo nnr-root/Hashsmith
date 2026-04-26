@@ -67,6 +67,10 @@ func encodeText(text string, typ string, shift int, key string, rails int) (stri
 		return uuEncode([]byte(text)), nil
 	case "base58":
 		return encodeBase58([]byte(text)), nil
+	case "base62":
+		return encodeBase62([]byte(text)), nil
+	case "nato":
+		return encodeNATO(text), nil
 	case "hex":
 		return hex.EncodeToString([]byte(text)), nil
 	case "binary":
@@ -118,6 +122,44 @@ func encodeText(text string, typ string, shift int, key string, rails int) (stri
 	default:
 		return "", errors.New("unsupported encode type")
 	}
+}
+
+func encodeBase62(data []byte) string {
+	if len(data) == 0 {
+		return "0"
+	}
+	num := new(big.Int).SetBytes(data)
+	base := big.NewInt(62)
+	zero := big.NewInt(0)
+	rem := new(big.Int)
+	out := make([]byte, 0)
+	for num.Cmp(zero) > 0 {
+		num.DivMod(num, base, rem)
+		out = append(out, base62Alphabet[rem.Int64()])
+	}
+	for _, b := range data {
+		if b == 0 {
+			out = append(out, '0')
+		} else {
+			break
+		}
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return string(out)
+}
+
+func encodeNATO(text string) string {
+	out := make([]string, 0, len(text))
+	for _, ch := range strings.ToUpper(text) {
+		if word, ok := natoAlphabet[ch]; ok {
+			out = append(out, word)
+		} else if ch == ' ' {
+			out = append(out, "/")
+		}
+	}
+	return strings.Join(out, " ")
 }
 
 func encodeBase58(data []byte) string {

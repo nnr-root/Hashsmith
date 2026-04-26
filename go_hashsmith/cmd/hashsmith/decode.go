@@ -92,6 +92,14 @@ func decodeText(text string, typ string, shift int, key string, rails int) (stri
 			return "", errors.New("invalid Base58 format provided")
 		}
 		return string(b), nil
+	case "base62":
+		b, err := decodeBase62(text)
+		if err != nil {
+			return "", errors.New("invalid Base62 format provided")
+		}
+		return string(b), nil
+	case "nato":
+		return decodeNATO(text), nil
 	case "hex":
 		b, err := hex.DecodeString(text)
 		if err != nil {
@@ -162,6 +170,68 @@ func decodeText(text string, typ string, shift int, key string, rails int) (stri
 	default:
 		return "", errors.New("unsupported decode type")
 	}
+}
+
+func decodeBase62(text string) ([]byte, error) {
+	if text == "" {
+		return nil, errors.New("invalid")
+	}
+	num := big.NewInt(0)
+	base := big.NewInt(62)
+	for _, ch := range text {
+		idx := strings.IndexRune(base62Alphabet, ch)
+		if idx < 0 {
+			return nil, errors.New("invalid")
+		}
+		num.Mul(num, base)
+		num.Add(num, big.NewInt(int64(idx)))
+	}
+	out := num.Bytes()
+	pad := 0
+	for _, ch := range text {
+		if ch == '0' {
+			pad++
+		} else {
+			break
+		}
+	}
+	if pad > 0 {
+		out = append(bytes.Repeat([]byte{0}, pad), out...)
+	}
+	return out, nil
+}
+
+// decodeNATO converts a NATO phonetic alphabet string back to plain text.
+// Tokens are split on whitespace and commas; "/" is treated as a space marker.
+// Each token is looked up case-insensitively as-is first (so "X-ray" matches
+// the entry "x-ray" before any dash-splitting is attempted).  Only when a
+// whole-token match fails is the token split on dashes, enabling inputs like
+// "Alpha-Bravo-Charlie" to decode correctly.
+func decodeNATO(text string) string {
+	cleaned := strings.ReplaceAll(text, ",", " ")
+	tokens := strings.Fields(cleaned)
+	var out strings.Builder
+	for _, t := range tokens {
+		if t == "/" {
+			out.WriteByte(' ')
+			continue
+		}
+		// Try the token whole first — handles "X-ray", "x-ray", "X-RAY".
+		if ch, ok := reverseNATO[strings.ToLower(t)]; ok {
+			out.WriteRune(ch)
+			continue
+		}
+		// Fall back: split on dashes — handles "Alpha-Bravo-Charlie" style.
+		for _, part := range strings.Split(t, "-") {
+			if part == "" {
+				continue
+			}
+			if ch, ok := reverseNATO[strings.ToLower(part)]; ok {
+				out.WriteRune(ch)
+			}
+		}
+	}
+	return out.String()
 }
 
 func decodeBase58(text string) ([]byte, error) {

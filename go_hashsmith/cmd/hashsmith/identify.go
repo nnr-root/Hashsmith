@@ -24,6 +24,7 @@ var (
 	reBase64URL = regexp.MustCompile(`^[A-Za-z0-9_-]+=*$`)
 	reBase32Std = regexp.MustCompile(`^[A-Z2-7]+=*$`)
 	reBase58Pat = regexp.MustCompile(`^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$`)
+	reBase62Pat = regexp.MustCompile(`^[0-9A-Za-z]+$`)
 	reBcrypt    = regexp.MustCompile(`^\$2[aby]\$\d{2}\$`)
 	reArgon2    = regexp.MustCompile(`^\$argon2(i|d|id)\$`)
 	reScrypt    = regexp.MustCompile(`^scrypt\$`)
@@ -33,6 +34,7 @@ var (
 	reURLEnc    = regexp.MustCompile(`%[0-9a-fA-F]{2}`)
 	reJWT       = regexp.MustCompile(`^eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$`)
 	reUUID      = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	reNATOSep   = regexp.MustCompile(`[\s,]+`)
 )
 
 // English letter frequencies (a–z), used for chi-squared analysis.
@@ -397,6 +399,32 @@ func scoreEncodingGroup(v string, lv int, entropy float64, hexStr, hashLenHex bo
 		}
 	}
 
+	// Base62 — [0-9A-Za-z] charset, no +/=_- (distinguishes from Base64/Base64URL).
+	// Speculative: if decoded bytes match a known hash size, label specifically.
+	// Generic Base62 is only emitted when the string contains chars outside Base58
+	// alphabet (0, O, I, l) to avoid shadowing the Base58 candidate.
+	if !hexStr && reBase62Pat.MatchString(v) && !strings.ContainsAny(v, "+/=_-") && lv >= 8 {
+		if b, err := decodeBase62(v); err == nil {
+			if algos, ok := hashByteLengths[len(b)]; ok {
+				for _, algo := range algos {
+					ch <- candidate{
+						"Base62-encoded " + algo, 82,
+						fmt.Sprintf("decodes to %d bytes, matches %s digest size", len(b), algo),
+					}
+				}
+			} else if hasBase62OnlyChar(v) {
+				// Contains 0/O/I/l → cannot be Base58; emit generic Base62
+				s := 30.0
+				if entropy > 4.5 {
+					s += 18
+				} else if entropy > 3.5 {
+					s += 8
+				}
+				ch <- candidate{"Base62", s, fmt.Sprintf("valid Base62 charset (contains Base62-only chars), entropy %.2f", entropy)}
+			}
+		}
+	}
+
 	// Base85 (ASCII85) — '!'–'u' charset, optional <~ ~> delimiters.
 	// Without delimiters the charset overlaps heavily with hex, alpha, and Base64,
 	// so apply guards to suppress obvious false positives.
@@ -428,6 +456,20 @@ func scoreEncodingGroup(v string, lv int, entropy float64, hexStr, hashLenHex bo
 // ── Group 3: Structural / cipher-format detection ─────────────────────────────
 
 func scoreStructuralGroup(v string, entropy float64, ch chan<- candidate) {
+	// NATO phonetic alphabet — checked first so multi-word NATO strings are not
+	// mis-scored as plain text or substitution cipher.
+	if ok, count := isNATOStr(v); ok {
+		// Use a high raw score so NATO dominates over plain-text noise.
+		// Plain text fires at ~33 pts for space-separated text; at 300 pts
+		// NATO reaches ~90% (300/333) even when plain text also fires.
+		score := 150.0
+		if count > 3 {
+			score = 300.0
+		}
+		ch <- candidate{"NATO Phonetic Alphabet", score,
+			fmt.Sprintf("%d phonetic words detected", count)}
+	}
+
 	if isBinaryStr(v) {
 		ch <- candidate{"Binary", 90, "space-separated 8-bit groups"}
 	}
@@ -785,6 +827,62 @@ func isLeetStr(s string) bool {
 
 // isBrainfuckStr detects Brainf*ck source code: the 8 operators (+ - < > [ ] . ,)
 // must constitute at least 60% of all non-whitespace characters.
+// hasBase62OnlyChar returns true if s contains at least one character that is
+// valid in Base62 but absent from the Base58 alphabet: '0', 'O', 'I', 'l'.
+// This distinguishes a genuine Base62 string from one that is also valid Base58.
+func hasBase62OnlyChar(s string) bool {
+	for _, c := range s {
+		if c == '0' || c == 'O' || c == 'I' || c == 'l' {
+			return true
+		}
+	}
+	return false
+}
+
+// isNATOStr checks whether s is a sequence of NATO phonetic words.
+// Returns (match, wordCount). A match requires at least 2 tokens AND ≥75% of
+// tokens must be valid NATO words (guards against false positives on plain text).
+//
+// Tokenisation: split on whitespace and commas only so that "X-ray" is kept
+// as a single token and matched directly against natoWordSet.  Only when a
+// whole-token lookup fails is the token expanded by splitting on dashes,
+// enabling inputs like "Alpha-Bravo-Charlie" to be identified correctly.
+func isNATOStr(s string) (bool, int) {
+	cleaned := strings.ReplaceAll(s, ",", " ")
+	rawTokens := strings.Fields(strings.TrimSpace(cleaned))
+
+	// Expand tokens: keep token whole if it matches; dash-split otherwise.
+	var tokens []string
+	for _, t := range rawTokens {
+		if t == "" || t == "/" {
+			continue
+		}
+		if natoWordSet[strings.ToLower(t)] {
+			tokens = append(tokens, t)
+		} else {
+			tokens = append(tokens, strings.Split(t, "-")...)
+		}
+	}
+
+	natoCount, total := 0, 0
+	for _, t := range tokens {
+		if t == "" {
+			continue
+		}
+		total++
+		if natoWordSet[strings.ToLower(t)] {
+			natoCount++
+		}
+	}
+	if total < 2 || natoCount < 2 {
+		return false, 0
+	}
+	if natoCount*100/total < 75 {
+		return false, 0
+	}
+	return true, natoCount
+}
+
 func isBrainfuckStr(s string) bool {
 	if len(s) < 4 {
 		return false
