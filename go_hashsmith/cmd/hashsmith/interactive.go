@@ -115,11 +115,10 @@ func menuCryptography(reader *bufio.Reader) error {
 }
 
 // menuAttack runs the "attack & crack" sub-menu loop.
-// Focused on file-based operations: extracting and cracking ZIP passwords.
-// interactiveExtractHash chains into interactiveCrackKnown automatically.
+// Focused on file-based forensics: extract hash from zip/7z/rar/pdf then crack.
 func menuAttack(reader *bufio.Reader) error {
 	entries := []menuEntry{
-		{"1", "extract-hash   — pull hash from encrypted ZIP, then crack"},
+		{"1", "archive forensics (zip, 7z, rar, pdf → crack)"},
 	}
 	for {
 		printSubMenu("attack & crack", entries, "1")
@@ -138,7 +137,7 @@ func menuAttack(reader *bufio.Reader) error {
 		var execErr error
 		switch input {
 		case "1":
-			execErr = interactiveExtractHash(reader)
+			execErr = interactiveArchiveForensics(reader)
 		default:
 			clrRed.Fprintln(os.Stderr, "invalid selection.")
 			continue
@@ -210,7 +209,7 @@ func printMainMenu() {
 	fmt.Fprintf(os.Stderr, "       %s\n", dim("encode · decode · hash · crack · identify"))
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintf(os.Stderr, "  %s  attack & crack\n", ac("[2]"))
-	fmt.Fprintf(os.Stderr, "       %s\n", dim("extract zip passwords"))
+	fmt.Fprintf(os.Stderr, "       %s\n", dim("archive forensics: zip · 7z · rar · pdf"))
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintf(os.Stderr, "  %s  settings & tools\n", ac("[3]"))
 	fmt.Fprintf(os.Stderr, "       %s\n", dim("set theme"))
@@ -530,6 +529,59 @@ func interactiveCrack(reader *bufio.Reader) error {
 
 	return doCrack(targetHash, hashType, "brute", "", charset,
 		minLen, maxLen, workers, salt, saltMode, "", copyOut, false)
+}
+
+// interactiveArchiveForensics auto-detects the archive format (.zip, .7z, .rar,
+// .pdf), extracts a crackable hash, and optionally hands off to the crack module.
+func interactiveArchiveForensics(reader *bufio.Reader) error {
+	archivePath, err := askText(reader, "archive path (.zip, .7z, .rar, .pdf)", "")
+	if err != nil {
+		return err
+	}
+	if archivePath == "" {
+		return errors.New("archive path is required")
+	}
+
+	lower := strings.ToLower(archivePath)
+	var statusMsg string
+	switch {
+	case strings.HasSuffix(lower, ".7z"):
+		statusMsg = "analyzing 7-zip header..."
+	case strings.HasSuffix(lower, ".rar"):
+		statusMsg = "extracting rar salt..."
+	case strings.HasSuffix(lower, ".pdf"):
+		statusMsg = "parsing pdf user-string..."
+	default:
+		statusMsg = "extracting hash from archive..."
+	}
+	clrYellow.Fprintln(os.Stderr, statusMsg)
+
+	res, err := extractArchiveHash(archivePath)
+	if err != nil {
+		return fmt.Errorf("extraction failed: %w", err)
+	}
+	printExtractResult(res)
+
+	copyHash, err := askYesNo(reader, "copy hash to clipboard?", true)
+	if err != nil {
+		return err
+	}
+	if copyHash {
+		if copyToClipboard(res.hash) {
+			clrGreen.Fprintln(os.Stderr, "hash copied to clipboard")
+		} else {
+			clrYellow.Fprintln(os.Stderr, "unable to copy to clipboard")
+		}
+	}
+
+	sendToCrack, err := askYesNo(reader, "send to crack module?", true)
+	if err != nil {
+		return err
+	}
+	if !sendToCrack {
+		return nil
+	}
+	return interactiveCrackKnown(reader, res.hashType, res.hash)
 }
 
 // interactiveExtractHash guides the user through:

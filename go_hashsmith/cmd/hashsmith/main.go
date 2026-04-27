@@ -73,8 +73,20 @@ func main() {
 		if err := runIdentify(rest); err != nil {
 			fail(err.Error())
 		}
-	case "extract-hash", "zip2hash":
+	case "extract-hash", "zip2hash", "zip2smith":
 		if err := runExtractHash(rest); err != nil {
+			fail(err.Error())
+		}
+	case "7z2smith":
+		if err := runExtract7z(rest); err != nil {
+			fail(err.Error())
+		}
+	case "rar2smith":
+		if err := runExtractRAR(rest); err != nil {
+			fail(err.Error())
+		}
+	case "pdf2smith":
+		if err := runExtractPDF(rest); err != nil {
 			fail(err.Error())
 		}
 	case "interactive":
@@ -98,7 +110,10 @@ func printHelp() {
 	fmt.Println("  hash          -t <type> -i <text> [-f file] [-s salt] [-S prefix|suffix] [-e hex|base58] [-o out] [-c]")
 	fmt.Println("  crack         -t <type> -H <hash> -M dict|brute [-w wordlist] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]")
 	fmt.Println("  identify      -i <text> [-f file] [-o out] [-c]")
-	fmt.Println("  extract-hash  -f <zip-file> [-o out] [-c]   (alias: zip2hash)")
+	fmt.Println("  zip2smith     -f <zip-file>  [-o out] [-c]   (aliases: extract-hash, zip2hash)")
+	fmt.Println("  7z2smith      -f <7z-file>   [-o out] [-c]")
+	fmt.Println("  rar2smith     -f <rar-file>  [-o out] [-c]   (RAR4 -hp or RAR5)")
+	fmt.Println("  pdf2smith     -f <pdf-file>  [-o out] [-c]")
 	fmt.Println("  interactive   guided interactive mode")
 	fmt.Println()
 	fmt.Println("Global flags:")
