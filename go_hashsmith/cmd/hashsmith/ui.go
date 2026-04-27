@@ -53,7 +53,7 @@ func renderBanner() {
 	if noBanner {
 		return
 	}
-	extra := []string{"", "Hashsmith", "Modular CLI for encoding, decoding, hashing, cracking"}
+	extra := []string{"", "Hashsmith", "Modular Forensic & Cryptography Toolkit"}
 	all := append(append([]string{}, bannerArt...), extra...)
 
 	maxW := 0

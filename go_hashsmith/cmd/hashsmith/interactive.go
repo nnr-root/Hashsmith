@@ -22,88 +22,229 @@ var (
 
 func runInteractive() error {
 	reader := bufio.NewReader(os.Stdin)
-	color.New(themeAttr, color.Bold).Fprintln(os.Stderr, "Interactive mode — type q to quit, 0 to go back")
-
-	// Main menu uses fixed key assignments:
-	//  1=encode  2=decode  3=hash  4=crack  5=set-theme  i=identify
-	mainKeys := map[string]string{
-		"1": "encode",
-		"2": "decode",
-		"3": "hash",
-		"4": "crack",
-		"5": "set-theme",
-		"6": "extract-hash",
-		"i": "identify",
-	}
+	color.New(themeAttr, color.Bold).Fprintln(os.Stderr,
+		"interactive mode — [0] quit  [q] quit")
 
 	for {
-		acFn := color.New(themeAttr).Sprint
-		fmt.Fprintf(os.Stderr, "\nChoose action:\n")
-		fmt.Fprintf(os.Stderr, "  %s back\n", acFn("0)"))
-		fmt.Fprintf(os.Stderr, "  %s encode\n", acFn("1)"))
-		fmt.Fprintf(os.Stderr, "  %s decode\n", acFn("2)"))
-		fmt.Fprintf(os.Stderr, "  %s hash\n", acFn("3)"))
-		fmt.Fprintf(os.Stderr, "  %s crack\n", acFn("4)"))
-		fmt.Fprintf(os.Stderr, "  %s set-theme\n", acFn("5)"))
-		fmt.Fprintf(os.Stderr, "  %s extract-hash (ZIP → crack)\n", acFn("6)"))
-		fmt.Fprintf(os.Stderr, "  %s identify\n", acFn("i)"))
-		fmt.Fprintf(os.Stderr, "  %s Quit\n", acFn("q)"))
-		fmt.Fprintf(os.Stderr, "Select option %s: ", acFn("[1]"))
+		printMainMenu()
 
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			break
-		}
-		input := strings.TrimSpace(strings.ToLower(line))
-		if input == "" {
-			input = "1"
-		}
-		if input == "q" || input == "quit" || input == "exit" || input == "bye" {
+		input, err := readMenuLine(reader)
+		if err != nil || input == "q" || input == "0" {
 			color.New(themeAttr, color.Bold).Fprintln(os.Stderr, "Goodbye")
 			return nil
 		}
-		if input == "0" {
-			return nil
-		}
-
-		action, ok := mainKeys[input]
-		if !ok {
-			clrRed.Fprintln(os.Stderr, "Invalid selection.")
-			continue
+		if input == "" {
+			input = "1" // default: cryptography & utility
 		}
 
 		var execErr error
-		switch action {
-		case "encode":
-			execErr = interactiveEncode(reader)
-		case "decode":
-			execErr = interactiveDecode(reader)
-		case "hash":
-			execErr = interactiveHash(reader)
-		case "identify":
-			execErr = interactiveIdentify(reader)
-		case "crack":
-			execErr = interactiveCrack(reader)
-		case "extract-hash":
-			execErr = interactiveExtractHash(reader)
-		case "set-theme":
-			execErr = interactiveSetTheme(reader)
+		switch input {
+		case "1":
+			execErr = menuCryptography(reader)
+		case "2":
+			execErr = menuAttack(reader)
+		case "3":
+			execErr = menuSettings(reader)
+		default:
+			clrRed.Fprintln(os.Stderr, "invalid selection.")
+			continue
 		}
 
-		if execErr == errBack {
-			// sub-menu "0" → back to main menu, already at top of loop
-		} else if execErr == errQuit {
+		if execErr == errQuit {
 			color.New(themeAttr, color.Bold).Fprintln(os.Stderr, "Goodbye")
 			return nil
-		} else if execErr != nil {
-			clrRed.Fprint(os.Stderr, "Error: ")
+		}
+		// errBack and nil both loop back to the main menu.
+		if execErr != nil && execErr != errBack {
+			clrRed.Fprint(os.Stderr, "error: ")
 			fmt.Fprintln(os.Stderr, execErr.Error())
-			return nil
-		} else {
-			return nil
 		}
 	}
-	return nil
+}
+
+// ── Category menus ────────────────────────────────────────────────────────────
+
+// menuCryptography runs the "cryptography & utility" sub-menu loop.
+func menuCryptography(reader *bufio.Reader) error {
+	entries := []menuEntry{
+		{"1", "encode"},
+		{"2", "decode"},
+		{"3", "hash"},
+		{"4", "crack"},
+		{"i", "identify"},
+	}
+	for {
+		printSubMenu("cryptography & utility", entries, "1")
+
+		input, err := readMenuLine(reader)
+		if err != nil || input == "q" {
+			return errQuit
+		}
+		if input == "0" {
+			return errBack
+		}
+		if input == "" {
+			input = "1"
+		}
+
+		var execErr error
+		switch input {
+		case "1":
+			execErr = interactiveEncode(reader)
+		case "2":
+			execErr = interactiveDecode(reader)
+		case "3":
+			execErr = interactiveHash(reader)
+		case "4":
+			execErr = interactiveCrack(reader)
+		case "i":
+			execErr = interactiveIdentify(reader)
+		default:
+			clrRed.Fprintln(os.Stderr, "invalid selection.")
+			continue
+		}
+
+		if execErr == errQuit {
+			return errQuit
+		}
+		if execErr != nil && execErr != errBack {
+			clrRed.Fprint(os.Stderr, "error: ")
+			fmt.Fprintln(os.Stderr, execErr.Error())
+		}
+	}
+}
+
+// menuAttack runs the "attack & crack" sub-menu loop.
+// Focused on file-based operations: extracting and cracking ZIP passwords.
+// interactiveExtractHash chains into interactiveCrackKnown automatically.
+func menuAttack(reader *bufio.Reader) error {
+	entries := []menuEntry{
+		{"1", "extract-hash   — pull hash from encrypted ZIP, then crack"},
+	}
+	for {
+		printSubMenu("attack & crack", entries, "1")
+
+		input, err := readMenuLine(reader)
+		if err != nil || input == "q" {
+			return errQuit
+		}
+		if input == "0" {
+			return errBack
+		}
+		if input == "" {
+			input = "1"
+		}
+
+		var execErr error
+		switch input {
+		case "1":
+			execErr = interactiveExtractHash(reader)
+		default:
+			clrRed.Fprintln(os.Stderr, "invalid selection.")
+			continue
+		}
+
+		if execErr == errQuit {
+			return errQuit
+		}
+		if execErr != nil && execErr != errBack {
+			clrRed.Fprint(os.Stderr, "error: ")
+			fmt.Fprintln(os.Stderr, execErr.Error())
+		}
+	}
+}
+
+// menuSettings runs the "settings & tools" sub-menu loop.
+func menuSettings(reader *bufio.Reader) error {
+	entries := []menuEntry{
+		{"1", "set theme"},
+	}
+	for {
+		printSubMenu("settings & tools", entries, "1")
+
+		input, err := readMenuLine(reader)
+		if err != nil || input == "q" {
+			return errQuit
+		}
+		if input == "0" {
+			return errBack
+		}
+		if input == "" {
+			input = "1"
+		}
+
+		var execErr error
+		switch input {
+		case "1":
+			execErr = interactiveSetTheme(reader)
+		default:
+			clrRed.Fprintln(os.Stderr, "invalid selection.")
+			continue
+		}
+
+		if execErr == errQuit {
+			return errQuit
+		}
+		if execErr != nil && execErr != errBack {
+			clrRed.Fprint(os.Stderr, "error: ")
+			fmt.Fprintln(os.Stderr, execErr.Error())
+		}
+	}
+}
+
+// ── Menu rendering ────────────────────────────────────────────────────────────
+
+type menuEntry struct {
+	key   string
+	label string
+}
+
+func printMainMenu() {
+	ac := color.New(themeAttr, color.Bold).Sprint
+	dim := color.New(themeAttr).Sprint
+
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "%s\n", dim("── categories "+strings.Repeat("─", 40)))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "  %s  cryptography & utility\n", ac("[1]"))
+	fmt.Fprintf(os.Stderr, "       %s\n", dim("encode · decode · hash · crack · identify"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "  %s  attack & crack\n", ac("[2]"))
+	fmt.Fprintf(os.Stderr, "       %s\n", dim("extract zip passwords"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "  %s  settings & tools\n", ac("[3]"))
+	fmt.Fprintf(os.Stderr, "       %s\n", dim("set theme"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "  %s  quit\n", ac("[q]"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "Select %s: ", ac("[1]"))
+}
+
+func printSubMenu(title string, entries []menuEntry, defaultKey string) {
+	ac := color.New(themeAttr, color.Bold).Sprint
+	dim := color.New(themeAttr).Sprint
+
+	sep := strings.Repeat("─", max(0, 46-len(title)))
+
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "%s\n", dim("── "+title+" "+sep))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "  %s  back\n", ac("[0]"))
+	for _, e := range entries {
+		fmt.Fprintf(os.Stderr, "  %s  %s\n", ac("["+e.key+"]"), e.label)
+	}
+	fmt.Fprintf(os.Stderr, "  %s  quit\n", ac("[q]"))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "Select %s: ", ac("["+defaultKey+"]"))
+}
+
+// readMenuLine reads one trimmed, lowercased line from the reader.
+func readMenuLine(reader *bufio.Reader) (string, error) {
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(strings.ToLower(line)), nil
 }
 
 // ── Sub-actions ───────────────────────────────────────────────────────────────
@@ -295,7 +436,7 @@ func interactiveCrack(reader *bufio.Reader) error {
 	if hashType == "auto" {
 		candidates := detectHashTypes(targetHash)
 		if len(candidates) == 0 {
-			return errors.New("unable to detect hash type — specify -t manually")
+			return errors.New("unable to detect hash type — specify manually")
 		}
 		if len(candidates) == 1 {
 			hashType = candidates[0]
@@ -357,7 +498,7 @@ func interactiveCrack(reader *bufio.Reader) error {
 				return err
 			}
 		}
-		useRules, err := askYesNo(reader, "Use mangling rules? (tries common variations: capitalize, leet, append digits…)", true)
+		useRules, err := askYesNo(reader, "Use mangling rules? (capitalize, leet, append digits…)", true)
 		if err != nil {
 			return err
 		}
@@ -411,7 +552,6 @@ func interactiveExtractHash(reader *bufio.Reader) error {
 	}
 	printExtractResult(res)
 
-	// Optional: copy hash to clipboard.
 	copyHash, err := askYesNo(reader, "Copy hash to clipboard?", true)
 	if err != nil {
 		return err
@@ -424,7 +564,6 @@ func interactiveExtractHash(reader *bufio.Reader) error {
 		}
 	}
 
-	// Optional: pipe directly into the crack module.
 	sendToCrack, err := askYesNo(reader, "Send to crack module?", true)
 	if err != nil {
 		return err
@@ -474,7 +613,7 @@ func interactiveCrackKnown(reader *bufio.Reader, hashType, targetHash string) er
 				return err
 			}
 		}
-		useRules, err := askYesNo(reader, "Use mangling rules? (tries common variations: capitalize, leet, append digits…)", true)
+		useRules, err := askYesNo(reader, "Use mangling rules? (capitalize, leet, append digits…)", true)
 		if err != nil {
 			return err
 		}
@@ -525,14 +664,14 @@ func chooseOption(reader *bufio.Reader, label string, options []string, defaultI
 	acFn := color.New(themeAttr).Sprint
 
 	fmt.Fprintf(os.Stderr, "\n%s:\n", label)
-	fmt.Fprintf(os.Stderr, "  %s back\n", acFn("0)"))
+	fmt.Fprintf(os.Stderr, "  %s  back\n", acFn("[0]"))
 	for i, opt := range options {
-		fmt.Fprintf(os.Stderr, "  %s %s\n", acFn(fmt.Sprintf("%d)", i+1)), opt)
+		fmt.Fprintf(os.Stderr, "  %s  %s\n", acFn(fmt.Sprintf("[%d]", i+1)), opt)
 	}
-	fmt.Fprintf(os.Stderr, "  %s quit\n", acFn("q)"))
+	fmt.Fprintf(os.Stderr, "  %s  quit\n", acFn("[q]"))
 
 	hint := acFn(fmt.Sprintf("[%d]", defaultIdx))
-	fmt.Fprintf(os.Stderr, "Select option %s: ", hint)
+	fmt.Fprintf(os.Stderr, "Select %s: ", hint)
 
 	line, err := reader.ReadString('\n')
 	if err != nil {
