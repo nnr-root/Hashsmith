@@ -34,8 +34,9 @@ Notes for npm:
 
 ### Direct Go Build
 ```bash
-cd go_hashsmith
-go build -o ../hashsmith ./cmd/hashsmith
+cd hashsmith/go_hashsmith
+go build -o ../../hashsmith ./cmd/hashsmith
+cd ../..
 ./hashsmith --help
 ```
 

@@ -1,6 +1,6 @@
 {
   "name": "hashsmith-cli",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Go-first Hashsmith CLI with a Python launcher for PyPI.",
   "main": "bin/index.js",
   "bin": {
@@ -9,6 +9,11 @@
   "scripts": {
     "postinstall": "node scripts/npm-postinstall.js"
   },
+  "files": [
+    "bin/",
+    "scripts/",
+    "hashsmith/go_hashsmith/"
+  ],
   "keywords": ["security", "hashing", "encoding", "cracking", "cli"],
   "author": "Salih Sefer",
   "license": "MIT"

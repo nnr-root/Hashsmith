@@ -4,7 +4,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const root = path.resolve(__dirname, '..');
-const goRoot = path.join(root, 'go_hashsmith');
+const goRoot = path.join(root, 'hashsmith', 'go_hashsmith');
 const outDir = path.join(root, '.npm-bin');
 const outName = process.platform === 'win32' ? 'hashsmith.exe' : 'hashsmith';
 const outPath = path.join(outDir, outName);
@@ -23,6 +23,7 @@ const build = spawnSync(
   {
     cwd: goRoot,
     stdio: 'inherit',
+    env: { ...process.env, GOWORK: 'off' },
   }
 );
 

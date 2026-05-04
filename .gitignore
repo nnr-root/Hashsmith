@@ -7,7 +7,7 @@ venv/
 .env
 .DS_Store
 .hashsmith-go/
-go_hashsmith/hashsmith
+hashsmith/go_hashsmith/hashsmith
 .npm-bin/
 dist/
 *.egg-info/

@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 
-_ROOT = Path(__file__).resolve().parents[1]
-_GO_ROOT = _ROOT / "go_hashsmith"
-_GO_BIN_DIR = _ROOT / ".hashsmith-go"
+_PKG_DIR = Path(__file__).resolve().parent       # hashsmith/ package dir
+_GO_ROOT = _PKG_DIR / "go_hashsmith"             # go sources bundled inside the package
+_GO_BIN_DIR = Path.home() / ".hashsmith-go"      # compiled binary stored in user home
 _GO_BIN = _GO_BIN_DIR / ("hashsmith.exe" if os.name == "nt" else "hashsmith")
 
 
@@ -32,9 +32,11 @@ def ensure_go_binary() -> Path:
     if need_build:
         _GO_BIN_DIR.mkdir(parents=True, exist_ok=True)
         try:
+            env = {**os.environ, "GOWORK": "off"}
             subprocess.run(
                 ["go", "build", "-o", str(_GO_BIN), "./cmd/hashsmith"],
                 cwd=str(_GO_ROOT),
+                env=env,
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
