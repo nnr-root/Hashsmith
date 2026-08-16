@@ -42,30 +42,34 @@ cd ../..
 
 ## Quick Start
 
+Input is always **positional** — inline text, a quoted comma-list, or a file (one input per line):
 ```bash
-hashsmith encode -t base64 -i "hello"
-hashsmith decode -t base64 -i "aGVsbG8="
-hashsmith hash -t sha256 -i "secret"
-hashsmith crack -t md5 -H 5f4dcc3b5aa765d61d8327deb882cf99          # uses the built-in common.txt wordlist
-hashsmith crack -t md5 -H 5f4dcc3b5aa765d61d8327deb882cf99 -w custom.txt   # or supply your own with -w / --wordlist
-hashsmith identify -i "aGVsbG8="
-hashsmith identify -i hash.txt          # -i also accepts a file (one hash per line)
+hashsmith encode -t base64 "hello"
+hashsmith decode -t base64 "aGVsbG8="
+hashsmith hash -t sha256 "secret"
+hashsmith hash -t md5 "password, admin, letmein"    # comma-list → one hash per input
+hashsmith hash -t md5 words.txt                      # file → one hash per line
+hashsmith crack -t md5 5f4dcc3b5aa765d61d8327deb882cf99          # built-in common.txt wordlist
+hashsmith crack -t md5 5f4dcc3b5aa765d61d8327deb882cf99 -w custom.txt   # or -w / --wordlist
+hashsmith identify "5f4dcc3b5aa765d61d8327deb882cf99, 8846f7ea…"  # identify several at once
 ```
 
 Auto-detect & crack (John-the-Ripper style) — no need to name the hash type:
 ```bash
 hashsmith 5f4dcc3b5aa765d61d8327deb882cf99   # detects the type, then cracks it
 hashsmith hashes.txt                          # cracks every hash in a file (one per line)
-hashsmith crack -H 5f4dcc3b5aa765d61d8327deb882cf99   # same auto-detection via the crack command
+hashsmith crack 5f4dcc3b5aa765d61d8327deb882cf99   # same auto-detection via the crack command
 ```
 When the type is ambiguous (e.g. a 32-char hex could be MD5/MD4/NTLM) every candidate is tried in turn.
 Specifying `-t <type>` skips detection and is faster.
 
-Identify shortcut — `-i` takes an inline value (in `'…'` or `"…"`) or a file path:
+Identify shortcut — `-i` takes an inline value (in `'…'` or `"…"`), a comma-list, or a file path:
 ```bash
 hashsmith -i "aGVsbG8="
 hashsmith -i hash.txt
 ```
+
+> Multi-input is comma-separated, so a single input that itself contains a comma should be given via a file (one line).
 
 Flexible arguments — flag order doesn't matter and every flag form is accepted:
 ```bash

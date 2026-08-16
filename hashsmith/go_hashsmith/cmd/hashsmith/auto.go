@@ -1,15 +1,11 @@
 package main
 
 import (
-	"bufio"
-	"errors"
 	"flag"
 	"io"
 	"os"
 	"runtime"
 	"strings"
-
-	"github.com/fatih/color"
 )
 
 // runAuto powers the John-the-Ripper-style shortcut. The target (a literal hash
@@ -45,11 +41,10 @@ func runAuto(args []string) error {
 		return err
 	}
 
-	positional := fs.Args()
-	if len(positional) == 0 {
-		return errors.New("provide a hash or a file containing hashes (e.g. hashsmith hash.txt)")
+	targets, err := gatherInputs(fs.Args())
+	if err != nil {
+		return err
 	}
-	target := positional[0]
 
 	wl := *wordlist
 	if wl == "" {
@@ -59,58 +54,8 @@ func runAuto(args []string) error {
 	if w < 1 {
 		w = runtime.NumCPU()
 	}
-
-	targets, fromFile, err := resolveAutoTargets(target)
-	if err != nil {
-		return err
-	}
-	if len(targets) == 0 {
-		return errors.New("no hashes found to crack")
-	}
-
-	for i, h := range targets {
-		if fromFile || len(targets) > 1 {
-			color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
-				"\n══ Hash %d/%d: %s\n", i+1, len(targets), h)
-		}
-		if err := crackWithDetection(h, *typ, *mode, wl, *charset,
-			*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules); err != nil {
-			// Report and continue so one bad line doesn't abort the whole file.
-			clrRed.Fprintf(os.Stderr, "  error: %v\n", err)
-		}
-	}
-	return nil
-}
-
-// resolveAutoTargets turns the positional argument into a list of hashes. If it
-// is a readable file, every non-empty, non-comment line becomes a target;
-// otherwise the argument itself is treated as a single literal hash. The bool
-// reports whether the hashes came from a file.
-func resolveAutoTargets(arg string) ([]string, bool, error) {
-	info, statErr := os.Stat(arg)
-	if statErr == nil && !info.IsDir() {
-		f, err := os.Open(arg)
-		if err != nil {
-			return nil, false, err
-		}
-		defer f.Close()
-
-		var hashes []string
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 1<<20), 1<<20)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			hashes = append(hashes, line)
-		}
-		if err := scanner.Err(); err != nil {
-			return nil, true, err
-		}
-		return hashes, true, nil
-	}
-	return []string{strings.TrimSpace(arg)}, false, nil
+	return crackTargets(targets, *typ, *mode, wl, *charset,
+		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules)
 }
 
 // looksLikeAutoTarget decides whether a bare, non-command argument should be

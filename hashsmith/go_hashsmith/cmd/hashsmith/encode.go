@@ -21,8 +21,6 @@ func runEncode(args []string) error {
 	fs := flag.NewFlagSet("encode", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	typ := fs.String("t", "", "type")
-	text := fs.String("i", "", "text")
-	filePath := fs.String("f", "", "input file")
 	outFile := fs.String("o", "", "output file")
 	copyResult := fs.Bool("c", false, "copy to clipboard")
 	shift := fs.Int("s", 3, "shift")
@@ -31,15 +29,19 @@ func runEncode(args []string) error {
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
-	input, err := readInput(*text, *filePath)
+	inputs, err := gatherInputs(fs.Args())
 	if err != nil {
 		return err
 	}
-	result, err := encodeText(input, *typ, *shift, *key, *rails)
-	if err != nil {
-		return err
+	results := make([]string, 0, len(inputs))
+	for _, in := range inputs {
+		r, err := encodeText(in, *typ, *shift, *key, *rails)
+		if err != nil {
+			return err
+		}
+		results = append(results, r)
 	}
-	return outputResult(result, *outFile, *copyResult)
+	return outputResult(strings.Join(results, "\n"), *outFile, *copyResult)
 }
 
 func encodeText(text string, typ string, shift int, key string, rails int) (string, error) {

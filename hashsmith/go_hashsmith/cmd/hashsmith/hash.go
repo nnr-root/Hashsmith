@@ -32,8 +32,6 @@ func runHash(args []string) error {
 	fs := flag.NewFlagSet("hash", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	typ := fs.String("t", "", "type")
-	text := fs.String("i", "", "text")
-	filePath := fs.String("f", "", "input file")
 	outFile := fs.String("o", "", "output file")
 	copyResult := fs.Bool("c", false, "copy to clipboard")
 	salt := fs.String("s", "", "salt")
@@ -42,29 +40,33 @@ func runHash(args []string) error {
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
-	input, err := readInput(*text, *filePath)
+	inputs, err := gatherInputs(fs.Args())
 	if err != nil {
 		return err
 	}
-	result, err := hashText(input, *typ, *salt, *saltMode)
-	if err != nil {
-		return err
-	}
-	if strings.EqualFold(*outEncoding, "base58") {
-		hexValue := result
-		if strings.HasPrefix(strings.ToLower(hexValue), "0x") {
-			hexValue = hexValue[2:]
-		}
-		if !isHex(hexValue) || len(hexValue)%2 != 0 {
-			return errors.New("base58 output is only supported for hex hashes")
-		}
-		bytesValue, err := hex.DecodeString(hexValue)
+	results := make([]string, 0, len(inputs))
+	for _, in := range inputs {
+		result, err := hashText(in, *typ, *salt, *saltMode)
 		if err != nil {
-			return errors.New("invalid hash for base58 output")
+			return err
 		}
-		result = encodeBase58(bytesValue)
+		if strings.EqualFold(*outEncoding, "base58") {
+			hexValue := result
+			if strings.HasPrefix(strings.ToLower(hexValue), "0x") {
+				hexValue = hexValue[2:]
+			}
+			if !isHex(hexValue) || len(hexValue)%2 != 0 {
+				return errors.New("base58 output is only supported for hex hashes")
+			}
+			bytesValue, err := hex.DecodeString(hexValue)
+			if err != nil {
+				return errors.New("invalid hash for base58 output")
+			}
+			result = encodeBase58(bytesValue)
+		}
+		results = append(results, result)
 	}
-	return outputResult(result, *outFile, *copyResult)
+	return outputResult(strings.Join(results, "\n"), *outFile, *copyResult)
 }
 
 func hashText(text string, algorithm string, salt string, saltMode string) (string, error) {

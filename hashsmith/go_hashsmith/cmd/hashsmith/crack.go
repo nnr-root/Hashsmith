@@ -49,7 +49,6 @@ func runCrack(args []string) error {
 	fs := flag.NewFlagSet("crack", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	typ := fs.String("t", "", "hash type (omit or 'auto' to auto-detect)")
-	targetHash := fs.String("H", "", "target hash")
 	mode := fs.String("M", "dict", "attack mode: dict|brute")
 	wordlist := fs.String("w", "", "wordlist path (dict mode; defaults to built-in common.txt)")
 	wordlistLong := fs.String("wordlist", "", "alias for -w")
@@ -65,8 +64,9 @@ func runCrack(args []string) error {
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
-	if *targetHash == "" {
-		return errors.New("-H target hash is required")
+	targets, err := gatherInputs(fs.Args())
+	if err != nil {
+		return err
 	}
 
 	// Resolve wordlist from either -w or its --wordlist alias. An empty value
@@ -80,9 +80,30 @@ func runCrack(args []string) error {
 	if w < 1 {
 		w = runtime.NumCPU()
 	}
-	// An empty/"auto" -t triggers auto-detection (normalization happens inside).
-	return crackWithDetection(*targetHash, *typ, *mode, wl, *charset,
+	return crackTargets(targets, *typ, *mode, wl, *charset,
 		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules)
+}
+
+// crackTargets runs crackWithDetection over one or more targets, printing a
+// header for each when several were supplied.
+func crackTargets(targets []string, typ, mode, wordlist, charset string,
+	minLen, maxLen, workers int,
+	salt, saltMode, outFile string, copyResult, useRules bool) error {
+	for i, tgt := range targets {
+		if len(targets) > 1 {
+			color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
+				"\n══ [%d/%d] %s\n", i+1, len(targets), tgt)
+		}
+		err := crackWithDetection(tgt, typ, mode, wordlist, charset,
+			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules)
+		if err != nil {
+			if len(targets) == 1 {
+				return err
+			}
+			clrRed.Fprintf(os.Stderr, "  error: %v\n", err)
+		}
+	}
+	return nil
 }
 
 // ── Core engine ──────────────────────────────────────────────────────────────

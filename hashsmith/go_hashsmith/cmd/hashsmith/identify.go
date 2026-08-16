@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/base32"
 	"encoding/base64"
 	"errors"
@@ -109,48 +108,19 @@ func runIdentify(args []string) error {
 // interchangeably.
 func collectIdentifyInputs(iVal, fVal string, positional []string) ([]string, error) {
 	if strings.TrimSpace(fVal) != "" {
-		return readHashLines(fVal)
+		return readInputLines(fVal)
 	}
-
-	v := strings.TrimSpace(iVal)
-	if v == "" && len(positional) > 0 {
-		v = strings.TrimSpace(positional[0])
+	// Gather from the -i value and any positional args, each of which may itself
+	// be inline text, a comma-list, or a file path.
+	var raw []string
+	if strings.TrimSpace(iVal) != "" {
+		raw = append(raw, iVal)
 	}
-	if v == "" {
-		return nil, errors.New("identify requires a hash value or file path (use -i)")
+	raw = append(raw, positional...)
+	if len(raw) == 0 {
+		return nil, errors.New("identify requires a hash value, a comma-list, or a file path")
 	}
-
-	if info, statErr := os.Stat(v); statErr == nil && !info.IsDir() {
-		return readHashLines(v)
-	}
-	return []string{v}, nil
-}
-
-// readHashLines returns every non-empty, non-comment line of a file.
-func readHashLines(path string) ([]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	var lines []string
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1<<20), 1<<20)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		lines = append(lines, line)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	if len(lines) == 0 {
-		return nil, fmt.Errorf("no hashes found in %s", path)
-	}
-	return lines, nil
+	return gatherInputs(raw)
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

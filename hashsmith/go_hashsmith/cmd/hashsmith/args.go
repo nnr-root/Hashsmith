@@ -67,5 +67,11 @@ func reorderArgs(args []string, boolFlags map[string]bool) []string {
 			i++
 		}
 	}
-	return append(flags, positionals...)
+	// Emit an explicit "--" separator so flag.Parse treats every positional as a
+	// non-flag argument even when it begins with a dash (e.g. encoding "-x").
+	if len(positionals) > 0 {
+		out := append(flags, "--")
+		return append(out, positionals...)
+	}
+	return flags
 }

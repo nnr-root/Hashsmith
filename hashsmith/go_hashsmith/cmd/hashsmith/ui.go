@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -104,16 +103,3 @@ func outputResult(result, outFile string, copyResult bool) error {
 	return nil
 }
 
-func readInput(text, filePath string) (string, error) {
-	if text != "" {
-		return text, nil
-	}
-	if filePath != "" {
-		b, err := os.ReadFile(filePath)
-		if err != nil {
-			return "", err
-		}
-		return strings.TrimRight(string(b), "\r\n"), nil
-	}
-	return "", errors.New("provide -i text or -f file path")
-}
