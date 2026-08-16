@@ -51,7 +51,8 @@ func runCrack(args []string) error {
 	typ := fs.String("t", "", "hash type")
 	targetHash := fs.String("H", "", "target hash")
 	mode := fs.String("M", "dict", "attack mode: dict|brute")
-	wordlist := fs.String("w", "", "wordlist path (dict mode)")
+	wordlist := fs.String("w", "", "wordlist path (dict mode; defaults to built-in common.txt)")
+	wordlistLong := fs.String("wordlist", "", "alias for -w")
 	charset := fs.String("C", "abcdefghijklmnopqrstuvwxyz0123456789", "charset (brute mode)")
 	minLen := fs.Int("n", 1, "min length (brute)")
 	maxLen := fs.Int("x", 4, "max length (brute)")
@@ -78,19 +79,30 @@ func runCrack(args []string) error {
 		target = normalized
 	}
 
+	// Resolve wordlist from either -w or its --wordlist alias. An empty value
+	// falls through to the built-in common.txt inside doCrack/dictAttack.
+	wl := *wordlist
+	if wl == "" {
+		wl = *wordlistLong
+	}
+
 	w := *workers
 	if w < 1 {
 		w = runtime.NumCPU()
 	}
-	return doCrack(target, *typ, *mode, *wordlist, *charset,
+	return doCrack(target, *typ, *mode, wl, *charset,
 		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules)
 }
 
 // ── Core engine ──────────────────────────────────────────────────────────────
 
+// doCrack runs a single attack for one concrete hash type and reports whether
+// the password was found. It never prints "Not found" itself — the caller
+// decides how to report failure (important when several candidate types are
+// tried in sequence).
 func doCrack(targetHash, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
-	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
+	salt, saltMode, outFile string, copyResult bool, useRules bool) (bool, error) {
 
 	start := time.Now()
 	var atomicAttempts int64
@@ -98,8 +110,9 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	// ── pre-count for progress bar ──────────────────────────────────────────
 	var total int64 = -1
 	m := strings.ToLower(mode)
-	if m == "dict" && wordlist != "" {
-		if n, err := countFileLines(wordlist); err == nil {
+	if m == "dict" {
+		// An empty wordlist path counts the embedded common.txt.
+		if n, err := countWordlistLines(wordlist); err == nil {
 			total = n
 			if useRules {
 				// Each word generates up to NumManglingRules extra candidates.
@@ -123,16 +136,13 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	)
 	switch m {
 	case "dict":
-		if wordlist == "" {
-			tickCancel()
-			return errors.New("-w wordlist is required for dict mode")
-		}
+		// An empty wordlist path uses the built-in common.txt (see openWordlist).
 		result, err = dictAttack(context.Background(), wordlist,
 			targetHash, typ, salt, saltMode, workers, &atomicAttempts, useRules)
 	case "brute":
 		if minLen < 1 || maxLen < minLen {
 			tickCancel()
-			return errors.New("invalid -n/-x range")
+			return false, errors.New("invalid -n/-x range")
 		}
 		var pw string
 		pw, err = bruteAttack(context.Background(), targetHash, typ,
@@ -140,14 +150,14 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		result = crackedResult{password: pw}
 	default:
 		tickCancel()
-		return errors.New("unknown mode: use dict or brute")
+		return false, errors.New("unknown mode: use dict or brute")
 	}
 
 	tickCancel()
 	_ = bar.Finish()
 	fmt.Fprintln(os.Stderr) // newline after bar
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	elapsed := time.Since(start).Seconds()
@@ -195,11 +205,14 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 func dictAttack(ctx context.Context, wordlistPath, targetHash, typ, salt, saltMode string,
 	workers int, atomicAttempts *int64, useRules bool) (crackedResult, error) {
 
-	f, err := os.Open(wordlistPath)
+	f, label, err := openWordlist(wordlistPath)
 	if err != nil {
 		return crackedResult{}, err
 	}
 	defer f.Close()
+	if label == defaultWordlistLabel {
+		clrYellow.Fprintf(os.Stderr, "No wordlist supplied — using %s\n", label)
+	}
 
 	innerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -451,23 +464,6 @@ func formatRate(r float64) string {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-func countFileLines(path string) (int64, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return -1, err
-	}
-	defer f.Close()
-	var n int64
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1<<20), 1<<20)
-	for scanner.Scan() {
-		if strings.TrimSpace(scanner.Text()) != "" {
-			n++
-		}
-	}
-	return n, scanner.Err()
-}
 
 func calcBruteTotal(charset string, minLen, maxLen int) int64 {
 	base := int64(len([]rune(charset)))

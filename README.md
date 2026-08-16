@@ -46,7 +46,8 @@ cd ../..
 hashsmith encode -t base64 -i "hello"
 hashsmith decode -t base64 -i "aGVsbG8="
 hashsmith hash -t sha256 -i "secret"
-hashsmith crack -t md5 -H 5f4dcc3b5aa765d61d8327deb882cf99 -M dict -w wordlists/common.txt
+hashsmith crack -t md5 -H 5f4dcc3b5aa765d61d8327deb882cf99          # uses the built-in common.txt wordlist
+hashsmith crack -t md5 -H 5f4dcc3b5aa765d61d8327deb882cf99 -w custom.txt   # or supply your own with -w / --wordlist
 hashsmith identify -i "aGVsbG8="
 ```
 

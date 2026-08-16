@@ -486,11 +486,11 @@ func interactiveCrack(reader *bufio.Reader) error {
 	}
 
 	if mode == "dict" {
-		wlChoice, err := chooseOption(reader, "Wordlist", []string{"wordlists/common.txt", "enter custom path"}, 1)
+		wlChoice, err := chooseOption(reader, "Wordlist", []string{"built-in common.txt (default)", "enter custom path"}, 1)
 		if err != nil {
 			return err
 		}
-		wordlist := "wordlists/common.txt"
+		wordlist := "" // empty → built-in common.txt (see openWordlist)
 		if strings.Contains(wlChoice, "custom") || strings.Contains(wlChoice, "enter") {
 			wordlist, err = askText(reader, "Wordlist path", "")
 			if err != nil {
@@ -654,11 +654,11 @@ func interactiveCrackKnown(reader *bufio.Reader, hashType, targetHash string) er
 
 	if mode == "dict" {
 		wlChoice, err := chooseOption(reader,
-			"Wordlist", []string{"wordlists/common.txt", "enter custom path"}, 1)
+			"Wordlist", []string{"built-in common.txt (default)", "enter custom path"}, 1)
 		if err != nil {
 			return err
 		}
-		wordlist := "wordlists/common.txt"
+		wordlist := "" // empty → built-in common.txt (see openWordlist)
 		if strings.Contains(wlChoice, "custom") || strings.Contains(wlChoice, "enter") {
 			wordlist, err = askText(reader, "Wordlist path", "")
 			if err != nil {
