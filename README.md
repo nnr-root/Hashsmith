@@ -49,6 +49,7 @@ hashsmith hash -t sha256 -i "secret"
 hashsmith crack -t md5 -H 5f4dcc3b5aa765d61d8327deb882cf99          # uses the built-in common.txt wordlist
 hashsmith crack -t md5 -H 5f4dcc3b5aa765d61d8327deb882cf99 -w custom.txt   # or supply your own with -w / --wordlist
 hashsmith identify -i "aGVsbG8="
+hashsmith identify -i hash.txt          # -i also accepts a file (one hash per line)
 ```
 
 Auto-detect & crack (John-the-Ripper style) — no need to name the hash type:
@@ -60,9 +61,10 @@ hashsmith crack -H 5f4dcc3b5aa765d61d8327deb882cf99   # same auto-detection via 
 When the type is ambiguous (e.g. a 32-char hex could be MD5/MD4/NTLM) every candidate is tried in turn.
 Specifying `-t <type>` skips detection and is faster.
 
-Shortcut:
+Identify shortcut — `-i` takes an inline value (in `'…'` or `"…"`) or a file path:
 ```bash
-hashsmith -id -i "aGVsbG8="
+hashsmith -i "aGVsbG8="
+hashsmith -i hash.txt
 ```
 
 ## Commands

@@ -51,15 +51,8 @@ def ensure_go_binary() -> Path:
     return _GO_BIN
 
 
-def _normalize_args(argv: Sequence[str]) -> list[str]:
-    args = list(argv)
-    if args and args[0] in {"-id", "--identify"}:
-        return ["identify", *args[1:]]
-    return args
-
-
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    args = _normalize_args(sys.argv[1:] if argv is None else argv)
+    args = list(sys.argv[1:] if argv is None else argv)
     try:
         binary = ensure_go_binary()
     except RuntimeError as exc:

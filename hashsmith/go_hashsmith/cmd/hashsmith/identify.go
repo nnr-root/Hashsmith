@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/base32"
 	"encoding/base64"
 	"errors"
@@ -61,23 +62,95 @@ type candidate struct {
 func runIdentify(args []string) error {
 	fs := flag.NewFlagSet("identify", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	text     := fs.String("i", "", "text")
-	filePath := fs.String("f", "", "file path")
+	text     := fs.String("i", "", "hash text or file path")
+	filePath := fs.String("f", "", "file path (optional; -i also accepts a file)")
 	outFile  := fs.String("o", "", "output file")
 	copyRes  := fs.Bool("c", false, "copy to clipboard")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	value, err := readInput(*text, *filePath)
-	if err != nil || strings.TrimSpace(value) == "" {
-		return errors.New("identify requires -i text or -f file")
+
+	inputs, err := collectIdentifyInputs(*text, *filePath, fs.Args())
+	if err != nil {
+		return err
 	}
-	result := identifyText(strings.TrimSpace(value))
+
+	// Identify every input; when more than one is given (a multi-line file)
+	// each result is prefixed with the hash it describes.
+	var sb strings.Builder
+	for i, in := range inputs {
+		if len(inputs) > 1 {
+			if i > 0 {
+				sb.WriteString("\n")
+			}
+			fmt.Fprintf(&sb, "── %s\n", in)
+		}
+		sb.WriteString(identifyText(in))
+		if len(inputs) > 1 {
+			sb.WriteString("\n")
+		}
+	}
+	result := strings.TrimRight(sb.String(), "\n")
+
 	if *outFile == "" && !*copyRes {
 		color.New(themeAttr).Fprintln(os.Stdout, result)
 		return nil
 	}
 	return outputResult(result, *outFile, *copyRes)
+}
+
+// collectIdentifyInputs resolves the identify target(s). Precedence:
+//  1. -f <file>            → every non-empty, non-comment line
+//  2. -i <value>           → a file's lines if the value is a readable file,
+//                            otherwise the literal value itself
+//  3. positional argument  → same flexible handling as -i
+//
+// This lets `-i` accept inline text ('…' / "…") or a file path (hash.txt)
+// interchangeably.
+func collectIdentifyInputs(iVal, fVal string, positional []string) ([]string, error) {
+	if strings.TrimSpace(fVal) != "" {
+		return readHashLines(fVal)
+	}
+
+	v := strings.TrimSpace(iVal)
+	if v == "" && len(positional) > 0 {
+		v = strings.TrimSpace(positional[0])
+	}
+	if v == "" {
+		return nil, errors.New("identify requires a hash value or file path (use -i)")
+	}
+
+	if info, statErr := os.Stat(v); statErr == nil && !info.IsDir() {
+		return readHashLines(v)
+	}
+	return []string{v}, nil
+}
+
+// readHashLines returns every non-empty, non-comment line of a file.
+func readHashLines(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1<<20), 1<<20)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	if len(lines) == 0 {
+		return nil, fmt.Errorf("no hashes found in %s", path)
+	}
+	return lines, nil
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

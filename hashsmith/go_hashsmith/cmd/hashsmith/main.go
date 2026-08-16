@@ -41,16 +41,26 @@ func main() {
 	cmd := filtered[0]
 	rest := filtered[1:]
 
-	if cmd == "-id" || cmd == "--identify" {
-		cmd = "identify"
-	}
-
 	if cmd == "-h" || cmd == "--help" || cmd == "help" {
 		printHelp()
 		os.Exit(0)
 	}
 
 	renderBanner()
+
+	// -i shortcut: identify a hash given inline or as a file path, e.g.
+	//   hashsmith -i 5f4dcc3b5aa765d61d8327deb882cf99
+	//   hashsmith -i hash.txt
+	if cmd == "-i" {
+		if len(rest) == 0 {
+			fail("-i requires a hash value or a file path (e.g. hashsmith -i hash.txt)")
+		}
+		// Rebuild as `-i <value> [flags]` so runIdentify parses it normally.
+		if err := runIdentify(append([]string{"-i", rest[0]}, rest[1:]...)); err != nil {
+			fail(err.Error())
+		}
+		return
+	}
 
 	switch cmd {
 	case "encode":
@@ -118,7 +128,7 @@ func printHelp() {
 	fmt.Println("  decode        -t <type> -i <text> [-f file] [-o out] [-c]")
 	fmt.Println("  hash          -t <type> -i <text> [-f file] [-s salt] [-S prefix|suffix] [-e hex|base58] [-o out] [-c]")
 	fmt.Println("  crack         -H <hash> [-t <type|auto>] -M dict|brute [-w wordlist] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]")
-	fmt.Println("  identify      -i <text> [-f file] [-o out] [-c]")
+	fmt.Println("  identify      -i <hash|file> [-o out] [-c]   (-i accepts inline text or a file path)")
 	fmt.Println("  zip2smith     -f <zip-file>  [-o out] [-c]   (aliases: extract-hash, zip2hash)")
 	fmt.Println("  7z2smith      -f <7z-file>   [-o out] [-c]")
 	fmt.Println("  rar2smith     -f <rar-file>  [-o out] [-c]   (RAR4 -hp or RAR5)")
@@ -129,7 +139,7 @@ func printHelp() {
 	fmt.Println("  -N, --no-banner   suppress the banner")
 	fmt.Println("  -T <theme>        accent colour: cyan green magenta blue yellow red white")
 	fmt.Println()
-	fmt.Println("Shortcuts:  -id / --identify  →  identify command")
+	fmt.Println("Shortcuts:  -i <hash|file>  →  identify command")
 }
 
 func fail(msg string) {
