@@ -67,6 +67,16 @@ hashsmith -i "aGVsbG8="
 hashsmith -i hash.txt
 ```
 
+Flexible arguments — flag order doesn't matter and every flag form is accepted:
+```bash
+hashsmith -w=rockyou.txt hash.txt        # flags first
+hashsmith hash.txt -w rockyou.txt        # target first
+hashsmith hash.txt --wordlist=rockyou.txt
+hashsmith hash.txt --wordlist rockyou.txt
+```
+`-w x`, `-w=x`, `--wordlist x`, and `--wordlist=x` are all equivalent, and the
+hash/file target may appear anywhere among the flags.
+
 ## Commands
 
 - `encode`

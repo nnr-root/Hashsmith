@@ -62,7 +62,7 @@ func runCrack(args []string) error {
 	outFile := fs.String("o", "", "write result to file")
 	copyResult := fs.Bool("c", false, "copy result to clipboard")
 	useRules := fs.Bool("r", false, "enable mangling rules in dict mode")
-	if err := fs.Parse(args); err != nil {
+	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
 	if *targetHash == "" {

@@ -39,7 +39,7 @@ func runHash(args []string) error {
 	salt := fs.String("s", "", "salt")
 	saltMode := fs.String("S", "prefix", "salt mode")
 	outEncoding := fs.String("e", "hex", "output encoding")
-	if err := fs.Parse(args); err != nil {
+	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
 	input, err := readInput(*text, *filePath)

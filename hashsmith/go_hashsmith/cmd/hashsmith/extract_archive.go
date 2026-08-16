@@ -33,7 +33,7 @@ func runExtract7z(args []string) error {
 	filePath := fs.String("f", "", "7z file path")
 	outFile := fs.String("o", "", "write hash to file")
 	copyRes := fs.Bool("c", false, "copy hash to clipboard")
-	if err := fs.Parse(args); err != nil {
+	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
 	if *filePath == "" {
@@ -53,7 +53,7 @@ func runExtractRAR(args []string) error {
 	filePath := fs.String("f", "", "RAR file path")
 	outFile := fs.String("o", "", "write hash to file")
 	copyRes := fs.Bool("c", false, "copy hash to clipboard")
-	if err := fs.Parse(args); err != nil {
+	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
 	if *filePath == "" {
@@ -73,7 +73,7 @@ func runExtractPDF(args []string) error {
 	filePath := fs.String("f", "", "PDF file path")
 	outFile := fs.String("o", "", "write hash to file")
 	copyRes := fs.Bool("c", false, "copy hash to clipboard")
-	if err := fs.Parse(args); err != nil {
+	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
 	if *filePath == "" {

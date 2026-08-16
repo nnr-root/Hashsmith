@@ -28,7 +28,7 @@ func runEncode(args []string) error {
 	shift := fs.Int("s", 3, "shift")
 	key := fs.String("k", "", "key")
 	rails := fs.Int("r", 2, "rails")
-	if err := fs.Parse(args); err != nil {
+	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
 	input, err := readInput(*text, *filePath)

@@ -66,7 +66,7 @@ func runIdentify(args []string) error {
 	filePath := fs.String("f", "", "file path (optional; -i also accepts a file)")
 	outFile  := fs.String("o", "", "output file")
 	copyRes  := fs.Bool("c", false, "copy to clipboard")
-	if err := fs.Parse(args); err != nil {
+	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
 

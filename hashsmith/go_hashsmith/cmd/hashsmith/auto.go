@@ -12,16 +12,20 @@ import (
 	"github.com/fatih/color"
 )
 
-// runAuto powers the John-the-Ripper-style shortcut:
+// runAuto powers the John-the-Ripper-style shortcut. The target (a literal hash
+// or a file with one hash per line) may appear anywhere among the flags — all of
+// these are equivalent:
 //
-//	hashsmith <hash>          # detect the type and crack it
-//	hashsmith hashes.txt      # crack every hash in a file
-//	hashsmith <hash> -w list  # optional flags after the target
+//	hashsmith <hash>
+//	hashsmith hashes.txt
+//	hashsmith <hash> -w list.txt
+//	hashsmith -w list.txt <hash>
+//	hashsmith --wordlist=list.txt hashes.txt
 //
-// The target (a literal hash or a file containing one hash per line) is the
-// first positional argument; any remaining args are the same flags accepted by
-// the `crack` command. When -t is omitted the hash type is auto-detected.
-func runAuto(target string, flagArgs []string) error {
+// When -t is omitted the hash type is auto-detected. The whole argument list is
+// passed in; flags and the positional target are separated by the flexible
+// parser.
+func runAuto(args []string) error {
 	fs := flag.NewFlagSet("auto", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	typ := fs.String("t", "", "hash type (omit or 'auto' to auto-detect)")
@@ -37,9 +41,15 @@ func runAuto(target string, flagArgs []string) error {
 	outFile := fs.String("o", "", "write result to file")
 	copyResult := fs.Bool("c", false, "copy result to clipboard")
 	useRules := fs.Bool("r", false, "enable mangling rules in dict mode")
-	if err := fs.Parse(flagArgs); err != nil {
+	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
+
+	positional := fs.Args()
+	if len(positional) == 0 {
+		return errors.New("provide a hash or a file containing hashes (e.g. hashsmith hash.txt)")
+	}
+	target := positional[0]
 
 	wl := *wordlist
 	if wl == "" {

@@ -65,7 +65,7 @@ func runExtractHash(args []string) error {
 	filePath := fs.String("f", "", "ZIP file path")
 	outFile := fs.String("o", "", "write hash to file")
 	copyRes := fs.Bool("c", false, "copy hash to clipboard")
-	if err := fs.Parse(args); err != nil {
+	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
 	if *filePath == "" {

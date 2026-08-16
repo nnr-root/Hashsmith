@@ -105,9 +105,12 @@ func main() {
 		}
 	default:
 		// John-the-Ripper-style shortcut: a bare hash or a file of hashes is
-		// auto-detected and cracked. `cmd` here is the first positional arg.
-		if looksLikeAutoTarget(cmd) {
-			if err := runAuto(cmd, rest); err != nil {
+		// auto-detected and cracked. The target may be preceded by flags
+		// (e.g. `hashsmith -w list.txt hash.txt`), so route to auto whenever the
+		// first token is a flag or itself looks like a crackable target; the
+		// whole argument list is handed over and separated by the flag parser.
+		if strings.HasPrefix(cmd, "-") || looksLikeAutoTarget(cmd) {
+			if err := runAuto(filtered); err != nil {
 				fail(err.Error())
 			}
 		} else {
