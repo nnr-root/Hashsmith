@@ -501,7 +501,7 @@ func interactiveCrack(reader *bufio.Reader) error {
 		if err != nil {
 			return err
 		}
-		return doCrack(targetHash, hashType, "dict", wordlist, "",
+		return crackReport(targetHash, hashType, "dict", wordlist, "",
 			1, 1, workers, salt, saltMode, "", copyOut, useRules)
 	}
 
@@ -527,7 +527,7 @@ func interactiveCrack(reader *bufio.Reader) error {
 		return err
 	}
 
-	return doCrack(targetHash, hashType, "brute", "", charset,
+	return crackReport(targetHash, hashType, "brute", "", charset,
 		minLen, maxLen, workers, salt, saltMode, "", copyOut, false)
 }
 
@@ -669,7 +669,7 @@ func interactiveCrackKnown(reader *bufio.Reader, hashType, targetHash string) er
 		if err != nil {
 			return err
 		}
-		return doCrack(targetHash, hashType, "dict", wordlist, "",
+		return crackReport(targetHash, hashType, "dict", wordlist, "",
 			1, 1, workers, "", "prefix", "", copyOut, useRules)
 	}
 
@@ -694,7 +694,7 @@ func interactiveCrackKnown(reader *bufio.Reader, hashType, targetHash string) er
 	if err != nil {
 		return err
 	}
-	return doCrack(targetHash, hashType, "brute", "", charset,
+	return crackReport(targetHash, hashType, "brute", "", charset,
 		minLen, maxLen, workers, "", "prefix", "", copyOut, false)
 }
 

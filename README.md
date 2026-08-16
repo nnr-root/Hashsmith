@@ -51,6 +51,15 @@ hashsmith crack -t md5 -H 5f4dcc3b5aa765d61d8327deb882cf99 -w custom.txt   # or 
 hashsmith identify -i "aGVsbG8="
 ```
 
+Auto-detect & crack (John-the-Ripper style) — no need to name the hash type:
+```bash
+hashsmith 5f4dcc3b5aa765d61d8327deb882cf99   # detects the type, then cracks it
+hashsmith hashes.txt                          # cracks every hash in a file (one per line)
+hashsmith crack -H 5f4dcc3b5aa765d61d8327deb882cf99   # same auto-detection via the crack command
+```
+When the type is ambiguous (e.g. a 32-char hex could be MD5/MD4/NTLM) every candidate is tried in turn.
+Specifying `-t <type>` skips detection and is faster.
+
 Shortcut:
 ```bash
 hashsmith -id -i "aGVsbG8="

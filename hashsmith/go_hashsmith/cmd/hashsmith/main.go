@@ -94,7 +94,15 @@ func main() {
 			fail(err.Error())
 		}
 	default:
-		fail("unknown command: " + cmd)
+		// John-the-Ripper-style shortcut: a bare hash or a file of hashes is
+		// auto-detected and cracked. `cmd` here is the first positional arg.
+		if looksLikeAutoTarget(cmd) {
+			if err := runAuto(cmd, rest); err != nil {
+				fail(err.Error())
+			}
+		} else {
+			fail("unknown command: " + cmd)
+		}
 	}
 }
 
@@ -103,12 +111,13 @@ func printHelp() {
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  hashsmith [global-flags] <command> [options]")
+	fmt.Println("  hashsmith <hash | hashfile> [crack-options]   auto-detect the type and crack")
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  encode        -t <type> -i <text> [-f file] [-o out] [-c]")
 	fmt.Println("  decode        -t <type> -i <text> [-f file] [-o out] [-c]")
 	fmt.Println("  hash          -t <type> -i <text> [-f file] [-s salt] [-S prefix|suffix] [-e hex|base58] [-o out] [-c]")
-	fmt.Println("  crack         -t <type> -H <hash> -M dict|brute [-w wordlist] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]")
+	fmt.Println("  crack         -H <hash> [-t <type|auto>] -M dict|brute [-w wordlist] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]")
 	fmt.Println("  identify      -i <text> [-f file] [-o out] [-c]")
 	fmt.Println("  zip2smith     -f <zip-file>  [-o out] [-c]   (aliases: extract-hash, zip2hash)")
 	fmt.Println("  7z2smith      -f <7z-file>   [-o out] [-c]")

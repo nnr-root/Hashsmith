@@ -48,7 +48,7 @@ type crackedResult struct {
 func runCrack(args []string) error {
 	fs := flag.NewFlagSet("crack", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	typ := fs.String("t", "", "hash type")
+	typ := fs.String("t", "", "hash type (omit or 'auto' to auto-detect)")
 	targetHash := fs.String("H", "", "target hash")
 	mode := fs.String("M", "dict", "attack mode: dict|brute")
 	wordlist := fs.String("w", "", "wordlist path (dict mode; defaults to built-in common.txt)")
@@ -65,18 +65,8 @@ func runCrack(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *typ == "" {
-		return errors.New("-t type is required")
-	}
 	if *targetHash == "" {
 		return errors.New("-H target hash is required")
-	}
-
-	// Normalize Base58/Base64 encoded hash bytes to hex before the attack loop.
-	target := *targetHash
-	if normalized, enc := normalizeHashInput(target); enc != "" {
-		clrYellow.Fprintf(os.Stderr, "Detected %s encoded hash — normalizing to hex\n", enc)
-		target = normalized
 	}
 
 	// Resolve wordlist from either -w or its --wordlist alias. An empty value
@@ -90,7 +80,8 @@ func runCrack(args []string) error {
 	if w < 1 {
 		w = runtime.NumCPU()
 	}
-	return doCrack(target, *typ, *mode, wl, *charset,
+	// An empty/"auto" -t triggers auto-detection (normalization happens inside).
+	return crackWithDetection(*targetHash, *typ, *mode, wl, *charset,
 		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules)
 }
 
@@ -167,7 +158,8 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		rate = float64(attempts) / elapsed
 	}
 
-	if result.password != "" {
+	found := result.password != ""
+	if found {
 		clrGreen.Fprint(os.Stderr, "Found: ")
 		if result.ruleLabel != "" {
 			fmt.Fprintf(os.Stderr, "%s (via rule: %s)\n", result.password, result.ruleLabel)
@@ -176,7 +168,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		}
 		if outFile != "" {
 			if e := os.WriteFile(outFile, []byte(result.password+"\n"), 0644); e != nil {
-				return e
+				return true, e
 			}
 			clrGreen.Fprintf(os.Stderr, "Saved to %s\n", outFile)
 		}
@@ -187,12 +179,80 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				clrYellow.Fprintln(os.Stderr, "Unable to copy to clipboard")
 			}
 		}
-	} else {
-		clrYellow.Fprintln(os.Stderr, "Not found")
 	}
 	color.New(themeAttr).Fprintf(os.Stderr,
 		"Attempts: %d | Elapsed: %.2fs | Rate: %s\n",
 		attempts, elapsed, formatRate(rate))
+	return found, nil
+}
+
+// crackReport runs a single-type attack and prints "Not found" on failure.
+// Used by callers that already know the concrete hash type (interactive mode).
+func crackReport(targetHash, typ, mode, wordlist, charset string,
+	minLen, maxLen, workers int,
+	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
+	found, err := doCrack(targetHash, typ, mode, wordlist, charset,
+		minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules)
+	if err != nil {
+		return err
+	}
+	if !found {
+		clrYellow.Fprintln(os.Stderr, "Not found")
+	}
+	return nil
+}
+
+// crackWithDetection cracks a hash whose type may be unknown. When explicitType
+// is empty or "auto", it uses detectHashTypes to find candidate algorithms and
+// tries each in turn until one succeeds — the John-the-Ripper-style workflow.
+// Base58/Base64-encoded hashes are normalized to hex first.
+func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
+	minLen, maxLen, workers int,
+	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
+
+	target := strings.TrimSpace(rawTarget)
+	if normalized, enc := normalizeHashInput(target); enc != "" {
+		clrYellow.Fprintf(os.Stderr, "Detected %s encoded hash — normalizing to hex\n", enc)
+		target = normalized
+	}
+
+	var types []string
+	if explicitType != "" && !strings.EqualFold(explicitType, "auto") {
+		types = []string{strings.ToLower(explicitType)}
+	} else {
+		types = detectHashTypes(target)
+		if len(types) == 0 {
+			return fmt.Errorf("could not auto-detect hash type — specify it with -t "+
+				"(try 'hashsmith identify -i %s' for analysis)", target)
+		}
+		if len(types) == 1 {
+			clrGreen.Fprintf(os.Stderr, "Detected hash type: %s\n", types[0])
+		} else {
+			clrYellow.Fprintf(os.Stderr,
+				"Ambiguous hash — trying candidate types: %s\n", strings.Join(types, ", "))
+		}
+	}
+
+	for _, t := range types {
+		if len(types) > 1 {
+			color.New(themeAttr, color.Bold).Fprintf(os.Stderr, "\n→ Attempting as %s\n", t)
+		}
+		found, err := doCrack(target, t, mode, wordlist, charset,
+			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules)
+		if err != nil {
+			if len(types) == 1 {
+				return err
+			}
+			// One candidate's hash format may be invalid; keep trying the rest.
+			clrYellow.Fprintf(os.Stderr, "  (%s not applicable: %v)\n", t, err)
+			continue
+		}
+		if found {
+			return nil
+		}
+	}
+
+	clrYellow.Fprintln(os.Stderr, "Not found")
 	return nil
 }
 
