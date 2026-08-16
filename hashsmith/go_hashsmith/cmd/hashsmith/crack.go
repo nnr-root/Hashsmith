@@ -566,6 +566,24 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyRAR5(targetHash, candidate)
 	case "pdf":
 		return verifyPDF(targetHash, candidate)
+	case "ssh":
+		return verifySSH(targetHash, candidate)
+	case "pkcs8":
+		return verifyPKCS8(targetHash, candidate)
+	case "gpg":
+		return verifyGPG(targetHash, candidate)
+	case "office":
+		return verifyOffice(targetHash, candidate)
+	case "keepass":
+		return verifyKeePass(targetHash, candidate)
+	case "netntlmv2":
+		return verifyNetNTLMv2(targetHash, candidate)
+	case "netntlmv1":
+		return verifyNetNTLMv1(targetHash, candidate)
+	case "krb5asrep":
+		return verifyKrb5(targetHash, candidate)
+	case "krb5tgs":
+		return verifyKrb5(targetHash, candidate)
 	}
 	got, err := hashText(candidate, algo, salt, saltMode)
 	if err != nil {

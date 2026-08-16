@@ -292,6 +292,28 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"ZIP (WinZip AES-192 encrypted)", 1000, "$zipaes192$ prefix — WinZip AES-192 hash"}}
 	case strings.HasPrefix(v, "$zipaes256$"):
 		return []candidate{{"ZIP (WinZip AES-256 encrypted)", 1000, "$zipaes256$ prefix — WinZip AES-256 hash"}}
+	case strings.HasPrefix(v, "$7z$"):
+		return []candidate{{"7-Zip (AES-256 encrypted)", 1000, "$7z$ prefix — 7-Zip AES hash"}}
+	case strings.HasPrefix(v, "$rar3$"):
+		return []candidate{{"RAR3/RAR4 (AES encrypted)", 1000, "$rar3$ prefix — RAR4 header-encryption hash"}}
+	case strings.HasPrefix(v, "$rar5$"):
+		return []candidate{{"RAR5 (AES-256 encrypted)", 1000, "$rar5$ prefix — RAR5 PBKDF2 hash"}}
+	case strings.HasPrefix(v, "$pdf$"):
+		return []candidate{{"PDF (Standard encryption)", 1000, "$pdf$ prefix — PDF Standard security handler"}}
+	case strings.HasPrefix(v, "$ssh$"):
+		return []candidate{{"SSH private key", 1000, "$ssh$ prefix — encrypted SSH private key"}}
+	case strings.HasPrefix(v, "$pkcs8$"):
+		return []candidate{{"PKCS#8 encrypted key", 1000, "$pkcs8$ prefix — PBES2 (PBKDF2) private key"}}
+	case strings.HasPrefix(v, "$gpg$"):
+		return []candidate{{"GPG symmetric", 1000, "$gpg$ prefix — gpg -c symmetric encryption"}}
+	case strings.HasPrefix(v, "$office$"):
+		return []candidate{{"MS Office (encrypted document)", 1000, "$office$ prefix — Office 2007/2010/2013"}}
+	case strings.HasPrefix(v, "$keepass$"):
+		return []candidate{{"KeePass database", 1000, "$keepass$ prefix — KDBX 1/2 (AES-KDF)"}}
+	case strings.HasPrefix(v, "$krb5asrep$"):
+		return []candidate{{"Kerberos 5 AS-REP (etype 23)", 1000, "$krb5asrep$ prefix — AS-REP roastable hash"}}
+	case strings.HasPrefix(v, "$krb5tgs$"):
+		return []candidate{{"Kerberos 5 TGS-REP (etype 23)", 1000, "$krb5tgs$ prefix — Kerberoastable ticket"}}
 	case reBcrypt.MatchString(v):
 		return []candidate{{"bcrypt", 1000, "starts with $2[aby]$ cost-factor signature"}}
 	case reArgon2.MatchString(v):
@@ -1048,7 +1070,7 @@ func isUUStr(s string) bool {
 
 func detectHashTypes(text string) []string {
 	t := strings.TrimSpace(text)
-	// ZIP hash formats extracted by the extract-hash module.
+	// Archive/file hash formats produced by the *2smith extractors.
 	if strings.HasPrefix(t, "$zipcrypto$") {
 		return []string{"zipcrypto"}
 	}
@@ -1060,6 +1082,43 @@ func detectHashTypes(text string) []string {
 	}
 	if strings.HasPrefix(t, "$zipaes256$") {
 		return []string{"zipaes256"}
+	}
+	if strings.HasPrefix(t, "$7z$") {
+		return []string{"7z"}
+	}
+	if strings.HasPrefix(t, "$rar3$") {
+		return []string{"rar4"}
+	}
+	if strings.HasPrefix(t, "$rar5$") {
+		return []string{"rar5"}
+	}
+	if strings.HasPrefix(t, "$pdf$") {
+		return []string{"pdf"}
+	}
+	if strings.HasPrefix(t, "$ssh$") {
+		return []string{"ssh"}
+	}
+	if strings.HasPrefix(t, "$pkcs8$") {
+		return []string{"pkcs8"}
+	}
+	if strings.HasPrefix(t, "$gpg$") {
+		return []string{"gpg"}
+	}
+	if strings.HasPrefix(t, "$office$") {
+		return []string{"office"}
+	}
+	if strings.HasPrefix(t, "$keepass$") {
+		return []string{"keepass"}
+	}
+	if strings.HasPrefix(t, "$krb5asrep$") {
+		return []string{"krb5asrep"}
+	}
+	if strings.HasPrefix(t, "$krb5tgs$") {
+		return []string{"krb5tgs"}
+	}
+	if isNetNTLMLine(t) {
+		// v1 and v2 share the user::domain:… shape; try both.
+		return []string{"netntlmv2", "netntlmv1"}
 	}
 	if reBcrypt.MatchString(t) {
 		return []string{"bcrypt"}

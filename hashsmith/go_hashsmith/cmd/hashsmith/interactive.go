@@ -118,7 +118,7 @@ func menuCryptography(reader *bufio.Reader) error {
 // Focused on file-based forensics: extract hash from zip/7z/rar/pdf then crack.
 func menuAttack(reader *bufio.Reader) error {
 	entries := []menuEntry{
-		{"1", "archive forensics (zip, 7z, rar, pdf → crack)"},
+		{"1", "archive & key forensics (zip, 7z, rar, pdf, ssh, gpg, kdbx, office → crack)"},
 	}
 	for {
 		printSubMenu("attack & crack", entries, "1")
@@ -209,7 +209,7 @@ func printMainMenu() {
 	fmt.Fprintf(os.Stderr, "       %s\n", dim("encode · decode · hash · crack · identify"))
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintf(os.Stderr, "  %s  attack & crack\n", ac("[2]"))
-	fmt.Fprintf(os.Stderr, "       %s\n", dim("archive forensics: zip · 7z · rar · pdf"))
+	fmt.Fprintf(os.Stderr, "       %s\n", dim("archive & keys: zip · 7z · rar · pdf · ssh · gpg · kdbx · office"))
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintf(os.Stderr, "  %s  settings & tools\n", ac("[3]"))
 	fmt.Fprintf(os.Stderr, "       %s\n", dim("set theme"))
@@ -410,6 +410,8 @@ func interactiveCrack(reader *bufio.Reader) error {
 		"sha3_224", "sha3_256", "sha3_512", "blake2b", "blake2s", "ripemd160",
 		"ntlm", "mysql323", "mysql41", "bcrypt", "argon2", "scrypt",
 		"mssql2000", "mssql2005", "mssql2012", "postgres",
+		"netntlmv1", "netntlmv2", "krb5asrep", "krb5tgs",
+		"ssh", "pkcs8", "gpg", "office", "keepass",
 	}
 	hashType, err := chooseOption(reader, "Hash type", hashTypes, 1) // default auto
 	if err != nil {
@@ -534,7 +536,7 @@ func interactiveCrack(reader *bufio.Reader) error {
 // interactiveArchiveForensics auto-detects the archive format (.zip, .7z, .rar,
 // .pdf), extracts a crackable hash, and optionally hands off to the crack module.
 func interactiveArchiveForensics(reader *bufio.Reader) error {
-	archivePath, err := askText(reader, "archive path (.zip, .7z, .rar, .pdf)", "")
+	archivePath, err := askText(reader, "archive/key/db path (.zip .7z .rar .pdf ssh .gpg .kdbx .docx)", "")
 	if err != nil {
 		return err
 	}

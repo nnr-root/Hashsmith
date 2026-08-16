@@ -87,6 +87,99 @@ func runExtractPDF(args []string) error {
 	return outputResult(res.hash, *outFile, *copyRes)
 }
 
+func runExtractSSH(args []string) error {
+	fs := flag.NewFlagSet("ssh2smith", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	filePath := fs.String("f", "", "SSH private key path")
+	outFile := fs.String("o", "", "write hash to file")
+	copyRes := fs.Bool("c", false, "copy hash to clipboard")
+	if err := parseArgsFlexible(fs, args); err != nil {
+		return err
+	}
+	// Allow the key path as a positional argument too (ssh2smith id_rsa).
+	if *filePath == "" && fs.NArg() > 0 {
+		*filePath = fs.Arg(0)
+	}
+	if *filePath == "" {
+		return errors.New("ssh2smith requires -f <private-key> (or a path argument)")
+	}
+	res, err := extractSSHKey(*filePath)
+	if err != nil {
+		return err
+	}
+	printExtractResult(res)
+	return outputResult(res.hash, *outFile, *copyRes)
+}
+
+func runExtractOffice(args []string) error {
+	fs := flag.NewFlagSet("office2smith", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	filePath := fs.String("f", "", "encrypted Office document path")
+	outFile := fs.String("o", "", "write hash to file")
+	copyRes := fs.Bool("c", false, "copy hash to clipboard")
+	if err := parseArgsFlexible(fs, args); err != nil {
+		return err
+	}
+	if *filePath == "" && fs.NArg() > 0 {
+		*filePath = fs.Arg(0)
+	}
+	if *filePath == "" {
+		return errors.New("office2smith requires -f <docx/xlsx/pptx> (or a path argument)")
+	}
+	res, err := extractOffice(*filePath)
+	if err != nil {
+		return err
+	}
+	printExtractResult(res)
+	return outputResult(res.hash, *outFile, *copyRes)
+}
+
+func runExtractKeePass(args []string) error {
+	fs := flag.NewFlagSet("keepass2smith", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	filePath := fs.String("f", "", "KDBX database path")
+	outFile := fs.String("o", "", "write hash to file")
+	copyRes := fs.Bool("c", false, "copy hash to clipboard")
+	if err := parseArgsFlexible(fs, args); err != nil {
+		return err
+	}
+	if *filePath == "" && fs.NArg() > 0 {
+		*filePath = fs.Arg(0)
+	}
+	if *filePath == "" {
+		return errors.New("keepass2smith requires -f <kdbx-file> (or a path argument)")
+	}
+	res, err := extractKeePass(*filePath)
+	if err != nil {
+		return err
+	}
+	printExtractResult(res)
+	return outputResult(res.hash, *outFile, *copyRes)
+}
+
+func runExtractGPG(args []string) error {
+	fs := flag.NewFlagSet("gpg2smith", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	filePath := fs.String("f", "", "gpg-encrypted file path")
+	outFile := fs.String("o", "", "write hash to file")
+	copyRes := fs.Bool("c", false, "copy hash to clipboard")
+	if err := parseArgsFlexible(fs, args); err != nil {
+		return err
+	}
+	if *filePath == "" && fs.NArg() > 0 {
+		*filePath = fs.Arg(0)
+	}
+	if *filePath == "" {
+		return errors.New("gpg2smith requires -f <gpg-file> (or a path argument)")
+	}
+	res, err := extractGPG(*filePath)
+	if err != nil {
+		return err
+	}
+	printExtractResult(res)
+	return outputResult(res.hash, *outFile, *copyRes)
+}
+
 // ── Auto-detect dispatcher ────────────────────────────────────────────────────
 
 // extractArchiveHash auto-detects the archive format by extension and delegates.
@@ -100,13 +193,21 @@ func extractArchiveHash(path string) (*zipHashResult, error) {
 		return extractRAR(path)
 	case ".pdf":
 		return extractPDF(path)
+	case ".pem", ".key":
+		return extractSSHKey(path)
+	case ".gpg", ".pgp", ".asc":
+		return extractGPG(path)
+	case ".kdbx", ".kdb":
+		return extractKeePass(path)
+	case ".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt":
+		return extractOffice(path)
 	default:
 		// Sniff the magic bytes to handle misnamed files.
 		f, err := os.Open(path)
 		if err != nil {
 			return nil, err
 		}
-		magic := make([]byte, 8)
+		magic := make([]byte, 32)
 		n, _ := f.Read(magic)
 		f.Close()
 		magic = magic[:n]
@@ -121,8 +222,15 @@ func extractArchiveHash(path string) (*zipHashResult, error) {
 			return extractRAR(path)
 		case len(magic) >= 4 && string(magic[:4]) == "%PDF":
 			return extractPDF(path)
+		case bytes.Contains(magic, []byte("-----BEGIN")) && bytes.Contains(magic, []byte("PRIVATE KEY")):
+			return extractSSHKey(path)
+		case len(magic) >= 8 && binary.LittleEndian.Uint32(magic) == kdbxSig1 &&
+			binary.LittleEndian.Uint32(magic[4:]) == kdbxSig2:
+			return extractKeePass(path)
+		case bytes.HasPrefix(magic, cfbSignature):
+			return extractOffice(path)
 		default:
-			return nil, errors.New("unsupported archive format (use .zip, .7z, .rar, or .pdf)")
+			return nil, errors.New("unsupported file format (use .zip, .7z, .rar, .pdf, or an SSH private key)")
 		}
 	}
 }

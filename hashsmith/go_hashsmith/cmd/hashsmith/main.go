@@ -99,6 +99,22 @@ func main() {
 		if err := runExtractPDF(rest); err != nil {
 			fail(err.Error())
 		}
+	case "ssh2smith":
+		if err := runExtractSSH(rest); err != nil {
+			fail(err.Error())
+		}
+	case "gpg2smith":
+		if err := runExtractGPG(rest); err != nil {
+			fail(err.Error())
+		}
+	case "keepass2smith":
+		if err := runExtractKeePass(rest); err != nil {
+			fail(err.Error())
+		}
+	case "office2smith":
+		if err := runExtractOffice(rest); err != nil {
+			fail(err.Error())
+		}
 	case "interactive":
 		if err := runInteractive(); err != nil {
 			fail(err.Error())
@@ -136,6 +152,10 @@ func printHelp() {
 	fmt.Println("  7z2smith      -f <7z-file>   [-o out] [-c]")
 	fmt.Println("  rar2smith     -f <rar-file>  [-o out] [-c]   (RAR4 -hp or RAR5)")
 	fmt.Println("  pdf2smith     -f <pdf-file>  [-o out] [-c]")
+	fmt.Println("  ssh2smith     -f <ssh-key>   [-o out] [-c]   (OpenSSH / legacy PEM / PKCS#8 keys)")
+	fmt.Println("  gpg2smith     -f <gpg-file>  [-o out] [-c]   (gpg -c symmetric encryption)")
+	fmt.Println("  keepass2smith -f <kdbx-file> [-o out] [-c]   (KeePass KDBX 3.1 database)")
+	fmt.Println("  office2smith  -f <docx/xlsx> [-o out] [-c]   (encrypted Office 2013+ document)")
 	fmt.Println("  interactive   guided interactive mode")
 	fmt.Println()
 	fmt.Println("Global flags:")

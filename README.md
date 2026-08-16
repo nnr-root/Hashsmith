@@ -85,6 +85,52 @@ hash/file target may appear anywhere among the flags.
 - `crack`
 - `identify`
 
+### File → hash extractors (`*2smith`)
+
+Turn a password-protected file into a crackable hash, then feed it straight to `crack`:
+
+| Command | Input | Formats |
+|---|---|---|
+| `zip2smith` | `.zip` | ZipCrypto, WinZip AES-128/192/256 |
+| `7z2smith`  | `.7z`  | 7-Zip AES-256 |
+| `rar2smith` | `.rar` | RAR3/RAR4 (`-hp`), RAR5 |
+| `pdf2smith` | `.pdf` | Standard security handler (RC4 / AES) |
+| `ssh2smith` | SSH / private key | OpenSSH (bcrypt-pbkdf + AES), legacy PEM (AES-CBC / 3DES), PKCS#8 PBES2 (PBKDF2) |
+| `gpg2smith` | `.gpg` / `.asc` | `gpg -c` symmetric (AES-128/192/256, CAST5, 3DES) |
+| `keepass2smith` | `.kdbx` | KeePass KDBX 3.1 (AES-KDF) and KDBX 4 (Argon2d / Argon2id) |
+| `office2smith` | `.docx` / `.xlsx` / `.pptx` | MS Office 2007/2010 (standard) and 2013+ (agile) |
+
+```bash
+hashsmith ssh2smith -f id_ed25519 -o hash.txt   # extract
+hashsmith hash.txt                               # auto-detect type & crack
+```
+
+### Network-capture hash types
+
+These are captured as text (Responder, impacket, Rubeus) — paste the line straight into `crack` (auto-detected):
+
+| `-t` type | hashcat | Source |
+|---|---|---|
+| `netntlmv1` | 5500 | NetNTLMv1 / NTLMv1-ESS challenge-response |
+| `netntlmv2` | 5600 | NetNTLMv2 challenge-response |
+| `krb5asrep` | 18200 | Kerberos AS-REP roasting (etype 23 / RC4) |
+| `krb5tgs`   | 13100 | Kerberoasting TGS-REP (etype 23 / RC4) |
+
+```bash
+hashsmith 'admin::WORKGROUP:1122334455667788:9a94e588…:0101…'   # auto-detect & crack
+```
+
+### Encrypted-container hash types
+
+Extracted with a `*2smith` command (or pasted from hashcat/john) and cracked with the built-in wordlist:
+
+| `-t` type | hashcat | Notes |
+|---|---|---|
+| `pkcs8`   | –     | PKCS#8 PBES2 private keys (via `ssh2smith`) |
+| `gpg`     | 16700/17010 | `gpg -c` symmetric (via `gpg2smith`); AES-128/192/256 |
+| `office`  | 9400/9500/9600 | MS Office 2007 (standard), 2010 (standard), 2013 (agile) |
+| `keepass` | 13400 | KeePass KDBX 1, 2 (AES-KDF) and 4 (Argon2d / Argon2id) |
+
 Use help:
 ```bash
 hashsmith --help
