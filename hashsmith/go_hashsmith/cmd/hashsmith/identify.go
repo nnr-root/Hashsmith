@@ -191,6 +191,9 @@ func scoreCandidates(v string) []candidate {
 		return nil
 	}
 
+	// A "user:hash" or raw /etc/shadow line collapses to its crypt-hash field.
+	v = stripShadowUsername(v)
+
 	// Level 0 — signature-based (definitive, synchronous)
 	if sig := signatureMatch(v); sig != nil {
 		return sig
@@ -254,6 +257,12 @@ func scoreCandidates(v string) []candidate {
 // carry an unambiguous structural signature, bypassing probabilistic scoring.
 func signatureMatch(v string) []candidate {
 	switch {
+	case strings.HasPrefix(v, "$6$"):
+		return []candidate{{"sha512crypt (Unix $6$)", 1000, "$6$ prefix — glibc SHA-512 crypt shadow hash"}}
+	case strings.HasPrefix(v, "$5$"):
+		return []candidate{{"sha256crypt (Unix $5$)", 1000, "$5$ prefix — glibc SHA-256 crypt shadow hash"}}
+	case strings.HasPrefix(v, "$1$"):
+		return []candidate{{"md5crypt (Unix $1$)", 1000, "$1$ prefix — FreeBSD/Linux MD5 crypt shadow hash"}}
 	case strings.HasPrefix(v, "$zipcrypto$"):
 		return []candidate{{"ZIP (ZipCrypto encrypted)", 1000, "$zipcrypto$ prefix — traditional PKWARE encryption hash"}}
 	case strings.HasPrefix(v, "$zipaes128$"):
@@ -300,6 +309,8 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"JWT (JSON Web Token)", 1000, "eyJ header + 3-part Base64URL structure"}}
 	case reUUID.MatchString(v):
 		return []candidate{{"UUID", 1000, "8-4-4-4-12 hex groups"}}
+	case looksLikeDescrypt(v):
+		return []candidate{{"descrypt (traditional DES crypt)", 1000, "13-char crypt-base64 — classic Unix DES password hash"}}
 	}
 	return nil
 }
@@ -1038,8 +1049,46 @@ func isUUStr(s string) bool {
 
 // ── Backward-compat (used by crack auto-detection) ────────────────────────────
 
+// looksLikeCryptHash reports whether s is a bare Unix crypt(3) shadow hash:
+// a $-tagged scheme ($1$/$5$/$6$ or bcrypt $2[aby]$) or a 13-char descrypt.
+func looksLikeCryptHash(s string) bool {
+	if strings.HasPrefix(s, "$1$") || strings.HasPrefix(s, "$5$") ||
+		strings.HasPrefix(s, "$6$") || reBcrypt.MatchString(s) {
+		return true
+	}
+	return looksLikeDescrypt(s)
+}
+
+// stripShadowUsername pulls the hash field out of a "user:hash[:...]" line — the
+// shape produced by unshadow/shadow2smith and by raw /etc/shadow entries. It
+// only strips when the second colon-separated field is itself a crypt hash, so
+// NetNTLM ("user::domain:…") and other colon-bearing formats are left intact.
+func stripShadowUsername(s string) string {
+	if !strings.Contains(s, ":") {
+		return s
+	}
+	fields := strings.Split(s, ":")
+	if len(fields) >= 2 && looksLikeCryptHash(fields[1]) {
+		return fields[1]
+	}
+	return s
+}
+
 func detectHashTypes(text string) []string {
 	t := strings.TrimSpace(text)
+	// Unix crypt(3) shadow hashes may still carry a "user:" (or full passwd/
+	// shadow line) prefix — crack the hash field directly.
+	t = stripShadowUsername(t)
+	// Unix crypt(3) shadow hashes.
+	if strings.HasPrefix(t, "$1$") {
+		return []string{"md5crypt"}
+	}
+	if strings.HasPrefix(t, "$5$") {
+		return []string{"sha256crypt"}
+	}
+	if strings.HasPrefix(t, "$6$") {
+		return []string{"sha512crypt"}
+	}
 	// Archive/file hash formats produced by the *2smith extractors.
 	if strings.HasPrefix(t, "$zipcrypto$") {
 		return []string{"zipcrypto"}
@@ -1107,6 +1156,9 @@ func detectHashTypes(text string) []string {
 	}
 	if reMSSQLNew.MatchString(t) {
 		return []string{"mssql2005", "mssql2012"}
+	}
+	if looksLikeDescrypt(t) {
+		return []string{"descrypt"}
 	}
 	if !isHex(t) {
 		return nil

@@ -115,6 +115,10 @@ func main() {
 		if err := runExtractOffice(rest); err != nil {
 			fail(err.Error())
 		}
+	case "shadow2smith", "unshadow":
+		if err := runExtractShadow(rest); err != nil {
+			fail(err.Error())
+		}
 	case "interactive":
 		if err := runInteractive(); err != nil {
 			fail(err.Error())
@@ -156,6 +160,7 @@ func printHelp() {
 	fmt.Println("  gpg2smith     -f <gpg-file>  [-o out] [-c]   (gpg -c symmetric encryption)")
 	fmt.Println("  keepass2smith -f <kdbx-file> [-o out] [-c]   (KeePass KDBX 3.1 database)")
 	fmt.Println("  office2smith  -f <docx/xlsx> [-o out] [-c]   (encrypted Office 2013+ document)")
+	fmt.Println("  shadow2smith  <shadow> [passwd] [-o out] [-c]   (unshadow: /etc/shadow → user:hash, any order)")
 	fmt.Println("  interactive   guided interactive mode")
 	fmt.Println()
 	fmt.Println("Global flags:")

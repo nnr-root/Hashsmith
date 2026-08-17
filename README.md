@@ -103,11 +103,44 @@ Turn a password-protected file into a crackable hash, then feed it straight to `
 | `gpg2smith` | `.gpg` / `.asc` | `gpg -c` symmetric (AES-128/192/256, CAST5, 3DES) |
 | `keepass2smith` | `.kdbx` | KeePass KDBX 3.1 (AES-KDF) and KDBX 4 (Argon2d / Argon2id) |
 | `office2smith` | `.docx` / `.xlsx` / `.pptx` | MS Office 2007/2010 (standard) and 2013+ (agile) |
+| `shadow2smith` | `/etc/shadow` (+ `/etc/passwd`) | Linux/Unix login hashes — `unshadow`-style extraction to `user:hash` |
 
 ```bash
 hashsmith ssh2smith -f id_ed25519 -o hash.txt   # extract
 hashsmith hash.txt                               # auto-detect type & crack
 ```
+
+### System password hashes (`unshadow`)
+
+`shadow2smith` (alias `unshadow`) turns an `/etc/shadow` file — optionally merged
+with `/etc/passwd`, exactly like John the Ripper's `unshadow passwd shadow` — into
+one crackable `user:hash` line per account. Locked/disabled accounts (`*`, `!`,
+`!!`) are skipped, and recognised-but-unsupported schemes (e.g. yescrypt `$y$`)
+are reported rather than silently dropped.
+
+```bash
+hashsmith shadow2smith shadow.txt passwd.txt -o hashes.txt   # just pass the files
+hashsmith unshadow passwd.txt shadow.txt -o hashes.txt       # order doesn't matter
+hashsmith shadow2smith shadow.txt -o hashes.txt              # shadow alone
+hashsmith hashes.txt                                         # auto-detect crypt type & crack
+```
+
+No `-f`/`-p` is required — pass the files directly in **either order**. The tool
+inspects each file's contents and decides which is the shadow file and which is
+passwd on its own (classification is by content, not filename), then prints its
+decision. Force a role with `-f`/`-p` only if you need to override the
+auto-detection. Run `hashsmith shadow2smith -h` for the full command reference.
+
+You can also crack a `user:hash` line — or a raw shadow entry — directly; the
+leading username is detected and stripped automatically.
+
+| `-t` type | hashcat | john | Shadow prefix |
+|---|---|---|---|
+| `md5crypt`    | 500   | md5crypt      | `$1$`  |
+| `sha256crypt` | 7400  | sha256crypt   | `$5$`  |
+| `sha512crypt` | 1800  | sha512crypt   | `$6$`  |
+| `bcrypt`      | 3200  | bcrypt        | `$2a$` / `$2b$` / `$2y$` |
+| `descrypt`    | 1500  | descrypt      | 13-char DES (no prefix) |
 
 ### Network-capture hash types
 

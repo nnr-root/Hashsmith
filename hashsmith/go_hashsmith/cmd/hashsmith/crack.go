@@ -232,6 +232,13 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
 
 	target := strings.TrimSpace(rawTarget)
+	// A "user:hash" or raw /etc/shadow line (from unshadow/shadow2smith) is
+	// reduced to its crypt-hash field so the verifier sees a clean hash.
+	if stripped := stripShadowUsername(target); stripped != target {
+		clrYellow.Fprintf(os.Stderr, "Detected shadow entry — cracking hash for user %q\n",
+			target[:strings.IndexByte(target, ':')])
+		target = stripped
+	}
 	if normalized, enc := normalizeHashInput(target); enc != "" {
 		clrYellow.Fprintf(os.Stderr, "Detected %s encoded hash — normalizing to hex\n", enc)
 		target = normalized
@@ -569,6 +576,14 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 	switch algo {
 	case "bcrypt":
 		return bcrypt.CompareHashAndPassword([]byte(targetHash), []byte(candidate)) == nil, nil
+	case "md5crypt":
+		return verifyMD5Crypt(targetHash, candidate)
+	case "sha256crypt":
+		return verifyShaCrypt(sha256Params, targetHash, candidate)
+	case "sha512crypt":
+		return verifyShaCrypt(sha512Params, targetHash, candidate)
+	case "descrypt":
+		return verifyDescrypt(targetHash, candidate)
 	case "argon2":
 		return verifyArgon2(targetHash, candidate), nil
 	case "scrypt":
