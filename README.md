@@ -177,6 +177,16 @@ single most common password shape — a base word plus a trailing year, digits, 
 symbol — far more cheaply than brute-forcing the whole length. `--mask-first`
 puts the mask in front of the word instead.
 
+```bash
+# Combinator — join every word of one list with every word of another
+hashsmith crack -t md5 <hash> -M combinator -w left.txt --wordlist2 right.txt
+```
+
+**Combinator** = wordlist × wordlist. Every left word is concatenated with every
+right word (`super` + `man` → `superman`), for passphrase-style passwords built
+from two real words that neither a plain wordlist nor a mask would reach.
+`--w2` is a short alias for `--wordlist2`.
+
 **Mask placeholders:** `?l` a-z · `?u` A-Z · `?d` 0-9 · `?s` symbols · `?a` all
 printable · `?h`/`?H` lower/upper hex · `?b` any byte. Define up to four custom
 sets with `-1`…`-4` (referenced as `?1`…`?4`), escape a literal `?` as `\?`, and

@@ -47,16 +47,17 @@ type crackedResult struct {
 // crackCtx carries cross-cutting run state — the potfile (skip / record cracked
 // hashes) and an optional resumable session — through the crack call chain.
 type crackCtx struct {
-	pot      *potfile
-	session  *sessionState // pre-loaded saved session (may be nil)
-	sessName string        // session name; "" disables sessions
-	showOnly bool          // --show: print potfile hits only, never attack
+	pot       *potfile
+	session   *sessionState // pre-loaded saved session (may be nil)
+	sessName  string        // session name; "" disables sessions
+	showOnly  bool          // --show: print potfile hits only, never attack
+	wordlist2 string        // combinator right-hand list ("" when unused)
 }
 
 // newCrackCtx loads the potfile (unless disabled) and any saved session. A nil
 // return is never produced — a disabled potfile simply yields a nil p.pot.
-func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool) (*crackCtx, error) {
-	cc := &crackCtx{sessName: sessName, showOnly: showOnly}
+func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool, wordlist2 string) (*crackCtx, error) {
+	cc := &crackCtx{sessName: sessName, showOnly: showOnly, wordlist2: wordlist2}
 	if !noPot {
 		p, err := loadPotfile(potPath)
 		if err != nil {
@@ -105,6 +106,8 @@ func runCrack(args []string) error {
 	showOnly := fs.Bool("show", false, "print already-cracked hashes from the potfile; do not attack")
 	sessName := fs.String("session", "", "named resumable session (brute/mask)")
 	restore := fs.String("restore", "", "alias for --session: resume a saved session by name")
+	wordlist2 := fs.String("wordlist2", "", "right-hand wordlist for -M combinator")
+	w2 := fs.String("w2", "", "alias for --wordlist2")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -129,7 +132,11 @@ func runCrack(args []string) error {
 	if sn == "" {
 		sn = *restore
 	}
-	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly)
+	wl2 := *wordlist2
+	if wl2 == "" {
+		wl2 = *w2
+	}
+	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2)
 	if err != nil {
 		return err
 	}
@@ -230,6 +237,12 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		if n, err := countWordlistLines(wordlist); err == nil {
 			if sets, e := parseMask(mc); e == nil {
 				total = n * maskKeyspace(sets)
+			}
+		}
+	} else if m == "combinator" && cc != nil && cc.wordlist2 != "" {
+		if a, e1 := countWordlistLines(wordlist); e1 == nil {
+			if b, e2 := countWordlistLines(cc.wordlist2); e2 == nil {
+				total = a * b
 			}
 		}
 	}
@@ -336,9 +349,18 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		pw, err = hybridAttack(runCtx, wordlist, sets, mc.maskFirst, workers, verifyFn, &atomicAttempts)
 		interrupted = runCtx.Err() != nil
 		result = crackedResult{password: pw}
+	case "combinator":
+		if cc == nil || cc.wordlist2 == "" {
+			tickCancel()
+			return false, errors.New("combinator mode requires -w <left list> and --wordlist2 <right list>")
+		}
+		var pw string
+		pw, err = combinatorAttack(runCtx, wordlist, cc.wordlist2, workers, verifyFn, &atomicAttempts)
+		interrupted = runCtx.Err() != nil
+		result = crackedResult{password: pw}
 	default:
 		tickCancel()
-		return false, errors.New("unknown mode: use dict, brute, mask or hybrid")
+		return false, errors.New("unknown mode: use dict, brute, mask, hybrid or combinator")
 	}
 
 	tickCancel()
@@ -429,7 +451,7 @@ func showPotEntry(p *potfile, target, outFile string, copyResult bool) error {
 func crackReport(targetHash, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
 	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
-	cc, _ := newCrackCtx("", false, "", false)
+	cc, _ := newCrackCtx("", false, "", false, "")
 	var engine *ruleEngine
 	if useRules {
 		engine = builtinRuleEngine()

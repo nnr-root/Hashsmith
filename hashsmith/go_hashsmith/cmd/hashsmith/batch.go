@@ -151,8 +151,12 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 		if len(typeOrder) > 1 {
 			color.New(themeAttr, color.Bold).Fprintf(os.Stderr, "\n→ Testing as %s\n", t)
 		}
+		wl2 := ""
+		if cc != nil {
+			wl2 = cc.wordlist2
+		}
 		batchRunType(t, mode, active, batch, &remaining,
-			wordlist, charset, minLen, maxLen, workers, rules, mc)
+			wordlist, wl2, charset, minLen, maxLen, workers, rules, mc)
 	}
 
 	// Report and record.
@@ -179,7 +183,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 // batchRunType runs one attack pass for a single type against all unfound
 // targets in digestToIdx, wrapping the shared engines with a progress bar.
 func batchRunType(typ, mode string, active []int, batch []*batchTarget,
-	remaining *int64, wordlist, charset string, minLen, maxLen, workers int,
+	remaining *int64, wordlist, wordlist2, charset string, minLen, maxLen, workers int,
 	rules *ruleEngine, mc *maskConfig) {
 
 	start := time.Now()
@@ -263,6 +267,12 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 				}
 			}
 		}
+	case "combinator":
+		if a, e1 := countWordlistLines(wordlist); e1 == nil {
+			if b, e2 := countWordlistLines(wordlist2); e2 == nil {
+				total = a * b
+			}
+		}
 	}
 	bar := newCrackBar(total)
 	tickCtx, tickCancel := context.WithCancel(context.Background())
@@ -283,6 +293,10 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 			if sets, err := parseMask(mc); err == nil {
 				_, _ = hybridAttack(context.Background(), wordlist, sets, mc.maskFirst, workers, verify, &atomicAttempts)
 			}
+		}
+	case "combinator":
+		if wordlist2 != "" {
+			_, _ = combinatorAttack(context.Background(), wordlist, wordlist2, workers, verify, &atomicAttempts)
 		}
 	default: // dict
 		batchDictAttack(wordlist, verify, workers, rules, &atomicAttempts)
