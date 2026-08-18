@@ -143,6 +143,10 @@ func main() {
 		if err := runBenchmark(rest); err != nil {
 			fail(err.Error())
 		}
+	case "gpu":
+		if err := runGPUInfo(rest); err != nil {
+			fail(err.Error())
+		}
 	case "interactive":
 		if err := runInteractive(); err != nil {
 			fail(err.Error())
@@ -176,7 +180,7 @@ func printHelp() {
 	fmt.Println("  decode        -t <type> [-s shift] [-k key] [-r rails] [-o out] [-c]  INPUT...")
 	fmt.Println("  hash          -t <type> [-s salt] [-S prefix|suffix] [-e hex|base58] [-o out] [-c]  INPUT...")
 	fmt.Println("  crack         [-t <type|auto>] [-M dict|brute|mask|markov|hybrid|combinator] [-w wordlist] [--wordlist2 list2] [-r | --rules <file>] [--mask ?l?d..] [-1..-4 set] [--increment] [--mask-first] [--stdout]")
-	fmt.Println("                [--session <name>] [--restore <name>] [--show] [--no-pot] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]  INPUT...")
+	fmt.Println("                [--session <name>] [--restore <name>] [--gpu] [--show] [--no-pot] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]  INPUT...")
 	fmt.Println("  types         list every supported -t hash type")
 	fmt.Println("  identify      [-o out] [-c]  INPUT...")
 	fmt.Println("  zip2smith     -f <zip-file>  [-o out] [-c]   (aliases: extract-hash, zip2hash)")
@@ -191,6 +195,7 @@ func printHelp() {
 	fmt.Println("  luks2smith    -f <volume.luks> [-o out] [-c]    (LUKS v1 volume → crackable hash)")
 	fmt.Println("  rules         <rulefile> [word]   preview/validate a mangling-rule file")
 	fmt.Println("  benchmark     [-t type] [-p workers]   measure cracking throughput per hash type")
+	fmt.Println("  gpu           show GPU acceleration status (opt-in build: go build -tags gpu)")
 	fmt.Println("  sessions      list | rm <name> | clear   manage saved brute/mask sessions")
 	fmt.Println("  interactive   guided interactive mode")
 	fmt.Println()

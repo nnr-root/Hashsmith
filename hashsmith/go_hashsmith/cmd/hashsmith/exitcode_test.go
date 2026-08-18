@@ -10,7 +10,7 @@ func TestExitCodeAggregation(t *testing.T) {
 	dir := t.TempDir()
 	wl := filepath.Join(dir, "wl.txt")
 	os.WriteFile(wl, []byte("password\nadmin\n"), 0644)
-	cc, _ := newCrackCtx("", true, "", false, "") // no potfile
+	cc, _ := newCrackCtx("", true, "", false, "", false) // no potfile
 
 	// all cracked → exitCode 0
 	exitCode = 0

@@ -155,6 +155,23 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 		if cc != nil {
 			wl2 = cc.wordlist2
 		}
+		// Multi-target on the GPU: hash-and-match every candidate against all
+		// still-unfound md5 targets in one dispatch. Falls through to the CPU
+		// batch engine when ineligible or no GPU is present.
+		if cc != nil && cc.useGPU && (t == "md5" || t == "ntlm" || t == "sha256" || t == "sha1") && (mode == "brute" || mode == "mask") {
+			entries := make([]*batchTarget, len(active))
+			for i, idx := range active {
+				entries[i] = batch[idx]
+			}
+			if gpuBatchMaskHash(t, mode, mc, charset, minLen, maxLen, entries) {
+				for _, e := range entries {
+					if atomic.LoadInt32(&e.flag) == 1 {
+						atomic.AddInt64(&remaining, -1)
+					}
+				}
+				continue
+			}
+		}
 		batchRunType(t, mode, active, batch, &remaining,
 			wordlist, wl2, charset, minLen, maxLen, workers, rules, mc)
 	}

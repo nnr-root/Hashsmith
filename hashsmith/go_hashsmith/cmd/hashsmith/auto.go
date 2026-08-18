@@ -52,6 +52,7 @@ func runAuto(args []string) error {
 	restore := fs.String("restore", "", "alias for --session")
 	wordlist2 := fs.String("wordlist2", "", "right-hand wordlist for -M combinator")
 	w2 := fs.String("w2", "", "alias for --wordlist2")
+	useGPU := fs.Bool("gpu", false, "use the GPU backend for -M brute -t md5 (requires a -tags gpu build)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -78,7 +79,7 @@ func runAuto(args []string) error {
 	if wl2 == "" {
 		wl2 = *w2
 	}
-	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2)
+	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2, *useGPU)
 	if err != nil {
 		return err
 	}

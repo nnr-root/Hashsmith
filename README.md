@@ -282,6 +282,81 @@ ntlm            6.28 MH/s
 bcrypt         76.54 H/s
 ```
 
+## GPU acceleration (experimental, opt-in)
+
+Hashsmith ships as a **pure-Go, statically-linked, cross-platform binary** with no
+GPU dependency — that is the default and what every install gets. GPU support is
+**opt-in** behind a build tag, so it never compromises the default build:
+
+```bash
+go build              # default: pure Go, no cgo, no GPU
+go build -tags gpu    # adds the Metal backend (cgo; macOS + Apple GPU)
+```
+
+Check status (and run a correctness self-test + throughput probe):
+
+```bash
+hashsmith gpu
+# GPU acceleration: available — Metal (Apple M2)
+#   self-test: MD5 matches CPU across 6 vectors ✓
+#   throughput: 42.91 MH/s (MD5, 1048576/dispatch)
+```
+
+The Metal MD5 kernel is compiled at runtime (no offline shader toolchain needed)
+and is **verified bit-identical to the CPU** on every run before use — GPU crypto
+is only trusted once proven against the reference. On the integrated Apple M2 GPU,
+`hashsmith gpu` reports both paths:
+
+```
+throughput: 47.45 MH/s (MD5, transfer-bound)          # CPU-generated candidates
+in-kernel brute: cracked "zzzzz" — 140.89 MH/s        # candidates generated on the GPU
+```
+
+Generating candidates **in-kernel** (decoding each brute-force keyspace index on
+the GPU, so nothing is transferred and only a match flag returns) reaches
+~141 MH/s — **~7× the CPU fast path**, even on the small integrated M2 GPU — and
+it is verified by cracking the worst-case final index of the keyspace.
+
+`crack` uses it via `--gpu` (**MD5, NTLM, SHA-256, SHA-1**, brute/mask/multi-target, `-tags gpu` build):
+
+```bash
+hashsmith crack -t md5 <hash> -M brute -C ?l -n 1 -x 6 --gpu
+hashsmith crack -t md5 <hash> -M mask --mask '?u?l?l?l?d?d' --gpu
+```
+
+On a full a–z⁶ keyspace (309M candidates) the GPU finishes in **~3.9 s vs ~24 s on
+the CPU — ~6×**, for both brute and mask.
+
+`--gpu` also cracks a **whole dump of MD5 hashes at once** (multi-target on the
+GPU): every generated candidate is checked against all targets via an on-device
+binary search, at almost no extra cost. Cracking 100 hashes over an a–z⁵ sweep
+ran at **~130 MH/s vs ~12 MH/s on the CPU — ~10×**:
+
+```bash
+hashsmith crack -t md5  dump.txt -M mask --mask '?l?l?l?l?l' --gpu
+hashsmith crack -t ntlm dump.txt -M mask --mask '?l?l?l?l?l' --gpu   # NTLM too
+```
+
+NTLM (MD4/UTF-16LE) has no CPU hardware acceleration, so its GPU gain is largest:
+a 50-hash NTLM dump ran at **~165 MH/s vs ~6 MH/s on the CPU — ~27×**. SHA-256 —
+even though the CPU has hardware SHA — still runs **~10× faster** on the GPU (~142
+vs ~14 MH/s). The gain grows with keyspace size; for tiny keyspaces the CPU
+wins (GPU dispatch has per-batch latency), so `--gpu` is for big brute-force runs.
+Without a `-tags gpu` build, or for a non-MD5 type, `--gpu` prints a notice and
+falls back to the CPU automatically.
+
+**Status & roadmap.** Verified today: the backend seam (kernels plug in without
+touching the CPU engine), a Metal MD5 kernel checked bit-identical to the CPU,
+in-kernel brute-force and mask generation, multi-target on-device matching (crack
+a whole dump on the GPU), for **MD5, NTLM, SHA-256, and SHA-1**, all wired into
+`crack --gpu`, capability detection, and graceful CPU fallback. Multi-target
+sweeps keep several command buffers in flight (pipelined dispatch) and use large
+in-kernel batches. On the integrated Apple M2 these two together are throughput-
+neutral versus a single large batch — the GPU is compute-bound, already saturated
+by one dispatch — but they keep it continuously fed and help on faster/discrete
+GPUs where per-dispatch overhead is proportionally larger.
+Everything else runs on the CPU, already fast via the verifier and multi-hash mode.
+
 ## Multi-hash mode (crack a whole dump at once)
 
 Give `crack` a file of many hashes and Hashsmith automatically switches to

@@ -52,12 +52,13 @@ type crackCtx struct {
 	sessName  string        // session name; "" disables sessions
 	showOnly  bool          // --show: print potfile hits only, never attack
 	wordlist2 string        // combinator right-hand list ("" when unused)
+	useGPU    bool          // --gpu: try the GPU backend (brute/md5) when built with -tags gpu
 }
 
 // newCrackCtx loads the potfile (unless disabled) and any saved session. A nil
 // return is never produced — a disabled potfile simply yields a nil p.pot.
-func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool, wordlist2 string) (*crackCtx, error) {
-	cc := &crackCtx{sessName: sessName, showOnly: showOnly, wordlist2: wordlist2}
+func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool, wordlist2 string, useGPU bool) (*crackCtx, error) {
+	cc := &crackCtx{sessName: sessName, showOnly: showOnly, wordlist2: wordlist2, useGPU: useGPU}
 	if !noPot {
 		p, err := loadPotfile(potPath)
 		if err != nil {
@@ -109,6 +110,7 @@ func runCrack(args []string) error {
 	wordlist2 := fs.String("wordlist2", "", "right-hand wordlist for -M combinator")
 	w2 := fs.String("w2", "", "alias for --wordlist2")
 	stdoutMode := fs.Bool("stdout", false, "emit the candidate stream to stdout instead of cracking (no hash needed)")
+	useGPU := fs.Bool("gpu", false, "use the GPU backend for -M brute -t md5 (requires a -tags gpu build)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -147,7 +149,7 @@ func runCrack(args []string) error {
 	if sn == "" {
 		sn = *restore
 	}
-	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2)
+	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2, *useGPU)
 	if err != nil {
 		return err
 	}
@@ -352,8 +354,20 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			return false, errors.New("invalid -n/-x range")
 		}
 		var pw string
-		pw, interrupted, err = runSessionLayout(runCtx, bruteLayout(charset, minLen, maxLen),
-			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+		if cc != nil && cc.useGPU {
+			if gp, _, usedGPU := gpuBruteHash(targetHash, typ, charset, minLen, maxLen, &atomicAttempts); usedGPU {
+				pw = gp
+			} else {
+				_, reason := activeGPUBackend()
+				clrYellow.Fprintf(os.Stderr,
+					"GPU brute unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
+				pw, interrupted, err = runSessionLayout(runCtx, bruteLayout(charset, minLen, maxLen),
+					sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+			}
+		} else {
+			pw, interrupted, err = runSessionLayout(runCtx, bruteLayout(charset, minLen, maxLen),
+				sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+		}
 		result = crackedResult{password: pw}
 	case "mask":
 		if mc == nil {
@@ -366,8 +380,20 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			return false, e
 		}
 		var pw string
-		pw, interrupted, err = runSessionLayout(runCtx, layout,
-			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+		if cc != nil && cc.useGPU {
+			if gp, _, usedGPU := gpuMaskHash(targetHash, typ, mc, &atomicAttempts); usedGPU {
+				pw = gp
+			} else {
+				_, reason := activeGPUBackend()
+				clrYellow.Fprintf(os.Stderr,
+					"GPU mask unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
+				pw, interrupted, err = runSessionLayout(runCtx, layout,
+					sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+			}
+		} else {
+			pw, interrupted, err = runSessionLayout(runCtx, layout,
+				sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+		}
 		result = crackedResult{password: pw}
 	case "markov":
 		if minLen < 1 || maxLen < minLen {
@@ -514,7 +540,7 @@ func showPotEntry(p *potfile, target, outFile string, copyResult bool) (bool, er
 func crackReport(targetHash, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
 	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
-	cc, _ := newCrackCtx("", false, "", false, "")
+	cc, _ := newCrackCtx("", false, "", false, "", false)
 	var engine *ruleEngine
 	if useRules {
 		engine = builtinRuleEngine()
