@@ -36,7 +36,8 @@ func runAuto(args []string) error {
 	workers := fs.Int("p", 0, "parallel workers (0 = NumCPU)")
 	outFile := fs.String("o", "", "write result to file")
 	copyResult := fs.Bool("c", false, "copy result to clipboard")
-	useRules := fs.Bool("r", false, "enable mangling rules in dict mode")
+	useRules := fs.Bool("r", false, "enable the built-in mangling rules in dict mode")
+	rulesFile := fs.String("rules", "", "path to a rule file (dict mode; overrides -r)")
 	maskStr := fs.String("mask", "", "mask for -M mask (e.g. ?u?l?l?l?d?d)")
 	cs1 := fs.String("1", "", "custom charset 1 (mask)")
 	cs2 := fs.String("2", "", "custom charset 2 (mask)")
@@ -74,8 +75,12 @@ func runAuto(args []string) error {
 	if err != nil {
 		return err
 	}
+	engine, err := buildRuleEngine(*rulesFile, *useRules)
+	if err != nil {
+		return err
+	}
 	return crackTargets(targets, *typ, *mode, wl, *charset,
-		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules, mc, cc)
+		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, engine, mc, cc)
 }
 
 // looksLikeAutoTarget decides whether a bare, non-command argument should be

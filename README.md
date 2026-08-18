@@ -157,7 +157,8 @@ Choose the attack with `-M`:
 ```bash
 # Dictionary (default) — try each word in a wordlist, optionally with mangling rules
 hashsmith crack -t md5 <hash> -w rockyou.txt
-hashsmith crack -t md5 <hash> -w rockyou.txt -r        # apply mangling rules
+hashsmith crack -t md5 <hash> -w rockyou.txt -r              # built-in mangling rules
+hashsmith crack -t md5 <hash> -w rockyou.txt --rules my.rule # a custom rule file
 
 # Brute-force — every combination over a charset, lengths -n..-x
 hashsmith crack -t md5 <hash> -M brute -C abcdefghijklmnopqrstuvwxyz -n 1 -x 6
@@ -174,6 +175,39 @@ any other character is a literal. `--increment` tries shorter lengths first.
 ```bash
 hashsmith crack -t md5 <hash> -M mask --mask '?1?1?1?1' -1 '?l?d'   # 4 chars, each a-z or 0-9
 hashsmith crack -t md5 <hash> -M mask --mask '?a?a?a?a' --increment # lengths 1..4
+```
+
+## Mangling rules
+
+Dictionary mode can transform each word with **mangling rules**. Use the curated
+built-in set with `-r`, or supply your own rule file with `--rules <file>` — the
+standard `.rule` syntax is supported, so existing rulesets work unchanged. Each
+line is one rule: a sequence of single-character commands applied to every word.
+
+```bash
+hashsmith crack -t md5 <hash> -w words.txt -r                 # built-in rules
+hashsmith crack -t md5 <hash> -w words.txt --rules best64.rule
+hashsmith rules best64.rule Password                          # preview/validate a rule file
+```
+
+Common commands (positions/counts are base-36 digits: 0-9 then A-Z for 10-35):
+
+| Cmd | Effect | `Pass` → |
+|-----|--------|----------|
+| `l` `u` `c` `C` | lower / upper / capitalise / invert-capitalise | `pass` `PASS` `Pass` `pASS` |
+| `t` `TN` | toggle all / toggle char at N | `pASS` |
+| `r` `d` `f` `q` | reverse / duplicate / reflect / dup each char | `ssaP` `PassPass` `PassssaP` `PPaassss` |
+| `{` `}` `[` `]` | rotate L / rotate R / del first / del last | `assP` `sPas` `ass` `Pas` |
+| `$X` `^X` | append / prepend char X | `Pass1` (`$1`) · `1Pass` (`^1`) |
+| `sXY` `@X` | replace all X→Y / purge all X | `sso`→`Paoo` · `@s`→`Pa` |
+| `oNX` `iNX` `DN` `xNM` | overwrite / insert / delete / extract | — |
+| `<N` `>N` `_N` `!X` `/X` | reject unless len&lt;N / &gt;N / ==N / lacks X / contains X | — |
+
+```
+# example.rule — one rule per line, '#' starts a comment
+c $1                 # Capitalize + append 1  → Password1
+c $2 $0 $2 $4        # Capitalize + '2024'    → Password2024
+so0 sa@ c            # leet o→0, a→@, cap      → P@ssw0rd
 ```
 
 ## Potfile & resumable sessions

@@ -91,7 +91,8 @@ func runCrack(args []string) error {
 	workers := fs.Int("p", 0, "parallel workers (0 = NumCPU)")
 	outFile := fs.String("o", "", "write result to file")
 	copyResult := fs.Bool("c", false, "copy result to clipboard")
-	useRules := fs.Bool("r", false, "enable mangling rules in dict mode")
+	useRules := fs.Bool("r", false, "enable the built-in mangling rules in dict mode")
+	rulesFile := fs.String("rules", "", "path to a rule file (dict mode; overrides -r)")
 	maskStr := fs.String("mask", "", "mask for -M mask (e.g. ?u?l?l?l?d?d)")
 	cs1 := fs.String("1", "", "custom charset 1 (mask -1)")
 	cs2 := fs.String("2", "", "custom charset 2 (mask -2)")
@@ -131,22 +132,48 @@ func runCrack(args []string) error {
 	if err != nil {
 		return err
 	}
+	engine, err := buildRuleEngine(*rulesFile, *useRules)
+	if err != nil {
+		return err
+	}
 	return crackTargets(targets, *typ, *mode, wl, *charset,
-		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules, mc, cc)
+		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, engine, mc, cc)
+}
+
+// buildRuleEngine selects the mangling-rule source: a compiled rule file when
+// one is given (reporting any skipped invalid rules), else the built-in set when
+// -r is present, else nil (no rules).
+func buildRuleEngine(rulesFile string, useBuiltin bool) (*ruleEngine, error) {
+	if rulesFile != "" {
+		e, bad, err := loadRuleFile(rulesFile)
+		if err != nil {
+			return nil, err
+		}
+		msg := fmt.Sprintf("Loaded %d rules from %s", e.count(), rulesFile)
+		if bad > 0 {
+			msg += fmt.Sprintf(" (%d invalid rule(s) skipped)", bad)
+		}
+		clrGreen.Fprintln(os.Stderr, msg)
+		return e, nil
+	}
+	if useBuiltin {
+		return builtinRuleEngine(), nil
+	}
+	return nil, nil
 }
 
 // crackTargets runs crackWithDetection over one or more targets, printing a
 // header for each when several were supplied.
 func crackTargets(targets []string, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
-	salt, saltMode, outFile string, copyResult, useRules bool, mc *maskConfig, cc *crackCtx) error {
+	salt, saltMode, outFile string, copyResult bool, rules *ruleEngine, mc *maskConfig, cc *crackCtx) error {
 	for i, tgt := range targets {
 		if len(targets) > 1 {
 			color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
 				"\n══ [%d/%d] %s\n", i+1, len(targets), tgt)
 		}
 		err := crackWithDetection(tgt, typ, mode, wordlist, charset,
-			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules, mc, cc)
+			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, rules, mc, cc)
 		if err != nil {
 			if len(targets) == 1 {
 				return err
@@ -165,7 +192,7 @@ func crackTargets(targets []string, typ, mode, wordlist, charset string,
 // tried in sequence).
 func doCrack(targetHash, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
-	salt, saltMode, outFile string, copyResult bool, useRules bool, mc *maskConfig, cc *crackCtx) (bool, error) {
+	salt, saltMode, outFile string, copyResult bool, rules *ruleEngine, mc *maskConfig, cc *crackCtx) (bool, error) {
 
 	start := time.Now()
 	var atomicAttempts int64
@@ -177,9 +204,9 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		// An empty wordlist path counts the embedded common.txt.
 		if n, err := countWordlistLines(wordlist); err == nil {
 			total = n
-			if useRules {
-				// Each word generates up to NumManglingRules extra candidates.
-				total *= int64(1 + NumManglingRules)
+			if rules != nil {
+				// Each word generates up to rules.count() extra candidates.
+				total *= int64(1 + rules.count())
 			}
 		}
 	} else if m == "brute" {
@@ -243,7 +270,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	case "dict":
 		// An empty wordlist path uses the built-in common.txt (see openWordlist).
 		result, err = dictAttack(runCtx, wordlist,
-			targetHash, typ, salt, saltMode, workers, &atomicAttempts, useRules)
+			targetHash, typ, salt, saltMode, workers, &atomicAttempts, rules)
 		interrupted = runCtx.Err() != nil
 	case "brute":
 		if minLen < 1 || maxLen < minLen {
@@ -362,8 +389,12 @@ func crackReport(targetHash, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
 	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
 	cc, _ := newCrackCtx("", false, "", false)
+	var engine *ruleEngine
+	if useRules {
+		engine = builtinRuleEngine()
+	}
 	found, err := doCrack(targetHash, typ, mode, wordlist, charset,
-		minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules, nil, cc)
+		minLen, maxLen, workers, salt, saltMode, outFile, copyResult, engine, nil, cc)
 	if err != nil {
 		return err
 	}
@@ -379,7 +410,7 @@ func crackReport(targetHash, typ, mode, wordlist, charset string,
 // Base58/Base64-encoded hashes are normalized to hex first.
 func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
-	salt, saltMode, outFile string, copyResult bool, useRules bool, mc *maskConfig, cc *crackCtx) error {
+	salt, saltMode, outFile string, copyResult bool, rules *ruleEngine, mc *maskConfig, cc *crackCtx) error {
 
 	target := strings.TrimSpace(rawTarget)
 	// A "user:hash" or raw /etc/shadow line (from shadow2smith) is
@@ -430,7 +461,7 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 			color.New(themeAttr, color.Bold).Fprintf(os.Stderr, "\n→ Attempting as %s\n", t)
 		}
 		found, err := doCrack(target, t, mode, wordlist, charset,
-			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules, mc, cc)
+			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, rules, mc, cc)
 		if err != nil {
 			if len(types) == 1 {
 				return err
@@ -455,7 +486,7 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 // workers. Context cancellation propagates through both the reader and workers.
 
 func dictAttack(ctx context.Context, wordlistPath, targetHash, typ, salt, saltMode string,
-	workers int, atomicAttempts *int64, useRules bool) (crackedResult, error) {
+	workers int, atomicAttempts *int64, rules *ruleEngine) (crackedResult, error) {
 
 	f, label, err := openWordlist(wordlistPath)
 	if err != nil {
@@ -543,14 +574,14 @@ func dictAttack(ctx context.Context, wordlistPath, targetHash, typ, salt, saltMo
 							return
 						}
 						// Test all mangled variants when rules are enabled.
-						if useRules {
-							for _, mc := range expandRules(word) {
+						if rules != nil {
+							for _, mw := range rules.expand(word) {
 								select {
 								case <-innerCtx.Done():
 									return
 								default:
 								}
-								if tryCandidate(mc.password, mc.ruleLabel) {
+								if tryCandidate(mw.password, mw.ruleLabel) {
 									return
 								}
 							}
