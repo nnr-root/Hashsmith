@@ -167,6 +167,18 @@ func buildRuleEngine(rulesFile string, useBuiltin bool) (*ruleEngine, error) {
 func crackTargets(targets []string, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
 	salt, saltMode, outFile string, copyResult bool, rules *ruleEngine, mc *maskConfig, cc *crackCtx) error {
+	// Multi-hash acceleration: when several salt-independent raw-digest targets
+	// are given, hash each candidate once and check it against all of them. Only
+	// the targets multi-hash mode cannot handle are returned for per-target work.
+	if len(targets) > 1 && salt == "" {
+		targets = runBatch(targets, typ, mode, wordlist, charset,
+			minLen, maxLen, workers, saltMode, outFile, copyResult, rules, mc, cc)
+		if len(targets) == 0 {
+			return nil
+		}
+		color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
+			"\n── %d target(s) need per-hash cracking (salted / non-raw types)\n", len(targets))
+	}
 	for i, tgt := range targets {
 		if len(targets) > 1 {
 			color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
@@ -259,6 +271,14 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	verifyFn := func(c string) bool {
 		ok, _ := verifyCandidate(c, targetHash, typ, salt, saltMode)
 		return ok
+	}
+	// Zero-allocation fast path for salt-independent raw digests (md5, sha*,
+	// ntlm, …): hash straight into a stack buffer and compare bytes, avoiding a
+	// hex-encode and heap allocation on every candidate.
+	if salt == "" {
+		if fv, ok := newFastVerifier(typ, targetHash); ok {
+			verifyFn = fv.match
+		}
 	}
 
 	var (

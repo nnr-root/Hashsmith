@@ -210,6 +210,43 @@ c $2 $0 $2 $4        # Capitalize + '2024'    → Password2024
 so0 sa@ c            # leet o→0, a→@, cap      → P@ssw0rd
 ```
 
+## Performance
+
+Hashsmith runs on the CPU across all cores. For the salt-independent raw digests
+that dominate cracking (MD5, SHA-1/224/256/384/512, NTLM, MD4, RIPEMD-160,
+BLAKE2), the hot loop hashes each candidate straight into a stack buffer and
+compares raw bytes — no hex encoding, no per-candidate heap allocation — and
+worker attempt-counters are batched to avoid cache-line contention. Combined,
+these lift single-target MD5 brute-force from ~1.8 MH/s to ~20 MH/s on an 8-core
+laptop. Multi-hash mode (below) multiplies that further when cracking a dump.
+
+## Multi-hash mode (crack a whole dump at once)
+
+Give `crack` a file of many hashes and Hashsmith automatically switches to
+**multi-hash mode**: each candidate is hashed **once** and checked against every
+target, instead of re-running the attack per hash. Cracking N hashes of the same
+salt-independent raw-digest type (MD5, SHA-1/256/512, SHA-3, NTLM, RIPEMD-160,
+Whirlpool, Streebog, BLAKE2, MySQL, MSSQL-2000 …) costs one keyspace pass, not N —
+an N-fold reduction in work.
+
+```bash
+hashsmith crack -t md5 dump.txt -w rockyou.txt   # one pass finds every match
+hashsmith crack dump.txt -w rockyou.txt          # auto-detect + multi-hash
+```
+
+Output pairs each hash with its plaintext:
+
+```
+⚡ Multi-hash mode: 5000 target(s), hashing each candidate once against all
+  5f4dcc3b5aa765d61d8327deb882cf99  =>  password
+  21232f297a57a5a743894a0e4a801fc3  =>  admin
+  ...
+```
+
+Salted or expensive hashes in the same file (bcrypt, crypt(3), PBKDF2,
+containers, network captures) are automatically split out and cracked
+individually, since a per-target salt makes shared work impossible.
+
 ## Potfile & resumable sessions
 
 Every cracked hash is recorded in a **potfile** (`~/.hashsmith/hashsmith.pot`)

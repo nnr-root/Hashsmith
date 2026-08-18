@@ -138,6 +138,10 @@ func runLayout(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 				if from < resumeFrom {
 					from = resumeFrom
 				}
+				// Count attempts in a worker-local accumulator and flush per
+				// chunk, so the shared counter is not hammered once per candidate
+				// (that cache-line contention otherwise caps multi-core scaling).
+				var local int64
 				iter := 0
 				for idx := from; idx < end; idx++ {
 					if iter++; iter >= ctxCheckEvery {
@@ -147,13 +151,15 @@ func runLayout(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 							// Cancelled mid-chunk: leave cur[wID] at the current
 							// chunk so the watermark reflects the true resume
 							// point (this chunk is re-tested on resume — safe).
+							atomic.AddInt64(atomicAttempts, local)
 							return
 						default:
 						}
 					}
 					cand := l.candidate(idx)
-					atomic.AddInt64(atomicAttempts, 1)
+					local++
 					if verify(cand) {
+						atomic.AddInt64(atomicAttempts, local)
 						select {
 						case resultCh <- cand:
 						default:
@@ -163,6 +169,7 @@ func runLayout(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 						return
 					}
 				}
+				atomic.AddInt64(atomicAttempts, local)
 			}
 		}(w)
 	}
