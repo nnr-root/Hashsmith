@@ -42,7 +42,12 @@ func b64From24(dst []byte, b2, b1, b0 byte, n int) []byte {
 // md5cryptRaw computes the md5crypt digest+encoding for a password and salt and
 // returns the full "$1$<salt>$<hash>" string. Salt is truncated to 8 bytes.
 func md5cryptRaw(password, salt string) string {
-	const magic = "$1$"
+	return md5cryptMagic(password, salt, "$1$")
+}
+
+// md5cryptMagic is md5crypt parameterised by the magic prefix. Apache's apr1
+// ("$apr1$") uses the identical algorithm with a different magic.
+func md5cryptMagic(password, salt, magic string) string {
 	if len(salt) > 8 {
 		salt = salt[:8]
 	}
@@ -310,6 +315,19 @@ func verifyMD5Crypt(targetHash, candidate string) (bool, error) {
 	}
 	salt := body[:j]
 	return md5cryptRaw(candidate, salt) == targetHash, nil
+}
+
+// verifyAPR1 checks a candidate against an Apache "$apr1$" hash.
+func verifyAPR1(targetHash, candidate string) (bool, error) {
+	if !strings.HasPrefix(targetHash, "$apr1$") {
+		return false, errors.New("invalid apr1 hash (missing $apr1$ prefix)")
+	}
+	body := targetHash[len("$apr1$"):]
+	j := strings.LastIndexByte(body, '$')
+	if j < 0 {
+		return false, errors.New("invalid apr1 hash (missing salt separator)")
+	}
+	return md5cryptMagic(candidate, body[:j], "$apr1$") == targetHash, nil
 }
 
 // verifyShaCrypt checks a candidate against a $5$/$6$ target for the given params.

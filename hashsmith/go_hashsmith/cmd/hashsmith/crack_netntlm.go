@@ -18,9 +18,9 @@ import (
 // relay attacks. They are already text lines, so there is no *2smith extractor —
 // paste the captured line straight into `crack`.
 //
-//   NetNTLMv2 (hashcat 5600):
+//   NetNTLMv2:
 //       user::domain:serverchallenge:ntproof:blob
-//   NetNTLMv1 (hashcat 5500):
+//   NetNTLMv1:
 //       user::domain:lmresponse:ntresponse:serverchallenge
 
 // ntHash returns the NTLM hash MD4(UTF-16LE(password)).

@@ -115,8 +115,16 @@ func main() {
 		if err := runExtractOffice(rest); err != nil {
 			fail(err.Error())
 		}
-	case "shadow2smith", "unshadow":
+	case "shadow2smith":
 		if err := runExtractShadow(rest); err != nil {
+			fail(err.Error())
+		}
+	case "luks2smith":
+		if err := runExtractLUKS(rest); err != nil {
+			fail(err.Error())
+		}
+	case "types", "list-types":
+		if err := runListTypes(rest); err != nil {
 			fail(err.Error())
 		}
 	case "interactive":
@@ -124,7 +132,7 @@ func main() {
 			fail(err.Error())
 		}
 	default:
-		// John-the-Ripper-style shortcut: a bare hash or a file of hashes is
+		// Bare-target shortcut: a bare hash or a file of hashes is
 		// auto-detected and cracked. The target may be preceded by flags
 		// (e.g. `hashsmith -w list.txt hash.txt`), so route to auto whenever the
 		// first token is a flag or itself looks like a crackable target; the
@@ -151,6 +159,7 @@ func printHelp() {
 	fmt.Println("  decode        -t <type> [-s shift] [-k key] [-r rails] [-o out] [-c]  INPUT...")
 	fmt.Println("  hash          -t <type> [-s salt] [-S prefix|suffix] [-e hex|base58] [-o out] [-c]  INPUT...")
 	fmt.Println("  crack         [-t <type|auto>] [-M dict|brute] [-w wordlist] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]  INPUT...")
+	fmt.Println("  types         list every supported -t hash type")
 	fmt.Println("  identify      [-o out] [-c]  INPUT...")
 	fmt.Println("  zip2smith     -f <zip-file>  [-o out] [-c]   (aliases: extract-hash, zip2hash)")
 	fmt.Println("  7z2smith      -f <7z-file>   [-o out] [-c]")
@@ -160,7 +169,8 @@ func printHelp() {
 	fmt.Println("  gpg2smith     -f <gpg-file>  [-o out] [-c]   (gpg -c symmetric encryption)")
 	fmt.Println("  keepass2smith -f <kdbx-file> [-o out] [-c]   (KeePass KDBX 3.1 database)")
 	fmt.Println("  office2smith  -f <docx/xlsx> [-o out] [-c]   (encrypted Office 2013+ document)")
-	fmt.Println("  shadow2smith  <shadow> [passwd] [-o out] [-c]   (unshadow: /etc/shadow → user:hash, any order)")
+	fmt.Println("  shadow2smith  <shadow> [passwd] [-o out] [-c]   (/etc/shadow → user:hash, files any order)")
+	fmt.Println("  luks2smith    -f <volume.luks> [-o out] [-c]    (LUKS v1 volume → crackable hash)")
 	fmt.Println("  interactive   guided interactive mode")
 	fmt.Println()
 	fmt.Println("Global flags:")

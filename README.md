@@ -54,7 +54,7 @@ hashsmith crack -t md5 5f4dcc3b5aa765d61d8327deb882cf99 -w custom.txt   # or -w 
 hashsmith identify "5f4dcc3b5aa765d61d8327deb882cf99, 8846f7ea…"  # identify several at once
 ```
 
-Auto-detect & crack (John-the-Ripper style) — no need to name the hash type:
+Auto-detect & crack — no need to name the hash type:
 ```bash
 hashsmith 5f4dcc3b5aa765d61d8327deb882cf99   # detects the type, then cracks it
 hashsmith hashes.txt                          # cracks every hash in a file (one per line)
@@ -70,6 +70,75 @@ hashsmith -i hash.txt
 ```
 
 > Multi-input is comma-separated, so a single input that itself contains a comma should be given via a file (one line).
+
+### Hash types
+
+Hashsmith supports **100+ hash types**, and every one is validated against a
+known-answer vector before shipping — no unimplemented stubs, no unvalidated
+crypto. Most hashes are auto-detected, so naming a type is optional. When you want
+to pin one, pass `-t <name>`; run `hashsmith types` for the full catalogue. Beyond
+the raw digests, Hashsmith covers salted placements, nested digests, and HMAC
+natively:
+
+```bash
+hashsmith crack -t md5 <hash> -s 12345678 -S suffix   # md5($pass . $salt)
+hashsmith crack -t md5 <hash> -s 12345678 -S prefix   # md5($salt . $pass)
+hashsmith crack -t md5-md5 <hash>                     # md5(hex(md5($pass)))
+hashsmith crack -t hmac-sha256 <hash>:<salt>          # HMAC-SHA256, key = password
+hashsmith crack -t hmac-sha256-saltkey <hash>:<salt>  # HMAC-SHA256, key = salt
+hashsmith types                                       # list every supported -t type
+```
+
+Covered today: the full **raw / salted / iterated / HMAC** digest family
+(MD4/MD5/SHA1/SHA2/SHA3/RIPEMD-160/BLAKE2b/BLAKE2s, salted with `-s`/`-S`, the
+`digest-digest` nested forms, and HMAC in both key-modes), the Unix crypt(3)
+family (`descrypt`/`md5crypt`/`sha256crypt`/`sha512crypt`/`bcrypt`), MySQL, MSSQL,
+PostgreSQL, NTLM/NetNTLM, Kerberos, Argon2/scrypt, generic PBKDF2, and every
+encrypted-container format handled by the `*2smith` extractors.
+
+Application, device & framework hashes: **Django**, **phpass** (WordPress/phpBB3),
+**Drupal 7**, **MediaWiki**, **vBulletin**, **Redmine**, **LDAP** (`{SSHA*}`/`{SMD5}`),
+**Cisco-IOS 8/9**, **Cisco-PIX/ASA**, **Citrix NetScaler**, **Juniper NetScreen**,
+**macOS 10.8+** (`$ml$`), **Atlassian** (`{PKCS5S2}`), **JWT** (HMAC), **SIP digest**,
+**SolarWinds Orion**, and **Bitwarden** — all vector-tested.
+
+Database, auth & directory hashes: **MySQL**, **MSSQL**, **PostgreSQL** (incl.
+**SCRAM-SHA-256**), **MongoDB SCRAM-SHA-1**, **Sybase ASE**, **SAP CODVN B & F/G**,
+**NTLM/NetNTLM**, **Kerberos**, Active Directory **DCC/DCC2** (mscash/mscash2),
+**CRAM-MD5**, **IPMI2 RAKP**, and **iSCSI CHAP** — all vector-tested.
+
+### Wireless, wallets & disk encryption
+
+Every entry is validated against a known-answer vector before shipping (802.11i /
+RFC 4493 for WPA, go-ethereum's keystore test data for Ethereum, the reference
+wallet examples for Bitcoin/Electrum, real VeraCrypt/BitLocker/LUKS volumes):
+
+| `-t` type | Format | Covers |
+|---|---|---|
+| `wpa` | `WPA*01*…` / `WPA*02*…` / `pmkid*ap*sta*essid` | WPA/WPA2 PMKID and EAPOL 4-way handshake (HMAC-MD5/SHA1, AES-CMAC) |
+| `ethereum` | `$ethereum$p*…` / `$ethereum$s*…` | Web3/Geth keystore v3 (PBKDF2 and scrypt) |
+| `bitcoin` | `$bitcoin$…` | Bitcoin/Litecoin wallet.dat (iterated SHA-512 + AES-256-CBC) |
+| `electrum` | `$electrum$1*…` | Electrum wallet salt-type 1-3 (double SHA-256 + AES-CBC) |
+| `veracrypt` / `truecrypt` | `veracrypt:<512-byte-header-hex>` | VeraCrypt/TrueCrypt — AES/Serpent/Twofish-XTS × SHA-512/SHA-256/Whirlpool/Streebog/RIPEMD-160 |
+| `bitlocker` | `$bitlocker$…` | BitLocker (1M-round SHA-256 + AES-CTR VMK check) |
+| `luks` | `$luks$…` (via `luks2smith`) | LUKS v1 — AES/Twofish/Serpent × XTS/CBC-ESSIV/CBC × SHA-1/256/512/RIPEMD-160/Whirlpool |
+| `phpass` / `drupal7` | `$P$…` / `$H$…` / `$S$…` | WordPress, phpBB3, Drupal 7 |
+
+```bash
+hashsmith 'WPA*01*<pmkid>*<ap>*<sta>*<essid_hex>' -w wordlist.txt   # auto-detected
+hashsmith '$ethereum$s*262144*1*8*<salt>*<ct>*<mac>' -w wordlist.txt
+hashsmith '$bitcoin$96*…' -w wordlist.txt
+hashsmith crack -t veracrypt 'veracrypt:<header-hex>' -w wordlist.txt
+hashsmith luks2smith -f volume.luks -o luks.hash && hashsmith luks.hash -w wordlist.txt
+```
+
+Serpent, Whirlpool, and Streebog are implemented from spec and validated against
+their published test vectors (Serpent also against the real LUKS Serpent volumes),
+so the single-cipher VeraCrypt/LUKS configurations are all covered. `whirlpool`,
+`streebog256`, and `streebog512` are also available as standalone `-t` hash types.
+
+> Still out of scope: VeraCrypt/LUKS **cipher cascades** (e.g. AES-Twofish-Serpent)
+> and the GOST "Magma"/Kuznyechik block ciphers — single-cipher volumes only.
 
 Flexible arguments — flag order doesn't matter and every flag form is accepted:
 ```bash
@@ -103,24 +172,23 @@ Turn a password-protected file into a crackable hash, then feed it straight to `
 | `gpg2smith` | `.gpg` / `.asc` | `gpg -c` symmetric (AES-128/192/256, CAST5, 3DES) |
 | `keepass2smith` | `.kdbx` | KeePass KDBX 3.1 (AES-KDF) and KDBX 4 (Argon2d / Argon2id) |
 | `office2smith` | `.docx` / `.xlsx` / `.pptx` | MS Office 2007/2010 (standard) and 2013+ (agile) |
-| `shadow2smith` | `/etc/shadow` (+ `/etc/passwd`) | Linux/Unix login hashes — `unshadow`-style extraction to `user:hash` |
+| `shadow2smith` | `/etc/shadow` (+ `/etc/passwd`) | Linux/Unix login hashes — extraction to `user:hash` |
 
 ```bash
 hashsmith ssh2smith -f id_ed25519 -o hash.txt   # extract
 hashsmith hash.txt                               # auto-detect type & crack
 ```
 
-### System password hashes (`unshadow`)
+### System password hashes
 
-`shadow2smith` (alias `unshadow`) turns an `/etc/shadow` file — optionally merged
-with `/etc/passwd`, exactly like John the Ripper's `unshadow passwd shadow` — into
-one crackable `user:hash` line per account. Locked/disabled accounts (`*`, `!`,
-`!!`) are skipped, and recognised-but-unsupported schemes (e.g. yescrypt `$y$`)
-are reported rather than silently dropped.
+`shadow2smith` turns an `/etc/shadow` file — optionally merged with `/etc/passwd`
+— into one crackable `user:hash` line per account. Locked/disabled accounts (`*`,
+`!`, `!!`) are skipped, and recognised-but-unsupported schemes (e.g. yescrypt
+`$y$`) are reported rather than silently dropped.
 
 ```bash
 hashsmith shadow2smith shadow.txt passwd.txt -o hashes.txt   # just pass the files
-hashsmith unshadow passwd.txt shadow.txt -o hashes.txt       # order doesn't matter
+hashsmith shadow2smith passwd.txt shadow.txt -o hashes.txt   # order doesn't matter
 hashsmith shadow2smith shadow.txt -o hashes.txt              # shadow alone
 hashsmith hashes.txt                                         # auto-detect crypt type & crack
 ```
@@ -134,24 +202,24 @@ auto-detection. Run `hashsmith shadow2smith -h` for the full command reference.
 You can also crack a `user:hash` line — or a raw shadow entry — directly; the
 leading username is detected and stripped automatically.
 
-| `-t` type | hashcat | john | Shadow prefix |
-|---|---|---|---|
-| `md5crypt`    | 500   | md5crypt      | `$1$`  |
-| `sha256crypt` | 7400  | sha256crypt   | `$5$`  |
-| `sha512crypt` | 1800  | sha512crypt   | `$6$`  |
-| `bcrypt`      | 3200  | bcrypt        | `$2a$` / `$2b$` / `$2y$` |
-| `descrypt`    | 1500  | descrypt      | 13-char DES (no prefix) |
+| `-t` type | Shadow prefix | Notes |
+|---|---|---|
+| `md5crypt`    | `$1$`  | MD5 crypt |
+| `sha256crypt` | `$5$`  | SHA-256 crypt |
+| `sha512crypt` | `$6$`  | SHA-512 crypt |
+| `bcrypt`      | `$2a$` / `$2b$` / `$2y$` | Blowfish crypt |
+| `descrypt`    | 13-char (no prefix) | traditional DES crypt |
 
 ### Network-capture hash types
 
-These are captured as text (Responder, impacket, Rubeus) — paste the line straight into `crack` (auto-detected):
+These are captured as text — paste the line straight into `crack` (auto-detected):
 
-| `-t` type | hashcat | Source |
-|---|---|---|
-| `netntlmv1` | 5500 | NetNTLMv1 / NTLMv1-ESS challenge-response |
-| `netntlmv2` | 5600 | NetNTLMv2 challenge-response |
-| `krb5asrep` | 18200 | Kerberos AS-REP roasting (etype 23 / RC4) |
-| `krb5tgs`   | 13100 | Kerberoasting TGS-REP (etype 23 / RC4) |
+| `-t` type | Source |
+|---|---|
+| `netntlmv1` | NetNTLMv1 / NTLMv1-ESS challenge-response |
+| `netntlmv2` | NetNTLMv2 challenge-response |
+| `krb5asrep` | Kerberos AS-REP roasting (etype 23 / RC4) |
+| `krb5tgs`   | Kerberoasting TGS-REP (etype 23 / RC4) |
 
 ```bash
 hashsmith 'admin::WORKGROUP:1122334455667788:9a94e588…:0101…'   # auto-detect & crack
@@ -159,14 +227,14 @@ hashsmith 'admin::WORKGROUP:1122334455667788:9a94e588…:0101…'   # auto-detec
 
 ### Encrypted-container hash types
 
-Extracted with a `*2smith` command (or pasted from hashcat/john) and cracked with the built-in wordlist:
+Extracted with a `*2smith` command and cracked with the built-in wordlist:
 
-| `-t` type | hashcat | Notes |
-|---|---|---|
-| `pkcs8`   | –     | PKCS#8 PBES2 private keys (via `ssh2smith`) |
-| `gpg`     | 16700/17010 | `gpg -c` symmetric (via `gpg2smith`); AES-128/192/256 |
-| `office`  | 9400/9500/9600 | MS Office 2007 (standard), 2010 (standard), 2013 (agile) |
-| `keepass` | 13400 | KeePass KDBX 1, 2 (AES-KDF) and 4 (Argon2d / Argon2id) |
+| `-t` type | Notes |
+|---|---|
+| `pkcs8`   | PKCS#8 PBES2 private keys (via `ssh2smith`) |
+| `gpg`     | `gpg -c` symmetric (via `gpg2smith`); AES-128/192/256 |
+| `office`  | MS Office 2007 (standard), 2010 (standard), 2013 (agile) |
+| `keepass` | KeePass KDBX 1, 2 (AES-KDF) and 4 (Argon2d / Argon2id) |
 
 Use help:
 ```bash

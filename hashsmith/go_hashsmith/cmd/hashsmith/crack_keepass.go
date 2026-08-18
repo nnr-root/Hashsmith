@@ -16,15 +16,15 @@ import (
 
 // ── KeePass database (KDBX 1 & 2, AES-KDF) ─────────────────────────────────────
 //
-// Cracks the $keepass$ hash produced by keepass2john / hashcat mode 13400 for
-// AES-KDF databases (KDBX4's Argon2 KDF is not covered here).
+// Cracks the $keepass$ hash produced by keepass2smith for AES-KDF databases
+// (KDBX4's Argon2 KDF is not covered here).
 //
 //   KDBX1: $keepass$*1*<rounds>*<algo>*<masterSeed>*<transformSeed>*<encIV>*
 //          <contentsHash>*<inline>*<dataSize>*<encData>
 //   KDBX2: $keepass$*2*<rounds>*<?>*<masterSeed>*<transformSeed>*<encIV>*
 //          <expectedStartBytes>*<firstEncryptedBytes>
 //
-// Verified against hashcat's mode-13400 example hashes.
+// Verified against known KeePass KDBX example hashes.
 
 func verifyKeePass(targetHash, candidate string) (bool, error) {
 	p := strings.Split(targetHash, "*")

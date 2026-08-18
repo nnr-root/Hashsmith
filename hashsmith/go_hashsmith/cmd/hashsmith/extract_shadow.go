@@ -1,11 +1,11 @@
 package main
 
-// shadow2smith — the John-the-Ripper `unshadow` workflow.
+// shadow2smith — the /etc/shadow extraction workflow.
 //
-// It reads an /etc/shadow file (optionally combined with /etc/passwd, matching
-// `unshadow passwd shadow`) and emits one crackable "user:hash" line per account
-// that carries a real password hash. Locked, disabled, and password-less
-// accounts are skipped. The output feeds straight back into the cracker:
+// It reads an /etc/shadow file (optionally combined with /etc/passwd) and emits
+// one crackable "user:hash" line per account that carries a real password hash.
+// Locked, disabled, and password-less accounts are skipped. The output feeds
+// straight back into the cracker:
 //
 //	hashsmith shadow2smith -f shadow -o hashes.txt
 //	hashsmith hashes.txt                     # auto-detect crypt type & crack
@@ -33,12 +33,12 @@ type shadowEntry struct {
 	supported bool
 }
 
-// runExtractShadow implements the shadow2smith / unshadow command.
+// runExtractShadow implements the shadow2smith command.
 func runExtractShadow(args []string) error {
 	fs := flag.NewFlagSet("shadow2smith", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	shadowPath := fs.String("f", "", "shadow file path (/etc/shadow)")
-	passwdPath := fs.String("p", "", "optional passwd file (/etc/passwd) to merge, unshadow-style")
+	passwdPath := fs.String("p", "", "optional passwd file (/etc/passwd) to merge")
 	outFile := fs.String("o", "", "write hashes to file")
 	copyRes := fs.Bool("c", false, "copy hashes to clipboard")
 
@@ -67,7 +67,7 @@ func runExtractShadow(args []string) error {
 	// Show the tool's decision so the auto-detection is transparent.
 	clrYellow.Fprintf(os.Stderr, "Shadow file: %s\n", *shadowPath)
 	if *passwdPath != "" {
-		clrYellow.Fprintf(os.Stderr, "Passwd file: %s (unshadow merge)\n", *passwdPath)
+		clrYellow.Fprintf(os.Stderr, "Passwd file: %s (merge)\n", *passwdPath)
 	}
 
 	hashes, order, err := parseShadowFile(*shadowPath)
@@ -76,7 +76,7 @@ func runExtractShadow(args []string) error {
 	}
 
 	// Optional passwd merge: restrict to (and order by) accounts present in
-	// passwd, mirroring `unshadow passwd shadow`.
+	// passwd.
 	if *passwdPath != "" {
 		users, perr := parsePasswdUsers(*passwdPath)
 		if perr != nil {
@@ -242,15 +242,13 @@ func assignShadowPasswd(pos []string, shadowPath, passwdPath *string) {
 
 // printShadowUsage prints the shadow2smith command reference.
 func printShadowUsage() {
-	fmt.Println("shadow2smith (alias: unshadow) — extract crackable Unix login hashes")
+	fmt.Println("shadow2smith — extract crackable Unix login hashes from /etc/shadow")
 	fmt.Println()
-	fmt.Println("Turn an /etc/shadow file (optionally merged with /etc/passwd, exactly like")
-	fmt.Println("John the Ripper's `unshadow passwd shadow`) into one 'user:hash' line per")
-	fmt.Println("account, ready to feed straight back into the cracker.")
+	fmt.Println("Turn an /etc/shadow file (optionally merged with /etc/passwd) into one")
+	fmt.Println("'user:hash' line per account, ready to feed straight back into the cracker.")
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  hashsmith shadow2smith <shadow> [passwd] [-o out] [-c]   files, any order")
-	fmt.Println("  hashsmith unshadow     <shadow> [passwd] [-o out] [-c]   (alias)")
 	fmt.Println()
 	fmt.Println("Just pass the files directly — no -f/-p needed. The two files may be given")
 	fmt.Println("in either order; the tool inspects each and decides which is shadow and")
@@ -268,9 +266,9 @@ func printShadowUsage() {
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  hashsmith shadow2smith shadow.txt passwd.txt -o hashes.txt")
-	fmt.Println("  hashsmith unshadow passwd.txt shadow.txt -o hashes.txt   # order doesn't matter")
-	fmt.Println("  hashsmith shadow2smith shadow.txt                        # shadow alone")
-	fmt.Println("  hashsmith hashes.txt                                     # auto-detect & crack")
+	fmt.Println("  hashsmith shadow2smith passwd.txt shadow.txt -o hashes.txt  # order doesn't matter")
+	fmt.Println("  hashsmith shadow2smith shadow.txt                          # shadow alone")
+	fmt.Println("  hashsmith hashes.txt                                       # auto-detect & crack")
 }
 
 // parsePasswdUsers reads the usernames from an /etc/passwd file in file order.

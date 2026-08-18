@@ -225,14 +225,14 @@ func crackReport(targetHash, typ, mode, wordlist, charset string,
 
 // crackWithDetection cracks a hash whose type may be unknown. When explicitType
 // is empty or "auto", it uses detectHashTypes to find candidate algorithms and
-// tries each in turn until one succeeds — the John-the-Ripper-style workflow.
+// tries each in turn until one succeeds — the auto-detect crack workflow.
 // Base58/Base64-encoded hashes are normalized to hex first.
 func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
 	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
 
 	target := strings.TrimSpace(rawTarget)
-	// A "user:hash" or raw /etc/shadow line (from unshadow/shadow2smith) is
+	// A "user:hash" or raw /etc/shadow line (from shadow2smith) is
 	// reduced to its crypt-hash field so the verifier sees a clean hash.
 	if stripped := stripShadowUsername(target); stripped != target {
 		clrYellow.Fprintf(os.Stderr, "Detected shadow entry — cracking hash for user %q\n",
@@ -578,6 +578,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return bcrypt.CompareHashAndPassword([]byte(targetHash), []byte(candidate)) == nil, nil
 	case "md5crypt":
 		return verifyMD5Crypt(targetHash, candidate)
+	case "apr1":
+		return verifyAPR1(targetHash, candidate)
 	case "sha256crypt":
 		return verifyShaCrypt(sha256Params, targetHash, candidate)
 	case "sha512crypt":
@@ -612,6 +614,102 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyOffice(targetHash, candidate)
 	case "keepass":
 		return verifyKeePass(targetHash, candidate)
+	case "wpa":
+		return verifyWPA(targetHash, candidate)
+	case "ethereum":
+		return verifyEthereum(targetHash, candidate)
+	case "bitcoin":
+		return verifyBitcoin(targetHash, candidate)
+	case "django":
+		return verifyDjango(targetHash, candidate)
+	case "veracrypt", "truecrypt":
+		return verifyVeraCrypt(targetHash, candidate)
+	case "bitlocker":
+		return verifyBitLocker(targetHash, candidate)
+	case "electrum":
+		return verifyElectrum(targetHash, candidate)
+	case "phpass":
+		return verifyPhpass(targetHash, candidate)
+	case "drupal7":
+		return verifyDrupal7(targetHash, candidate)
+	case "luks":
+		return verifyLUKS(targetHash, candidate)
+	case "cisco8":
+		return verifyCiscoType8(targetHash, candidate)
+	case "cisco9":
+		return verifyCiscoType9(targetHash, candidate)
+	case "macos":
+		return verifyMacOS(targetHash, candidate)
+	case "atlassian":
+		return verifyAtlassian(targetHash, candidate)
+	case "jwt":
+		return verifyJWT(targetHash, candidate)
+	case "pbkdf2":
+		return verifyPBKDF2(targetHash, candidate)
+	case "mediawiki":
+		return verifyMediaWiki(targetHash, candidate)
+	case "vbulletin":
+		return verifyVBulletin(targetHash, candidate)
+	case "redmine":
+		return verifyRedmine(targetHash, candidate)
+	case "dcc":
+		return verifyDCC(targetHash, candidate)
+	case "dcc2":
+		return verifyDCC2(targetHash, candidate)
+	case "citrix":
+		return verifyCitrix(targetHash, candidate)
+	case "cisco-pix":
+		return verifyCiscoPIX(targetHash, candidate)
+	case "cisco-asa":
+		return verifyCiscoASA(targetHash, candidate)
+	case "cram-md5":
+		return verifyCRAMMD5(targetHash, candidate)
+	case "scram":
+		return verifySCRAM(targetHash, candidate)
+	case "ipmi":
+		return verifyIPMI(targetHash, candidate)
+	case "half-md5":
+		return verifyHalfMD5(targetHash, candidate)
+	case "sap-fg":
+		return verifySAPCodvnFG(targetHash, candidate)
+	case "sap-b":
+		return verifySAPCodvnB(targetHash, candidate)
+	case "sybase":
+		return verifySybaseASE(targetHash, candidate)
+	case "chap":
+		return verifyChap(targetHash, candidate)
+	case "ldap":
+		return verifyLDAP(targetHash, candidate)
+	case "bitwarden":
+		return verifyBitwarden(targetHash, candidate)
+	case "mongodb":
+		return verifyMongoDB(targetHash, candidate)
+	case "solarwinds":
+		return verifySolarWinds(targetHash, candidate)
+	case "sip":
+		return verifySIP(targetHash, candidate)
+	case "juniper":
+		return verifyJuniper(targetHash, candidate)
+	case "itunes":
+		return verifyITunesBackup(targetHash, candidate)
+	case "1password":
+		return verify1Password(targetHash, candidate)
+	case "ike":
+		return verifyIKE(targetHash, candidate)
+	case "ansible":
+		return verifyAnsible(targetHash, candidate)
+	case "blockchain":
+		return verifyBlockchain(targetHash, candidate)
+	case "oracle11g":
+		return verifyOracle11g(targetHash, candidate)
+	case "oracle12c":
+		return verifyOracle12c(targetHash, candidate)
+	case "axcrypt-sha1":
+		return verifyAxCryptSHA1(targetHash, candidate)
+	case "aix":
+		return verifyAIX(targetHash, candidate)
+	case "pdf-r6":
+		return verifyPDFR6(targetHash, candidate)
 	case "netntlmv2":
 		return verifyNetNTLMv2(targetHash, candidate)
 	case "netntlmv1":
@@ -620,12 +718,22 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyKrb5(targetHash, candidate)
 	case "krb5tgs":
 		return verifyKrb5(targetHash, candidate)
+	case "krb5pa":
+		return verifyKrb5(targetHash, candidate)
 	}
-	got, err := hashText(candidate, algo, salt, saltMode)
+	// HMAC types take their message from a "hash:salt" pairing when no salt was
+	// supplied via -s, so `<hmac>:<salt>` targets crack without extra flags.
+	target, effSalt := targetHash, salt
+	if effSalt == "" && strings.HasPrefix(algo, "hmac-") {
+		if i := strings.LastIndexByte(targetHash, ':'); i >= 0 {
+			target, effSalt = targetHash[:i], targetHash[i+1:]
+		}
+	}
+	got, err := hashText(candidate, algo, effSalt, saltMode)
 	if err != nil {
 		return false, err
 	}
-	return got == targetHash, nil
+	return strings.EqualFold(got, target), nil
 }
 
 // ── ZIP hash verification ─────────────────────────────────────────────────────

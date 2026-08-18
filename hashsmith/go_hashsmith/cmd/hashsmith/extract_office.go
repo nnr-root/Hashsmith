@@ -143,7 +143,7 @@ func officeStandardFromBinary(info []byte, verMajor uint16, path string) (*zipHa
 	if verMajor == 4 {
 		version = 2010
 	}
-	// office2john/hashcat store the verifier-hash size for 2007 and the spin
+	// The $office$ format stores the verifier-hash size for 2007 and the spin
 	// count for 2010 in field 2.
 	field2 := verifierHashSize
 	if version == 2010 {

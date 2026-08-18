@@ -2,8 +2,7 @@ package main
 
 // Traditional DES-based crypt(3) — the 13-character hashes ("abJnggxhB/yWI")
 // that predate the $-tagged shadow schemes. Still occasionally seen on old
-// Unix systems and in captured /etc/shadow files, so unshadow-style cracking
-// needs it.
+// Unix systems and in captured /etc/shadow files, so shadow cracking needs it.
 //
 // The algorithm is DES with two twists:
 //   - the 8-byte key is the password with each 7-bit character shifted left one

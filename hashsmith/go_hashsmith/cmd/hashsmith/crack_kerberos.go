@@ -12,17 +12,21 @@ import (
 // ── Kerberos 5 etype 23 (RC4-HMAC) ─────────────────────────────────────────────
 //
 // AS-REP roasting and Kerberoasting both yield RC4-HMAC encrypted blobs that are
-// cracked offline against the account's NT hash. These are text lines (produced
-// by impacket / Rubeus), so there is no *2smith extractor.
+// cracked offline against the account's NT hash. These are captured as text
+// lines, so there is no *2smith extractor.
 //
-//   AS-REP  (hashcat 18200): $krb5asrep$23$user@REALM:<checksum>$<edata>
-//   TGS-REP (hashcat 13100): $krb5tgs$23$*user$realm$spn*$<checksum>$<edata>
+//   AS-REP : $krb5asrep$23$user@REALM:<checksum>$<edata>
+//   TGS-REP: $krb5tgs$23$*user$realm$spn*$<checksum>$<edata>
 //
 // Key usage numbers (RFC 4757 / MS-KILE): AS-REP enc-part = 8, TGS-REP
-// enc-part = 8. The service-ticket variant of 13100 uses 2, so both are tried.
+// enc-part = 8. The service-ticket TGS variant uses 2, so both are tried.
 
-// verifyKrb5 dispatches on the $krb5asrep$ / $krb5tgs$ prefix.
+// verifyKrb5 dispatches on the $krb5asrep$ / $krb5tgs$ / $krb5pa$ prefix. AES
+// etypes (17/18) route to the AES-CTS engine; etype 23 is RC4-HMAC below.
 func verifyKrb5(targetHash, candidate string) (bool, error) {
+	if isKrb5AES(targetHash) {
+		return verifyKrb5AESHash(targetHash, candidate)
+	}
 	checksum, edata, usages, err := parseKrb5(targetHash)
 	if err != nil {
 		return false, err

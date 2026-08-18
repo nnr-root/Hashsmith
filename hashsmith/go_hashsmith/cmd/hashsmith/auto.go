@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-// runAuto powers the John-the-Ripper-style shortcut. The target (a literal hash
-// or a file with one hash per line) may appear anywhere among the flags — all of
-// these are equivalent:
+// runAuto powers the bare-target shortcut. The target (a literal hash or a file
+// with one hash per line) may appear anywhere among the flags — all of these are
+// equivalent:
 //
 //	hashsmith <hash>
 //	hashsmith hashes.txt

@@ -15,15 +15,15 @@ import (
 // ── Microsoft Office document encryption ───────────────────────────────────────
 //
 // Cracks the verifier blobs from encrypted Office files (the $office$ hash
-// produced by office2john / hashcat modes 9400/9500/9600):
+// produced by office2smith):
 //
 //   $office$*<version>*<spinCount>*<keySizeBits>*<saltSize>*<salt>*<encVerifier>*<encVerifierHash>
 //
-//   2007 (9400): SHA-1, AES-128, 50000 spins
-//   2010 (9500): SHA-1, AES-128, 100000 spins
-//   2013 (9600): SHA-512, AES-256, 100000 spins
+//   2007: SHA-1, AES-128, 50000 spins
+//   2010: SHA-1, AES-128, 100000 spins
+//   2013: SHA-512, AES-256, 100000 spins
 //
-// Verified against hashcat's example hash for mode 9600.
+// Verified against a known Office 2013 example hash.
 
 // Agile (2013) block keys (MS-OFFCRYPTO §2.3.4.15).
 var (

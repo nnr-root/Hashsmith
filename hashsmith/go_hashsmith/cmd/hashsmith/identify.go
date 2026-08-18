@@ -263,6 +263,8 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"sha256crypt (Unix $5$)", 1000, "$5$ prefix — glibc SHA-256 crypt shadow hash"}}
 	case strings.HasPrefix(v, "$1$"):
 		return []candidate{{"md5crypt (Unix $1$)", 1000, "$1$ prefix — FreeBSD/Linux MD5 crypt shadow hash"}}
+	case strings.HasPrefix(v, "$apr1$"):
+		return []candidate{{"Apache apr1 (MD5)", 1000, "$apr1$ prefix — Apache .htpasswd MD5"}}
 	case strings.HasPrefix(v, "$zipcrypto$"):
 		return []candidate{{"ZIP (ZipCrypto encrypted)", 1000, "$zipcrypto$ prefix — traditional PKWARE encryption hash"}}
 	case strings.HasPrefix(v, "$zipaes128$"):
@@ -289,6 +291,84 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"MS Office (encrypted document)", 1000, "$office$ prefix — Office 2007/2010/2013"}}
 	case strings.HasPrefix(v, "$keepass$"):
 		return []candidate{{"KeePass database", 1000, "$keepass$ prefix — KDBX 1/2 (AES-KDF)"}}
+	case strings.HasPrefix(v, "WPA*01*"), isLegacyPMKID(v):
+		return []candidate{{"WPA/WPA2 PMKID", 1000, "PMKID = HMAC-SHA1(PMK, \"PMK Name\"|AP|STA)"}}
+	case strings.HasPrefix(v, "WPA*02*"):
+		return []candidate{{"WPA/WPA2 EAPOL (4-way handshake)", 1000, "MIC over the EAPOL-Key frame"}}
+	case strings.HasPrefix(v, "$ethereum$"):
+		return []candidate{{"Ethereum wallet (Web3 keystore)", 1000, "$ethereum$ prefix — scrypt/PBKDF2 + keccak256 MAC"}}
+	case strings.HasPrefix(v, "$bitcoin$"):
+		return []candidate{{"Bitcoin/Litecoin wallet.dat", 1000, "$bitcoin$ prefix — iterated SHA-512 + AES-256-CBC"}}
+	case strings.HasPrefix(v, "$bitwarden$"):
+		return []candidate{{"Bitwarden vault", 1000, "$bitwarden$ prefix — layered PBKDF2-SHA256"}}
+	case strings.HasPrefix(v, "$itunes_backup$"):
+		return []candidate{{"iTunes backup", 1000, "$itunes_backup$ — PBKDF2 + AES key-unwrap"}}
+	case strings.HasPrefix(v, "$ansible$"):
+		return []candidate{{"Ansible Vault", 1000, "$ansible$ — PBKDF2-SHA256 + HMAC-SHA256"}}
+	case strings.HasPrefix(v, "$blockchain$"):
+		return []candidate{{"Blockchain.info My Wallet", 1000, "$blockchain$ — PBKDF2-SHA1 + AES-256-CBC"}}
+	case strings.HasPrefix(v, "$mongodb-scram$"):
+		return []candidate{{"MongoDB SCRAM-SHA-1", 1000, "$mongodb-scram$ — PBKDF2-SHA1 + HMAC/SHA-1"}}
+	case strings.HasPrefix(v, "$solarwinds$"):
+		return []candidate{{"SolarWinds Orion", 1000, "$solarwinds$ — PBKDF2-SHA1 (1024) + SHA-512"}}
+	case strings.HasPrefix(v, "$sip$*"):
+		return []candidate{{"SIP digest authentication", 1000, "$sip$ — HTTP Digest (MD5)"}}
+	case strings.HasPrefix(v, "$electrum$"):
+		return []candidate{{"Electrum wallet (salt-type 1-3)", 1000, "$electrum$ prefix — double SHA-256 + AES-256-CBC"}}
+	case isDjangoHash(v):
+		return []candidate{{"Django PBKDF2", 1000, "pbkdf2_sha256/sha1$ — Django/passlib password hash"}}
+	case isPhpassHash(v):
+		return []candidate{{"phpass (WordPress/phpBB)", 1000, "$P$/$H$ portable phpass hash"}}
+	case isDrupal7Hash(v):
+		return []candidate{{"Drupal 7", 1000, "$S$ prefix — SHA-512 phpass-style hash"}}
+	case strings.HasPrefix(v, "$8$") && len(v) == 61:
+		return []candidate{{"Cisco-IOS type 8", 1000, "$8$ prefix — PBKDF2-HMAC-SHA256"}}
+	case strings.HasPrefix(v, "$9$") && len(v) == 61:
+		return []candidate{{"Cisco-IOS type 9", 1000, "$9$ prefix — scrypt"}}
+	case strings.HasPrefix(v, "$ml$"):
+		return []candidate{{"macOS 10.8+ (PBKDF2-SHA512)", 1000, "$ml$ prefix — macOS ShadowHashData"}}
+	case strings.HasPrefix(v, "{PKCS5S2}"):
+		return []candidate{{"Atlassian (PBKDF2-HMAC-SHA1)", 1000, "{PKCS5S2} prefix — Jira/Confluence/Crowd"}}
+	case isGenericPBKDF2(v):
+		return []candidate{{"PBKDF2 (generic)", 1000, "algo:iter:salt:dk — PBKDF2-HMAC"}}
+	case isOnePassword(v):
+		return []candidate{{"1Password Agile Keychain", 1000, "iter:salt:data — PBKDF2-SHA1 + AES-128-CBC"}}
+	case isIKE(v):
+		return []candidate{{"IKE aggressive-mode PSK", 1000, "9-field IKE handshake — HMAC HASH_R"}}
+	case strings.HasPrefix(v, "$DCC2$"):
+		return []candidate{{"Domain Cached Credentials 2 (mscash2)", 1000, "$DCC2$ — PBKDF2-HMAC-SHA1 over the DCC"}}
+	case strings.HasPrefix(v, "SCRAM-SHA-256$"):
+		return []candidate{{"PostgreSQL SCRAM-SHA-256", 1000, "PBKDF2-SHA256 + HMAC/SHA-256 stored key"}}
+	case strings.HasPrefix(v, "$cram_md5$"):
+		return []candidate{{"CRAM-MD5", 1000, "$cram_md5$ — HMAC-MD5 challenge-response"}}
+	case isCitrix(v):
+		return []candidate{{"Citrix NetScaler", 1000, "1 + salt + sha1(salt.pass.\\0)"}}
+	case isCiscoASA(v):
+		return []candidate{{"Cisco-ASA MD5", 900, "PIX-style md5(pad16(pass.salt))"}}
+	case isIPMI(v):
+		return []candidate{{"IPMI2 RAKP (HMAC-SHA1)", 1000, "salt:hmac — BMC RAKP authentication"}}
+	case isChap(v):
+		return []candidate{{"iSCSI CHAP (MD5)", 900, "md5:challenge:id — CHAP authentication"}}
+	case isLDAP(v):
+		return []candidate{{"LDAP salted digest", 1000, "{SSHA*}/{SMD5} — RFC 2307 salted hash"}}
+	case isSybaseASE(v):
+		return []candidate{{"Sybase ASE", 1000, "0xc007 prefix — sha256(utf16be(pass).pad.salt)"}}
+	case isJuniper(v):
+		return []candidate{{"Juniper NetScreen (ScreenOS)", 1000, "user$… — md5(user:Administration Tools:pass)"}}
+	case isSAPCodvnFG(v):
+		return []candidate{{"SAP CODVN F/G (PASSCODE)", 900, "user$sha1 — iSSHA-1 with magic array"}}
+	case isSAPCodvnB(v):
+		return []candidate{{"SAP CODVN B (BCODE)", 900, "user$md5-8 — BCODE magic walk"}}
+	case isMediaWiki(v):
+		return []candidate{{"MediaWiki $B$", 1000, "$B$salt$ — md5(salt.\"-\".md5(pass))"}}
+	case isRedmine(v):
+		return []candidate{{"Redmine", 900, "sha1:salt — sha1(salt.sha1(pass))"}}
+	case isVBulletin(v):
+		return []candidate{{"vBulletin", 900, "md5:salt — md5(md5(pass).salt)"}}
+	case strings.HasPrefix(v, "$bitlocker$"):
+		return []candidate{{"BitLocker", 1000, "$bitlocker$ prefix — 1M-round SHA-256 + AES-CTR VMK"}}
+	case strings.HasPrefix(v, "$luks$"):
+		return []candidate{{"LUKS v1", 1000, "$luks$ prefix — PBKDF2 + AF-splitter + master-key digest"}}
 	case strings.HasPrefix(v, "$krb5asrep$"):
 		return []candidate{{"Kerberos 5 AS-REP (etype 23)", 1000, "$krb5asrep$ prefix — AS-REP roastable hash"}}
 	case strings.HasPrefix(v, "$krb5tgs$"):
@@ -1060,7 +1140,7 @@ func looksLikeCryptHash(s string) bool {
 }
 
 // stripShadowUsername pulls the hash field out of a "user:hash[:...]" line — the
-// shape produced by unshadow/shadow2smith and by raw /etc/shadow entries. It
+// shape produced by shadow2smith and by raw /etc/shadow entries. It
 // only strips when the second colon-separated field is itself a crypt hash, so
 // NetNTLM ("user::domain:…") and other colon-bearing formats are left intact.
 func stripShadowUsername(s string) string {
@@ -1069,6 +1149,11 @@ func stripShadowUsername(s string) string {
 	}
 	fields := strings.Split(s, ":")
 	if len(fields) >= 2 && looksLikeCryptHash(fields[1]) {
+		// Don't strip when the first field is itself an md5/sha1 hash — that is a
+		// vBulletin/DCC/Redmine "hash:salt", not a "user:crypthash" shadow line.
+		if isHex(fields[0]) && (len(fields[0]) == 32 || len(fields[0]) == 40) {
+			return s
+		}
 		return fields[1]
 	}
 	return s
@@ -1082,6 +1167,9 @@ func detectHashTypes(text string) []string {
 	// Unix crypt(3) shadow hashes.
 	if strings.HasPrefix(t, "$1$") {
 		return []string{"md5crypt"}
+	}
+	if strings.HasPrefix(t, "$apr1$") {
+		return []string{"apr1"}
 	}
 	if strings.HasPrefix(t, "$5$") {
 		return []string{"sha256crypt"}
@@ -1111,6 +1199,9 @@ func detectHashTypes(text string) []string {
 	if strings.HasPrefix(t, "$rar5$") {
 		return []string{"rar5"}
 	}
+	if isPDFR6(t) {
+		return []string{"pdf-r6"}
+	}
 	if strings.HasPrefix(t, "$pdf$") {
 		return []string{"pdf"}
 	}
@@ -1129,11 +1220,141 @@ func detectHashTypes(text string) []string {
 	if strings.HasPrefix(t, "$keepass$") {
 		return []string{"keepass"}
 	}
+	if strings.HasPrefix(t, "WPA*01*") || strings.HasPrefix(t, "WPA*02*") || isLegacyPMKID(t) {
+		return []string{"wpa"}
+	}
+	if strings.HasPrefix(t, "$ethereum$") {
+		return []string{"ethereum"}
+	}
+	if strings.HasPrefix(t, "$bitcoin$") {
+		return []string{"bitcoin"}
+	}
+	if strings.HasPrefix(t, "$bitwarden$") {
+		return []string{"bitwarden"}
+	}
+	if strings.HasPrefix(t, "$itunes_backup$") {
+		return []string{"itunes"}
+	}
+	if strings.HasPrefix(t, "$ansible$") {
+		return []string{"ansible"}
+	}
+	if strings.HasPrefix(t, "$blockchain$") {
+		return []string{"blockchain"}
+	}
+	if strings.HasPrefix(t, "$axcrypt_sha1$") {
+		return []string{"axcrypt-sha1"}
+	}
+	if strings.HasPrefix(t, "$mongodb-scram$") {
+		return []string{"mongodb"}
+	}
+	if strings.HasPrefix(t, "$solarwinds$") {
+		return []string{"solarwinds"}
+	}
+	if strings.HasPrefix(t, "$sip$*") {
+		return []string{"sip"}
+	}
+	if isDjangoHash(t) {
+		return []string{"django"}
+	}
+	if strings.HasPrefix(t, "veracrypt:") || strings.HasPrefix(t, "truecrypt:") {
+		return []string{"veracrypt"}
+	}
+	if strings.HasPrefix(t, "$bitlocker$") {
+		return []string{"bitlocker"}
+	}
+	if strings.HasPrefix(t, "$electrum$") {
+		return []string{"electrum"}
+	}
+	if isPhpassHash(t) {
+		return []string{"phpass"}
+	}
+	if isDrupal7Hash(t) {
+		return []string{"drupal7"}
+	}
+	if strings.HasPrefix(t, "$luks$") {
+		return []string{"luks"}
+	}
+	if strings.HasPrefix(t, "$8$") && len(t) == 61 {
+		return []string{"cisco8"}
+	}
+	if strings.HasPrefix(t, "$9$") && len(t) == 61 {
+		return []string{"cisco9"}
+	}
+	if strings.HasPrefix(t, "$ml$") {
+		return []string{"macos"}
+	}
+	if strings.HasPrefix(t, "{PKCS5S2}") {
+		return []string{"atlassian"}
+	}
+	if isJWT(t) {
+		return []string{"jwt"}
+	}
+	if isGenericPBKDF2(t) {
+		return []string{"pbkdf2"}
+	}
+	if isOnePassword(t) {
+		return []string{"1password"}
+	}
+	if isIKE(t) {
+		return []string{"ike"}
+	}
+	if isDCC2(t) {
+		return []string{"dcc2"}
+	}
+	if strings.HasPrefix(t, "SCRAM-SHA-256$") {
+		return []string{"scram"}
+	}
+	if strings.HasPrefix(t, "$cram_md5$") {
+		return []string{"cram-md5"}
+	}
+	if isCitrix(t) {
+		return []string{"citrix"}
+	}
+	if isCiscoASA(t) {
+		return []string{"cisco-asa"}
+	}
+	if isIPMI(t) {
+		return []string{"ipmi"}
+	}
+	if isChap(t) {
+		return []string{"chap"}
+	}
+	if isAIX(t) {
+		return []string{"aix"}
+	}
+	if isLDAP(t) {
+		return []string{"ldap"}
+	}
+	if isSybaseASE(t) {
+		return []string{"sybase"}
+	}
+	if isSAPCodvnFG(t) {
+		return []string{"sap-fg"}
+	}
+	if isJuniper(t) {
+		return []string{"juniper"}
+	}
+	if isSAPCodvnB(t) {
+		return []string{"sap-b"}
+	}
+	if isMediaWiki(t) {
+		return []string{"mediawiki"}
+	}
+	if isRedmine(t) {
+		return []string{"redmine"}
+	}
+	// <md5>:<salt> is shared by vBulletin and DCC (mscash) — try both.
+	if isVBulletin(t) {
+		return []string{"vbulletin", "dcc"}
+	}
 	if strings.HasPrefix(t, "$krb5asrep$") {
 		return []string{"krb5asrep"}
 	}
 	if strings.HasPrefix(t, "$krb5tgs$") {
 		return []string{"krb5tgs"}
+	}
+	if strings.HasPrefix(t, "$krb5pa$") {
+		return []string{"krb5pa"}
 	}
 	if isNetNTLMLine(t) {
 		// v1 and v2 share the user::domain:… shape; try both.
@@ -1160,24 +1381,32 @@ func detectHashTypes(text string) []string {
 	if looksLikeDescrypt(t) {
 		return []string{"descrypt"}
 	}
+	// A 16-char crypt-base64 token with non-hex characters is a Cisco-PIX hash.
+	if len(t) == 16 && isPixToken(t) && !isHex(t) {
+		return []string{"cisco-pix"}
+	}
 	if !isHex(t) {
 		return nil
 	}
 	switch len(t) {
 	case 16:
-		return []string{"mysql323"}
+		return []string{"mysql323", "cisco-pix", "half-md5"}
 	case 32:
 		return []string{"md5", "md4", "ntlm"}
 	case 40:
 		return []string{"sha1", "ripemd160"}
 	case 56:
 		return []string{"sha224"}
+	case 60:
+		return []string{"oracle11g"}
+	case 160:
+		return []string{"oracle12c"}
 	case 64:
-		return []string{"sha256", "sha3_256", "blake2s"}
+		return []string{"sha256", "sha3_256", "blake2s", "streebog256"}
 	case 96:
 		return []string{"sha384"}
 	case 128:
-		return []string{"sha512", "sha3_512", "blake2b"}
+		return []string{"sha512", "sha3_512", "blake2b", "whirlpool", "streebog512"}
 	default:
 		return nil
 	}
