@@ -158,7 +158,7 @@ func printHelp() {
 	fmt.Println("  encode        -t <type> [-s shift] [-k key] [-r rails] [-o out] [-c]  INPUT...")
 	fmt.Println("  decode        -t <type> [-s shift] [-k key] [-r rails] [-o out] [-c]  INPUT...")
 	fmt.Println("  hash          -t <type> [-s salt] [-S prefix|suffix] [-e hex|base58] [-o out] [-c]  INPUT...")
-	fmt.Println("  crack         [-t <type|auto>] [-M dict|brute] [-w wordlist] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]  INPUT...")
+	fmt.Println("  crack         [-t <type|auto>] [-M dict|brute|mask] [-w wordlist] [--mask ?l?d..] [-1..-4 set] [--increment] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]  INPUT...")
 	fmt.Println("  types         list every supported -t hash type")
 	fmt.Println("  identify      [-o out] [-c]  INPUT...")
 	fmt.Println("  zip2smith     -f <zip-file>  [-o out] [-c]   (aliases: extract-hash, zip2hash)")

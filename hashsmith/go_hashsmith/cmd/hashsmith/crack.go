@@ -61,6 +61,12 @@ func runCrack(args []string) error {
 	outFile := fs.String("o", "", "write result to file")
 	copyResult := fs.Bool("c", false, "copy result to clipboard")
 	useRules := fs.Bool("r", false, "enable mangling rules in dict mode")
+	maskStr := fs.String("mask", "", "mask for -M mask (e.g. ?u?l?l?l?d?d)")
+	cs1 := fs.String("1", "", "custom charset 1 (mask -1)")
+	cs2 := fs.String("2", "", "custom charset 2 (mask -2)")
+	cs3 := fs.String("3", "", "custom charset 3 (mask -3)")
+	cs4 := fs.String("4", "", "custom charset 4 (mask -4)")
+	increment := fs.Bool("increment", false, "mask increment mode (try shorter lengths first)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -80,22 +86,23 @@ func runCrack(args []string) error {
 	if w < 1 {
 		w = runtime.NumCPU()
 	}
+	mc := buildMaskConfig(*maskStr, *cs1, *cs2, *cs3, *cs4, *increment, *minLen)
 	return crackTargets(targets, *typ, *mode, wl, *charset,
-		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules)
+		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules, mc)
 }
 
 // crackTargets runs crackWithDetection over one or more targets, printing a
 // header for each when several were supplied.
 func crackTargets(targets []string, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
-	salt, saltMode, outFile string, copyResult, useRules bool) error {
+	salt, saltMode, outFile string, copyResult, useRules bool, mc *maskConfig) error {
 	for i, tgt := range targets {
 		if len(targets) > 1 {
 			color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
 				"\n══ [%d/%d] %s\n", i+1, len(targets), tgt)
 		}
 		err := crackWithDetection(tgt, typ, mode, wordlist, charset,
-			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules)
+			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules, mc)
 		if err != nil {
 			if len(targets) == 1 {
 				return err
@@ -114,7 +121,7 @@ func crackTargets(targets []string, typ, mode, wordlist, charset string,
 // tried in sequence).
 func doCrack(targetHash, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
-	salt, saltMode, outFile string, copyResult bool, useRules bool) (bool, error) {
+	salt, saltMode, outFile string, copyResult bool, useRules bool, mc *maskConfig) (bool, error) {
 
 	start := time.Now()
 	var atomicAttempts int64
@@ -133,6 +140,8 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		}
 	} else if m == "brute" {
 		total = calcBruteTotal(charset, minLen, maxLen)
+	} else if m == "mask" && mc != nil {
+		total = calcMaskTotal(mc)
 	}
 
 	bar := newCrackBar(total)
@@ -159,6 +168,15 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		var pw string
 		pw, err = bruteAttack(context.Background(), targetHash, typ,
 			charset, minLen, maxLen, workers, salt, saltMode, &atomicAttempts)
+		result = crackedResult{password: pw}
+	case "mask":
+		if mc == nil {
+			tickCancel()
+			return false, errors.New("mask mode requires --mask <mask>")
+		}
+		var pw string
+		pw, err = maskAttack(context.Background(), targetHash, typ, mc,
+			workers, salt, saltMode, &atomicAttempts)
 		result = crackedResult{password: pw}
 	default:
 		tickCancel()
@@ -213,7 +231,7 @@ func crackReport(targetHash, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
 	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
 	found, err := doCrack(targetHash, typ, mode, wordlist, charset,
-		minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules)
+		minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules, nil)
 	if err != nil {
 		return err
 	}
@@ -229,7 +247,7 @@ func crackReport(targetHash, typ, mode, wordlist, charset string,
 // Base58/Base64-encoded hashes are normalized to hex first.
 func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
-	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
+	salt, saltMode, outFile string, copyResult bool, useRules bool, mc *maskConfig) error {
 
 	target := strings.TrimSpace(rawTarget)
 	// A "user:hash" or raw /etc/shadow line (from shadow2smith) is
@@ -266,7 +284,7 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 			color.New(themeAttr, color.Bold).Fprintf(os.Stderr, "\n→ Attempting as %s\n", t)
 		}
 		found, err := doCrack(target, t, mode, wordlist, charset,
-			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules)
+			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules, mc)
 		if err != nil {
 			if len(types) == 1 {
 				return err

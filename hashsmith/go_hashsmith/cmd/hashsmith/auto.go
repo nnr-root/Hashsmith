@@ -37,6 +37,12 @@ func runAuto(args []string) error {
 	outFile := fs.String("o", "", "write result to file")
 	copyResult := fs.Bool("c", false, "copy result to clipboard")
 	useRules := fs.Bool("r", false, "enable mangling rules in dict mode")
+	maskStr := fs.String("mask", "", "mask for -M mask (e.g. ?u?l?l?l?d?d)")
+	cs1 := fs.String("1", "", "custom charset 1 (mask)")
+	cs2 := fs.String("2", "", "custom charset 2 (mask)")
+	cs3 := fs.String("3", "", "custom charset 3 (mask)")
+	cs4 := fs.String("4", "", "custom charset 4 (mask)")
+	increment := fs.Bool("increment", false, "mask increment mode")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -54,8 +60,9 @@ func runAuto(args []string) error {
 	if w < 1 {
 		w = runtime.NumCPU()
 	}
+	mc := buildMaskConfig(*maskStr, *cs1, *cs2, *cs3, *cs4, *increment, *minLen)
 	return crackTargets(targets, *typ, *mode, wl, *charset,
-		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules)
+		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules, mc)
 }
 
 // looksLikeAutoTarget decides whether a bare, non-command argument should be
