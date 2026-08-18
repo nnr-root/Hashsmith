@@ -169,7 +169,18 @@ hashsmith crack -t ntlm <hash> -M mask --mask '?u?l?l?l?l?d?d'
 # Hybrid — a wordlist with a mask appended (or prepended) to every word
 hashsmith crack -t md5 <hash> -M hybrid -w words.txt --mask '?d?d?d?d'              # password2024
 hashsmith crack -t md5 <hash> -M hybrid -w words.txt --mask '?d?d?d' --mask-first   # 123password
+
+# Markov — brute-force ordered by likelihood (likely characters first)
+hashsmith crack -t md5 <hash> -M markov -C ?l -n 1 -x 8 -w rockyou.txt              # trained on a wordlist
 ```
+
+**Markov** ordering trains a first-order statistical model from a wordlist —
+which characters commonly start a word, and which commonly follow which — then
+enumerates the same brute-force keyspace with likely characters tried *first*. It
+covers exactly the same candidates as `-M brute`, just in a far smarter order, so
+realistic passwords surface early. Trained on the built-in list by default; pass
+`-w` to train on your own. (Example: `test` was found in 17k tries vs brute-force's
+335k.)
 
 **Hybrid** = dictionary + mask. Each word is extended by every expansion of the
 mask, so `summer` + `?d?d?d?d` tries `summer0000 … summer9999`. It captures the
@@ -196,6 +207,21 @@ any other character is a literal. `--increment` tries shorter lengths first.
 hashsmith crack -t md5 <hash> -M mask --mask '?1?1?1?1' -1 '?l?d'   # 4 chars, each a-z or 0-9
 hashsmith crack -t md5 <hash> -M mask --mask '?a?a?a?a' --increment # lengths 1..4
 ```
+
+## Candidate generation (`--stdout`)
+
+Any attack mode can emit its candidate stream to stdout instead of cracking —
+useful for previewing a mask or ruleset, estimating a keyspace, or piping into
+another tool. No hash is required.
+
+```bash
+hashsmith crack --stdout -M mask --mask '?u?l?l?d?d'        # print every masked candidate
+hashsmith crack --stdout -M hybrid -w words.txt --mask '?d?d?d?d'
+hashsmith crack --stdout -w words.txt --rules best64.rule   # words transformed by the ruleset
+hashsmith crack --stdout -M mask --mask 'ab?d' | wc -l      # count a keyspace
+```
+
+Output is single-threaded and ordered — the exact sequence the attack would try.
 
 ## Mangling rules
 

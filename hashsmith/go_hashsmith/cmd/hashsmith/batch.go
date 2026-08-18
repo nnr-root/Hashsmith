@@ -253,7 +253,7 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 				total *= int64(1 + rules.count())
 			}
 		}
-	case "brute":
+	case "brute", "markov":
 		total = calcBruteTotal(charset, minLen, maxLen)
 	case "mask":
 		if mc != nil {
@@ -293,6 +293,10 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 			if sets, err := parseMask(mc); err == nil {
 				_, _ = hybridAttack(context.Background(), wordlist, sets, mc.maskFirst, workers, verify, &atomicAttempts)
 			}
+		}
+	case "markov":
+		if model, err := trainMarkov(charset, wordlist); err == nil {
+			_, _ = runLayout(context.Background(), markovLayout(model, minLen, maxLen), 0, workers, &atomicAttempts, nil, verify)
 		}
 	case "combinator":
 		if wordlist2 != "" {

@@ -108,11 +108,8 @@ func runCrack(args []string) error {
 	restore := fs.String("restore", "", "alias for --session: resume a saved session by name")
 	wordlist2 := fs.String("wordlist2", "", "right-hand wordlist for -M combinator")
 	w2 := fs.String("w2", "", "alias for --wordlist2")
+	stdoutMode := fs.Bool("stdout", false, "emit the candidate stream to stdout instead of cracking (no hash needed)")
 	if err := parseArgsFlexible(fs, args); err != nil {
-		return err
-	}
-	targets, err := gatherInputs(fs.Args())
-	if err != nil {
 		return err
 	}
 
@@ -122,19 +119,33 @@ func runCrack(args []string) error {
 	if wl == "" {
 		wl = *wordlistLong
 	}
+	wl2 := *wordlist2
+	if wl2 == "" {
+		wl2 = *w2
+	}
+	mc := buildMaskConfig(*maskStr, *cs1, *cs2, *cs3, *cs4, *increment, *minLen, *maskFirst)
+
+	// --stdout: generate candidates only, no target or hashing required.
+	if *stdoutMode {
+		engine, err := buildRuleEngine(*rulesFile, *useRules)
+		if err != nil {
+			return err
+		}
+		return streamCandidates(*mode, wl, wl2, *charset, *minLen, *maxLen, mc, engine)
+	}
+
+	targets, err := gatherInputs(fs.Args())
+	if err != nil {
+		return err
+	}
 
 	w := *workers
 	if w < 1 {
 		w = runtime.NumCPU()
 	}
-	mc := buildMaskConfig(*maskStr, *cs1, *cs2, *cs3, *cs4, *increment, *minLen, *maskFirst)
 	sn := *sessName
 	if sn == "" {
 		sn = *restore
-	}
-	wl2 := *wordlist2
-	if wl2 == "" {
-		wl2 = *w2
 	}
 	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2)
 	if err != nil {
@@ -229,7 +240,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				total *= int64(1 + rules.count())
 			}
 		}
-	} else if m == "brute" {
+	} else if m == "brute" || m == "markov" {
 		total = calcBruteTotal(charset, minLen, maxLen)
 	} else if m == "mask" && mc != nil {
 		total = calcMaskTotal(mc)
@@ -259,7 +270,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	runCtx := context.Background()
 	var sess *sessionState
 	var resumeFrom int64
-	if cc != nil && cc.sessName != "" && (m == "brute" || m == "mask") {
+	if cc != nil && cc.sessName != "" && (m == "brute" || m == "mask" || m == "markov") {
 		var cancel context.CancelFunc
 		runCtx, cancel = context.WithCancel(context.Background())
 		sigCh := make(chan os.Signal, 1)
@@ -335,6 +346,20 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		pw, interrupted, err = runSessionLayout(runCtx, layout,
 			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
 		result = crackedResult{password: pw}
+	case "markov":
+		if minLen < 1 || maxLen < minLen {
+			tickCancel()
+			return false, errors.New("invalid -n/-x range")
+		}
+		model, e := trainMarkov(charset, wordlist)
+		if e != nil {
+			tickCancel()
+			return false, e
+		}
+		var pw string
+		pw, interrupted, err = runSessionLayout(runCtx, markovLayout(model, minLen, maxLen),
+			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+		result = crackedResult{password: pw}
 	case "hybrid":
 		if mc == nil {
 			tickCancel()
@@ -360,7 +385,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		result = crackedResult{password: pw}
 	default:
 		tickCancel()
-		return false, errors.New("unknown mode: use dict, brute, mask, hybrid or combinator")
+		return false, errors.New("unknown mode: use dict, brute, mask, markov, hybrid or combinator")
 	}
 
 	tickCancel()

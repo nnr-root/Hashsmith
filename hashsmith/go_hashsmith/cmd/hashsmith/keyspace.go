@@ -27,6 +27,7 @@ type keyspaceLayout struct {
 	segments [][][]byte
 	offsets  []int64
 	total    int64
+	gen      func(int64) string // optional override (e.g. Markov); nil = use segments
 }
 
 func newLayout(segments [][][]byte) *keyspaceLayout {
@@ -42,6 +43,9 @@ func newLayout(segments [][][]byte) *keyspaceLayout {
 
 // candidate decodes the global index i into its candidate string.
 func (l *keyspaceLayout) candidate(i int64) string {
+	if l.gen != nil {
+		return l.gen(i)
+	}
 	seg := 0
 	for seg+1 < len(l.offsets) && l.offsets[seg+1] <= i {
 		seg++

@@ -166,7 +166,7 @@ func printHelp() {
 	fmt.Println("  encode        -t <type> [-s shift] [-k key] [-r rails] [-o out] [-c]  INPUT...")
 	fmt.Println("  decode        -t <type> [-s shift] [-k key] [-r rails] [-o out] [-c]  INPUT...")
 	fmt.Println("  hash          -t <type> [-s salt] [-S prefix|suffix] [-e hex|base58] [-o out] [-c]  INPUT...")
-	fmt.Println("  crack         [-t <type|auto>] [-M dict|brute|mask|hybrid|combinator] [-w wordlist] [--wordlist2 list2] [-r | --rules <file>] [--mask ?l?d..] [-1..-4 set] [--increment] [--mask-first]")
+	fmt.Println("  crack         [-t <type|auto>] [-M dict|brute|mask|markov|hybrid|combinator] [-w wordlist] [--wordlist2 list2] [-r | --rules <file>] [--mask ?l?d..] [-1..-4 set] [--increment] [--mask-first] [--stdout]")
 	fmt.Println("                [--session <name>] [--restore <name>] [--show] [--no-pot] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]  INPUT...")
 	fmt.Println("  types         list every supported -t hash type")
 	fmt.Println("  identify      [-o out] [-c]  INPUT...")
