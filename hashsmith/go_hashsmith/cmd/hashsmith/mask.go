@@ -31,6 +31,7 @@ type maskConfig struct {
 	custom    [4]string
 	increment bool
 	incMin    int
+	maskFirst bool // hybrid mode: place the mask before the word (mask+word)
 }
 
 // parseMask expands a mask into a per-position list of candidate byte sets.
@@ -164,12 +165,17 @@ func calcMaskTotal(cfg *maskConfig) int64 {
 // maskIdxToStr maps a linear index to the candidate for a mixed-radix set list.
 func maskIdxToStr(index int64, sets [][]byte) string {
 	out := make([]byte, len(sets))
+	maskIdxInto(out, index, sets)
+	return string(out)
+}
+
+// maskIdxInto writes the mixed-radix expansion of index into dst (len == len(sets)).
+func maskIdxInto(dst []byte, index int64, sets [][]byte) {
 	for i := len(sets) - 1; i >= 0; i-- {
 		base := int64(len(sets[i]))
-		out[i] = sets[i][index%base]
+		dst[i] = sets[i][index%base]
 		index /= base
 	}
-	return string(out)
 }
 
 // maskAttack runs a mask across `workers` goroutines, honouring increment mode
@@ -191,7 +197,7 @@ func maskAttack(ctx context.Context, targetHash, typ string, cfg *maskConfig,
 
 // buildMaskConfig assembles a maskConfig from CLI flags (custom sets are
 // expanded so -1 ?d?l works). Returns nil when no mask was supplied.
-func buildMaskConfig(mask, c1, c2, c3, c4 string, increment bool, incMin int) *maskConfig {
+func buildMaskConfig(mask, c1, c2, c3, c4 string, increment bool, incMin int, maskFirst bool) *maskConfig {
 	if mask == "" {
 		return nil
 	}
@@ -203,5 +209,6 @@ func buildMaskConfig(mask, c1, c2, c3, c4 string, increment bool, incMin int) *m
 		},
 		increment: increment,
 		incMin:    incMin,
+		maskFirst: maskFirst,
 	}
 }

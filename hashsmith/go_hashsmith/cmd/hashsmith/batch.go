@@ -255,6 +255,14 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 		if mc != nil {
 			total = calcMaskTotal(mc)
 		}
+	case "hybrid":
+		if mc != nil {
+			if n, err := countWordlistLines(wordlist); err == nil {
+				if sets, e := parseMask(mc); e == nil {
+					total = n * maskKeyspace(sets)
+				}
+			}
+		}
 	}
 	bar := newCrackBar(total)
 	tickCtx, tickCancel := context.WithCancel(context.Background())
@@ -268,6 +276,12 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 		if mc != nil {
 			if layout, err := maskLayout(mc); err == nil {
 				_, _ = runLayout(context.Background(), layout, 0, workers, &atomicAttempts, nil, verify)
+			}
+		}
+	case "hybrid":
+		if mc != nil {
+			if sets, err := parseMask(mc); err == nil {
+				_, _ = hybridAttack(context.Background(), wordlist, sets, mc.maskFirst, workers, verify, &atomicAttempts)
 			}
 		}
 	default: // dict

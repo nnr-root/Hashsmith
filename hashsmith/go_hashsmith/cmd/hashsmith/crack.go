@@ -99,6 +99,7 @@ func runCrack(args []string) error {
 	cs3 := fs.String("3", "", "custom charset 3 (mask -3)")
 	cs4 := fs.String("4", "", "custom charset 4 (mask -4)")
 	increment := fs.Bool("increment", false, "mask increment mode (try shorter lengths first)")
+	maskFirst := fs.Bool("mask-first", false, "hybrid mode: place the mask before the word (mask+word)")
 	potPath := fs.String("pot", "", "potfile path (default ~/.hashsmith/hashsmith.pot)")
 	noPot := fs.Bool("no-pot", false, "disable the potfile (do not read or record cracked hashes)")
 	showOnly := fs.Bool("show", false, "print already-cracked hashes from the potfile; do not attack")
@@ -123,7 +124,7 @@ func runCrack(args []string) error {
 	if w < 1 {
 		w = runtime.NumCPU()
 	}
-	mc := buildMaskConfig(*maskStr, *cs1, *cs2, *cs3, *cs4, *increment, *minLen)
+	mc := buildMaskConfig(*maskStr, *cs1, *cs2, *cs3, *cs4, *increment, *minLen, *maskFirst)
 	sn := *sessName
 	if sn == "" {
 		sn = *restore
@@ -225,6 +226,12 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		total = calcBruteTotal(charset, minLen, maxLen)
 	} else if m == "mask" && mc != nil {
 		total = calcMaskTotal(mc)
+	} else if m == "hybrid" && mc != nil {
+		if n, err := countWordlistLines(wordlist); err == nil {
+			if sets, e := parseMask(mc); e == nil {
+				total = n * maskKeyspace(sets)
+			}
+		}
 	}
 
 	bar := newCrackBar(total)
@@ -315,9 +322,23 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		pw, interrupted, err = runSessionLayout(runCtx, layout,
 			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
 		result = crackedResult{password: pw}
+	case "hybrid":
+		if mc == nil {
+			tickCancel()
+			return false, errors.New("hybrid mode requires --mask <mask> and -w <wordlist>")
+		}
+		sets, e := parseMask(mc)
+		if e != nil {
+			tickCancel()
+			return false, e
+		}
+		var pw string
+		pw, err = hybridAttack(runCtx, wordlist, sets, mc.maskFirst, workers, verifyFn, &atomicAttempts)
+		interrupted = runCtx.Err() != nil
+		result = crackedResult{password: pw}
 	default:
 		tickCancel()
-		return false, errors.New("unknown mode: use dict, brute or mask")
+		return false, errors.New("unknown mode: use dict, brute, mask or hybrid")
 	}
 
 	tickCancel()

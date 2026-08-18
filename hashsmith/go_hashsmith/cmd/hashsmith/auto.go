@@ -44,6 +44,7 @@ func runAuto(args []string) error {
 	cs3 := fs.String("3", "", "custom charset 3 (mask)")
 	cs4 := fs.String("4", "", "custom charset 4 (mask)")
 	increment := fs.Bool("increment", false, "mask increment mode")
+	maskFirst := fs.Bool("mask-first", false, "hybrid mode: place the mask before the word (mask+word)")
 	potPath := fs.String("pot", "", "potfile path (default ~/.hashsmith/hashsmith.pot)")
 	noPot := fs.Bool("no-pot", false, "disable the potfile")
 	showOnly := fs.Bool("show", false, "print already-cracked hashes from the potfile; do not attack")
@@ -66,7 +67,7 @@ func runAuto(args []string) error {
 	if w < 1 {
 		w = runtime.NumCPU()
 	}
-	mc := buildMaskConfig(*maskStr, *cs1, *cs2, *cs3, *cs4, *increment, *minLen)
+	mc := buildMaskConfig(*maskStr, *cs1, *cs2, *cs3, *cs4, *increment, *minLen, *maskFirst)
 	sn := *sessName
 	if sn == "" {
 		sn = *restore

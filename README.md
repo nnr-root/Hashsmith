@@ -165,7 +165,17 @@ hashsmith crack -t md5 <hash> -M brute -C abcdefghijklmnopqrstuvwxyz -n 1 -x 6
 
 # Mask — a targeted brute-force where each position has its own charset
 hashsmith crack -t ntlm <hash> -M mask --mask '?u?l?l?l?l?d?d'
+
+# Hybrid — a wordlist with a mask appended (or prepended) to every word
+hashsmith crack -t md5 <hash> -M hybrid -w words.txt --mask '?d?d?d?d'              # password2024
+hashsmith crack -t md5 <hash> -M hybrid -w words.txt --mask '?d?d?d' --mask-first   # 123password
 ```
+
+**Hybrid** = dictionary + mask. Each word is extended by every expansion of the
+mask, so `summer` + `?d?d?d?d` tries `summer0000 … summer9999`. It captures the
+single most common password shape — a base word plus a trailing year, digits, or
+symbol — far more cheaply than brute-forcing the whole length. `--mask-first`
+puts the mask in front of the word instead.
 
 **Mask placeholders:** `?l` a-z · `?u` A-Z · `?d` 0-9 · `?s` symbols · `?a` all
 printable · `?h`/`?H` lower/upper hex · `?b` any byte. Define up to four custom
