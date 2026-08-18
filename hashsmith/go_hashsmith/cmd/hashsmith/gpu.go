@@ -511,40 +511,18 @@ func gpuFallbackNotice() {
 // gpuBruteDemo cracks a known target with in-kernel candidate generation,
 // proving correctness and measuring the transfer-free throughput.
 func gpuBruteDemo(b gpuBackend) {
-	const charset = "abcdefghijklmnopqrstuvwxyz"
-	const wordLen = 5
-	target := md5.Sum([]byte("zzzzz")) // worst case: the final index
-	var total uint64 = 1
-	for i := 0; i < wordLen; i++ {
-		total *= uint64(len(charset))
-	}
-	const chunk = uint64(1) << 27 // 16M candidates/dispatch
+	target := md5.Sum([]byte("zzzzz")) // worst case: final index of a-z^5
+	th := hex.EncodeToString(target[:])
+	var n int64
 	start := time.Now()
-	var done uint64
-	found := ""
-	for done < total {
-		cnt := chunk
-		if done+cnt > total {
-			cnt = total - done
-		}
-		idx, ok, err := b.md5Brute(charset, wordLen, target, done, uint32(cnt))
-		if err != nil {
-			clrRed.Fprintf(stderr(), "  brute: %v\n", err)
-			return
-		}
-		done += cnt
-		if ok {
-			found = bruteIndexToString(idx, wordLen, charset)
-			break
-		}
-	}
+	pw, found, _ := gpuBruteHash(th, "md5", "abcdefghijklmnopqrstuvwxyz", 5, 5, &n)
 	elapsed := time.Since(start).Seconds()
-	rate := float64(done) / elapsed
-	if found == "zzzzz" {
+	rate := float64(n) / elapsed
+	if found && pw == "zzzzz" {
 		clrGreen.Fprintf(stderr(), "  in-kernel brute: cracked \"zzzzz\" in %.2fs — %s (candidate gen on GPU)\n",
 			elapsed, formatRate(rate))
 	} else {
-		clrRed.Fprintf(stderr(), "  in-kernel brute: FAILED (got %q)\n", found)
+		clrRed.Fprintf(stderr(), "  in-kernel brute: FAILED (got %q)\n", pw)
 	}
 }
 

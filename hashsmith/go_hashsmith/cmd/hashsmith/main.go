@@ -195,7 +195,7 @@ func printHelp() {
 	fmt.Println("  luks2smith    -f <volume.luks> [-o out] [-c]    (LUKS v1 volume → crackable hash)")
 	fmt.Println("  rules         <rulefile> [word]   preview/validate a mangling-rule file")
 	fmt.Println("  benchmark     [-t type] [-p workers]   measure cracking throughput per hash type")
-	fmt.Println("  gpu           show GPU acceleration status (opt-in build: go build -tags gpu)")
+	fmt.Println("  gpu           show GPU acceleration status (build: -tags opencl any GPU, or -tags gpu Apple Metal)")
 	fmt.Println("  sessions      list | rm <name> | clear   manage saved brute/mask sessions")
 	fmt.Println("  interactive   guided interactive mode")
 	fmt.Println()

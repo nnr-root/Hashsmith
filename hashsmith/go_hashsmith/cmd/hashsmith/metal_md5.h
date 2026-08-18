@@ -1,4 +1,4 @@
-//go:build gpu && darwin
+//go:build gpu && darwin && !opencl
 #ifndef HS_METAL_MD5_H
 #define HS_METAL_MD5_H
 #include <stdint.h>

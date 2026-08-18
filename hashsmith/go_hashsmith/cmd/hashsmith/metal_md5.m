@@ -1,4 +1,4 @@
-//go:build gpu && darwin
+//go:build gpu && darwin && !opencl
 
 #import <Metal/Metal.h>
 #import <Foundation/Foundation.h>
