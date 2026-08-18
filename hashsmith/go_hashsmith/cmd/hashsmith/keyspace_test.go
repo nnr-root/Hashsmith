@@ -59,10 +59,13 @@ func TestRunLayoutResumeFindsAndSkips(t *testing.T) {
 func TestSessionMatch(t *testing.T) {
 	s := &sessionState{Mode: "brute", Type: "md5", Target: "x", Charset: "ab",
 		MinLen: 1, MaxLen: 3, SaltMode: "prefix"}
-	if !s.matches("brute", "md5", "x", "ab", 1, 3, "", [4]string{}, false, "", "prefix") {
+	if !s.matches("brute", "md5", "x", "ab", 1, 3, "", [4]string{}, false, "", "prefix", "", "") {
 		t.Error("identical params should match")
 	}
-	if s.matches("brute", "md5", "x", "ab", 1, 4, "", [4]string{}, false, "", "prefix") {
+	if s.matches("brute", "md5", "x", "ab", 1, 4, "", [4]string{}, false, "", "prefix", "", "") {
 		t.Error("different maxLen must not match")
+	}
+	if s.matches("brute", "md5", "x", "ab", 1, 3, "", [4]string{}, false, "", "prefix", "other.txt", "") {
+		t.Error("different wordlist must not match")
 	}
 }

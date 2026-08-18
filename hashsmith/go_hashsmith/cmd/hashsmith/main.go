@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// exitCode is the process exit status for crack/auto runs: 0 = every target
+// cracked, 1 = at least one target left uncracked. Real errors exit 2 via fail().
+var exitCode int
+
 func main() {
 	rawArgs := os.Args[1:]
 
@@ -135,6 +139,10 @@ func main() {
 		if err := runRules(rest); err != nil {
 			fail(err.Error())
 		}
+	case "benchmark", "bench":
+		if err := runBenchmark(rest); err != nil {
+			fail(err.Error())
+		}
 	case "interactive":
 		if err := runInteractive(); err != nil {
 			fail(err.Error())
@@ -153,6 +161,7 @@ func main() {
 			fail("unknown command: " + cmd)
 		}
 	}
+	os.Exit(exitCode)
 }
 
 func printHelp() {
@@ -181,6 +190,7 @@ func printHelp() {
 	fmt.Println("  shadow2smith  <shadow> [passwd] [-o out] [-c]   (/etc/shadow → user:hash, files any order)")
 	fmt.Println("  luks2smith    -f <volume.luks> [-o out] [-c]    (LUKS v1 volume → crackable hash)")
 	fmt.Println("  rules         <rulefile> [word]   preview/validate a mangling-rule file")
+	fmt.Println("  benchmark     [-t type] [-p workers]   measure cracking throughput per hash type")
 	fmt.Println("  sessions      list | rm <name> | clear   manage saved brute/mask sessions")
 	fmt.Println("  interactive   guided interactive mode")
 	fmt.Println()
@@ -189,6 +199,8 @@ func printHelp() {
 	fmt.Println("  -T <theme>        accent colour: cyan green magenta blue yellow red white")
 	fmt.Println()
 	fmt.Println("Shortcuts:  -i <hash|file>  →  identify command")
+	fmt.Println()
+	fmt.Println("Exit codes (crack):  0 = all targets cracked   1 = some not cracked   2 = error")
 }
 
 func fail(msg string) {

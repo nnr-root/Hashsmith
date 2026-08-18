@@ -66,13 +66,25 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 		if err != nil {
 			return err
 		}
-		_, err = hybridAttack(context.Background(), wordlist, sets, mc.maskFirst, 1, emit, &dummy)
+		words, _, err := loadWordlistSlice(wordlist)
+		if err != nil {
+			return err
+		}
+		_, err = runLayout(context.Background(), hybridLayout(words, sets, mc.maskFirst), 0, 1, &dummy, nil, emit)
 		return err
 	case "combinator":
 		if wordlist2 == "" {
 			return errors.New("combinator mode requires -w <left list> and --wordlist2 <right list>")
 		}
-		_, err := combinatorAttack(context.Background(), wordlist, wordlist2, 1, emit, &dummy)
+		left, _, err := loadWordlistSlice(wordlist)
+		if err != nil {
+			return err
+		}
+		right, _, err := loadWordlistSlice(wordlist2)
+		if err != nil {
+			return err
+		}
+		_, err = runLayout(context.Background(), combinatorLayout(left, right), 0, 1, &dummy, nil, emit)
 		return err
 	default: // dict
 		f, _, err := openWordlist(wordlist)

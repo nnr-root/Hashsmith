@@ -1,46 +1,38 @@
 package main
 
-import (
-	"context"
-	"os"
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
-func TestHybridAttackDirections(t *testing.T) {
-	dir := t.TempDir()
-	wl := filepath.Join(dir, "wl.txt")
-	if err := os.WriteFile(wl, []byte("password\nsummer\ndragon\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+func TestHybridLayout(t *testing.T) {
+	words := []string{"password", "summer"}
 	sets, err := parseMask(&maskConfig{mask: "?d?d"})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// append (word+mask): "summer" + "24"
-	var n int64
-	got, _ := hybridAttack(context.Background(), wl, sets, false, 4,
-		func(c string) bool { return c == "summer24" }, &n)
-	if got != "summer24" {
-		t.Errorf("append: got %q want summer24", got)
+	// append (word+mask): 2 words × 100 = 200
+	l := hybridLayout(words, sets, false)
+	if l.total != 200 {
+		t.Fatalf("total: want 200 got %d", l.total)
 	}
-
-	// prepend (mask+word): "24" + "dragon"
-	got, _ = hybridAttack(context.Background(), wl, sets, true, 4,
-		func(c string) bool { return c == "24dragon" }, &n)
-	if got != "24dragon" {
-		t.Errorf("prepend: got %q want 24dragon", got)
+	if c := l.candidate(0); c != "password00" {
+		t.Errorf("candidate(0): want password00 got %q", c)
 	}
-
-	// no match → empty, and the full keyspace was enumerated (3 words × 100)
-	n = 0
-	got, _ = hybridAttack(context.Background(), wl, sets, false, 4,
-		func(c string) bool { return false }, &n)
-	if got != "" {
-		t.Errorf("expected no match, got %q", got)
+	if c := l.candidate(99); c != "password99" {
+		t.Errorf("candidate(99): want password99 got %q", c)
 	}
-	if n != 300 {
-		t.Errorf("expected 300 attempts (3 words × 100), got %d", n)
+	if c := l.candidate(100); c != "summer00" {
+		t.Errorf("candidate(100): want summer00 got %q", c)
+	}
+	// prepend (mask+word)
+	lp := hybridLayout(words, sets, true)
+	if c := lp.candidate(100); c != "00summer" {
+		t.Errorf("prepend candidate(100): want 00summer got %q", c)
+	}
+	// full coverage is unique
+	seen := map[string]bool{}
+	for i := int64(0); i < l.total; i++ {
+		seen[l.candidate(i)] = true
+	}
+	if len(seen) != 200 {
+		t.Errorf("coverage: want 200 unique, got %d", len(seen))
 	}
 }

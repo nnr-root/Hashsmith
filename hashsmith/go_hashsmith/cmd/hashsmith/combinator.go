@@ -12,11 +12,7 @@ package main
 
 import (
 	"bufio"
-	"context"
-	"os"
 	"strings"
-	"sync"
-	"sync/atomic"
 )
 
 // loadWordlistSlice reads an entire wordlist into memory (trimmed, blanks
@@ -38,109 +34,14 @@ func loadWordlistSlice(path string) ([]string, string, error) {
 	return out, label, sc.Err()
 }
 
-func combinatorAttack(ctx context.Context, leftPath, rightPath string,
-	workers int, verify func(string) bool, atomicAttempts *int64) (string, error) {
-
-	right, _, err := loadWordlistSlice(rightPath)
-	if err != nil {
-		return "", err
+func combinatorLayout(left, right []string) *keyspaceLayout {
+	R := int64(len(right))
+	layout := &keyspaceLayout{total: int64(len(left)) * R}
+	if R == 0 || len(left) == 0 {
+		return layout
 	}
-	if len(right) == 0 {
-		return "", nil
+	layout.gen = func(i int64) string {
+		return left[i/R] + right[i%R]
 	}
-
-	f, label, err := openWordlist(leftPath)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	if label == defaultWordlistLabel {
-		clrYellow.Fprintf(os.Stderr, "No left wordlist supplied — using %s\n", label)
-	}
-
-	innerCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	batchCh := make(chan []string, workers*4)
-	resultCh := make(chan string, 1)
-
-	go func() {
-		defer close(batchCh)
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 1<<20), 1<<20)
-		cur := make([]string, 0, dictBatchSize)
-		for scanner.Scan() {
-			word := strings.TrimSpace(scanner.Text())
-			if word == "" {
-				continue
-			}
-			cur = append(cur, word)
-			if len(cur) >= dictBatchSize {
-				select {
-				case batchCh <- cur:
-					cur = make([]string, 0, dictBatchSize)
-				case <-innerCtx.Done():
-					return
-				}
-			}
-		}
-		if len(cur) > 0 {
-			select {
-			case batchCh <- cur:
-			case <-innerCtx.Done():
-			}
-		}
-	}()
-
-	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case <-innerCtx.Done():
-					return
-				case words, ok := <-batchCh:
-					if !ok {
-						return
-					}
-					for _, left := range words {
-						var local int64
-						iter := 0
-						for _, r := range right {
-							if iter++; iter >= ctxCheckEvery {
-								iter = 0
-								select {
-								case <-innerCtx.Done():
-									atomic.AddInt64(atomicAttempts, local)
-									return
-								default:
-								}
-							}
-							cand := left + r
-							local++
-							if verify(cand) {
-								atomic.AddInt64(atomicAttempts, local)
-								select {
-								case resultCh <- cand:
-								default:
-								}
-								cancel()
-								return
-							}
-						}
-						atomic.AddInt64(atomicAttempts, local)
-					}
-				}
-			}
-		}()
-	}
-	wg.Wait()
-	select {
-	case r := <-resultCh:
-		return r, nil
-	default:
-		return "", nil
-	}
+	return layout
 }

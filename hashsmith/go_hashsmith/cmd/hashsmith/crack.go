@@ -104,7 +104,7 @@ func runCrack(args []string) error {
 	potPath := fs.String("pot", "", "potfile path (default ~/.hashsmith/hashsmith.pot)")
 	noPot := fs.Bool("no-pot", false, "disable the potfile (do not read or record cracked hashes)")
 	showOnly := fs.Bool("show", false, "print already-cracked hashes from the potfile; do not attack")
-	sessName := fs.String("session", "", "named resumable session (brute/mask)")
+	sessName := fs.String("session", "", "named resumable session (brute/mask/markov/hybrid/combinator)")
 	restore := fs.String("restore", "", "alias for --session: resume a saved session by name")
 	wordlist2 := fs.String("wordlist2", "", "right-hand wordlist for -M combinator")
 	w2 := fs.String("w2", "", "alias for --wordlist2")
@@ -189,10 +189,16 @@ func crackTargets(targets []string, typ, mode, wordlist, charset string,
 	// Multi-hash acceleration: when several salt-independent raw-digest targets
 	// are given, hash each candidate once and check it against all of them. Only
 	// the targets multi-hash mode cannot handle are returned for per-target work.
+	uncracked := 0
 	if len(targets) > 1 && salt == "" {
-		targets = runBatch(targets, typ, mode, wordlist, charset,
+		var nb int
+		targets, nb = runBatch(targets, typ, mode, wordlist, charset,
 			minLen, maxLen, workers, saltMode, outFile, copyResult, rules, mc, cc)
+		uncracked += nb
 		if len(targets) == 0 {
+			if uncracked > 0 {
+				exitCode = 1
+			}
 			return nil
 		}
 		color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
@@ -203,14 +209,22 @@ func crackTargets(targets []string, typ, mode, wordlist, charset string,
 			color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
 				"\n══ [%d/%d] %s\n", i+1, len(targets), tgt)
 		}
-		err := crackWithDetection(tgt, typ, mode, wordlist, charset,
+		found, err := crackWithDetection(tgt, typ, mode, wordlist, charset,
 			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, rules, mc, cc)
 		if err != nil {
 			if len(targets) == 1 {
 				return err
 			}
 			clrRed.Fprintf(os.Stderr, "  error: %v\n", err)
+			uncracked++
+			continue
 		}
+		if !found {
+			uncracked++
+		}
+	}
+	if uncracked > 0 {
+		exitCode = 1
 	}
 	return nil
 }
@@ -227,6 +241,13 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 
 	start := time.Now()
 	var atomicAttempts int64
+
+	// Validate the type and hash format up front. The per-candidate verify loops
+	// ignore errors for speed, so without this an unknown type or malformed hash
+	// would silently "find nothing"; probing once surfaces it as a real error.
+	if _, err := verifyCandidate("hashsmith-probe", targetHash, typ, salt, saltMode); err != nil {
+		return false, err
+	}
 
 	// ── pre-count for progress bar ──────────────────────────────────────────
 	var total int64 = -1
@@ -270,7 +291,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	runCtx := context.Background()
 	var sess *sessionState
 	var resumeFrom int64
-	if cc != nil && cc.sessName != "" && (m == "brute" || m == "mask" || m == "markov") {
+	if cc != nil && cc.sessName != "" && (m == "brute" || m == "mask" || m == "markov" || m == "hybrid" || m == "combinator") {
 		var cancel context.CancelFunc
 		runCtx, cancel = context.WithCancel(context.Background())
 		sigCh := make(chan os.Signal, 1)
@@ -282,7 +303,8 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		if mc != nil {
 			maskStr, custom, inc = mc.mask, mc.custom, mc.increment
 		}
-		if cc.session.matches(m, typ, targetHash, charset, minLen, maxLen, maskStr, custom, inc, salt, saltMode) {
+		wl2 := cc.wordlist2
+		if cc.session.matches(m, typ, targetHash, charset, minLen, maxLen, maskStr, custom, inc, salt, saltMode, wordlist, wl2) {
 			sess = cc.session
 			resumeFrom = sess.Checkpoint
 			if resumeFrom > 0 {
@@ -294,7 +316,8 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				Name: cc.sessName, Mode: m, Type: typ, Target: targetHash,
 				Charset: charset, MinLen: minLen, MaxLen: maxLen,
 				Mask: maskStr, Custom: custom, Increment: inc,
-				Salt: salt, SaltMode: saltMode, path: sessionPath(cc.sessName),
+				Salt: salt, SaltMode: saltMode, Wordlist: wordlist, Wordlist2: wl2,
+				path: sessionPath(cc.sessName),
 			}
 		}
 	}
@@ -370,18 +393,33 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			tickCancel()
 			return false, e
 		}
+		words, _, e := loadWordlistSlice(wordlist)
+		if e != nil {
+			tickCancel()
+			return false, e
+		}
 		var pw string
-		pw, err = hybridAttack(runCtx, wordlist, sets, mc.maskFirst, workers, verifyFn, &atomicAttempts)
-		interrupted = runCtx.Err() != nil
+		pw, interrupted, err = runSessionLayout(runCtx, hybridLayout(words, sets, mc.maskFirst),
+			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
 		result = crackedResult{password: pw}
 	case "combinator":
 		if cc == nil || cc.wordlist2 == "" {
 			tickCancel()
 			return false, errors.New("combinator mode requires -w <left list> and --wordlist2 <right list>")
 		}
+		left, _, e1 := loadWordlistSlice(wordlist)
+		if e1 != nil {
+			tickCancel()
+			return false, e1
+		}
+		right, _, e2 := loadWordlistSlice(cc.wordlist2)
+		if e2 != nil {
+			tickCancel()
+			return false, e2
+		}
 		var pw string
-		pw, err = combinatorAttack(runCtx, wordlist, cc.wordlist2, workers, verifyFn, &atomicAttempts)
-		interrupted = runCtx.Err() != nil
+		pw, interrupted, err = runSessionLayout(runCtx, combinatorLayout(left, right),
+			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
 		result = crackedResult{password: pw}
 	default:
 		tickCancel()
@@ -460,15 +498,15 @@ func emitResult(pw, outFile string, copyResult bool) {
 
 // showPotEntry implements --show: report the potfile plaintext for a hash, if
 // one has been recorded, without running any attack.
-func showPotEntry(p *potfile, target, outFile string, copyResult bool) error {
+func showPotEntry(p *potfile, target, outFile string, copyResult bool) (bool, error) {
 	if pw, ok := p.lookup(target); ok {
 		clrGreen.Fprint(os.Stderr, "Found (potfile): ")
 		fmt.Fprintln(os.Stderr, pw)
 		emitResult(pw, outFile, copyResult)
-	} else {
-		clrYellow.Fprintln(os.Stderr, "Not in potfile")
+		return true, nil
 	}
-	return nil
+	clrYellow.Fprintln(os.Stderr, "Not in potfile")
+	return false, nil
 }
 
 // crackReport runs a single-type attack and prints "Not found" on failure.
@@ -498,7 +536,7 @@ func crackReport(targetHash, typ, mode, wordlist, charset string,
 // Base58/Base64-encoded hashes are normalized to hex first.
 func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
-	salt, saltMode, outFile string, copyResult bool, rules *ruleEngine, mc *maskConfig, cc *crackCtx) error {
+	salt, saltMode, outFile string, copyResult bool, rules *ruleEngine, mc *maskConfig, cc *crackCtx) (bool, error) {
 
 	target := strings.TrimSpace(rawTarget)
 	// A "user:hash" or raw /etc/shadow line (from shadow2smith) is
@@ -523,7 +561,7 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 			clrGreen.Fprint(os.Stderr, "Already cracked (potfile): ")
 			fmt.Fprintln(os.Stderr, pw)
 			emitResult(pw, outFile, copyResult)
-			return nil
+			return true, nil
 		}
 	}
 
@@ -533,7 +571,7 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 	} else {
 		types = detectHashTypes(target)
 		if len(types) == 0 {
-			return fmt.Errorf("could not auto-detect hash type — specify it with -t "+
+			return false, fmt.Errorf("could not auto-detect hash type — specify it with -t "+
 				"(try 'hashsmith identify -i %s' for analysis)", target)
 		}
 		if len(types) == 1 {
@@ -552,19 +590,19 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, rules, mc, cc)
 		if err != nil {
 			if len(types) == 1 {
-				return err
+				return false, err
 			}
 			// One candidate's hash format may be invalid; keep trying the rest.
 			clrYellow.Fprintf(os.Stderr, "  (%s not applicable: %v)\n", t, err)
 			continue
 		}
 		if found {
-			return nil
+			return true, nil
 		}
 	}
 
 	clrYellow.Fprintln(os.Stderr, "Not found")
-	return nil
+	return false, nil
 }
 
 // ── Dictionary attack — producer-consumer pipeline ───────────────────────────

@@ -61,6 +61,9 @@ hashsmith hashes.txt                          # cracks every hash in a file (one
 hashsmith crack 5f4dcc3b5aa765d61d8327deb882cf99   # same auto-detection via the crack command
 ```
 When the type is ambiguous (e.g. a 32-char hex could be MD5/MD4/NTLM) every candidate is tried in turn.
+
+`crack` sets a script-friendly **exit code**: `0` when every target was cracked,
+`1` when at least one was not, `2` on a usage or format error.
 Specifying `-t <type>` skips detection and is faster.
 
 Identify shortcut — `-i` takes an inline value (in `'…'` or `"…"`), a comma-list, or a file path:
@@ -266,6 +269,19 @@ worker attempt-counters are batched to avoid cache-line contention. Combined,
 these lift single-target MD5 brute-force from ~1.8 MH/s to ~20 MH/s on an 8-core
 laptop. Multi-hash mode (below) multiplies that further when cracking a dump.
 
+Measure throughput on your own machine with the `benchmark` command:
+
+```bash
+hashsmith benchmark                 # a common set of hash types
+hashsmith benchmark -t sha256       # a single type
+```
+```
+md5            20.42 MH/s
+sha256         14.05 MH/s
+ntlm            6.28 MH/s
+bcrypt         76.54 H/s
+```
+
 ## Multi-hash mode (crack a whole dump at once)
 
 Give `crack` a file of many hashes and Hashsmith automatically switches to
@@ -306,9 +322,10 @@ hashsmith crack -t md5 <hash> --no-pot   # ignore the potfile (always attack, do
 hashsmith crack -t md5 <hash> --pot my.pot   # use a custom potfile path
 ```
 
-Long brute-force and mask runs can be **checkpointed and resumed**. Name a run
-with `--session`; if it is interrupted (Ctrl-C), its progress is saved and
-`--restore` picks up exactly where it stopped:
+Long keyspace runs — **brute, mask, markov, hybrid, and combinator** — can be
+**checkpointed and resumed**. Name a run with `--session`; if it is interrupted
+(Ctrl-C), its progress is saved and `--restore` picks up exactly where it
+stopped:
 
 ```bash
 hashsmith crack -t md5 <hash> -M brute -C ?a -n 1 -x 8 --session bigrun

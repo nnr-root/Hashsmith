@@ -81,7 +81,7 @@ func allBatchable(typ, target string) ([]string, bool) {
 // reports and records results for the ones it does handle.
 func runBatch(targets []string, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int, saltMode, outFile string, copyResult bool,
-	rules *ruleEngine, mc *maskConfig, cc *crackCtx) []string {
+	rules *ruleEngine, mc *maskConfig, cc *crackCtx) ([]string, int) {
 
 	var batch []*batchTarget
 	var leftover []string
@@ -118,7 +118,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 	}
 
 	if len(batch) == 0 {
-		return leftover
+		return leftover, 0
 	}
 
 	color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
@@ -161,6 +161,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 
 	// Report and record.
 	var founds []string
+	uncracked := 0
 	for _, e := range batch {
 		if atomic.LoadInt32(&e.flag) == 1 {
 			clrGreen.Fprintf(os.Stderr, "  %s  =>  %s\n", e.norm, e.password)
@@ -170,6 +171,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 			founds = append(founds, e.norm+":"+e.password)
 		} else {
 			clrYellow.Fprintf(os.Stderr, "  %s  =>  (not found)\n", e.norm)
+			uncracked++
 		}
 	}
 	if outFile != "" && len(founds) > 0 {
@@ -177,7 +179,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 			clrGreen.Fprintf(os.Stderr, "Saved %d result(s) to %s\n", len(founds), outFile)
 		}
 	}
-	return leftover
+	return leftover, uncracked
 }
 
 // batchRunType runs one attack pass for a single type against all unfound
@@ -291,7 +293,9 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 	case "hybrid":
 		if mc != nil {
 			if sets, err := parseMask(mc); err == nil {
-				_, _ = hybridAttack(context.Background(), wordlist, sets, mc.maskFirst, workers, verify, &atomicAttempts)
+				if words, _, e := loadWordlistSlice(wordlist); e == nil {
+					_, _ = runLayout(context.Background(), hybridLayout(words, sets, mc.maskFirst), 0, workers, &atomicAttempts, nil, verify)
+				}
 			}
 		}
 	case "markov":
@@ -300,7 +304,11 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 		}
 	case "combinator":
 		if wordlist2 != "" {
-			_, _ = combinatorAttack(context.Background(), wordlist, wordlist2, workers, verify, &atomicAttempts)
+			if left, _, e1 := loadWordlistSlice(wordlist); e1 == nil {
+				if right, _, e2 := loadWordlistSlice(wordlist2); e2 == nil {
+					_, _ = runLayout(context.Background(), combinatorLayout(left, right), 0, workers, &atomicAttempts, nil, verify)
+				}
+			}
 		}
 	default: // dict
 		batchDictAttack(wordlist, verify, workers, rules, &atomicAttempts)

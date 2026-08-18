@@ -34,9 +34,30 @@ func openWordlist(path string) (io.ReadCloser, string, error) {
 	return f, path, nil
 }
 
+// wordlistCountable reports whether a wordlist can be pre-counted for the
+// progress bar without harm. Non-regular inputs — pipes, FIFOs, process
+// substitution (/dev/fd/N), stdin — are one-shot streams: reading them to count
+// lines would consume the data before the attack runs, so they are skipped (the
+// progress bar is simply left indeterminate). The embedded default re-reads from
+// memory and is always countable.
+func wordlistCountable(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return true
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.Mode().IsRegular()
+}
+
 // countWordlistLines counts the non-empty lines of a wordlist (embedded default
-// when path is empty) so the progress bar can show an accurate total.
+// when path is empty) so the progress bar can show an accurate total. It returns
+// -1 for non-seekable inputs, which must not be read twice (see wordlistCountable).
 func countWordlistLines(path string) (int64, error) {
+	if !wordlistCountable(path) {
+		return -1, nil
+	}
 	rc, _, err := openWordlist(path)
 	if err != nil {
 		return -1, err
