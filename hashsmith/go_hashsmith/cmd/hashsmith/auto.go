@@ -43,6 +43,11 @@ func runAuto(args []string) error {
 	cs3 := fs.String("3", "", "custom charset 3 (mask)")
 	cs4 := fs.String("4", "", "custom charset 4 (mask)")
 	increment := fs.Bool("increment", false, "mask increment mode")
+	potPath := fs.String("pot", "", "potfile path (default ~/.hashsmith/hashsmith.pot)")
+	noPot := fs.Bool("no-pot", false, "disable the potfile")
+	showOnly := fs.Bool("show", false, "print already-cracked hashes from the potfile; do not attack")
+	sessName := fs.String("session", "", "named resumable session (brute/mask)")
+	restore := fs.String("restore", "", "alias for --session")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -61,8 +66,16 @@ func runAuto(args []string) error {
 		w = runtime.NumCPU()
 	}
 	mc := buildMaskConfig(*maskStr, *cs1, *cs2, *cs3, *cs4, *increment, *minLen)
+	sn := *sessName
+	if sn == "" {
+		sn = *restore
+	}
+	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly)
+	if err != nil {
+		return err
+	}
 	return crackTargets(targets, *typ, *mode, wl, *charset,
-		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules, mc)
+		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules, mc, cc)
 }
 
 // looksLikeAutoTarget decides whether a bare, non-command argument should be

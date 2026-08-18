@@ -150,9 +150,68 @@ hashsmith hash.txt --wordlist rockyou.txt
 `-w x`, `-w=x`, `--wordlist x`, and `--wordlist=x` are all equivalent, and the
 hash/file target may appear anywhere among the flags.
 
+## Attack modes
+
+Choose the attack with `-M`:
+
+```bash
+# Dictionary (default) — try each word in a wordlist, optionally with mangling rules
+hashsmith crack -t md5 <hash> -w rockyou.txt
+hashsmith crack -t md5 <hash> -w rockyou.txt -r        # apply mangling rules
+
+# Brute-force — every combination over a charset, lengths -n..-x
+hashsmith crack -t md5 <hash> -M brute -C abcdefghijklmnopqrstuvwxyz -n 1 -x 6
+
+# Mask — a targeted brute-force where each position has its own charset
+hashsmith crack -t ntlm <hash> -M mask --mask '?u?l?l?l?l?d?d'
+```
+
+**Mask placeholders:** `?l` a-z · `?u` A-Z · `?d` 0-9 · `?s` symbols · `?a` all
+printable · `?h`/`?H` lower/upper hex · `?b` any byte. Define up to four custom
+sets with `-1`…`-4` (referenced as `?1`…`?4`), escape a literal `?` as `\?`, and
+any other character is a literal. `--increment` tries shorter lengths first.
+
+```bash
+hashsmith crack -t md5 <hash> -M mask --mask '?1?1?1?1' -1 '?l?d'   # 4 chars, each a-z or 0-9
+hashsmith crack -t md5 <hash> -M mask --mask '?a?a?a?a' --increment # lengths 1..4
+```
+
+## Potfile & resumable sessions
+
+Every cracked hash is recorded in a **potfile** (`~/.hashsmith/hashsmith.pot`)
+so later runs skip work already done:
+
+```bash
+hashsmith crack -t md5 <hash>            # cracks it and records hash → plaintext
+hashsmith crack -t md5 <hash>            # instantly reported from the potfile
+hashsmith crack -t md5 <hash> --show     # print the potfile plaintext; never attack
+hashsmith crack -t md5 <hash> --no-pot   # ignore the potfile (always attack, don't record)
+hashsmith crack -t md5 <hash> --pot my.pot   # use a custom potfile path
+```
+
+Long brute-force and mask runs can be **checkpointed and resumed**. Name a run
+with `--session`; if it is interrupted (Ctrl-C), its progress is saved and
+`--restore` picks up exactly where it stopped:
+
+```bash
+hashsmith crack -t md5 <hash> -M brute -C ?a -n 1 -x 8 --session bigrun
+# ^C  → "Interrupted — session "bigrun" saved at index 4153344/308915776"
+hashsmith crack -t md5 <hash> -M brute -C ?a -n 1 -x 8 --restore bigrun   # resumes
+
+hashsmith sessions                 # list saved sessions and their progress
+hashsmith sessions rm bigrun       # delete one
+hashsmith sessions clear           # delete all
+```
+
+A finished run (found or keyspace exhausted) removes its own session file.
+
 ## Commands
 
 - `encode`
+- `decode`
+- `hash`
+- `crack`
+- `identify`
 - `decode`
 - `hash`
 - `crack`

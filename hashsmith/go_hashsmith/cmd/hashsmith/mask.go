@@ -14,8 +14,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
-	"sync/atomic"
 )
 
 const (
@@ -174,81 +172,21 @@ func maskIdxToStr(index int64, sets [][]byte) string {
 	return string(out)
 }
 
-// maskAttack enumerates one mask keyspace across `workers` goroutines.
-func maskAttackFixed(ctx context.Context, targetHash, typ string, sets [][]byte,
-	workers int, salt, saltMode string, atomicAttempts *int64) (string, error) {
-
-	total := maskKeyspace(sets)
-	if total == 0 {
-		return "", nil
-	}
-	innerCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	resultCh := make(chan string, 1)
-	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func(wID int) {
-			defer wg.Done()
-			stride := int64(workers)
-			iter := 0
-			for idx := int64(wID); idx < total; idx += stride {
-				iter++
-				if iter >= ctxCheckEvery {
-					iter = 0
-					select {
-					case <-innerCtx.Done():
-						return
-					default:
-					}
-				}
-				cand := maskIdxToStr(idx, sets)
-				atomic.AddInt64(atomicAttempts, 1)
-				if ok, _ := verifyCandidate(cand, targetHash, typ, salt, saltMode); ok {
-					select {
-					case resultCh <- cand:
-					default:
-					}
-					cancel()
-					return
-				}
-			}
-		}(w)
-	}
-	wg.Wait()
-	select {
-	case pw := <-resultCh:
-		return pw, nil
-	default:
-		return "", nil
-	}
-}
-
-// maskAttack runs a mask, honouring increment mode (try shorter prefixes first).
+// maskAttack runs a mask across `workers` goroutines, honouring increment mode
+// (try shorter prefixes first). It is a thin wrapper over the shared keyspace
+// runner; doCrack drives the resumable/session-aware path directly.
 func maskAttack(ctx context.Context, targetHash, typ string, cfg *maskConfig,
 	workers int, salt, saltMode string, atomicAttempts *int64) (string, error) {
 
-	sets, err := parseMask(cfg)
+	layout, err := maskLayout(cfg)
 	if err != nil {
 		return "", err
 	}
-	if !cfg.increment {
-		return maskAttackFixed(ctx, targetHash, typ, sets, workers, salt, saltMode, atomicAttempts)
-	}
-	lo := cfg.incMin
-	if lo < 1 {
-		lo = 1
-	}
-	for l := lo; l <= len(sets); l++ {
-		pw, err := maskAttackFixed(ctx, targetHash, typ, sets[:l], workers, salt, saltMode, atomicAttempts)
-		if err != nil {
-			return "", err
-		}
-		if pw != "" {
-			return pw, nil
-		}
-	}
-	return "", nil
+	return runLayout(ctx, layout, 0, workers, atomicAttempts, nil,
+		func(c string) bool {
+			ok, _ := verifyCandidate(c, targetHash, typ, salt, saltMode)
+			return ok
+		})
 }
 
 // buildMaskConfig assembles a maskConfig from CLI flags (custom sets are

@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"runtime"
 	"strconv"
 	"strings"
@@ -43,6 +44,36 @@ type crackedResult struct {
 	ruleLabel string
 }
 
+// crackCtx carries cross-cutting run state — the potfile (skip / record cracked
+// hashes) and an optional resumable session — through the crack call chain.
+type crackCtx struct {
+	pot      *potfile
+	session  *sessionState // pre-loaded saved session (may be nil)
+	sessName string        // session name; "" disables sessions
+	showOnly bool          // --show: print potfile hits only, never attack
+}
+
+// newCrackCtx loads the potfile (unless disabled) and any saved session. A nil
+// return is never produced — a disabled potfile simply yields a nil p.pot.
+func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool) (*crackCtx, error) {
+	cc := &crackCtx{sessName: sessName, showOnly: showOnly}
+	if !noPot {
+		p, err := loadPotfile(potPath)
+		if err != nil {
+			return nil, err
+		}
+		cc.pot = p
+	}
+	if sessName != "" {
+		s, err := loadSession(sessName)
+		if err != nil {
+			return nil, err
+		}
+		cc.session = s
+	}
+	return cc, nil
+}
+
 // ── CLI entry ────────────────────────────────────────────────────────────────
 
 func runCrack(args []string) error {
@@ -67,6 +98,11 @@ func runCrack(args []string) error {
 	cs3 := fs.String("3", "", "custom charset 3 (mask -3)")
 	cs4 := fs.String("4", "", "custom charset 4 (mask -4)")
 	increment := fs.Bool("increment", false, "mask increment mode (try shorter lengths first)")
+	potPath := fs.String("pot", "", "potfile path (default ~/.hashsmith/hashsmith.pot)")
+	noPot := fs.Bool("no-pot", false, "disable the potfile (do not read or record cracked hashes)")
+	showOnly := fs.Bool("show", false, "print already-cracked hashes from the potfile; do not attack")
+	sessName := fs.String("session", "", "named resumable session (brute/mask)")
+	restore := fs.String("restore", "", "alias for --session: resume a saved session by name")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -87,22 +123,30 @@ func runCrack(args []string) error {
 		w = runtime.NumCPU()
 	}
 	mc := buildMaskConfig(*maskStr, *cs1, *cs2, *cs3, *cs4, *increment, *minLen)
+	sn := *sessName
+	if sn == "" {
+		sn = *restore
+	}
+	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly)
+	if err != nil {
+		return err
+	}
 	return crackTargets(targets, *typ, *mode, wl, *charset,
-		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules, mc)
+		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, *useRules, mc, cc)
 }
 
 // crackTargets runs crackWithDetection over one or more targets, printing a
 // header for each when several were supplied.
 func crackTargets(targets []string, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
-	salt, saltMode, outFile string, copyResult, useRules bool, mc *maskConfig) error {
+	salt, saltMode, outFile string, copyResult, useRules bool, mc *maskConfig, cc *crackCtx) error {
 	for i, tgt := range targets {
 		if len(targets) > 1 {
 			color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
 				"\n══ [%d/%d] %s\n", i+1, len(targets), tgt)
 		}
 		err := crackWithDetection(tgt, typ, mode, wordlist, charset,
-			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules, mc)
+			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules, mc, cc)
 		if err != nil {
 			if len(targets) == 1 {
 				return err
@@ -121,7 +165,7 @@ func crackTargets(targets []string, typ, mode, wordlist, charset string,
 // tried in sequence).
 func doCrack(targetHash, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
-	salt, saltMode, outFile string, copyResult bool, useRules bool, mc *maskConfig) (bool, error) {
+	salt, saltMode, outFile string, copyResult bool, useRules bool, mc *maskConfig, cc *crackCtx) (bool, error) {
 
 	start := time.Now()
 	var atomicAttempts int64
@@ -151,36 +195,82 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	go progressTicker(tickCtx, bar, &atomicAttempts)
 
 	// ── attack ──────────────────────────────────────────────────────────────
+	// A named session installs a SIGINT handler so Ctrl-C checkpoints progress
+	// and exits cleanly; without one the run uses a plain background context.
+	runCtx := context.Background()
+	var sess *sessionState
+	var resumeFrom int64
+	if cc != nil && cc.sessName != "" && (m == "brute" || m == "mask") {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithCancel(context.Background())
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt)
+		go func() { <-sigCh; cancel() }()
+		defer func() { signal.Stop(sigCh); cancel() }()
+
+		maskStr, custom, inc := "", [4]string{}, false
+		if mc != nil {
+			maskStr, custom, inc = mc.mask, mc.custom, mc.increment
+		}
+		if cc.session.matches(m, typ, targetHash, charset, minLen, maxLen, maskStr, custom, inc, salt, saltMode) {
+			sess = cc.session
+			resumeFrom = sess.Checkpoint
+			if resumeFrom > 0 {
+				clrYellow.Fprintf(os.Stderr, "Resuming session %q from index %d of %d\n",
+					cc.sessName, resumeFrom, sess.Total)
+			}
+		} else {
+			sess = &sessionState{
+				Name: cc.sessName, Mode: m, Type: typ, Target: targetHash,
+				Charset: charset, MinLen: minLen, MaxLen: maxLen,
+				Mask: maskStr, Custom: custom, Increment: inc,
+				Salt: salt, SaltMode: saltMode, path: sessionPath(cc.sessName),
+			}
+		}
+	}
+
+	verifyFn := func(c string) bool {
+		ok, _ := verifyCandidate(c, targetHash, typ, salt, saltMode)
+		return ok
+	}
+
 	var (
-		result crackedResult
-		err    error
+		result      crackedResult
+		err         error
+		interrupted bool
 	)
 	switch m {
 	case "dict":
 		// An empty wordlist path uses the built-in common.txt (see openWordlist).
-		result, err = dictAttack(context.Background(), wordlist,
+		result, err = dictAttack(runCtx, wordlist,
 			targetHash, typ, salt, saltMode, workers, &atomicAttempts, useRules)
+		interrupted = runCtx.Err() != nil
 	case "brute":
 		if minLen < 1 || maxLen < minLen {
 			tickCancel()
 			return false, errors.New("invalid -n/-x range")
 		}
 		var pw string
-		pw, err = bruteAttack(context.Background(), targetHash, typ,
-			charset, minLen, maxLen, workers, salt, saltMode, &atomicAttempts)
+		pw, interrupted, err = runSessionLayout(runCtx, bruteLayout(charset, minLen, maxLen),
+			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
 		result = crackedResult{password: pw}
 	case "mask":
 		if mc == nil {
 			tickCancel()
 			return false, errors.New("mask mode requires --mask <mask>")
 		}
+		layout, e := maskLayout(mc)
+		if e != nil {
+			tickCancel()
+			return false, e
+		}
 		var pw string
-		pw, err = maskAttack(context.Background(), targetHash, typ, mc,
-			workers, salt, saltMode, &atomicAttempts)
+		pw, interrupted, err = runSessionLayout(runCtx, layout,
+			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
 		result = crackedResult{password: pw}
 	default:
 		tickCancel()
-		return false, errors.New("unknown mode: use dict or brute")
+		return false, errors.New("unknown mode: use dict, brute or mask")
 	}
 
 	tickCancel()
@@ -198,6 +288,21 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	}
 
 	found := result.password != ""
+	if found && cc != nil {
+		cc.pot.add(targetHash, result.password)
+	}
+	// Session bookkeeping: keep (and re-save) the checkpoint on interrupt so the
+	// run can be resumed; otherwise the work is done — discard the session file.
+	if sess != nil {
+		if interrupted && !found {
+			_ = sess.save()
+			clrYellow.Fprintf(os.Stderr,
+				"Interrupted — session %q saved at index %d/%d (resume: hashsmith crack --restore %s ...)\n",
+				cc.sessName, sess.Checkpoint, sess.Total, cc.sessName)
+		} else {
+			sess.remove()
+		}
+	}
 	if found {
 		clrGreen.Fprint(os.Stderr, "Found: ")
 		if result.ruleLabel != "" {
@@ -225,13 +330,40 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	return found, nil
 }
 
+// emitResult writes an already-known password to the -o file and/or clipboard.
+// Shared by the potfile fast-path and --show, which skip the attack entirely.
+func emitResult(pw, outFile string, copyResult bool) {
+	if outFile != "" {
+		if err := os.WriteFile(outFile, []byte(pw+"\n"), 0644); err == nil {
+			clrGreen.Fprintf(os.Stderr, "Saved to %s\n", outFile)
+		}
+	}
+	if copyResult && copyToClipboard(pw) {
+		clrGreen.Fprintln(os.Stderr, "Copied to clipboard")
+	}
+}
+
+// showPotEntry implements --show: report the potfile plaintext for a hash, if
+// one has been recorded, without running any attack.
+func showPotEntry(p *potfile, target, outFile string, copyResult bool) error {
+	if pw, ok := p.lookup(target); ok {
+		clrGreen.Fprint(os.Stderr, "Found (potfile): ")
+		fmt.Fprintln(os.Stderr, pw)
+		emitResult(pw, outFile, copyResult)
+	} else {
+		clrYellow.Fprintln(os.Stderr, "Not in potfile")
+	}
+	return nil
+}
+
 // crackReport runs a single-type attack and prints "Not found" on failure.
 // Used by callers that already know the concrete hash type (interactive mode).
 func crackReport(targetHash, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
 	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
+	cc, _ := newCrackCtx("", false, "", false)
 	found, err := doCrack(targetHash, typ, mode, wordlist, charset,
-		minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules, nil)
+		minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules, nil, cc)
 	if err != nil {
 		return err
 	}
@@ -247,7 +379,7 @@ func crackReport(targetHash, typ, mode, wordlist, charset string,
 // Base58/Base64-encoded hashes are normalized to hex first.
 func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
-	salt, saltMode, outFile string, copyResult bool, useRules bool, mc *maskConfig) error {
+	salt, saltMode, outFile string, copyResult bool, useRules bool, mc *maskConfig, cc *crackCtx) error {
 
 	target := strings.TrimSpace(rawTarget)
 	// A "user:hash" or raw /etc/shadow line (from shadow2smith) is
@@ -260,6 +392,20 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 	if normalized, enc := normalizeHashInput(target); enc != "" {
 		clrYellow.Fprintf(os.Stderr, "Detected %s encoded hash — normalizing to hex\n", enc)
 		target = normalized
+	}
+
+	// --show reports the potfile entry (if any) for this hash and stops.
+	if cc != nil && cc.showOnly {
+		return showPotEntry(cc.pot, target, outFile, copyResult)
+	}
+	// A hash already in the potfile is reported without re-running the attack.
+	if cc != nil {
+		if pw, ok := cc.pot.lookup(target); ok {
+			clrGreen.Fprint(os.Stderr, "Already cracked (potfile): ")
+			fmt.Fprintln(os.Stderr, pw)
+			emitResult(pw, outFile, copyResult)
+			return nil
+		}
 	}
 
 	var types []string
@@ -284,7 +430,7 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 			color.New(themeAttr, color.Bold).Fprintf(os.Stderr, "\n→ Attempting as %s\n", t)
 		}
 		found, err := doCrack(target, t, mode, wordlist, charset,
-			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules, mc)
+			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, useRules, mc, cc)
 		if err != nil {
 			if len(types) == 1 {
 				return err
@@ -422,90 +568,6 @@ func dictAttack(ctx context.Context, wordlistPath, targetHash, typ, salt, saltMo
 	default:
 		return crackedResult{}, nil
 	}
-}
-
-// ── Brute-force attack — stride-based keyspace division ──────────────────────
-//
-// The keyspace for each length L is [0, base^L). Worker w processes indices
-// w, w+workers, w+2*workers, … giving every worker an independent, contiguous-
-// stride slice of the keyspace. No coordination channels needed — only one
-// atomic increment per attempt plus a non-blocking context check every
-// ctxCheckEvery iterations.
-
-func bruteAttack(ctx context.Context, targetHash, typ, charset string,
-	minLen, maxLen, workers int, salt, saltMode string,
-	atomicAttempts *int64) (string, error) {
-
-	chars := []rune(charset)
-	base := int64(len(chars))
-	if base == 0 {
-		return "", errors.New("charset must not be empty")
-	}
-
-	innerCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	resultCh := make(chan string, 1)
-	var wg sync.WaitGroup
-
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func(wID int) {
-			defer wg.Done()
-			stride := int64(workers)
-			for l := minLen; l <= maxLen; l++ {
-				// total candidates at this length
-				total := int64(1)
-				for i := 0; i < l; i++ {
-					total *= base
-				}
-				iter := 0
-				for idx := int64(wID); idx < total; idx += stride {
-					// non-blocking context poll every ctxCheckEvery iters
-					iter++
-					if iter >= ctxCheckEvery {
-						iter = 0
-						select {
-						case <-innerCtx.Done():
-							return
-						default:
-						}
-					}
-					candidate := idxToStr(idx, l, chars, base)
-					atomic.AddInt64(atomicAttempts, 1)
-					ok, _ := verifyCandidate(candidate, targetHash, typ, salt, saltMode)
-					if ok {
-						select {
-						case resultCh <- candidate:
-						default:
-						}
-						cancel()
-						return
-					}
-				}
-			}
-		}(w)
-	}
-
-	wg.Wait()
-	select {
-	case pass := <-resultCh:
-		return pass, nil
-	default:
-		return "", nil
-	}
-}
-
-// idxToStr converts a linear index in [0, base^length) to the corresponding
-// candidate string. Output is built as []byte (single allocation) since
-// cracking charsets are always ASCII; byte(r) is safe for runes < 128.
-func idxToStr(index int64, length int, chars []rune, base int64) string {
-	out := make([]byte, length)
-	for i := length - 1; i >= 0; i-- {
-		out[i] = byte(chars[index%base])
-		index /= base
-	}
-	return string(out)
 }
 
 // ── Progress ─────────────────────────────────────────────────────────────────

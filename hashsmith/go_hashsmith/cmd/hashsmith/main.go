@@ -127,6 +127,10 @@ func main() {
 		if err := runListTypes(rest); err != nil {
 			fail(err.Error())
 		}
+	case "sessions":
+		if err := runSessions(rest); err != nil {
+			fail(err.Error())
+		}
 	case "interactive":
 		if err := runInteractive(); err != nil {
 			fail(err.Error())
@@ -158,7 +162,8 @@ func printHelp() {
 	fmt.Println("  encode        -t <type> [-s shift] [-k key] [-r rails] [-o out] [-c]  INPUT...")
 	fmt.Println("  decode        -t <type> [-s shift] [-k key] [-r rails] [-o out] [-c]  INPUT...")
 	fmt.Println("  hash          -t <type> [-s salt] [-S prefix|suffix] [-e hex|base58] [-o out] [-c]  INPUT...")
-	fmt.Println("  crack         [-t <type|auto>] [-M dict|brute|mask] [-w wordlist] [--mask ?l?d..] [-1..-4 set] [--increment] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]  INPUT...")
+	fmt.Println("  crack         [-t <type|auto>] [-M dict|brute|mask] [-w wordlist] [--mask ?l?d..] [-1..-4 set] [--increment]")
+	fmt.Println("                [--session <name>] [--restore <name>] [--show] [--no-pot] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]  INPUT...")
 	fmt.Println("  types         list every supported -t hash type")
 	fmt.Println("  identify      [-o out] [-c]  INPUT...")
 	fmt.Println("  zip2smith     -f <zip-file>  [-o out] [-c]   (aliases: extract-hash, zip2hash)")
@@ -171,6 +176,7 @@ func printHelp() {
 	fmt.Println("  office2smith  -f <docx/xlsx> [-o out] [-c]   (encrypted Office 2013+ document)")
 	fmt.Println("  shadow2smith  <shadow> [passwd] [-o out] [-c]   (/etc/shadow → user:hash, files any order)")
 	fmt.Println("  luks2smith    -f <volume.luks> [-o out] [-c]    (LUKS v1 volume → crackable hash)")
+	fmt.Println("  sessions      list | rm <name> | clear   manage saved brute/mask sessions")
 	fmt.Println("  interactive   guided interactive mode")
 	fmt.Println()
 	fmt.Println("Global flags:")
