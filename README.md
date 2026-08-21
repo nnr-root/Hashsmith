@@ -47,6 +47,8 @@ Input is always **positional** — inline text, a quoted comma-list, or a file (
 hashsmith encode -t base64 "hello"
 hashsmith decode -t base64 "aGVsbG8="
 hashsmith hash -t sha256 "secret"
+hashsmith hash -t keccak256 -e base64url "secret"
+hashsmith encodings                                  # list every codec/transform
 hashsmith hash -t md5 "password, admin, letmein"    # comma-list → one hash per input
 hashsmith hash -t md5 words.txt                      # file → one hash per line
 hashsmith crack -t md5 5f4dcc3b5aa765d61d8327deb882cf99          # built-in common.txt wordlist
@@ -74,6 +76,31 @@ hashsmith -i hash.txt
 
 > Multi-input is comma-separated, so a single input that itself contains a comma should be given via a file (one line).
 
+### Encoding and decoding types
+
+Run `hashsmith encodings` (or `hashsmith codecs`) for the complete catalogue.
+Alongside Hex, Base32/58/62/64/85, URL, Morse, and the classical transforms,
+Hashsmith supports Base32hex, Crockford Base32 and z-base-32, Base36, RFC 9285
+Base45, Bitcoin/Flickr/Ripple Base58, Base58Check, Bech32/Bech32m, Z85, basE91,
+Bubble Babble, MIME/raw/padded Base64
+variants, PEM, gzip/zlib with Base64 transport, C-style hex escapes, Adobe
+ASCII85, JSON/form escaping, A1Z26, ROT5/13/18/47, and UTF-16/UTF-32 in both
+byte orders. Decoders accept
+practical variants such as unpadded Base32/Base64, embedded ASCII whitespace,
+and separated hexadecimal:
+
+```bash
+hashsmith encode -t base45 "Hello!!"             # %69 VD92EX0
+hashsmith decode -t z85 "HelloWorld"
+hashsmith encode -t base58check "payload"
+hashsmith encode -t base58ripple "XRP alphabet"
+hashsmith encode -t bubblebabble "pronounceable bytes"
+hashsmith encode -t bech32 -k hs "checksummed payload"
+hashsmith encode -t gzip "compress me"            # Base64-transported gzip
+hashsmith encode -t utf16le "Hashsmith"           # hexadecimal UTF-16LE bytes
+hashsmith decode -t hex "0x68:61:73:68-73 6d 69 74 68"
+```
+
 ### Hash types
 
 Hashsmith supports **100+ hash types**, and every one is validated against a
@@ -89,24 +116,37 @@ hashsmith crack -t md5 <hash> -s 12345678 -S prefix   # md5($salt . $pass)
 hashsmith crack -t md5-md5 <hash>                     # md5(hex(md5($pass)))
 hashsmith crack -t hmac-sha256 <hash>:<salt>          # HMAC-SHA256, key = password
 hashsmith crack -t hmac-sha256-saltkey <hash>:<salt>  # HMAC-SHA256, key = salt
+hashsmith hash -t sha512_256 -e base64url "secret"    # encode raw digest bytes
 hashsmith types                                       # list every supported -t type
 ```
 
 Covered today: the full **raw / salted / iterated / HMAC** digest family
-(MD4/MD5/SHA1/SHA2/SHA3/RIPEMD-160/BLAKE2b/BLAKE2s, salted with `-s`/`-S`, the
-`digest-digest` nested forms, and HMAC in both key-modes), the Unix crypt(3)
+(MD2/MD4/MD5/SHA-0/SHA1/SHA2/SHA3/SHAKE/SM3/Keccak/RIPEMD-160/BLAKE2b/BLAKE2s,
+salted with `-s`/`-S`, expanded `digest-digest` nested forms, and HMAC-MD5,
+SHA1/SHA2/SHA3/RIPEMD-160 in both key-modes), the Unix crypt(3)
 family (`descrypt`/`md5crypt`/`sha256crypt`/`sha512crypt`/`bcrypt`), MySQL, MSSQL,
-PostgreSQL, NTLM/NetNTLM, Kerberos, Argon2/scrypt, generic PBKDF2, and every
+PostgreSQL, LM/NTLM/NetNTLM, Kerberos, Argon2/scrypt, generic PBKDF2 with
+MD5/SHA1/SHA224/SHA256/SHA384/SHA512, GRUB2 PBKDF2-SHA512, and every
 encrypted-container format handled by the `*2smith` extractors.
 
-Application, device & framework hashes: **Django**, **phpass** (WordPress/phpBB3),
-**Drupal 7**, **MediaWiki**, **vBulletin**, **Redmine**, **LDAP** (`{SSHA*}`/`{SMD5}`),
-**Cisco-IOS 8/9**, **Cisco-PIX/ASA**, **Citrix NetScaler**, **Juniper NetScreen**,
+Raw additions include MD2, SHA-0, SM3, SHA-512/224, SHA-512/256, legacy
+Keccak-256/512, SHAKE128-256, SHAKE256-512, BLAKE2b-256/384, and legacy Windows
+LM. Explicit checksum modes cover CRC-32, CRC-32C, CRC-64/ECMA, Adler-32,
+FNV-1a 32/64, xxHash32/64, and MurmurHash3-32;
+because short checksums are highly ambiguous, specify those with `-t`.
+
+Application, device & framework hashes: **Django** (PBKDF2, scrypt, Argon2,
+bcrypt-SHA256, and legacy salted hashes), **phpass** (WordPress/phpBB3),
+**Drupal 7**, **MediaWiki**, **vBulletin**, **Redmine**, **LDAP** (`{SHA*}`/`{SSHA*}`/`{CRYPT}`),
+**Cisco-IOS 4/8/9**, **Cisco-PIX/ASA**, **Citrix NetScaler**, **Juniper NetScreen**,
 **macOS 10.8+** (`$ml$`), **Atlassian** (`{PKCS5S2}`), **JWT** (HMAC), **SIP digest**,
+**Python Passlib PBKDF2**, **Werkzeug PBKDF2/scrypt**, **ASP.NET Identity v2/v3**,
 **SolarWinds Orion**, and **Bitwarden** — all vector-tested.
 
-Database, auth & directory hashes: **MySQL**, **MSSQL**, **PostgreSQL** (incl.
-**SCRAM-SHA-256**), **MongoDB SCRAM-SHA-1**, **Sybase ASE**, **SAP CODVN B & F/G**,
+Database, auth & directory hashes: **MySQL** (3.23, 4.1+, and MySQL 8 `$A$`
+`caching_sha2_password`), **MSSQL**, **PostgreSQL** (incl. **SCRAM-SHA-256**),
+**MongoDB SCRAM-SHA-1/SHA-256** stored and server keys, Red Hat **389-DS
+`{PBKDF2_SHA256}`**, **Sybase ASE**, **SAP CODVN B & F/G**,
 **NTLM/NetNTLM**, **Kerberos**, Active Directory **DCC/DCC2** (mscash/mscash2),
 **CRAM-MD5**, **IPMI2 RAKP**, and **iSCSI CHAP** — all vector-tested.
 

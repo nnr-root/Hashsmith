@@ -4,17 +4,11 @@ package main
 //
 //	<algo>:<iterations>:<base64(salt)>:<base64(dk)>
 //
-// where algo is one of sha1, sha256, sha512, md5. The derived-key length is
-// taken from the stored digest.
+// where algo is one of md5, sha1, sha224, sha256, sha384, or sha512. The
+// derived-key length is taken from the stored digest.
 
 import (
-	"crypto/md5"
-	"crypto/sha1"
-	"crypto/sha256"
-	"crypto/sha512"
-	"encoding/base64"
 	"errors"
-	"hash"
 	"strconv"
 	"strings"
 
@@ -27,29 +21,20 @@ func verifyPBKDF2(targetHash, candidate string) (bool, error) {
 	if len(f) != 4 {
 		return false, errors.New("invalid PBKDF2 hash (need algo:iter:salt:dk)")
 	}
-	var newHash func() hash.Hash
-	switch strings.ToLower(f[0]) {
-	case "sha1":
-		newHash = sha1.New
-	case "sha256":
-		newHash = sha256.New
-	case "sha512":
-		newHash = sha512.New
-	case "md5":
-		newHash = md5.New
-	default:
+	newHash, ok := pbkdf2HashFactory(f[0])
+	if !ok {
 		return false, errors.New("unsupported PBKDF2 algorithm " + f[0])
 	}
 	iter, err := strconv.Atoi(f[1])
-	if err != nil || iter < 1 {
+	if err != nil || iter < 1 || iter > maxKDFIterations {
 		return false, errors.New("invalid PBKDF2 iteration count")
 	}
-	salt, err := base64.StdEncoding.DecodeString(f[2])
-	if err != nil {
+	salt, err := decodeBase64Flexible(f[2], false)
+	if err != nil || len(salt) > maxKDFFieldSize {
 		return false, errors.New("invalid PBKDF2 salt (base64)")
 	}
-	want, err := base64.StdEncoding.DecodeString(f[3])
-	if err != nil || len(want) == 0 {
+	want, err := decodeBase64Flexible(f[3], false)
+	if err != nil || len(want) == 0 || len(want) > maxKDFFieldSize {
 		return false, errors.New("invalid PBKDF2 digest (base64)")
 	}
 	got := pbkdf2.Key([]byte(candidate), salt, iter, len(want), newHash)
@@ -62,18 +47,19 @@ func isGenericPBKDF2(s string) bool {
 	if len(f) != 4 {
 		return false
 	}
-	switch strings.ToLower(f[0]) {
-	case "sha1", "sha256", "sha512", "md5":
-	default:
+	if _, ok := pbkdf2HashFactory(f[0]); !ok {
 		return false
 	}
-	if _, err := strconv.Atoi(f[1]); err != nil {
+	iterations, err := strconv.Atoi(f[1])
+	if err != nil || iterations < 1 || iterations > maxKDFIterations {
 		return false
 	}
-	if _, err := base64.StdEncoding.DecodeString(f[2]); err != nil {
+	salt, err := decodeBase64Flexible(f[2], false)
+	if err != nil || len(salt) > maxKDFFieldSize {
 		return false
 	}
-	if _, err := base64.StdEncoding.DecodeString(f[3]); err != nil {
+	digest, err := decodeBase64Flexible(f[3], false)
+	if err != nil || len(digest) == 0 || len(digest) > maxKDFFieldSize {
 		return false
 	}
 	return true

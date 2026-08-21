@@ -5,6 +5,7 @@ import (
 	"encoding/ascii85"
 	"encoding/base32"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -15,6 +16,7 @@ import (
 	"mime/quotedprintable"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 )
 
 func runEncode(args []string) error {
@@ -45,18 +47,44 @@ func runEncode(args []string) error {
 }
 
 func encodeText(text string, typ string, shift int, key string, rails int) (string, error) {
-	t := strings.ToLower(typ)
+	t := canonicalCodecType(typ)
 	switch t {
 	case "base64":
 		return base64.StdEncoding.EncodeToString([]byte(text)), nil
+	case "base64raw":
+		return base64.RawStdEncoding.EncodeToString([]byte(text)), nil
 	case "base64url":
 		return strings.TrimRight(base64.URLEncoding.EncodeToString([]byte(text)), "="), nil
+	case "base64url-padded":
+		return base64.URLEncoding.EncodeToString([]byte(text)), nil
+	case "base64-mime":
+		return encodeMIMEBase64([]byte(text)), nil
 	case "base32":
 		return base32.StdEncoding.EncodeToString([]byte(text)), nil
+	case "base32-nopad":
+		return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString([]byte(text)), nil
+	case "base32hex":
+		return base32.HexEncoding.EncodeToString([]byte(text)), nil
+	case "zbase32":
+		return encodeZBase32([]byte(text)), nil
+	case "base32crockford":
+		return encodeCrockford([]byte(text)), nil
+	case "base36":
+		return encodeBase36([]byte(text)), nil
+	case "base45":
+		return encodeBase45([]byte(text)), nil
 	case "base85":
 		out := make([]byte, ascii85.MaxEncodedLen(len(text)))
 		n := ascii85.Encode(out, []byte(text))
 		return string(out[:n]), nil
+	case "adobe85":
+		out := make([]byte, ascii85.MaxEncodedLen(len(text)))
+		n := ascii85.Encode(out, []byte(text))
+		return "<~" + string(out[:n]) + "~>", nil
+	case "z85":
+		return encodeZ85([]byte(text))
+	case "base91":
+		return encodeBase91([]byte(text)), nil
 	case "quoted-printable":
 		var buf bytes.Buffer
 		w := quotedprintable.NewWriter(&buf)
@@ -69,12 +97,28 @@ func encodeText(text string, typ string, shift int, key string, rails int) (stri
 		return uuEncode([]byte(text)), nil
 	case "base58":
 		return encodeBase58([]byte(text)), nil
+	case "base58flickr":
+		return encodeBase58WithAlphabet([]byte(text), flickrBase58Alphabet), nil
+	case "base58ripple":
+		return encodeBase58WithAlphabet([]byte(text), rippleBase58Alphabet), nil
+	case "base58check":
+		return encodeBase58Check([]byte(text)), nil
 	case "base62":
 		return encodeBase62([]byte(text)), nil
+	case "pem":
+		return encodePEM([]byte(text)), nil
+	case "bech32", "bech32m":
+		return encodeBech32([]byte(text), key, t)
+	case "gzip", "zlib":
+		return encodeCompressed([]byte(text), t)
+	case "bubblebabble":
+		return encodeBubbleBabble([]byte(text)), nil
 	case "nato":
 		return encodeNATO(text), nil
 	case "hex":
 		return hex.EncodeToString([]byte(text)), nil
+	case "hex-escape":
+		return encodeHexEscape([]byte(text)), nil
 	case "binary":
 		out := make([]string, 0, len(text))
 		for _, b := range []byte(text) {
@@ -97,10 +141,20 @@ func encodeText(text string, typ string, shift int, key string, rails int) (stri
 		return encodeMorse(text), nil
 	case "url":
 		return encodeURL(text), nil
+	case "url-form":
+		return formURLEncode(text), nil
+	case "json":
+		return jsonEscapeEncode(text), nil
 	case "caesar":
 		return caesar(text, shift), nil
 	case "rot13":
 		return caesar(text, 13), nil
+	case "rot5":
+		return rot5(text), nil
+	case "rot18":
+		return rot18(text), nil
+	case "rot47":
+		return rot47(text), nil
 	case "vigenere":
 		return vigenereEncode(text, key)
 	case "xor":
@@ -119,8 +173,18 @@ func encodeText(text string, typ string, shift int, key string, rails int) (stri
 		return railFenceEncode(text, rails)
 	case "polybius":
 		return polybiusEncode(text), nil
+	case "a1z26":
+		return a1z26Encode(text), nil
 	case "unicode":
 		return unicodeEscapeEncode(text), nil
+	case "utf16le":
+		return encodeUTF16Hex(text, binary.LittleEndian), nil
+	case "utf16be":
+		return encodeUTF16Hex(text, binary.BigEndian), nil
+	case "utf32le":
+		return encodeUTF32Hex(text, binary.LittleEndian), nil
+	case "utf32be":
+		return encodeUTF32Hex(text, binary.BigEndian), nil
 	default:
 		return "", errors.New("unsupported encode type")
 	}
@@ -128,7 +192,7 @@ func encodeText(text string, typ string, shift int, key string, rails int) (stri
 
 func encodeBase62(data []byte) string {
 	if len(data) == 0 {
-		return "0"
+		return ""
 	}
 	num := new(big.Int).SetBytes(data)
 	base := big.NewInt(62)
@@ -166,7 +230,7 @@ func encodeNATO(text string) string {
 
 func encodeBase58(data []byte) string {
 	if len(data) == 0 {
-		return "1"
+		return ""
 	}
 	num := new(big.Int).SetBytes(data)
 	base := big.NewInt(58)
@@ -395,8 +459,8 @@ func polybiusEncode(text string) string {
 
 func unicodeEscapeEncode(text string) string {
 	var out strings.Builder
-	for _, ch := range text {
-		out.WriteString(fmt.Sprintf("\\u%04x", ch))
+	for _, unit := range utf16.Encode([]rune(text)) {
+		fmt.Fprintf(&out, "\\u%04x", unit)
 	}
 	return out.String()
 }

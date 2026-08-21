@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/base32"
 	"encoding/base64"
 	"errors"
 	"flag"
@@ -23,6 +22,7 @@ var (
 	reBase64Std = regexp.MustCompile(`^[A-Za-z0-9+/]+=*$`)
 	reBase64URL = regexp.MustCompile(`^[A-Za-z0-9_-]+=*$`)
 	reBase32Std = regexp.MustCompile(`^[A-Z2-7]+=*$`)
+	reBase32Hex = regexp.MustCompile(`^[0-9A-V]+=*$`)
 	reBase58Pat = regexp.MustCompile(`^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$`)
 	reBase62Pat = regexp.MustCompile(`^[0-9A-Za-z]+$`)
 	reBcrypt    = regexp.MustCompile(`^\$2[aby]\$\d{2}\$`)
@@ -32,6 +32,8 @@ var (
 	reMySQL41   = regexp.MustCompile(`^\*[0-9a-fA-F]{40}$`)
 	reMSSQLNew  = regexp.MustCompile(`(?i)^0x0100[0-9a-fA-F]{48}$`)
 	reURLEnc    = regexp.MustCompile(`%[0-9a-fA-F]{2}`)
+	reJSONEsc   = regexp.MustCompile(`\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})`)
+	reHexEsc    = regexp.MustCompile(`(?:\\[xX][0-9a-fA-F]{2})`)
 	reJWT       = regexp.MustCompile(`^eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$`)
 	reUUID      = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	reNATOSep   = regexp.MustCompile(`[\s,]+`)
@@ -61,10 +63,10 @@ type candidate struct {
 func runIdentify(args []string) error {
 	fs := flag.NewFlagSet("identify", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	text     := fs.String("i", "", "hash text or file path")
+	text := fs.String("i", "", "hash text or file path")
 	filePath := fs.String("f", "", "file path (optional; -i also accepts a file)")
-	outFile  := fs.String("o", "", "output file")
-	copyRes  := fs.Bool("c", false, "copy to clipboard")
+	outFile := fs.String("o", "", "output file")
+	copyRes := fs.Bool("c", false, "copy to clipboard")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -101,7 +103,7 @@ func runIdentify(args []string) error {
 // collectIdentifyInputs resolves the identify target(s). Precedence:
 //  1. -f <file>            → every non-empty, non-comment line
 //  2. -i <value>           → a file's lines if the value is a readable file,
-//                            otherwise the literal value itself
+//     otherwise the literal value itself
 //  3. positional argument  → same flexible handling as -i
 //
 // This lets `-i` accept inline text ('…' / "…") or a file path (hash.txt)
@@ -257,6 +259,14 @@ func scoreCandidates(v string) []candidate {
 // carry an unambiguous structural signature, bypassing probabilistic scoring.
 func signatureMatch(v string) []candidate {
 	switch {
+	case isBubbleBabble(v):
+		return []candidate{{"Bubble Babble", 1000, "valid pronounceable Bubble Babble record"}}
+	case isBech32(v, "bech32"):
+		return []candidate{{"Bech32", 1000, "valid Bech32 polymod checksum"}}
+	case isBech32(v, "bech32m"):
+		return []candidate{{"Bech32m", 1000, "valid Bech32m polymod checksum"}}
+	case isPEMData(v):
+		return []candidate{{"PEM", 1000, "BEGIN/END block with valid Base64 payload"}}
 	case strings.HasPrefix(v, "$6$"):
 		return []candidate{{"sha512crypt (Unix $6$)", 1000, "$6$ prefix — glibc SHA-512 crypt shadow hash"}}
 	case strings.HasPrefix(v, "$5$"):
@@ -307,8 +317,10 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"Ansible Vault", 1000, "$ansible$ — PBKDF2-SHA256 + HMAC-SHA256"}}
 	case strings.HasPrefix(v, "$blockchain$"):
 		return []candidate{{"Blockchain.info My Wallet", 1000, "$blockchain$ — PBKDF2-SHA1 + AES-256-CBC"}}
+	case isMySQL8(v):
+		return []candidate{{"MySQL 8 caching_sha2_password", 1000, "$mysql$A$ — 20-byte-salt SHA-256-crypt record"}}
 	case strings.HasPrefix(v, "$mongodb-scram$"):
-		return []candidate{{"MongoDB SCRAM-SHA-1", 1000, "$mongodb-scram$ — PBKDF2-SHA1 + HMAC/SHA-1"}}
+		return []candidate{{"MongoDB SCRAM", 1000, "$mongodb-scram$ — SHA-1/SHA-256 stored or server key"}}
 	case strings.HasPrefix(v, "$solarwinds$"):
 		return []candidate{{"SolarWinds Orion", 1000, "$solarwinds$ — PBKDF2-SHA1 (1024) + SHA-512"}}
 	case strings.HasPrefix(v, "$sip$*"):
@@ -325,12 +337,22 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"Cisco-IOS type 8", 1000, "$8$ prefix — PBKDF2-HMAC-SHA256"}}
 	case strings.HasPrefix(v, "$9$") && len(v) == 61:
 		return []candidate{{"Cisco-IOS type 9", 1000, "$9$ prefix — scrypt"}}
+	case strings.HasPrefix(v, "$4$") && isCiscoType4(v):
+		return []candidate{{"Cisco-IOS type 4", 1000, "$4$ prefix — SHA-256 with Cisco Base64"}}
 	case strings.HasPrefix(v, "$ml$"):
 		return []candidate{{"macOS 10.8+ (PBKDF2-SHA512)", 1000, "$ml$ prefix — macOS ShadowHashData"}}
 	case strings.HasPrefix(v, "{PKCS5S2}"):
 		return []candidate{{"Atlassian (PBKDF2-HMAC-SHA1)", 1000, "{PKCS5S2} prefix — Jira/Confluence/Crowd"}}
 	case isGenericPBKDF2(v):
 		return []candidate{{"PBKDF2 (generic)", 1000, "algo:iter:salt:dk — PBKDF2-HMAC"}}
+	case isPasslibPBKDF2(v):
+		return []candidate{{"Passlib PBKDF2", 1000, "$pbkdf2-sha*$ modular format"}}
+	case isWerkzeug(v):
+		return []candidate{{"Werkzeug password hash", 1000, "PBKDF2/scrypt method$salt$checksum"}}
+	case isASPNetIdentity(v):
+		return []candidate{{"ASP.NET Identity", 1000, "versioned PBKDF2 binary payload in Base64"}}
+	case isGRUB2(v):
+		return []candidate{{"GRUB2 PBKDF2-SHA512", 1000, "grub.pbkdf2.sha512 signature"}}
 	case isOnePassword(v):
 		return []candidate{{"1Password Agile Keychain", 1000, "iter:salt:data — PBKDF2-SHA1 + AES-128-CBC"}}
 	case isIKE(v):
@@ -349,6 +371,8 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"IPMI2 RAKP (HMAC-SHA1)", 1000, "salt:hmac — BMC RAKP authentication"}}
 	case isChap(v):
 		return []candidate{{"iSCSI CHAP (MD5)", 900, "md5:challenge:id — CHAP authentication"}}
+	case isRedHat389PBKDF2(v):
+		return []candidate{{"Red Hat 389-DS PBKDF2-SHA256", 1000, "{PBKDF2_SHA256} — fixed binary PBKDF2 record"}}
 	case isLDAP(v):
 		return []candidate{{"LDAP salted digest", 1000, "{SSHA*}/{SMD5} — RFC 2307 salted hash"}}
 	case isSybaseASE(v):
@@ -398,7 +422,7 @@ func signatureMatch(v string) []candidate {
 // ── Group 1: Hex hash detection ───────────────────────────────────────────────
 
 func scoreHashGroup(v string, lv int, entropy float64, hexStr, lower, upper, hashLenHex bool, ch chan<- candidate) {
-	if !hexStr || !hashLenHex {
+	if !hexStr || (!hashLenHex && lv != 8) {
 		return
 	}
 
@@ -426,8 +450,13 @@ func scoreHashGroup(v string, lv int, entropy float64, hexStr, lower, upper, has
 	}
 
 	switch lv {
+	case 8:
+		ch <- candidate{"CRC-32 / CRC-32C / Adler-32", eb(58), fmt.Sprintf("8-char %s checksum-sized value", caseLabel)}
+		ch <- candidate{"FNV-1a / xxHash / Murmur3 32-bit", eb(42), fmt.Sprintf("8-char %s checksum-sized value", caseLabel)}
+
 	case 16:
 		ch <- candidate{"MySQL 3.x", eb(75), fmt.Sprintf("16-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"CRC-64 / FNV-1a / xxHash64 / Half-MD5", eb(48), fmt.Sprintf("16-char %s", caseLabel)}
 
 	case 32:
 		// NTLM hashes are typically stored as uppercase in Windows credential stores;
@@ -435,6 +464,7 @@ func scoreHashGroup(v string, lv int, entropy float64, hexStr, lower, upper, has
 		md5s := eb(80)
 		ntlm := eb(68)
 		md4s := eb(58)
+		lm := eb(52)
 		if lower {
 			md5s += 20
 			ntlm -= 15
@@ -442,35 +472,52 @@ func scoreHashGroup(v string, lv int, entropy float64, hexStr, lower, upper, has
 			ntlm += 20
 			md5s -= 5
 		}
-		ch <- candidate{"MD5",  math.Max(md5s, 0), fmt.Sprintf("32-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"MD5", math.Max(md5s, 0), fmt.Sprintf("32-char %s, entropy %.2f", caseLabel, entropy)}
 		ch <- candidate{"NTLM", math.Max(ntlm, 0), fmt.Sprintf("32-char %s, entropy %.2f", caseLabel, entropy)}
-		ch <- candidate{"MD4",  math.Max(md4s, 0), fmt.Sprintf("32-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"MD4", math.Max(md4s, 0), fmt.Sprintf("32-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"MD2", eb(42), fmt.Sprintf("32-char %s legacy digest", caseLabel)}
+		ch <- candidate{"LM (LAN Manager)", math.Max(lm, 0), fmt.Sprintf("32-char %s legacy Windows digest", caseLabel)}
 
 	case 40:
-		ch <- candidate{"SHA-1",      eb(80), fmt.Sprintf("40-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"SHA-1", eb(80), fmt.Sprintf("40-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"SHA-0", eb(44), fmt.Sprintf("40-char %s legacy digest", caseLabel)}
 		ch <- candidate{"RIPEMD-160", eb(62), fmt.Sprintf("40-char %s, entropy %.2f", caseLabel, entropy)}
 
 	case 56:
 		ch <- candidate{"SHA-224", eb(85), fmt.Sprintf("56-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"SHA-512/224", eb(63), fmt.Sprintf("56-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"SHA3-224", eb(58), fmt.Sprintf("56-char %s, entropy %.2f", caseLabel, entropy)}
 
 	case 64:
-		ch <- candidate{"SHA-256",  eb(85), fmt.Sprintf("64-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"SHA-256", eb(85), fmt.Sprintf("64-char %s, entropy %.2f", caseLabel, entropy)}
 		ch <- candidate{"SHA3-256", eb(65), fmt.Sprintf("64-char %s, entropy %.2f", caseLabel, entropy)}
-		ch <- candidate{"BLAKE2s",  eb(58), fmt.Sprintf("64-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"SM3", eb(55), fmt.Sprintf("64-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"BLAKE2s", eb(58), fmt.Sprintf("64-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"SHA-512/256", eb(54), fmt.Sprintf("64-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"Keccak-256", eb(52), fmt.Sprintf("64-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"BLAKE2b-256", eb(48), fmt.Sprintf("64-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"SHAKE128-256 / Streebog-256", eb(44), fmt.Sprintf("64-char %s", caseLabel)}
 
 	case 96:
 		ch <- candidate{"SHA-384", eb(85), fmt.Sprintf("96-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"SHA3-384", eb(62), fmt.Sprintf("96-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"BLAKE2b-384", eb(54), fmt.Sprintf("96-char %s, entropy %.2f", caseLabel, entropy)}
 
 	case 128:
-		ch <- candidate{"SHA-512",  eb(85), fmt.Sprintf("128-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"SHA-512", eb(85), fmt.Sprintf("128-char %s, entropy %.2f", caseLabel, entropy)}
 		ch <- candidate{"SHA3-512", eb(65), fmt.Sprintf("128-char %s, entropy %.2f", caseLabel, entropy)}
-		ch <- candidate{"BLAKE2b",  eb(58), fmt.Sprintf("128-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"BLAKE2b", eb(58), fmt.Sprintf("128-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"Keccak-512", eb(52), fmt.Sprintf("128-char %s, entropy %.2f", caseLabel, entropy)}
+		ch <- candidate{"SHAKE256-512 / Whirlpool / Streebog-512", eb(46), fmt.Sprintf("128-char %s", caseLabel)}
 	}
 }
 
 // ── Group 2: Encoding detection ───────────────────────────────────────────────
 
 func scoreEncodingGroup(v string, lv int, entropy float64, hexStr, hashLenHex bool, ch chan<- candidate) {
+	if isMIMEBase64(v) {
+		ch <- candidate{"MIME Base64", 92, "valid Base64 wrapped at 76 columns"}
+	}
 	// Hex encoding — skip known hash lengths (those are handled by hash group)
 	if hexStr && lv%2 == 0 && !hashLenHex {
 		s := 30.0
@@ -482,9 +529,13 @@ func scoreEncodingGroup(v string, lv int, entropy float64, hexStr, hashLenHex bo
 
 	// Base64 standard — skip all hex strings (hex ⊂ Base64 charset, would always match).
 	// Speculative: if decoded bytes length matches a known hash size, label specifically.
-	if !hexStr && reBase64Std.MatchString(v) && lv%4 == 0 {
-		if dec, err := base64.StdEncoding.DecodeString(v); err == nil {
-			if allPrintable(dec) {
+	if !hexStr && reBase64Std.MatchString(v) && lv%4 != 1 {
+		if dec, err := decodeBase64Flexible(v, false); err == nil {
+			if len(dec) >= 2 && dec[0] == 0x1f && dec[1] == 0x8b {
+				ch <- candidate{"Gzip + Base64", 96, "Base64 payload begins with gzip magic bytes"}
+			} else if looksLikeZlib(dec) {
+				ch <- candidate{"Zlib + Base64", 94, "Base64 payload has a valid zlib header"}
+			} else if allPrintable(dec) {
 				ch <- candidate{"Base64", 70, "decodes to printable text"}
 			} else if algos, ok := hashByteLengths[len(dec)]; ok {
 				for _, algo := range algos {
@@ -503,8 +554,7 @@ func scoreEncodingGroup(v string, lv int, entropy float64, hexStr, hashLenHex bo
 
 	// Base64 URL-safe — speculative hash detection; suppress generic "decodes successfully".
 	if !hexStr && reBase64URL.MatchString(v) && !strings.ContainsAny(v, "+/") {
-		padding := strings.Repeat("=", (4-lv%4)%4)
-		if dec, err := base64.URLEncoding.DecodeString(v + padding); err == nil {
+		if dec, err := decodeBase64Flexible(v, true); err == nil {
 			if allPrintable(dec) {
 				ch <- candidate{"Base64 URL", 55, "decodes to printable text"}
 			} else if algos, ok := hashByteLengths[len(dec)]; ok {
@@ -526,21 +576,62 @@ func scoreEncodingGroup(v string, lv int, entropy float64, hexStr, hashLenHex bo
 	// Base32
 	upper := strings.ToUpper(v)
 	if reBase32Std.MatchString(upper) {
-		if dec, err := base32.StdEncoding.DecodeString(upper); err == nil {
+		if dec, err := decodeBase32Flexible(upper, false); err == nil {
 			s := 40.0
 			reason := "decodes successfully"
 			if allPrintable(dec) {
 				s += 25
 				reason = "decodes to printable text"
 			}
-			ch <- candidate{"Base32", s, reason}
+			if algos, ok := hashByteLengths[len(dec)]; ok && !allPrintable(dec) {
+				for _, algo := range algos {
+					ch <- candidate{"Base32-encoded " + algo, 82,
+						fmt.Sprintf("decodes to %d bytes, matches %s digest size", len(dec), algo)}
+				}
+			} else {
+				ch <- candidate{"Base32", s, reason}
+			}
 		}
+	}
+
+	// Extended-hex Base32. Require a digit outside the standard Base32 alphabet
+	// to avoid reporting the same token as both alphabets.
+	if reBase32Hex.MatchString(upper) && strings.ContainsAny(upper, "0189") {
+		if dec, err := decodeBase32Flexible(upper, true); err == nil {
+			s, reason := 42.0, "valid extended-hex Base32"
+			if allPrintable(dec) {
+				s, reason = 67, "decodes to printable text"
+			}
+			ch <- candidate{"Base32hex", s, reason}
+		}
+	}
+
+	if isCrockfordCandidate(v) {
+		dec, _ := decodeCrockford(v)
+		score, reason := 48.0, "valid Crockford Base32 alphabet and padding bits"
+		if allPrintable(dec) {
+			score, reason = 72, "decodes to printable text"
+		}
+		ch <- candidate{"Crockford Base32", score, reason}
+	}
+	if isZBase32Candidate(v) {
+		dec, _ := decodeZBase32(v)
+		score, reason := 72.0, "canonical z-base-32 alphabet and padding bits"
+		if allPrintable(dec) {
+			score, reason = 170, "canonical form decodes to printable text"
+		}
+		ch <- candidate{"z-base-32", score, reason}
 	}
 
 	// Base58 — speculative: decode and cross-reference byte length against hash registry.
 	// Falls back to generic Base58 when no hash length matches.
 	if !hexStr && reBase58Pat.MatchString(v) && lv >= 8 {
 		speculativeHit := false
+		if payload, err := decodeBase58Check(v); err == nil {
+			speculativeHit = true
+			reason := fmt.Sprintf("valid double-SHA256 checksum over %d payload bytes", len(payload))
+			ch <- candidate{"Base58Check", 96, reason}
+		}
 		if b, err := decodeBase58(v); err == nil {
 			if algos, ok := hashByteLengths[len(b)]; ok {
 				speculativeHit = true
@@ -608,6 +699,37 @@ func scoreEncodingGroup(v string, lv int, entropy float64, hexStr, hashLenHex bo
 		ch <- candidate{"UU Encoded", 78, "length-prefixed UU line format"}
 	}
 
+	// Base45 and Z85 are block encodings with strict canonical forms. Their
+	// alphabets overlap normal text, so confidence stays conservative unless the
+	// decoded bytes are printable or the token contains encoding punctuation.
+	if lv >= 4 && lv%3 != 1 && strings.ContainsAny(v, "0123456789$%*+-./:") {
+		if dec, err := decodeBase45(v); err == nil && encodeBase45(dec) == v {
+			s := 38.0
+			if allPrintable(dec) {
+				s = 70
+			}
+			ch <- candidate{"Base45", s, "valid RFC 9285 groups"}
+		}
+	}
+	if lv >= 5 && lv%5 == 0 {
+		if dec, err := decodeZ85(v); err == nil {
+			s := 34.0
+			if allPrintable(dec) || strings.ContainsAny(v, ".-:+=^!/*?&<>()[]{}@%$#") {
+				s = 62
+			}
+			ch <- candidate{"Z85", s, "valid 5-character Z85 blocks"}
+		}
+	}
+	if lv >= 6 && countDistinctRunesFrom(v, "!#$%&()*+,./:;<=>?@[]^_`{|}~\"") >= 2 {
+		if dec, err := decodeBase91(v); err == nil && encodeBase91(dec) == v {
+			s := 48.0
+			if allPrintable(dec) {
+				s = 72
+			}
+			ch <- candidate{"basE91", s, "canonical basE91 alphabet and bit packing"}
+		}
+	}
+
 	// URL-encoded
 	if reURLEnc.MatchString(v) {
 		count := len(reURLEnc.FindAllString(v, -1))
@@ -615,6 +737,27 @@ func scoreEncodingGroup(v string, lv int, entropy float64, hexStr, hashLenHex bo
 			math.Min(30+float64(count)*8, 80),
 			fmt.Sprintf("%d %%XX sequences", count)}
 	}
+	if matches := reJSONEsc.FindAllString(v, -1); len(matches) > 0 {
+		ch <- candidate{"JSON String Escapes", math.Min(45+float64(len(matches))*8, 85),
+			fmt.Sprintf("%d JSON escape sequences", len(matches))}
+	}
+	if matches := reHexEsc.FindAllString(v, -1); len(matches) > 0 && len(matches)*4 == len(v) {
+		ch <- candidate{"C-style Hex Escapes", math.Min(55+float64(len(matches))*4, 92),
+			fmt.Sprintf("%d \\xNN byte escapes", len(matches))}
+	}
+	if !hexStr && isCiscoType4(v) {
+		ch <- candidate{"Cisco-IOS type 4", 36, "43-character Cisco crypt-64 SHA-256 value"}
+	}
+}
+
+func countDistinctRunesFrom(text, set string) int {
+	seen := make(map[rune]struct{})
+	for _, r := range text {
+		if strings.ContainsRune(set, r) {
+			seen[r] = struct{}{}
+		}
+	}
+	return len(seen)
 }
 
 // ── Group 3: Structural / cipher-format detection ─────────────────────────────
@@ -1130,9 +1273,10 @@ func isUUStr(s string) bool {
 // ── Backward-compat (used by crack auto-detection) ────────────────────────────
 
 // looksLikeCryptHash reports whether s is a bare Unix crypt(3) shadow hash:
-// a $-tagged scheme ($1$/$5$/$6$ or bcrypt $2[aby]$) or a 13-char descrypt.
+// a $-tagged scheme ($1$/$apr1$/$5$/$6$ or bcrypt $2[aby]$) or a 13-char
+// descrypt.
 func looksLikeCryptHash(s string) bool {
-	if strings.HasPrefix(s, "$1$") || strings.HasPrefix(s, "$5$") ||
+	if strings.HasPrefix(s, "$1$") || strings.HasPrefix(s, "$apr1$") || strings.HasPrefix(s, "$5$") ||
 		strings.HasPrefix(s, "$6$") || reBcrypt.MatchString(s) {
 		return true
 	}
@@ -1241,6 +1385,9 @@ func detectHashTypes(text string) []string {
 	if strings.HasPrefix(t, "$blockchain$") {
 		return []string{"blockchain"}
 	}
+	if isMySQL8(t) {
+		return []string{"mysql8"}
+	}
 	if strings.HasPrefix(t, "$axcrypt_sha1$") {
 		return []string{"axcrypt-sha1"}
 	}
@@ -1280,6 +1427,9 @@ func detectHashTypes(text string) []string {
 	if strings.HasPrefix(t, "$9$") && len(t) == 61 {
 		return []string{"cisco9"}
 	}
+	if strings.HasPrefix(t, "$4$") && isCiscoType4(t) {
+		return []string{"cisco4"}
+	}
 	if strings.HasPrefix(t, "$ml$") {
 		return []string{"macos"}
 	}
@@ -1291,6 +1441,18 @@ func detectHashTypes(text string) []string {
 	}
 	if isGenericPBKDF2(t) {
 		return []string{"pbkdf2"}
+	}
+	if isPasslibPBKDF2(t) {
+		return []string{"passlib-pbkdf2"}
+	}
+	if isWerkzeug(t) {
+		return []string{"werkzeug"}
+	}
+	if isASPNetIdentity(t) {
+		return []string{"aspnet-identity"}
+	}
+	if isGRUB2(t) {
+		return []string{"grub2"}
 	}
 	if isOnePassword(t) {
 		return []string{"1password"}
@@ -1321,6 +1483,9 @@ func detectHashTypes(text string) []string {
 	}
 	if isAIX(t) {
 		return []string{"aix"}
+	}
+	if isRedHat389PBKDF2(t) {
+		return []string{"ldap-pbkdf2"}
 	}
 	if isLDAP(t) {
 		return []string{"ldap"}
@@ -1392,21 +1557,21 @@ func detectHashTypes(text string) []string {
 	case 16:
 		return []string{"mysql323", "cisco-pix", "half-md5"}
 	case 32:
-		return []string{"md5", "md4", "ntlm"}
+		return []string{"md5", "md4", "md2", "ntlm", "lm"}
 	case 40:
-		return []string{"sha1", "ripemd160"}
+		return []string{"sha1", "sha0", "ripemd160"}
 	case 56:
-		return []string{"sha224"}
+		return []string{"sha224", "sha512_224", "sha3_224"}
 	case 60:
 		return []string{"oracle11g"}
 	case 160:
 		return []string{"oracle12c"}
 	case 64:
-		return []string{"sha256", "sha3_256", "blake2s", "streebog256"}
+		return []string{"sha256", "sha3_256", "sm3", "blake2s", "streebog256", "sha512_256", "keccak256", "shake128-256", "blake2b256"}
 	case 96:
-		return []string{"sha384"}
+		return []string{"sha384", "sha3_384", "blake2b384"}
 	case 128:
-		return []string{"sha512", "sha3_512", "blake2b", "whirlpool", "streebog512"}
+		return []string{"sha512", "sha3_512", "blake2b", "whirlpool", "streebog512", "keccak512", "shake256-512"}
 	default:
 		return nil
 	}

@@ -3,8 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/ascii85"
-	"encoding/base32"
-	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -15,6 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 )
 
 func runDecode(args []string) error {
@@ -45,34 +45,85 @@ func runDecode(args []string) error {
 }
 
 func decodeText(text string, typ string, shift int, key string, rails int) (string, error) {
-	t := strings.ToLower(typ)
+	t := canonicalCodecType(typ)
 	switch t {
-	case "base64":
-		b, err := base64.StdEncoding.DecodeString(text)
+	case "base64", "base64raw":
+		b, err := decodeBase64Flexible(text, false)
 		if err != nil {
 			return "", errors.New("invalid Base64 format provided")
 		}
 		return string(b), nil
-	case "base64url":
-		padding := strings.Repeat("=", (4-len(text)%4)%4)
-		b, err := base64.URLEncoding.DecodeString(text + padding)
+	case "base64url", "base64url-padded":
+		b, err := decodeBase64Flexible(text, true)
 		if err != nil {
 			return "", errors.New("invalid Base64URL format provided")
 		}
 		return string(b), nil
-	case "base32":
-		b, err := base32.StdEncoding.DecodeString(strings.ToUpper(text))
+	case "base64-mime":
+		b, err := decodeBase64Flexible(text, false)
+		if err != nil {
+			return "", errors.New("invalid MIME Base64 format provided")
+		}
+		return string(b), nil
+	case "base32", "base32-nopad":
+		b, err := decodeBase32Flexible(text, false)
 		if err != nil {
 			return "", errors.New("invalid Base32 format provided")
 		}
 		return string(b), nil
-	case "base85":
-		dst := make([]byte, len(text))
-		n, _, err := ascii85.Decode(dst, []byte(text), true)
+	case "base32hex":
+		b, err := decodeBase32Flexible(text, true)
+		if err != nil {
+			return "", errors.New("invalid Base32hex format provided")
+		}
+		return string(b), nil
+	case "zbase32":
+		b, err := decodeZBase32(text)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	case "base32crockford":
+		b, err := decodeCrockford(text)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	case "base36":
+		b, err := decodeBase36(text)
+		if err != nil {
+			return "", errors.New("invalid Base36 format provided")
+		}
+		return string(b), nil
+	case "base45":
+		b, err := decodeBase45(text)
+		if err != nil {
+			return "", errors.New("invalid Base45 format provided")
+		}
+		return string(b), nil
+	case "base85", "adobe85":
+		value := compactASCIIWhitespace(text)
+		if strings.HasPrefix(value, "<~") && strings.HasSuffix(value, "~>") {
+			value = value[2 : len(value)-2]
+		}
+		dst := make([]byte, len(value))
+		n, _, err := ascii85.Decode(dst, []byte(value), true)
 		if err != nil {
 			return "", errors.New("invalid Base85 format provided")
 		}
 		return string(dst[:n]), nil
+	case "z85":
+		b, err := decodeZ85(text)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	case "base91":
+		b, err := decodeBase91(text)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
 	case "quoted-printable":
 		r := quotedprintable.NewReader(strings.NewReader(text))
 		b, err := io.ReadAll(r)
@@ -94,18 +145,66 @@ func decodeText(text string, typ string, shift int, key string, rails int) (stri
 			return "", errors.New("invalid Base58 format provided")
 		}
 		return string(b), nil
+	case "base58flickr":
+		b, err := decodeBase58WithAlphabet(text, flickrBase58Alphabet)
+		if err != nil {
+			return "", errors.New("invalid Flickr Base58 format provided")
+		}
+		return string(b), nil
+	case "base58ripple":
+		b, err := decodeBase58WithAlphabet(text, rippleBase58Alphabet)
+		if err != nil {
+			return "", errors.New("invalid Ripple Base58 format provided")
+		}
+		return string(b), nil
+	case "base58check":
+		b, err := decodeBase58Check(text)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
 	case "base62":
 		b, err := decodeBase62(text)
 		if err != nil {
 			return "", errors.New("invalid Base62 format provided")
 		}
 		return string(b), nil
+	case "pem":
+		b, err := decodePEM(text)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	case "bech32", "bech32m":
+		b, _, err := decodeBech32(text, key, t)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	case "gzip", "zlib":
+		b, err := decodeCompressed(text, t)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	case "bubblebabble":
+		b, err := decodeBubbleBabble(text)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
 	case "nato":
 		return decodeNATO(text), nil
 	case "hex":
-		b, err := hex.DecodeString(text)
+		b, err := decodeCleanHex(text)
 		if err != nil {
 			return "", errors.New("invalid Hex format provided")
+		}
+		return string(b), nil
+	case "hex-escape":
+		b, err := decodeHexEscape(text)
+		if err != nil {
+			return "", err
 		}
 		return string(b), nil
 	case "binary":
@@ -145,10 +244,20 @@ func decodeText(text string, typ string, shift int, key string, rails int) (stri
 		return decodeMorse(text), nil
 	case "url":
 		return decodeURL(text), nil
+	case "url-form":
+		return formURLDecode(text)
+	case "json":
+		return jsonEscapeDecode(text)
 	case "caesar":
 		return caesar(text, -shift), nil
 	case "rot13":
 		return caesar(text, 13), nil
+	case "rot5":
+		return rot5(text), nil
+	case "rot18":
+		return rot18(text), nil
+	case "rot47":
+		return rot47(text), nil
 	case "vigenere":
 		return vigenereDecode(text, key)
 	case "xor":
@@ -167,8 +276,18 @@ func decodeText(text string, typ string, shift int, key string, rails int) (stri
 		return railFenceDecode(text, rails)
 	case "polybius":
 		return polybiusDecode(text)
+	case "a1z26":
+		return a1z26Decode(text)
 	case "unicode":
 		return unicodeEscapeDecode(text)
+	case "utf16le":
+		return decodeUTF16Hex(text, binary.LittleEndian)
+	case "utf16be":
+		return decodeUTF16Hex(text, binary.BigEndian)
+	case "utf32le":
+		return decodeUTF32Hex(text, binary.LittleEndian)
+	case "utf32be":
+		return decodeUTF32Hex(text, binary.BigEndian)
 	default:
 		return "", errors.New("unsupported decode type")
 	}
@@ -176,7 +295,7 @@ func decodeText(text string, typ string, shift int, key string, rails int) (stri
 
 func decodeBase62(text string) ([]byte, error) {
 	if text == "" {
-		return nil, errors.New("invalid")
+		return []byte{}, nil
 	}
 	num := big.NewInt(0)
 	base := big.NewInt(62)
@@ -490,19 +609,22 @@ func unicodeEscapeDecode(text string) (string, error) {
 	if len(text)%6 != 0 {
 		return "", errors.New("invalid Unicode escaped format provided")
 	}
-	var out strings.Builder
+	units := make([]uint16, 0, len(text)/6)
 	for i := 0; i < len(text); i += 6 {
 		chunk := text[i : i+6]
 		if !strings.HasPrefix(chunk, "\\u") {
 			return "", errors.New("invalid Unicode escaped format provided")
 		}
-		v, err := strconv.ParseInt(chunk[2:], 16, 32)
+		v, err := strconv.ParseUint(chunk[2:], 16, 16)
 		if err != nil {
 			return "", errors.New("invalid Unicode escaped format provided")
 		}
-		out.WriteRune(rune(v))
+		units = append(units, uint16(v))
 	}
-	return out.String(), nil
+	if !validUTF16(units) {
+		return "", errors.New("invalid Unicode surrogate sequence provided")
+	}
+	return string(utf16.Decode(units)), nil
 }
 
 func uuDecode(text string) ([]byte, error) {

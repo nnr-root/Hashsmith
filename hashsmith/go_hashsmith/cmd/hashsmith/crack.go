@@ -572,7 +572,8 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 			target[:strings.IndexByte(target, ':')])
 		target = stripped
 	}
-	if normalized, enc := normalizeHashInput(target); enc != "" {
+	skipNormalization := canonicalHashType(explicitType) == "cisco4"
+	if normalized, enc := normalizeHashInput(target); !skipNormalization && enc != "" {
 		clrYellow.Fprintf(os.Stderr, "Detected %s encoded hash — normalizing to hex\n", enc)
 		target = normalized
 	}
@@ -835,7 +836,7 @@ func calcBruteTotal(charset string, minLen, maxLen int) int64 {
 // ── Hash verification ─────────────────────────────────────────────────────────
 
 func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, error) {
-	algo := strings.ToLower(typ)
+	algo := canonicalHashType(typ)
 	switch algo {
 	case "bcrypt":
 		return bcrypt.CompareHashAndPassword([]byte(targetHash), []byte(candidate)) == nil, nil
@@ -885,6 +886,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyBitcoin(targetHash, candidate)
 	case "django":
 		return verifyDjango(targetHash, candidate)
+	case "mysql8":
+		return verifyMySQL8(targetHash, candidate)
 	case "veracrypt", "truecrypt":
 		return verifyVeraCrypt(targetHash, candidate)
 	case "bitlocker":
@@ -901,6 +904,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyCiscoType8(targetHash, candidate)
 	case "cisco9":
 		return verifyCiscoType9(targetHash, candidate)
+	case "cisco4":
+		return verifyCiscoType4(targetHash, candidate)
 	case "macos":
 		return verifyMacOS(targetHash, candidate)
 	case "atlassian":
@@ -909,6 +914,14 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyJWT(targetHash, candidate)
 	case "pbkdf2":
 		return verifyPBKDF2(targetHash, candidate)
+	case "passlib-pbkdf2":
+		return verifyPasslibPBKDF2(targetHash, candidate)
+	case "werkzeug":
+		return verifyWerkzeug(targetHash, candidate)
+	case "aspnet-identity":
+		return verifyASPNetIdentity(targetHash, candidate)
+	case "grub2":
+		return verifyGRUB2(targetHash, candidate)
 	case "mediawiki":
 		return verifyMediaWiki(targetHash, candidate)
 	case "vbulletin":
@@ -943,6 +956,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyChap(targetHash, candidate)
 	case "ldap":
 		return verifyLDAP(targetHash, candidate)
+	case "ldap-pbkdf2":
+		return verifyRedHat389PBKDF2(targetHash, candidate)
 	case "bitwarden":
 		return verifyBitwarden(targetHash, candidate)
 	case "mongodb":

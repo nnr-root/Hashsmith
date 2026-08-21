@@ -2,6 +2,7 @@ package main
 
 // Cisco IOS password hashes:
 //
+//	<hash>             type 4 — raw SHA-256 with Cisco crypt-64 encoding
 //	$8$<salt>$<hash>   type 8 — PBKDF2-HMAC-SHA256, 20000 iterations
 //	$9$<salt>$<hash>   type 9 — scrypt (N=16384, r=1, p=1)
 //
@@ -16,6 +17,34 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/crypto/scrypt"
 )
+
+// verifyCiscoType4 checks the unsalted 43-character IOS type 4 value.
+func verifyCiscoType4(targetHash, candidate string) (bool, error) {
+	target := strings.TrimPrefix(targetHash, "$4$")
+	if len(target) != 43 {
+		return false, errors.New("invalid Cisco type 4 hash length")
+	}
+	for i := range target {
+		if strings.IndexByte(itoa64, target[i]) < 0 {
+			return false, errors.New("invalid Cisco type 4 character")
+		}
+	}
+	digest := sha256.Sum256([]byte(candidate))
+	return cryptB64MSB(digest[:])[:43] == target, nil
+}
+
+func isCiscoType4(target string) bool {
+	target = strings.TrimPrefix(target, "$4$")
+	if len(target) != 43 {
+		return false
+	}
+	for i := range target {
+		if strings.IndexByte(itoa64, target[i]) < 0 {
+			return false
+		}
+	}
+	return true
+}
 
 // cryptB64MSB encodes bytes with the crypt-64 alphabet, MSB-first per 3-byte
 // group (as used by Cisco type 8/9, distinct from the LSB-first crypt output).

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +16,17 @@ var (
 	errQuit = errors.New("quit")
 	errBack = errors.New("back")
 )
+
+var interactiveCodecTypes = []string{
+	"base64", "base64raw", "base64url", "base64url-padded", "base32", "base32-nopad",
+	"base64-mime", "base32hex", "base32crockford", "zbase32", "base36", "base45", "base58",
+	"base58flickr", "base58ripple", "base58check", "base62", "base85", "adobe85", "z85", "base91",
+	"pem", "bech32", "bech32m", "gzip", "zlib", "bubblebabble",
+	"quoted-printable", "html-entities", "json", "uu", "hex", "hex-escape", "binary", "decimal", "octal",
+	"utf16le", "utf16be", "utf32le", "utf32be", "unicode", "url", "url-form",
+	"morse", "nato", "a1z26", "caesar", "rot5", "rot13", "rot18", "rot47", "vigenere", "xor", "atbash",
+	"baconian", "leet", "reverse", "brainf*ck", "railfence", "polybius",
+}
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -249,13 +259,7 @@ func readMenuLine(reader *bufio.Reader) (string, error) {
 // ── Sub-actions ───────────────────────────────────────────────────────────────
 
 func interactiveEncode(reader *bufio.Reader) error {
-	encTypes := []string{
-		"base64", "base64url", "base32", "base85", "quoted-printable",
-		"html-entities", "uu", "base58", "base62", "hex", "binary", "decimal", "octal",
-		"morse", "nato", "url", "caesar", "rot13", "vigenere", "xor", "atbash",
-		"baconian", "leet", "reverse", "brainf*ck", "railfence", "polybius", "unicode",
-	}
-	encType, err := chooseOption(reader, "Encoding type", encTypes, 1)
+	encType, err := chooseOption(reader, "Encoding type", interactiveCodecTypes, 1)
 	if err != nil {
 		return err
 	}
@@ -283,13 +287,7 @@ func interactiveEncode(reader *bufio.Reader) error {
 }
 
 func interactiveDecode(reader *bufio.Reader) error {
-	decTypes := []string{
-		"base64", "base64url", "base32", "base85", "quoted-printable",
-		"html-entities", "uu", "base58", "base62", "hex", "binary", "decimal", "octal",
-		"morse", "nato", "url", "caesar", "rot13", "vigenere", "xor", "atbash",
-		"baconian", "leet", "reverse", "brainf*ck", "railfence", "polybius", "unicode",
-	}
-	decType, err := chooseOption(reader, "Decoding type", decTypes, 1)
+	decType, err := chooseOption(reader, "Decoding type", interactiveCodecTypes, 1)
 	if err != nil {
 		return err
 	}
@@ -318,12 +316,18 @@ func interactiveDecode(reader *bufio.Reader) error {
 
 func interactiveHash(reader *bufio.Reader) error {
 	hashTypes := []string{
-		"md5", "md4", "sha1", "sha224", "sha256", "sha384", "sha512",
-		"sha3_224", "sha3_256", "sha3_512", "blake2b", "blake2s", "ripemd160",
-		"ntlm", "mysql323", "mysql41", "bcrypt", "argon2", "scrypt",
+		"md2", "md4", "md5", "sha0", "sha1", "sha224", "sha256", "sha384", "sha512",
+		"sha512_224", "sha512_256", "sha3_224", "sha3_256", "sha3_384", "sha3_512",
+		"keccak256", "keccak512", "shake128-256", "shake256-512",
+		"blake2b", "blake2b256", "blake2b384", "blake2s", "ripemd160", "sm3",
+		"ntlm", "lm", "crc32", "crc32c", "crc64", "adler32", "fnv1a32", "fnv1a64",
+		"xxhash32", "xxhash64", "murmur3-32", "md5-md5", "sha1-sha1", "sha256-sha256",
+		"sha512-sha512", "sha3_256-sha3_256", "hmac-md5", "hmac-sha1", "hmac-sha224",
+		"hmac-sha256", "hmac-sha384", "hmac-sha512", "hmac-sha3_256", "hmac-sha3_512",
+		"mysql323", "mysql41", "mysql8", "ldap-pbkdf2", "bcrypt", "argon2", "scrypt",
 		"mssql2000", "mssql2005", "mssql2012", "postgres",
 	}
-	hashType, err := chooseOption(reader, "Hash type", hashTypes, 3) // default sha1
+	hashType, err := chooseOption(reader, "Hash type", hashTypes, 5) // default sha1
 	if err != nil {
 		return err
 	}
@@ -365,7 +369,11 @@ func interactiveHash(reader *bufio.Reader) error {
 		}
 	}
 
-	outEnc, err := chooseOption(reader, "Output encoding", []string{"hex", "base58"}, 1)
+	outEnc, err := chooseOption(reader, "Output encoding", []string{
+		"hex", "base64", "base64url", "base64-mime", "base32", "base32crockford",
+		"base58", "base58flickr", "base58ripple", "base58check", "base62", "base85", "base91",
+		"pem", "gzip", "zlib", "bubblebabble",
+	}, 1)
 	if err != nil {
 		return err
 	}
@@ -374,17 +382,9 @@ func interactiveHash(reader *bufio.Reader) error {
 	if err != nil {
 		return err
 	}
-	if outEnc == "base58" {
-		hv := result
-		if strings.HasPrefix(strings.ToLower(hv), "0x") {
-			hv = hv[2:]
-		}
-		if isHex(hv) && len(hv)%2 == 0 {
-			b, e := hex.DecodeString(hv)
-			if e == nil {
-				result = encodeBase58(b)
-			}
-		}
+	result, err = encodeHashOutput(result, outEnc)
+	if err != nil {
+		return err
 	}
 
 	outFile, copyOut, err := askOutput(reader)
@@ -406,11 +406,18 @@ func interactiveIdentify(reader *bufio.Reader) error {
 
 func interactiveCrack(reader *bufio.Reader) error {
 	hashTypes := []string{
-		"auto", "md5", "md4", "sha1", "sha224", "sha256", "sha384", "sha512",
-		"sha3_224", "sha3_256", "sha3_512", "blake2b", "blake2s", "ripemd160",
-		"ntlm", "mysql323", "mysql41", "bcrypt", "argon2", "scrypt",
+		"auto", "md2", "md4", "md5", "sha0", "sha1", "sha224", "sha256", "sha384", "sha512",
+		"sha512_224", "sha512_256", "sha3_224", "sha3_256", "sha3_384", "sha3_512",
+		"keccak256", "keccak512", "shake128-256", "shake256-512",
+		"blake2b", "blake2b256", "blake2b384", "blake2s", "ripemd160", "sm3",
+		"ntlm", "lm", "crc32", "crc32c", "crc64", "adler32", "fnv1a32", "fnv1a64",
+		"xxhash32", "xxhash64", "murmur3-32", "md5-md5", "sha1-sha1", "sha256-sha256",
+		"sha512-sha512", "sha3_256-sha3_256", "hmac-md5", "hmac-sha1", "hmac-sha224",
+		"hmac-sha256", "hmac-sha384", "hmac-sha512", "hmac-sha3_256", "hmac-sha3_512",
+		"mysql323", "mysql41", "mysql8", "bcrypt", "argon2", "scrypt",
 		"mssql2000", "mssql2005", "mssql2012", "postgres",
 		"netntlmv1", "netntlmv2", "krb5asrep", "krb5tgs",
+		"cisco4", "grub2", "ldap", "ldap-pbkdf2", "passlib-pbkdf2", "werkzeug", "aspnet-identity",
 		"ssh", "pkcs8", "gpg", "office", "keepass",
 	}
 	hashType, err := chooseOption(reader, "Hash type", hashTypes, 1) // default auto
@@ -427,7 +434,7 @@ func interactiveCrack(reader *bufio.Reader) error {
 	}
 
 	// Preprocessing: normalize Base58/Base64 encoded hash bytes to hex.
-	if normalized, enc := normalizeHashInput(targetHash); enc != "" {
+	if normalized, enc := normalizeHashInput(targetHash); hashType != "cisco4" && enc != "" {
 		color.New(themeAttr).Fprintf(os.Stderr,
 			"Detected %s encoded target — normalizing for attack...\n", enc)
 		targetHash = normalized
@@ -881,6 +888,8 @@ func askAlgoParams(reader *bufio.Reader, typ string) (shift int, key string, rai
 		if err == nil && key == "" {
 			err = fmt.Errorf("%s requires a key", typ)
 		}
+	case "bech32", "bech32m":
+		key, err = askText(reader, "Human-readable prefix (HRP)", "hs")
 	case "railfence":
 		rails, err = askInt(reader, "Rails", 2)
 		if err == nil && rails < 2 {

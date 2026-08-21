@@ -27,17 +27,24 @@ import (
 
 // batchableTypes are the raw digests whose value depends only on the candidate.
 var batchableTypes = map[string]bool{
-	"md4": true, "md5": true, "sha1": true, "sha224": true, "sha256": true,
+	"md2": true, "md4": true, "md5": true, "sha0": true, "sha1": true,
+	"sha224": true, "sha256": true,
 	"sha384": true, "sha512": true, "sha3_224": true, "sha3_256": true,
 	"sha3_384": true, "sha3_512": true, "ripemd160": true, "whirlpool": true,
 	"streebog256": true, "streebog512": true, "blake2b": true, "blake2s": true,
-	"ntlm": true, "mysql323": true, "mysql41": true, "mssql2000": true,
+	"sha512_224": true, "sha512_256": true, "keccak256": true, "keccak512": true,
+	"shake128-256": true, "shake256-512": true, "blake2b256": true, "blake2b384": true,
+	"ntlm": true, "lm": true, "crc32": true, "crc32c": true, "crc64": true,
+	"adler32": true, "fnv1a32": true, "fnv1a64": true, "sm3": true,
+	"xxhash32": true, "xxhash64": true, "murmur3-32": true,
+	"mysql323": true, "mysql41": true, "mssql2000": true,
 	"md5-md5": true, "sha1-sha1": true, "sha256-sha256": true,
+	"sha512-sha512": true, "sha3_256-sha3_256": true,
 }
 
 // rawDigest returns a candidate→lowercase-hex function for a batchable type.
 func rawDigest(typ string) func(string) string {
-	algo := strings.ToLower(typ)
+	algo := canonicalHashType(typ)
 	return func(c string) string {
 		h, err := hashText(c, algo, "", "prefix")
 		if err != nil {
@@ -61,7 +68,7 @@ type batchTarget struct {
 func allBatchable(typ, target string) ([]string, bool) {
 	var cands []string
 	if typ != "" && !strings.EqualFold(typ, "auto") {
-		cands = []string{strings.ToLower(typ)}
+		cands = []string{canonicalHashType(typ)}
 	} else {
 		cands = detectHashTypes(target)
 	}
@@ -69,7 +76,7 @@ func allBatchable(typ, target string) ([]string, bool) {
 		return nil, false
 	}
 	for _, c := range cands {
-		if !batchableTypes[strings.ToLower(c)] {
+		if !batchableTypes[canonicalHashType(c)] {
 			return nil, false
 		}
 	}

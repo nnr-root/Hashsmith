@@ -164,6 +164,13 @@ const (
 // controls whether the "rounds=" field is emitted in the output string (it is
 // omitted for the default, matching glibc). Salt is truncated to 16 bytes.
 func shaCryptRaw(p shaCryptParams, password, salt string, rounds int, roundsExplicit bool) string {
+	return shaCryptRawWithSaltLimit(p, password, salt, rounds, roundsExplicit, 16)
+}
+
+// shaCryptRawWithSaltLimit is the shared SHA-crypt core. MySQL 8's
+// caching_sha2_password record deliberately uses a 20-byte salt, while the
+// normal crypt(3) formats cap it at 16 bytes.
+func shaCryptRawWithSaltLimit(p shaCryptParams, password, salt string, rounds int, roundsExplicit bool, saltLimit int) string {
 	if rounds <= 0 {
 		rounds = shaCryptDefaultRounds
 	}
@@ -173,8 +180,8 @@ func shaCryptRaw(p shaCryptParams, password, salt string, rounds int, roundsExpl
 	if rounds > shaCryptMaxRounds {
 		rounds = shaCryptMaxRounds
 	}
-	if len(salt) > 16 {
-		salt = salt[:16]
+	if saltLimit > 0 && len(salt) > saltLimit {
+		salt = salt[:saltLimit]
 	}
 	pw := []byte(password)
 	sb := []byte(salt)

@@ -131,6 +131,10 @@ func main() {
 		if err := runListTypes(rest); err != nil {
 			fail(err.Error())
 		}
+	case "encodings", "codecs", "list-encodings":
+		if err := runListEncodings(rest); err != nil {
+			fail(err.Error())
+		}
 	case "sessions":
 		if err := runSessions(rest); err != nil {
 			fail(err.Error())
@@ -178,10 +182,11 @@ func printHelp() {
 	fmt.Println("Commands (INPUT is text, a quoted comma-list \"a, b, c\", or a file with one input per line):")
 	fmt.Println("  encode        -t <type> [-s shift] [-k key] [-r rails] [-o out] [-c]  INPUT...")
 	fmt.Println("  decode        -t <type> [-s shift] [-k key] [-r rails] [-o out] [-c]  INPUT...")
-	fmt.Println("  hash          -t <type> [-s salt] [-S prefix|suffix] [-e hex|base58] [-o out] [-c]  INPUT...")
+	fmt.Println("  hash          -t <type> [-s salt] [-S prefix|suffix] [-e encoding] [-o out] [-c]  INPUT...")
 	fmt.Println("  crack         [-t <type|auto>] [-M dict|brute|mask|markov|hybrid|combinator] [-w wordlist] [--wordlist2 list2] [-r | --rules <file>] [--mask ?l?d..] [-1..-4 set] [--increment] [--mask-first] [--stdout]")
 	fmt.Println("                [--session <name>] [--restore <name>] [--gpu] [--show] [--no-pot] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]  INPUT...")
 	fmt.Println("  types         list every supported -t hash type")
+	fmt.Println("  encodings     list every supported encode/decode -t type (alias: codecs)")
 	fmt.Println("  identify      [-o out] [-c]  INPUT...")
 	fmt.Println("  zip2smith     -f <zip-file>  [-o out] [-c]   (aliases: extract-hash, zip2hash)")
 	fmt.Println("  7z2smith      -f <7z-file>   [-o out] [-c]")
