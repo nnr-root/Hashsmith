@@ -73,12 +73,26 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		"md5-md5": true, "sha1-sha1": true, "sha256-sha256": true,
 		"sha512-sha512": true, "sha3_256-sha3_256": true,
 	}
+	if _, ok := compatSaltedDigests[algo]; ok {
+		saltInAlgorithms[algo] = true
+	}
+	if _, ok := compositeConstructions[algo]; ok {
+		saltInAlgorithms[algo] = true
+	}
+	saltInAlgorithms["siphash"] = true
+	for _, name := range []string{"crc32-hashcat", "murmurhash", "murmur64a"} {
+		saltInAlgorithms[name] = true
+	}
 	if salt != "" && !saltInAlgorithms[algo] && !strings.HasPrefix(algo, "hmac-") {
 		if saltMode == "suffix" {
 			text = text + salt
 		} else {
 			text = salt + text
 		}
+	}
+
+	if _, ok := compositeConstructions[algo]; ok {
+		return hashComposite(text, algo, salt)
 	}
 
 	switch algo {
@@ -100,6 +114,23 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		h := ripemd160.New()
 		_, _ = h.Write([]byte(text))
 		return hex.EncodeToString(h.Sum(nil)), nil
+	case "ripemd128":
+		h := newRIPEMD128()
+		_, _ = h.Write([]byte(text))
+		return hex.EncodeToString(h.Sum(nil)), nil
+	case "ripemd256":
+		h := newRIPEMD256()
+		_, _ = h.Write([]byte(text))
+		return hex.EncodeToString(h.Sum(nil)), nil
+	case "ripemd320":
+		h := newRIPEMD320()
+		_, _ = h.Write([]byte(text))
+		return hex.EncodeToString(h.Sum(nil)), nil
+	case "siphash":
+		if len(salt) == 32 && isHex(salt) {
+			return sipHashHashcatHex(text, salt, 2, 4)
+		}
+		return sipHashHex(text, salt)
 	case "sha224":
 		h := sha256.Sum224([]byte(text))
 		return hex.EncodeToString(h[:]), nil
@@ -112,6 +143,16 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 	case "sha512":
 		h := sha512.Sum512([]byte(text))
 		return hex.EncodeToString(h[:]), nil
+	case "md5-utf16le", "sha1-utf16le", "sha256-utf16le", "sha384-utf16le", "sha512-utf16le":
+		return hashUTF16Digest(text, algo)
+	case "md5-pass-salt", "md5-salt-pass", "md5-utf16le-pass-salt", "md5-salt-utf16le-pass",
+		"sha1-pass-salt", "sha1-salt-pass", "sha1-utf16le-pass-salt", "sha1-salt-utf16le-pass",
+		"sha224-pass-salt", "sha224-salt-pass",
+		"sha256-pass-salt", "sha256-salt-pass", "sha256-utf16le-pass-salt", "sha256-salt-utf16le-pass",
+		"sha384-pass-salt", "sha384-salt-pass", "sha384-utf16le-pass-salt", "sha384-salt-utf16le-pass",
+		"sha512-pass-salt", "sha512-salt-pass", "sha512-utf16le-pass-salt", "sha512-salt-utf16le-pass",
+		"blake2b-pass-salt", "blake2b-salt-pass", "blake2b256-pass-salt", "blake2b256-salt-pass":
+		return hashCompatSaltedDigest(text, algo, salt)
 	case "sha512_224":
 		h := sha512.Sum512_224([]byte(text))
 		return hex.EncodeToString(h[:]), nil
@@ -167,6 +208,14 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		return nestedHex(sha512.New, text), nil
 	case "sha3_256-sha3_256":
 		return nestedHex(newSHA3_256, text), nil
+	case "md5-md5-md5":
+		return tripleMD5Hex(text), nil
+	case "md5-upper-md5":
+		return nestedCrossHex(md5.New, md5.New, text, true), nil
+	case "md5-sha1":
+		return nestedCrossHex(sha1.New, md5.New, text, false), nil
+	case "sha1-md5":
+		return nestedCrossHex(md5.New, sha1.New, text, false), nil
 	case "hmac-md5":
 		return hmacHex(md5.New, text, salt), nil
 	case "hmac-sha1":
@@ -189,6 +238,10 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		return hmacHex(newSHA3_512, text, salt), nil
 	case "hmac-ripemd160":
 		return hmacHex(ripemd160.New, text, salt), nil
+	case "hmac-ripemd320":
+		return hmacHex(newRIPEMD320, text, salt), nil
+	case "hmac-blake2s":
+		return hmacHex(newBlake2s256Hash, text, salt), nil
 	case "hmac-md5-saltkey":
 		return hmacHex(md5.New, salt, text), nil
 	case "hmac-sha1-saltkey":
@@ -211,6 +264,8 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		return hmacHex(newSHA3_512, salt, text), nil
 	case "hmac-ripemd160-saltkey":
 		return hmacHex(ripemd160.New, salt, text), nil
+	case "hmac-ripemd320-saltkey":
+		return hmacHex(newRIPEMD320, salt, text), nil
 	case "blake2b":
 		h := blake2b.Sum512([]byte(text))
 		return hex.EncodeToString(h[:]), nil
@@ -229,6 +284,17 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		return hex.EncodeToString(h[:]), nil
 	case "lm":
 		return legacyLMHash(text)
+	case "crc32-hashcat":
+		return crc32HashcatHex(text, salt)
+	case "murmurhash":
+		return murmurHash25700Hex(text, salt)
+	case "murmur64a":
+		return murmurHash64AHex(text, salt)
+	case "murmur64a-zero":
+		return murmurHash64AHex(text, "")
+	case "murmur64a-truncated":
+		got, err := murmurHash64AHex(text, "")
+		return got[:8], err
 	case "crc32", "crc32c", "crc64", "adler32", "fnv1a32", "fnv1a64",
 		"xxhash32", "xxhash64", "murmur3-32":
 		return checksumText(text, algo), nil
@@ -331,6 +397,11 @@ func hmacHex(newHash func() hash.Hash, key, message string) string {
 	m := hmac.New(newHash, []byte(key))
 	m.Write([]byte(message))
 	return hex.EncodeToString(m.Sum(nil))
+}
+
+func newBlake2s256Hash() hash.Hash {
+	h, _ := blake2s.New256(nil)
+	return h
 }
 
 func parseSaltBytes(salt string, defaultLen int) ([]byte, error) {

@@ -12,8 +12,8 @@ func TestMSCashVectors(t *testing.T) {
 	if ok, _ := verifyDCC(dcc, "wrong"); ok {
 		t.Error("DCC should reject the wrong passphrase")
 	}
-	if got := detectHashTypes(dcc); len(got) != 2 || got[0] != "vbulletin" || got[1] != "dcc" {
-		t.Errorf("detectHashTypes(dcc) = %v, want [vbulletin dcc]", got)
+	if got := detectHashTypes(dcc); len(got) < 2 || got[0] != "vbulletin" || got[1] != "dcc" {
+		t.Errorf("detectHashTypes(dcc) = %v, want vbulletin/dcc before generic salted candidates", got)
 	}
 
 	// DCC2 (mscash2): username "tom", 10240 iterations.

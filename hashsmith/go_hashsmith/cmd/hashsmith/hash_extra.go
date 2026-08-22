@@ -39,6 +39,18 @@ var (
 // standardized algorithm names while preserving Hashsmith's stable CLI tokens.
 func canonicalHashType(typ string) string {
 	t := strings.ToLower(strings.TrimSpace(typ))
+	// Accept the identifiers users already know from Hashcat (-m <number>) and
+	// John the Ripper (--format=<name>).  Namespaced spellings are useful in
+	// scripts, while bare Hashcat mode numbers keep interactive use concise.
+	for _, prefix := range []string{"hashcat:", "hashcat-", "hc:", "hc-", "john:", "john-", "jtr:", "jtr-"} {
+		if strings.HasPrefix(t, prefix) {
+			t = strings.TrimPrefix(t, prefix)
+			break
+		}
+	}
+	if alias, ok := compatibilityHashAliases[t]; ok {
+		return alias
+	}
 	switch t {
 	case "sha-1":
 		return "sha1"
@@ -106,6 +118,14 @@ func canonicalHashType(typ string) string {
 		return "blake2s"
 	case "ripemd-160":
 		return "ripemd160"
+	case "ripemd-128":
+		return "ripemd128"
+	case "ripemd-256":
+		return "ripemd256"
+	case "ripemd-320":
+		return "ripemd320"
+	case "siphash-2-4", "siphash24":
+		return "siphash"
 	case "sm-3":
 		return "sm3"
 	case "lmhash", "lanman":
@@ -135,6 +155,227 @@ func canonicalHashType(typ string) string {
 	default:
 		return t
 	}
+}
+
+// compatibilityHashAliases maps formats whose ciphertext representation is
+// directly usable by Hashsmith.  It intentionally omits modes that require a
+// different extractor/container representation even when their underlying
+// primitive is already implemented here.
+var compatibilityHashAliases = map[string]string{
+	// ── Hashcat: raw digests ──────────────────────────────────────────────────
+	"0": "md5", "70": "md5-utf16le", "900": "md4", "1000": "ntlm", "3000": "lm",
+	"100": "sha1", "170": "sha1-utf16le",
+	"1300": "sha224", "1400": "sha256", "1470": "sha256-utf16le",
+	"1700": "sha512", "1770": "sha512-utf16le",
+	"10800": "sha384", "10870": "sha384-utf16le",
+	"600": "blake2b", "31000": "blake2s", "34800": "blake2b256",
+	"6000": "ripemd160", "6100": "whirlpool",
+	// RIPEMD-128/256 have no Hashcat mode; John names them directly.
+	"ripemd-128": "ripemd128", "ripemd-256": "ripemd256", "ripemd-320": "ripemd320",
+	"11700": "streebog256", "11800": "streebog512", "31100": "sm3", "33600": "ripemd320",
+	"17300": "sha3_224", "17400": "sha3_256", "17500": "sha3_384", "17600": "sha3_512",
+	"17800": "keccak256", "18000": "keccak512",
+	"5100": "half-md5",
+
+	// ── Hashcat: generic salted constructions ─────────────────────────────────
+	"10": "md5-pass-salt", "20": "md5-salt-pass",
+	"30": "md5-utf16le-pass-salt", "40": "md5-salt-utf16le-pass",
+	"110": "sha1-pass-salt", "120": "sha1-salt-pass",
+	"130": "sha1-utf16le-pass-salt", "140": "sha1-salt-utf16le-pass",
+	"1310": "sha224-pass-salt", "1320": "sha224-salt-pass",
+	"1410": "sha256-pass-salt", "1420": "sha256-salt-pass",
+	"1430": "sha256-utf16le-pass-salt", "1440": "sha256-salt-utf16le-pass",
+	"1710": "sha512-pass-salt", "1720": "sha512-salt-pass",
+	"1730": "sha512-utf16le-pass-salt", "1740": "sha512-salt-utf16le-pass",
+	"10810": "sha384-pass-salt", "10820": "sha384-salt-pass",
+	"10830": "sha384-utf16le-pass-salt", "10840": "sha384-salt-utf16le-pass",
+	// Application modes that are exactly one of the generic constructions.
+	"11": "md5-pass-salt", // Joomla < 2.5.18
+	// Composite constructions: a nesting of MD5/SHA-1/SHA-256 over pass and salt.
+	"3710":  "md5-salt-md5pass",
+	"2630":  "md5-md5passsalt",
+	"3610":  "md5-md5-md5pass-salt",
+	"3800":  "md5-salt-pass-salt",
+	"3910":  "md5-md5pass-md5salt",
+	"4010":  "md5-salt-md5saltpass",
+	"4110":  "md5-salt-md5passsalt",
+	"4410":  "md5-sha1pass-salt",
+	"4420":  "md5-sha1passsalt",
+	"4430":  "md5-sha1saltpass",
+	"4510":  "sha1-sha1pass-salt",
+	"4710":  "sha1-md5pass-salt",
+	"2811":  "md5-md5salt-md5pass",
+	"21200": "md5-sha1salt-md5pass",
+	"21300": "md5-salt-sha1saltpass",
+	"4900":  "sha1-salt-pass-salt",
+	"5000":  "sha1-sha1saltpasssalt",
+	"24300": "sha1-salt-sha1passsalt",
+	"29000": "sha1-salt-sha1saltsha1pass",
+	"22300": "sha256-salt-pass-salt",
+	"20710": "sha256-sha256pass-salt",
+	"20800": "sha256-md5pass",
+	"21400": "sha256-sha256binpass",
+	"21000": "sha512-sha512binpass",
+	"20900": "md5-sha1pass-md5pass-sha1pass",
+	"30500": "md5-md5salt-md5-md5pass",
+	"12600": "sha256-salt-uppersha1pass",
+	"13800": "sha256-salt-utf16lepass",
+	"32410": "sha512-sha512pass-salt", "32420": "sha512-sha512binpass-salt",
+	"32600": "whirlpool-salt-pass-salt",
+	"32800": "md5-sha1-md5pass", "33100": "md5-salt-md5pass-salt",
+	"34400": "sha224-sha224pass", "34500": "sha224-sha1pass",
+	"1421":  "hmailserver",
+	"15000": "sha512-pass-salt", // FileZilla Server >= 0.9.55
+	"610":   "blake2b-pass-salt", "620": "blake2b-salt-pass",
+	"34810": "blake2b256-pass-salt", "34820": "blake2b256-salt-pass",
+	// Application modes that are exactly one of the constructions above.
+	"121":   "sha1-salt-pass",             // Simple Machines Forum
+	"11000": "md5-salt-pass",              // PrestaShop
+	"8400":  "sha1-salt-sha1saltsha1pass", // Woltlab Burning Board 3
+	"13900": "sha1-salt-sha1saltsha1pass", // OpenCart
+	"21":    "md5-salt-pass",              // osCommerce / xt:Commerce
+	"23":    "md5-salt-pass",              // Skype
+
+	// ── Hashcat: nested digests ───────────────────────────────────────────────
+	"2600": "md5-md5", "3500": "md5-md5-md5", "4300": "md5-upper-md5",
+	"4400": "md5-sha1", "4500": "sha1-sha1", "4700": "sha1-md5",
+
+	// ── Hashcat: HMAC ─────────────────────────────────────────────────────────
+	"50": "hmac-md5", "60": "hmac-md5-saltkey",
+	"150": "hmac-sha1", "160": "hmac-sha1-saltkey",
+	"1450": "hmac-sha256", "1460": "hmac-sha256-saltkey",
+	"1750": "hmac-sha512", "1760": "hmac-sha512-saltkey",
+	"6050": "hmac-ripemd160", "6060": "hmac-ripemd160-saltkey",
+	"33300": "hmac-blake2s", "33650": "hmac-ripemd320", "33660": "hmac-ripemd320-saltkey",
+
+	// ── Hashcat: keyed and seeded checksums ───────────────────────────────────
+	"10100": "siphash", "11500": "crc32-hashcat", "25700": "murmurhash",
+	"34200": "murmur64a", "34201": "murmur64a-zero", "34211": "murmur64a-truncated",
+
+	// ── Hashcat: Unix login / crypt(3) ────────────────────────────────────────
+	"500": "md5crypt", "1500": "descrypt", "1600": "apr1",
+	"1800": "sha512crypt", "3200": "bcrypt", "7400": "sha256crypt",
+	"25600": "bcrypt-md5", "25800": "bcrypt-sha1", "30600": "bcrypt-sha256",
+	"15100": "sha1crypt",
+
+	// ── Hashcat: databases ────────────────────────────────────────────────────
+	"12": "postgres", "112": "oracle11g", "12300": "oracle12c",
+	"133": "peoplesoft", "141": "episerver", "1441": "episerver",
+	"12800": "azuresync",
+	"131":   "mssql2000", "132": "mssql2005", "1731": "mssql2012",
+	"200": "mysql323", "300": "mysql41", "8000": "sybase",
+	"24100": "mongodb", "24200": "mongodb", "28600": "scram",
+
+	// ── Hashcat: CMS / frameworks / app platforms ─────────────────────────────
+	"400": "phpass", "7900": "drupal7", "3711": "mediawiki", "2612": "phps",
+	"2611": "vbulletin", "2711": "vbulletin",
+	"4520": "redmine", "4521": "redmine", "4522": "sha1-salt-sha1pass", "4711": "sha1-md5pass-salt",
+	"124": "django", "10000": "django", "12001": "atlassian", "12150": "shiro1-sha512", "16500": "jwt",
+	"16900": "ansible", "21500": "solarwinds",
+	"30000": "werkzeug", "30120": "werkzeug", "32060": "passlib-pbkdf2",
+	"32000": "sspr", "32010": "sspr", "32020": "sspr", "32030": "sspr",
+	"32031": "sspr", "32040": "sspr", "32041": "sspr",
+	"32050": "netiq-pbkdf2", "32070": "netiq-pbkdf2",
+	"9200": "cisco8", "9300": "cisco9",
+	"5700": "cisco4", "5800": "samsung-android",
+	"6300": "aix", "6400": "aix", "6500": "aix", "6700": "aix",
+	"7100": "macos", "7200": "grub2", "7401": "mysql8",
+	"122": "macos", "1722": "macos", "20711": "authme-sha256",
+	"30420": "dane-sha256", "35200": "as400-ssha1",
+
+	// ── Hashcat: KDFs ─────────────────────────────────────────────────────────
+	"8900": "scrypt", "10900": "pbkdf2", "10901": "ldap-pbkdf2", "32900": "pbkdf1",
+	"11900": "pbkdf2", "12000": "pbkdf2", "12100": "pbkdf2",
+	"34000": "argon2", "70000": "argon2", "70100": "scrypt", "70200": "scrypt",
+
+	// ── Hashcat: LDAP / directory ─────────────────────────────────────────────
+	"101": "ldap", "111": "ldap", "1411": "ldap", "1711": "ldap",
+
+	// ── Hashcat: network capture / authentication ─────────────────────────────
+	"1100": "dcc", "2100": "dcc2",
+	"2400": "cisco-pix", "2410": "cisco-asa", "22": "juniper",
+	"4800": "chap", "5500": "netntlmv1", "5600": "netntlmv2",
+	"7300": "ipmi", "8100": "citrix", "10200": "cram-md5",
+	"11400": "sip", "22000": "wpa",
+	"7700": "sap-b", "7800": "sap-fg",
+	// Kerberos: etype 23 (RC4) and the AES etypes 17/18.
+	"13100": "krb5tgs", "19600": "krb5tgs", "19700": "krb5tgs",
+	"18200": "krb5asrep", "19800": "krb5pa", "19900": "krb5pa",
+
+	// ── Hashcat: wallets ──────────────────────────────────────────────────────
+	"11300": "bitcoin", "12700": "blockchain", "16600": "electrum",
+	"15600": "ethereum", "15700": "ethereum",
+	"6600": "1password", "23400": "bitwarden",
+	"14700": "itunes", "14800": "itunes",
+
+	// ── Hashcat: disk encryption ──────────────────────────────────────────────
+	"14600": "luks", "22100": "bitlocker",
+	"6211": "truecrypt", "6212": "truecrypt", "6213": "truecrypt",
+	"6221": "truecrypt", "6222": "truecrypt", "6223": "truecrypt",
+	"13711": "veracrypt", "13712": "veracrypt", "13713": "veracrypt",
+	"13721": "veracrypt", "13722": "veracrypt", "13723": "veracrypt",
+	"13751": "veracrypt", "13752": "veracrypt", "13753": "veracrypt",
+
+	// ── Hashcat: documents / archives / key material ──────────────────────────
+	"9400": "office", "9500": "office", "9600": "office",
+	"10400": "pdf", "10500": "pdf", "10600": "pdf-r6", "10700": "pdf-r6",
+	"11600": "7z", "12500": "rar4", "13000": "rar5",
+	"13400": "keepass", "29700": "keepass",
+	"24400": "pkcs8", "13300": "axcrypt-sha1",
+	"pfx": "pfx", "p12": "pfx", "pkcs12": "pfx",
+	"5200": "pwsafe", "pwsafe": "pwsafe",
+
+	// ── John the Ripper: raw digests ──────────────────────────────────────────
+	"raw-md2": "md2", "raw-md4": "md4", "raw-md5": "md5", "raw-md5u": "md5-utf16le",
+	"raw-sha1": "sha1", "raw-sha1-ng": "sha1", "raw-sha1-axcrypt": "axcrypt-sha1",
+	"raw-sha224": "sha224", "raw-sha256": "sha256",
+	"raw-sha384": "sha384", "raw-sha512": "sha512",
+	"raw-sha3-224": "sha3_224", "raw-sha3-256": "sha3_256",
+	"raw-sha3-384": "sha3_384", "raw-sha3-512": "sha3_512",
+	// John's Raw-SHA3 is the 512-bit variant; Raw-Keccak likewise.
+	"raw-sha3": "sha3_512", "raw-keccak": "keccak512", "raw-keccak-256": "keccak256",
+	"raw-blake2": "blake2b", "raw-blake2s": "blake2s", "raw-sm3": "sm3",
+	"raw-ripemd320": "ripemd320", "nt": "ntlm", "whirlpool": "whirlpool",
+	"gost-2012-256": "streebog256", "gost-2012-512": "streebog512",
+
+	// ── John the Ripper: crypt(3) and system ──────────────────────────────────
+	"md5apr1": "apr1", "netbsd-sha1": "sha1crypt",
+	"aix-ssha256": "aix", "aix-ssha512": "aix",
+	"pbkdf2-hmac-md5": "pbkdf2", "pbkdf2-hmac-sha1": "pbkdf2",
+	"pbkdf2-hmac-sha256": "pbkdf2", "pbkdf2-hmac-sha512": "pbkdf2",
+
+	// ── John the Ripper: databases ────────────────────────────────────────────
+	"mysql": "mysql323", "mysql-sha1": "mysql41",
+	"mssql": "mssql2000", "mssql05": "mssql2005", "mssql12": "mssql2012",
+	"oracle11": "oracle11g", "sybasease": "sybase",
+
+	// ── John the Ripper: network / directory ──────────────────────────────────
+	"netntlm": "netntlmv1", "mscash": "dcc", "mscash2": "dcc2",
+	"wpapsk": "wpa", "salted-sha1": "ldap", "nsldap": "ldap", "nsldaps": "ldap",
+	"rakp": "ipmi", "citrix_ns10": "citrix", "krb5pa-sha1": "krb5pa",
+	"sapb": "sap-b", "sapg": "sap-fg",
+
+	// ── John the Ripper: containers and wallets ───────────────────────────────
+	"rar": "rar4", "agilekeychain": "1password", "itunes-backup": "itunes",
+	"episerver": "episerver", "peoplesoft": "peoplesoft",
+	"hmailserver": "hmailserver", "coldfusion": "sha256-salt-uppersha1pass",
+	"filezilla-server": "sha512-pass-salt",
+	"vc":               "veracrypt",
+
+	// ── John the Ripper: dynamic formats ──────────────────────────────────────
+	"dynamic_0": "md5", "dynamic_1": "md5-pass-salt", "dynamic_2": "md5-md5",
+	"dynamic_3": "md5-md5-md5", "dynamic_4": "md5-salt-pass",
+	"dynamic_5": "md5-salt-pass-salt", "dynamic_6": "md5-md5pass-salt",
+	"dynamic_8": "md5-salt-md5pass", "dynamic_9": "md5-salt-md5saltpass",
+	"dynamic_10": "md5-salt-pass-salt", "dynamic_11": "md5-md5salt-pass",
+	"dynamic_12": "md5-md5salt-md5pass", "dynamic_13": "md5-md5pass-md5salt",
+	"dynamic_14": "md5-salt-md5pass-salt",
+	"dynamic_22": "md5-sha1", "dynamic_23": "sha1-md5",
+	"dynamic_24": "sha1-pass-salt", "dynamic_25": "sha1-salt-pass",
+	"dynamic_26": "sha1", "dynamic_27": "md5crypt", "dynamic_28": "apr1",
+	"dynamic_29": "md5-utf16le", "dynamic_30": "md4", "dynamic_33": "ntlm",
+	"dynamic_60": "sha256", "dynamic_61": "sha256-pass-salt",
+	"dynamic_62": "sha256-salt-pass",
 }
 
 func legacyLMHash(password string) (string, error) {

@@ -27,7 +27,7 @@ var (
 	reBase62Pat = regexp.MustCompile(`^[0-9A-Za-z]+$`)
 	reBcrypt    = regexp.MustCompile(`^\$2[aby]\$\d{2}\$`)
 	reArgon2    = regexp.MustCompile(`^\$argon2(i|d|id)\$`)
-	reScrypt    = regexp.MustCompile(`^scrypt\$`)
+	reScrypt    = regexp.MustCompile(`(?i)^scrypt(?:\$|:)`)
 	rePostgres  = regexp.MustCompile(`^md5[0-9a-fA-F]{32}$`)
 	reMySQL41   = regexp.MustCompile(`^\*[0-9a-fA-F]{40}$`)
 	reMSSQLNew  = regexp.MustCompile(`(?i)^0x0100[0-9a-fA-F]{48}$`)
@@ -267,6 +267,8 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"Bech32m", 1000, "valid Bech32m polymod checksum"}}
 	case isPEMData(v):
 		return []candidate{{"PEM", 1000, "BEGIN/END block with valid Base64 payload"}}
+	case strings.HasPrefix(v, "$sha1$"):
+		return []candidate{{"NetBSD / Juniper sha1crypt", 1000, "$sha1$rounds$salt$checksum modular crypt record"}}
 	case strings.HasPrefix(v, "$6$"):
 		return []candidate{{"sha512crypt (Unix $6$)", 1000, "$6$ prefix — glibc SHA-512 crypt shadow hash"}}
 	case strings.HasPrefix(v, "$5$"):
@@ -275,6 +277,10 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"md5crypt (Unix $1$)", 1000, "$1$ prefix — FreeBSD/Linux MD5 crypt shadow hash"}}
 	case strings.HasPrefix(v, "$apr1$"):
 		return []candidate{{"Apache apr1 (MD5)", 1000, "$apr1$ prefix — Apache .htpasswd MD5"}}
+	case strings.HasPrefix(v, "$BLAKE2$") && len(v) == len("$BLAKE2$")+128 && isHex(v[len("$BLAKE2$"):]):
+		return []candidate{{"BLAKE2b-512 (Hashcat format)", 1000, "$BLAKE2$ prefix + 128-char digest"}}
+	case len(detectBlake2HashcatTypes(v)) > 0:
+		return []candidate{{"BLAKE2 (Hashcat format)", 1000, "$BLAKE2$ digest record — width and salt determine compatible modes"}}
 	case strings.HasPrefix(v, "$zipcrypto$"):
 		return []candidate{{"ZIP (ZipCrypto encrypted)", 1000, "$zipcrypto$ prefix — traditional PKWARE encryption hash"}}
 	case strings.HasPrefix(v, "$zipaes128$"):
@@ -317,6 +323,18 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"Ansible Vault", 1000, "$ansible$ — PBKDF2-SHA256 + HMAC-SHA256"}}
 	case strings.HasPrefix(v, "$blockchain$"):
 		return []candidate{{"Blockchain.info My Wallet", 1000, "$blockchain$ — PBKDF2-SHA1 + AES-256-CBC"}}
+	case isShiro1(v):
+		return []candidate{{"Apache Shiro 1 SHA-512", 1000, "$shiro1$SHA-512$ — iterated salted SHA-512"}}
+	case isSSPR(v):
+		return []candidate{{"NetIQ/Adobe SSPR", 1000, "$sspr$ — iterated MD5/SHA record"}}
+	case isNetIQPBKDF2(v):
+		return []candidate{{"NetIQ SSPR PBKDF2", 1000, "$pbkdf2-hmac-sha* — PBKDF2 record"}}
+	case isAS400SSHA1(v):
+		return []candidate{{"AS/400 SSHA1", 1000, "$as400$ssha1$ — username-salted SHA-1"}}
+	case isAuthMeSHA256(v):
+		return []candidate{{"AuthMe SHA256", 1000, "$SHA$ — sha256(sha256(password).salt)"}}
+	case isPHPS(v):
+		return []candidate{{"PHPS", 1000, "$PHPS$ — md5(md5(password).salt)"}}
 	case isMySQL8(v):
 		return []candidate{{"MySQL 8 caching_sha2_password", 1000, "$mysql$A$ — 20-byte-salt SHA-256-crypt record"}}
 	case strings.HasPrefix(v, "$mongodb-scram$"):
@@ -343,6 +361,8 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"macOS 10.8+ (PBKDF2-SHA512)", 1000, "$ml$ prefix — macOS ShadowHashData"}}
 	case strings.HasPrefix(v, "{PKCS5S2}"):
 		return []candidate{{"Atlassian (PBKDF2-HMAC-SHA1)", 1000, "{PKCS5S2} prefix — Jira/Confluence/Crowd"}}
+	case isPBKDF1SHA1(v):
+		return []candidate{{"PBKDF1-SHA1", 1000, "PBKDF1:sha1:iterations:salt:digest record"}}
 	case isGenericPBKDF2(v):
 		return []candidate{{"PBKDF2 (generic)", 1000, "algo:iter:salt:dk — PBKDF2-HMAC"}}
 	case isPasslibPBKDF2(v):
@@ -385,6 +405,10 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"SAP CODVN B (BCODE)", 900, "user$md5-8 — BCODE magic walk"}}
 	case isMediaWiki(v):
 		return []candidate{{"MediaWiki $B$", 1000, "$B$salt$ — md5(salt.\"-\".md5(pass))"}}
+	case len(detectCompatSaltedTypes(v)) > 0:
+		digest, _, _ := compatSaltedHashParts(v)
+		name := map[int]string{32: "MD5", 40: "SHA-1", 56: "SHA-224", 64: "SHA-256", 96: "SHA-384", 128: "SHA-512"}[len(digest)]
+		return []candidate{{"Generic salted " + name, 1000, "hash:salt record — pass/salt order and UTF-16LE variant are ambiguous"}}
 	case isRedmine(v):
 		return []candidate{{"Redmine", 900, "sha1:salt — sha1(salt.sha1(pass))"}}
 	case isVBulletin(v):
@@ -402,7 +426,11 @@ func signatureMatch(v string) []candidate {
 	case reArgon2.MatchString(v):
 		return []candidate{{"argon2", 1000, "starts with $argon2(i|d|id)$ signature"}}
 	case reScrypt.MatchString(v):
-		return []candidate{{"scrypt", 1000, "starts with scrypt$ signature"}}
+		return []candidate{{"scrypt", 1000, "recognized scrypt$ or Hashcat SCRYPT: record"}}
+	case isHexPair(v, 8, 8):
+		return []candidate{{"Seeded CRC32 / MurmurHash", 1000, "8-hex checksum and 8-hex initial value/seed"}}
+	case isHexPair(v, 16, 16):
+		return []candidate{{"MurmurHash64A", 1000, "16-hex checksum and 16-hex seed"}}
 	case rePostgres.MatchString(v):
 		return []candidate{{"PostgreSQL MD5", 1000, "md5 prefix + 32-char hex"}}
 	case reMySQL41.MatchString(v):
@@ -1309,6 +1337,9 @@ func detectHashTypes(text string) []string {
 	// shadow line) prefix — crack the hash field directly.
 	t = stripShadowUsername(t)
 	// Unix crypt(3) shadow hashes.
+	if strings.HasPrefix(t, "$sha1$") {
+		return []string{"sha1crypt"}
+	}
 	if strings.HasPrefix(t, "$1$") {
 		return []string{"md5crypt"}
 	}
@@ -1320,6 +1351,34 @@ func detectHashTypes(text string) []string {
 	}
 	if strings.HasPrefix(t, "$6$") {
 		return []string{"sha512crypt"}
+	}
+	if blake := detectBlake2HashcatTypes(t); len(blake) > 0 {
+		return blake
+	}
+	// Vendor formats with a distinctive record prefix.
+	if isHMailServer(t) {
+		return []string{"hmailserver"}
+	}
+	if isPwsafe(t) {
+		return []string{"pwsafe"}
+	}
+	if isPKCS12(t) {
+		return []string{"pfx"}
+	}
+	if isEpiserver(t) {
+		return []string{"episerver"}
+	}
+	if isAzureSync(t) {
+		return []string{"azuresync"}
+	}
+	if isSipHash(t) {
+		return []string{"siphash"}
+	}
+	if isHexPair(t, 8, 8) {
+		return []string{"crc32-hashcat", "murmurhash"}
+	}
+	if isHexPair(t, 16, 16) {
+		return []string{"murmur64a"}
 	}
 	// Archive/file hash formats produced by the *2smith extractors.
 	if strings.HasPrefix(t, "$zipcrypto$") {
@@ -1385,6 +1444,24 @@ func detectHashTypes(text string) []string {
 	if strings.HasPrefix(t, "$blockchain$") {
 		return []string{"blockchain"}
 	}
+	if isShiro1(t) {
+		return []string{"shiro1-sha512"}
+	}
+	if isSSPR(t) {
+		return []string{"sspr"}
+	}
+	if isNetIQPBKDF2(t) {
+		return []string{"netiq-pbkdf2"}
+	}
+	if isAS400SSHA1(t) {
+		return []string{"as400-ssha1"}
+	}
+	if isAuthMeSHA256(t) {
+		return []string{"authme-sha256"}
+	}
+	if isPHPS(t) {
+		return []string{"phps"}
+	}
 	if isMySQL8(t) {
 		return []string{"mysql8"}
 	}
@@ -1435,6 +1512,9 @@ func detectHashTypes(text string) []string {
 	}
 	if strings.HasPrefix(t, "{PKCS5S2}") {
 		return []string{"atlassian"}
+	}
+	if isPBKDF1SHA1(t) {
+		return []string{"pbkdf1"}
 	}
 	if isJWT(t) {
 		return []string{"jwt"}
@@ -1505,12 +1585,16 @@ func detectHashTypes(text string) []string {
 	if isMediaWiki(t) {
 		return []string{"mediawiki"}
 	}
-	if isRedmine(t) {
-		return []string{"redmine"}
-	}
-	// <md5>:<salt> is shared by vBulletin and DCC (mscash) — try both.
-	if isVBulletin(t) {
-		return []string{"vbulletin", "dcc"}
+	if generic := detectCompatSaltedTypes(t); len(generic) > 0 {
+		// App-specific formats share the same outer hash:salt structure. Keep
+		// their established precedence, then try generic Hashcat constructions.
+		if isRedmine(t) {
+			generic = append([]string{"redmine"}, generic...)
+		}
+		if isVBulletin(t) {
+			generic = append([]string{"vbulletin", "dcc"}, generic...)
+		}
+		return generic
 	}
 	if strings.HasPrefix(t, "$krb5asrep$") {
 		return []string{"krb5asrep"}

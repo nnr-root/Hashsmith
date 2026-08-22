@@ -13,3 +13,4 @@ dist/
 *.egg-info/
 *.tar.gz
 hashsmith/hashsmith
+graphify-out/

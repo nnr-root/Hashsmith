@@ -127,6 +127,18 @@ func main() {
 		if err := runExtractLUKS(rest); err != nil {
 			fail(err.Error())
 		}
+	case "pfx2smith", "p122smith":
+		if err := runExtractPKCS12(rest); err != nil {
+			fail(err.Error())
+		}
+	case "pwsafe2smith":
+		if err := runExtractPwsafe(rest); err != nil {
+			fail(err.Error())
+		}
+	case "selftest", "self-test":
+		if err := runSelfTest(rest); err != nil {
+			fail(err.Error())
+		}
 	case "types", "list-types":
 		if err := runListTypes(rest); err != nil {
 			fail(err.Error())
@@ -185,6 +197,7 @@ func printHelp() {
 	fmt.Println("  hash          -t <type> [-s salt] [-S prefix|suffix] [-e encoding] [-o out] [-c]  INPUT...")
 	fmt.Println("  crack         [-t <type|auto>] [-M dict|brute|mask|markov|hybrid|combinator] [-w wordlist] [--wordlist2 list2] [-r | --rules <file>] [--mask ?l?d..] [-1..-4 set] [--increment] [--mask-first] [--stdout]")
 	fmt.Println("                [--session <name>] [--restore <name>] [--gpu] [--show] [--no-pot] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]  INPUT...")
+	fmt.Println("  selftest      [-t type] [-v] [-gaps]   verify built-in known-answer vectors")
 	fmt.Println("  types         list every supported -t hash type")
 	fmt.Println("  encodings     list every supported encode/decode -t type (alias: codecs)")
 	fmt.Println("  identify      [-o out] [-c]  INPUT...")
@@ -198,6 +211,8 @@ func printHelp() {
 	fmt.Println("  office2smith  -f <docx/xlsx> [-o out] [-c]   (encrypted Office 2013+ document)")
 	fmt.Println("  shadow2smith  <shadow> [passwd] [-o out] [-c]   (/etc/shadow → user:hash, files any order)")
 	fmt.Println("  luks2smith    -f <volume.luks> [-o out] [-c]    (LUKS v1 volume → crackable hash)")
+	fmt.Println("  pfx2smith     -f <store.pfx>  [-o out] [-c]   (PKCS#12 / .p12 keystore)")
+	fmt.Println("  pwsafe2smith  -f <db.psafe3> [-o out] [-c]   (Password Safe v3 database)")
 	fmt.Println("  rules         <rulefile> [word]   preview/validate a mangling-rule file")
 	fmt.Println("  benchmark     [-t type] [-p workers]   measure cracking throughput per hash type")
 	fmt.Println("  gpu           show GPU acceleration status (build: -tags opencl any GPU, or -tags gpu Apple Metal)")

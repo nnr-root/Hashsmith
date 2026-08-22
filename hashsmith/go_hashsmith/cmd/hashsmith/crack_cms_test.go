@@ -27,7 +27,7 @@ func TestCMSVectors(t *testing.T) {
 	if ok, err := verifyRedmine(rm, "hashsmith"); err != nil || !ok {
 		t.Errorf("Redmine verify failed: ok=%v err=%v", ok, err)
 	}
-	if got := detectHashTypes(rm); len(got) != 1 || got[0] != "redmine" {
-		t.Errorf("detectHashTypes(redmine) = %v", got)
+	if got := detectHashTypes(rm); len(got) == 0 || got[0] != "redmine" {
+		t.Errorf("detectHashTypes(redmine) = %v, want redmine before generic salted candidates", got)
 	}
 }

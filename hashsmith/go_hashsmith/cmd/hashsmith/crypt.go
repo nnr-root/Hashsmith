@@ -13,7 +13,9 @@ package main
 // no timing-attack surface, so a plain string compare is fine).
 
 import (
+	"crypto/hmac"
 	"crypto/md5"
+	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
 	"errors"
@@ -335,6 +337,50 @@ func verifyAPR1(targetHash, candidate string) (bool, error) {
 		return false, errors.New("invalid apr1 hash (missing salt separator)")
 	}
 	return md5cryptMagic(candidate, body[:j], "$apr1$") == targetHash, nil
+}
+
+// ── NetBSD / Juniper SHA1-crypt ($sha1$) ─────────────────────────────────────
+
+// sha1CryptRaw implements NetBSD's HMAC-SHA1-based password hash. The initial
+// message is "salt$sha1$rounds"; each remaining round HMACs the previous
+// digest with the password as key. The 20-byte result is padded with one zero
+// byte and emitted with crypt's little-endian Base64 alphabet.
+func sha1CryptRaw(password, salt string, rounds int) string {
+	key := []byte(password)
+	mac := hmac.New(sha1.New, key)
+	_, _ = mac.Write([]byte(salt + "$sha1$" + strconv.Itoa(rounds)))
+	digest := mac.Sum(nil)
+	for i := 1; i < rounds; i++ {
+		mac = hmac.New(sha1.New, key)
+		_, _ = mac.Write(digest)
+		digest = mac.Sum(nil)
+	}
+	out := make([]byte, 0, 28)
+	for i := 0; i < 18; i += 3 {
+		out = b64From24(out, digest[i], digest[i+1], digest[i+2], 4)
+	}
+	out = b64From24(out, digest[18], digest[19], 0, 4)
+	return "$sha1$" + strconv.Itoa(rounds) + "$" + salt + "$" + string(out)
+}
+
+func verifySHA1Crypt(targetHash, candidate string) (bool, error) {
+	parts := strings.Split(targetHash, "$")
+	if len(parts) != 5 || parts[0] != "" || parts[1] != "sha1" {
+		return false, errors.New("invalid sha1crypt hash (need $sha1$rounds$salt$checksum)")
+	}
+	rounds, err := strconv.Atoi(parts[2])
+	if err != nil || rounds < 1 || rounds > maxKDFIterations {
+		return false, errors.New("invalid sha1crypt round count")
+	}
+	if len(parts[3]) > 64 || len(parts[4]) != 28 {
+		return false, errors.New("invalid sha1crypt salt or checksum length")
+	}
+	for _, ch := range parts[3] + parts[4] {
+		if !strings.ContainsRune(itoa64, ch) {
+			return false, errors.New("invalid sha1crypt alphabet")
+		}
+	}
+	return sha1CryptRaw(candidate, parts[3], rounds) == targetHash, nil
 }
 
 // verifyShaCrypt checks a candidate against a $5$/$6$ target for the given params.

@@ -24,6 +24,24 @@ import (
 // ── macOS 10.8+ ($ml$) ──
 
 func verifyMacOS(targetHash, candidate string) (bool, error) {
+	// macOS 10.4-10.6 and 10.7 store a four-byte salt followed by a SHA-1 or
+	// SHA-512 digest, all as one hexadecimal field (Hashcat 122 / 1722).
+	if len(targetHash) == 48 || len(targetHash) == 136 {
+		raw, err := hex.DecodeString(targetHash)
+		if err != nil {
+			return false, errors.New("invalid legacy macOS hash")
+		}
+		input := append(append([]byte{}, raw[:4]...), candidate...)
+		var got []byte
+		if len(raw) == 24 {
+			digest := sha1.Sum(input)
+			got = digest[:]
+		} else {
+			digest := sha512.Sum512(input)
+			got = digest[:]
+		}
+		return bytesEqualCT(got, raw[4:]), nil
+	}
 	if !strings.HasPrefix(targetHash, "$ml$") {
 		return false, errors.New("invalid macOS hash (missing $ml$ prefix)")
 	}

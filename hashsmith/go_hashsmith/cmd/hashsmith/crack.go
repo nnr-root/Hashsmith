@@ -837,7 +837,52 @@ func calcBruteTotal(charset string, minLen, maxLen int) int64 {
 
 func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, error) {
 	algo := canonicalHashType(typ)
+	if _, ok := compatSaltedDigests[algo]; ok {
+		return verifyCompatSaltedDigest(candidate, targetHash, algo, salt)
+	}
+	if _, ok := compositeConstructions[algo]; ok {
+		return verifyComposite(candidate, targetHash, algo, salt)
+	}
+	if algo == "siphash" {
+		return verifySipHash(targetHash, candidate, salt)
+	}
 	switch algo {
+	case "pbkdf1":
+		return verifyPBKDF1SHA1(targetHash, candidate)
+	case "crc32-hashcat":
+		return verifyCRC32Hashcat(targetHash, candidate, salt)
+	case "murmurhash":
+		return verifyMurmurHash25700(targetHash, candidate, salt)
+	case "murmur64a":
+		return verifyMurmurHash64A(targetHash, candidate, salt, false)
+	case "murmur64a-zero":
+		return verifyMurmurHash64A(targetHash, candidate, "0000000000000000", false)
+	case "murmur64a-truncated":
+		return verifyMurmurHash64A(targetHash, candidate, "0000000000000000", true)
+	}
+	switch algo {
+	case "dane-sha256":
+		return verifyDANESHA256(targetHash, candidate)
+	case "samsung-android":
+		return verifySamsungAndroid(targetHash, candidate)
+	case "sspr":
+		return verifySSPR(targetHash, candidate)
+	case "netiq-pbkdf2":
+		return verifyNetIQPBKDF2(targetHash, candidate)
+	case "as400-ssha1":
+		return verifyAS400SSHA1(targetHash, candidate)
+	case "authme-sha256":
+		return verifyAuthMeSHA256(targetHash, candidate)
+	case "phps":
+		return verifyPHPS(targetHash, candidate)
+	case "bcrypt-md5":
+		return verifyWrappedBcrypt(targetHash, candidate, "md5")
+	case "bcrypt-sha1":
+		return verifyWrappedBcrypt(targetHash, candidate, "sha1")
+	case "bcrypt-sha256":
+		return verifyWrappedBcrypt(targetHash, candidate, "sha256")
+	case "shiro1-sha512":
+		return verifyShiro1(targetHash, candidate)
 	case "bcrypt":
 		return bcrypt.CompareHashAndPassword([]byte(targetHash), []byte(candidate)) == nil, nil
 	case "md5crypt":
@@ -848,6 +893,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyShaCrypt(sha256Params, targetHash, candidate)
 	case "sha512crypt":
 		return verifyShaCrypt(sha512Params, targetHash, candidate)
+	case "sha1crypt":
+		return verifySHA1Crypt(targetHash, candidate)
 	case "descrypt":
 		return verifyDescrypt(targetHash, candidate)
 	case "argon2":
@@ -872,6 +919,10 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifySSH(targetHash, candidate)
 	case "pkcs8":
 		return verifyPKCS8(targetHash, candidate)
+	case "pfx":
+		return verifyPKCS12(targetHash, candidate)
+	case "pwsafe":
+		return verifyPwsafe(targetHash, candidate)
 	case "gpg":
 		return verifyGPG(targetHash, candidate)
 	case "office":
@@ -964,6 +1015,14 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyMongoDB(targetHash, candidate)
 	case "solarwinds":
 		return verifySolarWinds(targetHash, candidate)
+	case "peoplesoft":
+		return verifyPeopleSoft(targetHash, candidate)
+	case "episerver":
+		return verifyEpiserver(targetHash, candidate)
+	case "azuresync":
+		return verifyAzureSync(targetHash, candidate)
+	case "hmailserver":
+		return verifyHMailServer(targetHash, candidate)
 	case "sip":
 		return verifySIP(targetHash, candidate)
 	case "juniper":
@@ -998,6 +1057,27 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyKrb5(targetHash, candidate)
 	case "krb5pa":
 		return verifyKrb5(targetHash, candidate)
+	case "lm":
+		got, err := hashText(candidate, algo, salt, saltMode)
+		if err != nil {
+			return false, err
+		}
+		// Hashcat mode 3000 cracks the two 7-character LM halves separately;
+		// John and Windows dumps commonly retain the full 32-hex representation.
+		return strings.EqualFold(got, targetHash) ||
+			(len(targetHash) == 16 && strings.EqualFold(got[:16], targetHash)), nil
+	case "mysql41":
+		got, err := hashText(candidate, algo, salt, saltMode)
+		if err != nil {
+			return false, err
+		}
+		return strings.EqualFold(strings.TrimPrefix(got, "*"), strings.TrimPrefix(targetHash, "*")), nil
+	case "blake2b", "blake2b256", "blake2s":
+		got, err := hashText(candidate, algo, salt, saltMode)
+		if err != nil {
+			return false, err
+		}
+		return strings.EqualFold(got, strings.TrimPrefix(targetHash, "$BLAKE2$")), nil
 	}
 	// HMAC types take their message from a "hash:salt" pairing when no salt was
 	// supplied via -s, so `<hmac>:<salt>` targets crack without extra flags.
@@ -1083,29 +1163,47 @@ func verifyZipAES(targetHash, candidate string) (bool, error) {
 }
 
 func verifyScrypt(targetHash, candidate string) (bool, error) {
-	parts := strings.Split(targetHash, "$")
-	if len(parts) != 6 || parts[0] != "scrypt" {
-		return false, errors.New("invalid scrypt hash format")
+	var fields []string
+	var hashcatFormat bool
+	if strings.HasPrefix(strings.ToUpper(targetHash), "SCRYPT:") {
+		fields = strings.Split(targetHash, ":")
+		hashcatFormat = true
+	} else {
+		fields = strings.Split(targetHash, "$")
 	}
-	n, err := strconv.Atoi(parts[1])
+	if len(fields) != 6 || (!hashcatFormat && fields[0] != "scrypt") {
+		return false, errors.New("invalid scrypt hash (need scrypt$N$r$p$hexsalt$hexdigest or SCRYPT:N:r:p:b64salt:b64digest)")
+	}
+	n, err := strconv.Atoi(fields[1])
 	if err != nil {
 		return false, err
 	}
-	r, err := strconv.Atoi(parts[2])
+	r, err := strconv.Atoi(fields[2])
 	if err != nil {
 		return false, err
 	}
-	p, err := strconv.Atoi(parts[3])
+	p, err := strconv.Atoi(fields[3])
 	if err != nil {
 		return false, err
 	}
-	saltBytes, err := hex.DecodeString(parts[4])
-	if err != nil {
-		return false, err
+	if n <= 1 || n&(n-1) != 0 || r < 1 || p < 1 || r > 1<<20 || p > 1<<20 ||
+		uint64(128)*uint64(n)*uint64(r) > maxScryptMemory || uint64(r)*uint64(p) >= 1<<30 {
+		return false, errors.New("invalid or excessive scrypt work factors")
 	}
-	digest, err := hex.DecodeString(parts[5])
-	if err != nil {
-		return false, err
+	var saltBytes, digest []byte
+	if hashcatFormat {
+		saltBytes, err = decodeBase64Flexible(fields[4], false)
+		if err == nil {
+			digest, err = decodeBase64Flexible(fields[5], false)
+		}
+	} else {
+		saltBytes, err = hex.DecodeString(fields[4])
+		if err == nil {
+			digest, err = hex.DecodeString(fields[5])
+		}
+	}
+	if err != nil || len(saltBytes) > maxKDFFieldSize || len(digest) == 0 || len(digest) > maxKDFFieldSize {
+		return false, errors.New("invalid scrypt salt or digest encoding")
 	}
 	got, err := scrypt.Key([]byte(candidate), saltBytes, n, r, p, len(digest))
 	if err != nil {

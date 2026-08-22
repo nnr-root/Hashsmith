@@ -9,6 +9,7 @@ package main
 // (MSB-packed, characters emitted low 6 bits first).
 
 import (
+	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
 	"errors"
@@ -42,16 +43,27 @@ func aixB64(b []byte) string {
 }
 
 func verifyAIX(targetHash, candidate string) (bool, error) {
+	if strings.HasPrefix(targetHash, "{smd5}") {
+		rest := targetHash[len("{smd5}"):]
+		i := strings.LastIndexByte(rest, '$')
+		if i < 0 || i > 8 || len(rest)-i-1 != 22 {
+			return false, errors.New("invalid AIX {smd5} hash")
+		}
+		got := md5cryptMagic(candidate, rest[:i], "")
+		return got == rest, nil
+	}
 	var newHash func() hash.Hash
 	var dLen int
 	var rest string
 	switch {
+	case strings.HasPrefix(targetHash, "{ssha1}"):
+		newHash, dLen, rest = sha1.New, 20, targetHash[len("{ssha1}"):]
 	case strings.HasPrefix(targetHash, "{ssha256}"):
 		newHash, dLen, rest = sha256.New, 32, targetHash[len("{ssha256}"):]
 	case strings.HasPrefix(targetHash, "{ssha512}"):
 		newHash, dLen, rest = sha512.New, 64, targetHash[len("{ssha512}"):]
 	default:
-		return false, errors.New("invalid AIX hash (need {ssha256}/{ssha512})")
+		return false, errors.New("invalid AIX hash (need {smd5}/{ssha1}/{ssha256}/{ssha512})")
 	}
 	f := strings.Split(rest, "$")
 	if len(f) != 3 {
@@ -63,9 +75,13 @@ func verifyAIX(targetHash, candidate string) (bool, error) {
 	}
 	dk := pbkdf2.Key([]byte(candidate), []byte(f[1]), 1<<uint(nn), dLen, newHash)
 	got := aixB64(dk)
+	if len(f[2]) == 0 || len(f[2]) > len(got) {
+		return false, errors.New("invalid AIX checksum length")
+	}
 	return got[:len(f[2])] == f[2], nil
 }
 
 func isAIX(s string) bool {
-	return strings.HasPrefix(s, "{ssha256}") || strings.HasPrefix(s, "{ssha512}")
+	return strings.HasPrefix(s, "{smd5}") || strings.HasPrefix(s, "{ssha1}") ||
+		strings.HasPrefix(s, "{ssha256}") || strings.HasPrefix(s, "{ssha512}")
 }

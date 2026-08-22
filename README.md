@@ -103,7 +103,7 @@ hashsmith decode -t hex "0x68:61:73:68-73 6d 69 74 68"
 
 ### Hash types
 
-Hashsmith supports **100+ hash types**, and every one is validated against a
+Hashsmith supports **257 hash types**, and every one is validated against a
 known-answer vector before shipping — no unimplemented stubs, no unvalidated
 crypto. Most hashes are auto-detected, so naming a type is optional. When you want
 to pin one, pass `-t <name>`; run `hashsmith types` for the full catalogue. Beyond
@@ -120,19 +120,44 @@ hashsmith hash -t sha512_256 -e base64url "secret"    # encode raw digest bytes
 hashsmith types                                       # list every supported -t type
 ```
 
+Hashsmith also accepts familiar Hashcat mode numbers and John format labels for
+formats with the same text representation. The namespaced spelling is clearest
+in scripts; bare Hashcat mode numbers work too:
+
+```bash
+hashsmith crack -t hashcat:0 5f4dcc3b5aa765d61d8327deb882cf99
+hashsmith crack -t 1410 '<sha256>:<salt>'             # sha256($pass.$salt)
+hashsmith crack -t john:raw-sha256 <hash>
+hashsmith crack -t john:dynamic_2 <hash>              # md5(hex(md5($pass)))
+hashsmith crack -t 15100 '$sha1$20000$salt$checksum'  # NetBSD/Juniper sha1crypt
+hashsmith crack -t 8900 'SCRYPT:N:r:p:b64salt:b64dk'
+hashsmith crack -t 10900 'sha256:rounds:b64salt:b64dk'
+hashsmith crack -t 32900 'PBKDF1:sha1:rounds:b64salt:b64digest'
+hashsmith crack -t 25700 '<murmur-hash>:<32-bit-seed>'
+hashsmith crack -t 34810 '$BLAKE2$<blake2b-256>:<salt>'
+```
+
+The compatibility aliases cover the common raw digests, UTF-16LE digests,
+HMAC, Unix crypt, Windows credentials, generic `hash:salt` hashes, seeded
+checksums, PBKDF1/PBKDF2, and nested digest modes. Run `hashsmith types` for the
+canonical names. Digest-wrapped bcrypt, Apache Shiro 1 SHA-512, AIX, GRUB2,
+macOS, Django, Passlib, NetIQ/Adobe SSPR, AS/400, Samsung Android, AuthMe, PHPS,
+and CubeCart records also accept their corresponding mode numbers.
+
 Covered today: the full **raw / salted / iterated / HMAC** digest family
 (MD2/MD4/MD5/SHA-0/SHA1/SHA2/SHA3/SHAKE/SM3/Keccak/RIPEMD-160/BLAKE2b/BLAKE2s,
 salted with `-s`/`-S`, expanded `digest-digest` nested forms, and HMAC-MD5,
 SHA1/SHA2/SHA3/RIPEMD-160 in both key-modes), the Unix crypt(3)
 family (`descrypt`/`md5crypt`/`sha256crypt`/`sha512crypt`/`bcrypt`), MySQL, MSSQL,
 PostgreSQL, LM/NTLM/NetNTLM, Kerberos, Argon2/scrypt, generic PBKDF2 with
-MD5/SHA1/SHA224/SHA256/SHA384/SHA512, GRUB2 PBKDF2-SHA512, and every
+MD5/SHA1/SHA224/SHA256/SHA384/SHA512, PBKDF1-SHA1, GRUB2 PBKDF2-SHA512, and every
 encrypted-container format handled by the `*2smith` extractors.
 
 Raw additions include MD2, SHA-0, SM3, SHA-512/224, SHA-512/256, legacy
 Keccak-256/512, SHAKE128-256, SHAKE256-512, BLAKE2b-256/384, and legacy Windows
 LM. Explicit checksum modes cover CRC-32, CRC-32C, CRC-64/ECMA, Adler-32,
-FNV-1a 32/64, xxHash32/64, and MurmurHash3-32;
+FNV-1a 32/64, xxHash32/64, MurmurHash3-32, seeded CRC32, original MurmurHash,
+and MurmurHash64A;
 because short checksums are highly ambiguous, specify those with `-t`.
 
 Application, device & framework hashes: **Django** (PBKDF2, scrypt, Argon2,
@@ -555,6 +580,70 @@ Use help:
 ```bash
 hashsmith --help
 ```
+
+## How Hashsmith compares to Hashcat and John the Ripper
+
+The three tools solve overlapping problems from different directions. Hashcat is
+a GPU cracking engine, John the Ripper is a CPU cracking engine with an enormous
+format library and a script ecosystem around it, and Hashsmith is a single
+self-contained binary that tries to make the common path short.
+
+| | Hashsmith | Hashcat | John the Ripper (jumbo) |
+|---|---|---|---|
+| Hash formats | 257 | ~470 modes | ~470 formats |
+| Hash-type auto-detection | yes, by default | no, `-m` required | partial, guesses per file |
+| Hashcat mode numbers accepted | 273 | native | no |
+| John format labels accepted | 169 | no | native |
+| Attack modes | dict, brute, mask, markov, hybrid, combinator | straight, combinator, mask, hybrid, association | wordlist, incremental, mask, external |
+| Rule engine | ~35 operators | full, on-GPU, the de-facto standard | full, plus C-like external mode |
+| GPU | experimental, opt-in; Metal + OpenCL, a few algorithms | mature CUDA / HIP / OpenCL / Metal across nearly every mode | OpenCL for a subset |
+| File → hash extractors | 12, built into the binary | separate `*2hashcat` scripts | 100+ separate `*2john` scripts |
+| Install | one static binary, no runtime deps | binary + GPU runtime | build or distro package + Perl/Python for extractors |
+| Built-in known-answer self-test | `hashsmith selftest`, 242 vectors over 240 of 253 types, provenance-labelled | internal, on startup | `john --test` |
+| Distributed cracking | no | via third-party overlays | via MPI |
+
+**Where Hashsmith is the better tool.** You get one binary with no runtime
+dependencies, hash extraction and cracking in the same place, and auto-detection
+that means you rarely have to name a type at all. It also speaks both of the
+other tools' dialects, so a mode number pasted from a Hashcat writeup or a
+`--format` label from a John tutorial both work unchanged:
+
+```bash
+hashsmith crack -t 22300 '<sha256>:<salt>'      # Hashcat mode number
+hashsmith crack -t john:dynamic_12 '<md5>:<salt>'  # John dynamic format
+hashsmith crack -w rockyou.txt '<any hash>'     # or just let detection decide
+```
+
+**Verifying your own build.** `hashsmith selftest` runs the known-answer vectors
+compiled into the binary, which answers a question a version number cannot: is
+this copy, built by this toolchain, still computing the right answers? A
+miscompilation, a bad optimisation or a corrupted download shows up here and
+nowhere else.
+
+```bash
+hashsmith selftest              # 203 fast vectors in well under a second
+hashsmith selftest -slow        # include the high-iteration KDFs
+hashsmith selftest -gaps        # list the types that have no vector yet
+```
+
+Each vector records where its expected value came from, because that changes
+what a pass is worth — `published` (from the algorithm's specification or
+reference suite), `cross-checked` (computed independently with Python or
+OpenSSL) and `regression` (produced by Hashsmith itself, which catches drift but
+cannot prove the implementation was right to begin with). The summary reports
+the three separately rather than flattening them into one reassuring number, and
+tells you honestly how many catalogue types have no vector at all. At the time
+of writing 240 of 253 types carry one — 130 published, 104 cross-checked and 8
+regression-only.
+
+**Where they are the better tool.** For a large wordlist against a fast hash on
+a real GPU, Hashcat will beat Hashsmith by orders of magnitude — its kernels are
+mature and cover essentially every mode, while Hashsmith's GPU support is
+experimental and implemented for only a handful of algorithms. If the format you
+need is exotic — Lotus Domino, RACF, Mozilla key stores, Android FDE, most
+cryptocurrency wallets — John's format library and its `*2john` scripts are far
+broader. Neither of those gaps is close to being closed here, and picking the
+right tool for the job beats loyalty to any one of them.
 
 ## Security Notice
 
