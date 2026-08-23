@@ -58,10 +58,11 @@ func TestHashcatSeededChecksumVectors(t *testing.T) {
 		}
 	}
 
-	if got := detectHashTypes(cases[1].target); len(got) != 2 || got[0] != "crc32-hashcat" || got[1] != "murmurhash" {
+	if got := detectHashTypes(cases[1].target); len(got) != 5 || got[0] != "crc32-hashcat" ||
+		got[1] != "crc32c-hashcat" || got[2] != "murmurhash" || got[3] != "murmur3-seeded" || got[4] != "skip32" {
 		t.Errorf("8:8 checksum detection = %v", got)
 	}
-	if got := detectHashTypes(cases[3].target); len(got) != 1 || got[0] != "murmur64a" {
+	if got := detectHashTypes(cases[3].target); len(got) != 2 || got[0] != "murmur64a" || got[1] != "crc64-jones" {
 		t.Errorf("MurmurHash64A detection = %v", got)
 	}
 }

@@ -28,6 +28,24 @@ func verifyIPMI(targetHash, candidate string) (bool, error) {
 	return strings.EqualFold(hex.EncodeToString(mac.Sum(nil)), f[1]), nil
 }
 
+func verifyIPMIMD5(targetHash, candidate string) (bool, error) {
+	f := strings.Split(targetHash, ":")
+	if len(f) != 2 || len(f[0]) != 32 || !isHex(f[0]) || len(f[1]) < 116 || len(f[1]) > 148 ||
+		len(f[1])%2 != 0 || !isHex(f[1]) || len([]byte(candidate)) > 256 {
+		return false, errors.New("invalid IPMI HMAC-MD5 record")
+	}
+	salt, _ := hex.DecodeString(f[1])
+	mac := hmac.New(md5.New, []byte(candidate))
+	_, _ = mac.Write(salt)
+	return strings.EqualFold(hex.EncodeToString(mac.Sum(nil)), f[0]), nil
+}
+
+func isIPMIMD5(s string) bool {
+	f := strings.Split(s, ":")
+	return len(f) == 2 && len(f[0]) == 32 && isHex(f[0]) && len(f[1]) >= 116 && len(f[1]) <= 148 &&
+		len(f[1])%2 == 0 && isHex(f[1])
+}
+
 // isIPMI: <hex-salt>:<40-char sha1>, salt longer than 40 (a RAKP blob) to avoid
 // colliding with Redmine's sha1:salt shape.
 func isIPMI(s string) bool {

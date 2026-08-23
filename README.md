@@ -103,7 +103,7 @@ hashsmith decode -t hex "0x68:61:73:68-73 6d 69 74 68"
 
 ### Hash types
 
-Hashsmith supports **257 hash types**, and every one is validated against a
+Hashsmith supports **334 hash types**, and every one is validated against a
 known-answer vector before shipping — no unimplemented stubs, no unvalidated
 crypto. Most hashes are auto-detected, so naming a type is optional. When you want
 to pin one, pass `-t <name>`; run `hashsmith types` for the full catalogue. Beyond
@@ -157,7 +157,8 @@ Raw additions include MD2, SHA-0, SM3, SHA-512/224, SHA-512/256, legacy
 Keccak-256/512, SHAKE128-256, SHAKE256-512, BLAKE2b-256/384, and legacy Windows
 LM. Explicit checksum modes cover CRC-32, CRC-32C, CRC-64/ECMA, Adler-32,
 FNV-1a 32/64, xxHash32/64, MurmurHash3-32, seeded CRC32, original MurmurHash,
-and MurmurHash64A;
+MurmurHash64A, seeded MurmurHash3/CRC32C, CRC-64/Jones, Skip32 known-plaintext,
+and raw AES-128/192/256-ECB known-plaintext records;
 because short checksums are highly ambiguous, specify those with `-t`.
 
 Application, device & framework hashes: **Django** (PBKDF2, scrypt, Argon2,
@@ -168,12 +169,18 @@ bcrypt-SHA256, and legacy salted hashes), **phpass** (WordPress/phpBB3),
 **Python Passlib PBKDF2**, **Werkzeug PBKDF2/scrypt**, **ASP.NET Identity v2/v3**,
 **SolarWinds Orion**, and **Bitwarden** — all vector-tested.
 
+Canonical application records also cover **Veeam VBK**, **Microsoft Online
+Account**, **SecureCRT MasterPassphrase v2**, **KNX IP Secure**, **TeamSpeak 3**,
+Hashcat's NT-hash-input **NetNTLMv2** mode, **Dahua/Besder authentication**,
+**Simpla CMS**, **RSA NetWitness**, and **Radmin3**.
+
 Database, auth & directory hashes: **MySQL** (3.23, 4.1+, and MySQL 8 `$A$`
 `caching_sha2_password`), **MSSQL**, **PostgreSQL** (incl. **SCRAM-SHA-256**),
 **MongoDB SCRAM-SHA-1/SHA-256** stored and server keys, Red Hat **389-DS
 `{PBKDF2_SHA256}`**, **Sybase ASE**, **SAP CODVN B & F/G**,
 **NTLM/NetNTLM**, **Kerberos**, Active Directory **DCC/DCC2** (mscash/mscash2),
-**CRAM-MD5**, **IPMI2 RAKP**, and **iSCSI CHAP** — all vector-tested.
+**CRAM-MD5**, **IPMI2 RAKP HMAC-SHA1/HMAC-MD5**, **DNSSEC NSEC3**, legacy
+**Oracle H**, and **iSCSI CHAP** — all vector-tested.
 
 ### Wireless, wallets & disk encryption
 
@@ -590,16 +597,16 @@ self-contained binary that tries to make the common path short.
 
 | | Hashsmith | Hashcat | John the Ripper (jumbo) |
 |---|---|---|---|
-| Hash formats | 257 | ~470 modes | ~470 formats |
+| Hash formats | 334 | ~470 modes | ~470 formats |
 | Hash-type auto-detection | yes, by default | no, `-m` required | partial, guesses per file |
-| Hashcat mode numbers accepted | 273 | native | no |
-| John format labels accepted | 169 | no | native |
+| Hashcat mode numbers accepted | 350 | native | no |
+| John format labels accepted | 187 | no | native |
 | Attack modes | dict, brute, mask, markov, hybrid, combinator | straight, combinator, mask, hybrid, association | wordlist, incremental, mask, external |
 | Rule engine | ~35 operators | full, on-GPU, the de-facto standard | full, plus C-like external mode |
 | GPU | experimental, opt-in; Metal + OpenCL, a few algorithms | mature CUDA / HIP / OpenCL / Metal across nearly every mode | OpenCL for a subset |
 | File → hash extractors | 12, built into the binary | separate `*2hashcat` scripts | 100+ separate `*2john` scripts |
 | Install | one static binary, no runtime deps | binary + GPU runtime | build or distro package + Perl/Python for extractors |
-| Built-in known-answer self-test | `hashsmith selftest`, 242 vectors over 240 of 253 types, provenance-labelled | internal, on startup | `john --test` |
+| Built-in known-answer self-test | `hashsmith selftest`, 345 vectors over all 334 types, provenance-labelled | internal, on startup | `john --test` |
 | Distributed cracking | no | via third-party overlays | via MPI |
 
 **Where Hashsmith is the better tool.** You get one binary with no runtime
@@ -621,7 +628,7 @@ miscompilation, a bad optimisation or a corrupted download shows up here and
 nowhere else.
 
 ```bash
-hashsmith selftest              # 203 fast vectors in well under a second
+hashsmith selftest              # 289 fast vectors
 hashsmith selftest -slow        # include the high-iteration KDFs
 hashsmith selftest -gaps        # list the types that have no vector yet
 ```
@@ -632,9 +639,9 @@ reference suite), `cross-checked` (computed independently with Python or
 OpenSSL) and `regression` (produced by Hashsmith itself, which catches drift but
 cannot prove the implementation was right to begin with). The summary reports
 the three separately rather than flattening them into one reassuring number, and
-tells you honestly how many catalogue types have no vector at all. At the time
-of writing 240 of 253 types carry one — 130 published, 104 cross-checked and 8
-regression-only.
+tells you honestly how many catalogue types have no vector at all. All 334
+catalogue types now carry one: 232 published vectors, 106 independently
+cross-checked vectors, and 7 regression-only vectors (345 total).
 
 **Where they are the better tool.** For a large wordlist against a fast hash on
 a real GPU, Hashcat will beat Hashsmith by orders of magnitude — its kernels are

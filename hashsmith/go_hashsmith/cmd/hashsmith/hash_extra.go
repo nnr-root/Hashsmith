@@ -191,6 +191,7 @@ var compatibilityHashAliases = map[string]string{
 	"10830": "sha384-utf16le-pass-salt", "10840": "sha384-salt-utf16le-pass",
 	// Application modes that are exactly one of the generic constructions.
 	"11": "md5-pass-salt", // Joomla < 2.5.18
+	"24": "md5-salt-pass", // SolarWinds Serv-U
 	// Composite constructions: a nesting of MD5/SHA-1/SHA-256 over pass and salt.
 	"3710":  "md5-salt-md5pass",
 	"2630":  "md5-md5passsalt",
@@ -210,7 +211,8 @@ var compatibilityHashAliases = map[string]string{
 	"4900":  "sha1-salt-pass-salt",
 	"5000":  "sha1-sha1saltpasssalt",
 	"24300": "sha1-salt-sha1passsalt",
-	"29000": "sha1-salt-sha1saltsha1pass",
+	"29000": "sha1-salt-user-password",
+	"22800": "md5-salt-pass-md5pass",
 	"22300": "sha256-salt-pass-salt",
 	"20710": "sha256-sha256pass-salt",
 	"20800": "sha256-md5pass",
@@ -218,6 +220,12 @@ var compatibilityHashAliases = map[string]string{
 	"21000": "sha512-sha512binpass",
 	"20900": "md5-sha1pass-md5pass-sha1pass",
 	"30500": "md5-md5salt-md5-md5pass",
+	"3730":  "md5-salt1-upper-md5-salt2-pass",
+	"31700": "md5-triple-dual-salt",
+	"19300": "sha1-salt1-pass-salt2",
+	"20720": "sha256-salt-sha256pass", "20730": "sha256-sha256passsalt",
+	"21100": "sha1-md5passsalt", "21310": "md5-salt1-sha1salt2pass",
+	"21420": "sha256-salt-sha256binpass", "21900": "md5-triple-passsalt-dual",
 	"12600": "sha256-salt-uppersha1pass",
 	"13800": "sha256-salt-utf16lepass",
 	"32410": "sha512-sha512pass-salt", "32420": "sha512-sha512binpass-salt",
@@ -251,19 +259,26 @@ var compatibilityHashAliases = map[string]string{
 	// ── Hashcat: keyed and seeded checksums ───────────────────────────────────
 	"10100": "siphash", "11500": "crc32-hashcat", "25700": "murmurhash",
 	"34200": "murmur64a", "34201": "murmur64a-zero", "34211": "murmur64a-truncated",
+	"27800": "murmur3-seeded", "27900": "crc32c-hashcat", "28000": "crc64-jones",
+	"14900": "skip32",
+	"18700": "java-hashcode",
+	"26401": "aes128-ecb-nokdf", "26402": "aes192-ecb-nokdf", "26403": "aes256-ecb-nokdf",
 
 	// ── Hashcat: Unix login / crypt(3) ────────────────────────────────────────
 	"500": "md5crypt", "1500": "descrypt", "1600": "apr1",
 	"1800": "sha512crypt", "3200": "bcrypt", "7400": "sha256crypt",
 	"25600": "bcrypt-md5", "25800": "bcrypt-sha1", "30600": "bcrypt-sha256",
+	"28400": "bcrypt-sha512", "30601": "passlib-bcrypt-sha256",
 	"15100": "sha1crypt",
 
 	// ── Hashcat: databases ────────────────────────────────────────────────────
 	"12": "postgres", "112": "oracle11g", "12300": "oracle12c",
-	"133": "peoplesoft", "141": "episerver", "1441": "episerver",
+	"3100": "oracle-h",
+	"133":  "peoplesoft", "13500": "peoplesoft-token", "141": "episerver", "1441": "episerver",
 	"12800": "azuresync",
 	"131":   "mssql2000", "132": "mssql2005", "1731": "mssql2012",
-	"200": "mysql323", "300": "mysql41", "8000": "sybase",
+	"200": "mysql323", "300": "mysql41", "8000": "sybase", "11200": "mysql-cram",
+	"11100": "postgres-cram", "20600": "oracle-otm", "26200": "openedge",
 	"24100": "mongodb", "24200": "mongodb", "28600": "scram",
 
 	// ── Hashcat: CMS / frameworks / app platforms ─────────────────────────────
@@ -271,6 +286,13 @@ var compatibilityHashAliases = map[string]string{
 	"2611": "vbulletin", "2711": "vbulletin",
 	"4520": "redmine", "4521": "redmine", "4522": "sha1-salt-sha1pass", "4711": "sha1-md5pass-salt",
 	"124": "django", "10000": "django", "12001": "atlassian", "12150": "shiro1-sha512", "16500": "jwt",
+	"32300": "empirecms", "6800": "lastpass", "9900": "radmin2",
+	"19500": "rails-restful-auth", "21600": "web2py-pbkdf2", "29100": "flask-session",
+	"27200": "rails-restful-auth-one-round",
+	"35500": "wordpress-bcrypt",
+	"22301": "telegram-passcode", "30700": "anope-sha256", "33900": "citrix-pbkdf2",
+	"28300": "teamspeak3", "31200": "veeam-vbk", "31400": "securecrt-v2",
+	"33700": "ms-online-account",
 	"16900": "ansible", "21500": "solarwinds",
 	"30000": "werkzeug", "30120": "werkzeug", "32060": "passlib-pbkdf2",
 	"32000": "sspr", "32010": "sspr", "32020": "sspr", "32030": "sspr",
@@ -278,7 +300,11 @@ var compatibilityHashAliases = map[string]string{
 	"32050": "netiq-pbkdf2", "32070": "netiq-pbkdf2",
 	"9200": "cisco8", "9300": "cisco9",
 	"5700": "cisco4", "5800": "samsung-android",
-	"6300": "aix", "6400": "aix", "6500": "aix", "6700": "aix",
+	"5720": "cisco-ise", "7000": "fortigate",
+	"22200": "citrix-sha512", "24800": "umbraco-hmac-sha1", "26300": "fortigate256",
+	"20712": "netwitness-sha256", "24900": "dahua-auth-md5", "24901": "besder-auth-md5",
+	"29200": "radmin3",
+	"6300":  "aix", "6400": "aix", "6500": "aix", "6700": "aix",
 	"7100": "macos", "7200": "grub2", "7401": "mysql8",
 	"122": "macos", "1722": "macos", "20711": "authme-sha256",
 	"30420": "dane-sha256", "35200": "as400-ssha1",
@@ -296,17 +322,26 @@ var compatibilityHashAliases = map[string]string{
 	"2400": "cisco-pix", "2410": "cisco-asa", "22": "juniper",
 	"4800": "chap", "5500": "netntlmv1", "5600": "netntlmv2",
 	"7300": "ipmi", "8100": "citrix", "10200": "cram-md5",
+	"7350": "ipmi-md5", "7500": "krb5pa", "8300": "dnssec-nsec3",
 	"11400": "sip", "22000": "wpa",
-	"7700": "sap-b", "7800": "sap-fg",
+	"16100": "tacacs-plus", "23200": "xmpp-scram",
+	"18100": "totp", "25000": "snmpv3", "25100": "snmpv3", "28700": "aws-sig-v4",
+	"25200": "snmpv3", "26700": "snmpv3", "26800": "snmpv3", "26900": "snmpv3", "27300": "snmpv3",
+	"25900": "knx-ip-secure", "27100": "netntlmv2-nt", "31300": "ms-sntp",
+	"7700": "sap-b", "7800": "sap-fg", "35000": "sap-issha512",
+	"10300": "sap-issha1",
 	// Kerberos: etype 23 (RC4) and the AES etypes 17/18.
 	"13100": "krb5tgs", "19600": "krb5tgs", "19700": "krb5tgs",
-	"18200": "krb5asrep", "19800": "krb5pa", "19900": "krb5pa",
+	"18200": "krb5asrep", "19800": "krb5pa", "19900": "krb5pa", "28900": "krb5db",
 
 	// ── Hashcat: wallets ──────────────────────────────────────────────────────
 	"11300": "bitcoin", "12700": "blockchain", "16600": "electrum",
 	"15600": "ethereum", "15700": "ethereum",
 	"6600": "1password", "23400": "bitwarden",
 	"14700": "itunes", "14800": "itunes",
+	"16200": "apple-secure-notes",
+	"25500": "stellar-wallet",
+	"19000": "qnx-md5", "19100": "qnx-sha256", "19200": "qnx-sha512",
 
 	// ── Hashcat: disk encryption ──────────────────────────────────────────────
 	"14600": "luks", "22100": "bitlocker",
@@ -317,7 +352,7 @@ var compatibilityHashAliases = map[string]string{
 	"13751": "veracrypt", "13752": "veracrypt", "13753": "veracrypt",
 
 	// ── Hashcat: documents / archives / key material ──────────────────────────
-	"9400": "office", "9500": "office", "9600": "office",
+	"9400": "office", "9500": "office", "9600": "office", "25300": "office2016-sheet",
 	"10400": "pdf", "10500": "pdf", "10600": "pdf-r6", "10700": "pdf-r6",
 	"11600": "7z", "12500": "rar4", "13000": "rar5",
 	"13400": "keepass", "29700": "keepass",
@@ -345,15 +380,23 @@ var compatibilityHashAliases = map[string]string{
 	"pbkdf2-hmac-sha256": "pbkdf2", "pbkdf2-hmac-sha512": "pbkdf2",
 
 	// ── John the Ripper: databases ────────────────────────────────────────────
-	"mysql": "mysql323", "mysql-sha1": "mysql41",
+	"mysql": "mysql323", "mysql-sha1": "mysql41", "mysqlna": "mysql-cram",
 	"mssql": "mssql2000", "mssql05": "mssql2005", "mssql12": "mssql2012",
-	"oracle11": "oracle11g", "sybasease": "sybase",
+	"oracle": "oracle-h", "oracle11": "oracle11g", "sybasease": "sybase",
+	"pstoken": "peoplesoft-token",
 
 	// ── John the Ripper: network / directory ──────────────────────────────────
 	"netntlm": "netntlmv1", "mscash": "dcc", "mscash2": "dcc2",
 	"wpapsk": "wpa", "salted-sha1": "ldap", "nsldap": "ldap", "nsldaps": "ldap",
-	"rakp": "ipmi", "citrix_ns10": "citrix", "krb5pa-sha1": "krb5pa",
-	"sapb": "sap-b", "sapg": "sap-fg",
+	"rakp": "ipmi", "citrix_ns10": "citrix", "krb5pa-md5": "krb5pa", "krb5pa-sha1": "krb5pa",
+	"nsec3": "dnssec-nsec3",
+	"sapb":  "sap-b", "sapg": "sap-fg", "saph": "sap-issha512",
+	"restful-auth": "rails-restful-auth", "web2py": "web2py-pbkdf2",
+	"flask": "flask-session", "wpbcrypt": "wordpress-bcrypt",
+	"tacacs": "tacacs-plus", "oracle-otm": "oracle-otm", "xmpp-scram": "xmpp-scram",
+	"notes": "apple-secure-notes", "office2016": "office2016-sheet",
+	"snmp": "snmpv3",
+	"qnx":  "qnx-sha512", "telegram": "telegram-passcode",
 
 	// ── John the Ripper: containers and wallets ───────────────────────────────
 	"rar": "rar4", "agilekeychain": "1password", "itunes-backup": "itunes",

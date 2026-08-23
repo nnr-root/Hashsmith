@@ -114,7 +114,7 @@ func compatSaltedHashParts(target string) (digest, salt string, ok bool) {
 // a digest's byte length.  They are necessarily ambiguous without metadata,
 // so the auto-cracker tries them in the conventional Hashcat order.
 func detectCompatSaltedTypes(target string) []string {
-	digest, _, ok := compatSaltedHashParts(target)
+	digest, salt, ok := compatSaltedHashParts(target)
 	if !ok {
 		return nil
 	}
@@ -124,6 +124,9 @@ func detectCompatSaltedTypes(target string) []string {
 		simple = []string{"md5-pass-salt", "md5-salt-pass", "md5-utf16le-pass-salt", "md5-salt-utf16le-pass"}
 	case 40:
 		simple = []string{"sha1-pass-salt", "sha1-salt-pass", "sha1-utf16le-pass-salt", "sha1-salt-utf16le-pass"}
+		if len(salt) == 40 && isHex(salt) {
+			simple = append(simple, "rails-restful-auth-one-round")
+		}
 	case 56:
 		return []string{"sha224-pass-salt", "sha224-salt-pass"}
 	case 64:

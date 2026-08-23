@@ -47,6 +47,13 @@ func isNetNTLMLine(s string) bool {
 
 // verifyNetNTLMv2 checks a captured NetNTLMv2 response against a candidate.
 func verifyNetNTLMv2(targetHash, candidate string) (bool, error) {
+	return verifyNetNTLMv2NTHash(targetHash, ntHash(candidate))
+}
+
+// verifyNetNTLMv2NTHash checks the response from an already-computed NT hash.
+// Hashcat mode 27100 exposes this input directly, while mode 5600 calls it
+// through verifyNetNTLMv2 after deriving MD4(UTF-16LE(password)).
+func verifyNetNTLMv2NTHash(targetHash string, nt []byte) (bool, error) {
 	fields := strings.Split(targetHash, ":")
 	if len(fields) != 6 {
 		return false, errors.New("invalid NetNTLMv2 format (want user::domain:srvchal:ntproof:blob)")
@@ -67,7 +74,6 @@ func verifyNetNTLMv2(targetHash, candidate string) (bool, error) {
 
 	// NTLMv2 key = HMAC-MD5(NThash, UTF16LE(UPPER(user) + domain)).
 	// The username is uppercased; the domain is used verbatim.
-	nt := ntHash(candidate)
 	ident := utf16le(strings.ToUpper(user) + domain)
 	mac := hmac.New(md5.New, nt)
 	mac.Write(ident)

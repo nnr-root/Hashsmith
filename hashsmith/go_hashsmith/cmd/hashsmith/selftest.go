@@ -69,7 +69,12 @@ var slowSelfTestTypes = map[string]bool{
 	"ethereum": true, "office": true, "7z": true, "rar4": true, "pdf": true,
 	"ssh": true, "gpg": true, "ike": true,
 	"bcrypt-md5": true, "bcrypt-sha1": true, "bcrypt-sha256": true, "pfx": true,
-	"pwsafe": true,
+	"pwsafe":   true,
+	"lastpass": true, "netiq-pbkdf2": true, "sspr": true,
+	"wordpress-bcrypt":   true,
+	"apple-secure-notes": true, "office2016-sheet": true,
+	"bcrypt-sha512": true, "passlib-bcrypt-sha256": true,
+	"knx-ip-secure": true,
 }
 
 func runSelfTest(args []string) error {

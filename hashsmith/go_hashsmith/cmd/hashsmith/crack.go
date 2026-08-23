@@ -10,11 +10,13 @@ import (
 	"crypto/rc4"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 	"os/signal"
@@ -837,6 +839,33 @@ func calcBruteTotal(charset string, minLen, maxLen int) int64 {
 
 func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, error) {
 	algo := canonicalHashType(typ)
+	// John's "postgres" label covers PostgreSQL challenge/response records,
+	// while Hashsmith also uses postgres for the stored md5(password+user) form.
+	if algo == "postgres" && strings.HasPrefix(targetHash, "$postgres$") {
+		return verifyPostgresCRAM(targetHash, candidate)
+	}
+	if algo == "bcrypt-sha256" && strings.HasPrefix(targetHash, "$bcrypt-sha256$") {
+		return verifyPasslibBcryptSHA256(targetHash, candidate)
+	}
+	// John exposes all QNX and SAP CODVN H digest variants through one label.
+	if algo == "qnx-sha512" {
+		switch {
+		case strings.HasPrefix(targetHash, "@m"):
+			return verifyQNX(targetHash, candidate, "m")
+		case strings.HasPrefix(targetHash, "@s"):
+			return verifyQNX(targetHash, candidate, "s")
+		}
+	}
+	if algo == "sap-issha512" {
+		switch {
+		case strings.HasPrefix(targetHash, "{x-issha, "):
+			return verifySAPIteratedSHA(targetHash, candidate, "sha1")
+		case strings.HasPrefix(targetHash, "{x-isSHA256, "):
+			return verifySAPIteratedSHA(targetHash, candidate, "sha256")
+		case strings.HasPrefix(targetHash, "{x-isSHA384, "):
+			return verifySAPIteratedSHA(targetHash, candidate, "sha384")
+		}
+	}
 	if _, ok := compatSaltedDigests[algo]; ok {
 		return verifyCompatSaltedDigest(candidate, targetHash, algo, salt)
 	}
@@ -859,6 +888,20 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyMurmurHash64A(targetHash, candidate, "0000000000000000", false)
 	case "murmur64a-truncated":
 		return verifyMurmurHash64A(targetHash, candidate, "0000000000000000", true)
+	case "murmur3-seeded":
+		return verifyMurmur3Seeded(targetHash, candidate)
+	case "crc32c-hashcat":
+		return verifyCRC32CSeeded(targetHash, candidate)
+	case "crc64-jones":
+		return verifyCRC64Jones(targetHash, candidate)
+	case "skip32":
+		return verifySkip32(targetHash, candidate)
+	case "aes128-ecb-nokdf":
+		return verifyAESNOKDF(targetHash, candidate, 16)
+	case "aes192-ecb-nokdf":
+		return verifyAESNOKDF(targetHash, candidate, 24)
+	case "aes256-ecb-nokdf":
+		return verifyAESNOKDF(targetHash, candidate, 32)
 	}
 	switch algo {
 	case "dane-sha256":
@@ -875,12 +918,128 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyAuthMeSHA256(targetHash, candidate)
 	case "phps":
 		return verifyPHPS(targetHash, candidate)
+	case "md5-salt1-upper-md5-salt2-pass":
+		return verifyDualSaltMD5(targetHash, candidate, "upper-inner")
+	case "md5-triple-dual-salt":
+		return verifyDualSaltMD5(targetHash, candidate, "triple")
+	case "empirecms":
+		return verifyDualSaltMD5(targetHash, candidate, "empirecms")
+	case "cisco-ise":
+		return verifyCiscoISE(targetHash, candidate)
+	case "fortigate":
+		return verifyFortiGate(targetHash, candidate)
+	case "lastpass":
+		return verifyLastPass(targetHash, candidate)
+	case "sap-issha512":
+		return verifySAPIsSHA512(targetHash, candidate)
+	case "radmin2":
+		return verifyRadmin2(targetHash, candidate)
+	case "peoplesoft-token":
+		return verifyPeopleSoftToken(targetHash, candidate)
+	case "java-hashcode":
+		return verifyJavaHashCode(targetHash, candidate)
+	case "rails-restful-auth":
+		return verifyRailsRestfulAuth(targetHash, candidate)
+	case "web2py-pbkdf2":
+		return verifyWeb2pyPBKDF2(targetHash, candidate)
+	case "flask-session":
+		return verifyFlaskSession(targetHash, candidate)
+	case "wordpress-bcrypt":
+		return verifyWordPressBcrypt(targetHash, candidate)
+	case "krb5db":
+		return verifyKrb5DB(targetHash, candidate)
+	case "mysql-cram":
+		return verifyMySQLCRAM(targetHash, candidate)
+	case "tacacs-plus":
+		return verifyTACACSPlus(targetHash, candidate)
+	case "apple-secure-notes":
+		return verifyAppleSecureNotes(targetHash, candidate)
+	case "oracle-otm":
+		return verifyOracleOTM(targetHash, candidate)
+	case "xmpp-scram":
+		return verifyXMPPSCRAM(targetHash, candidate)
+	case "office2016-sheet":
+		return verifyOffice2016Sheet(targetHash, candidate)
+	case "postgres-cram":
+		return verifyPostgresCRAM(targetHash, candidate)
+	case "totp":
+		return verifyTOTP(targetHash, candidate)
+	case "snmpv3":
+		return verifySNMPv3(targetHash, candidate)
+	case "stellar-wallet":
+		return verifyStellarWallet(targetHash, candidate)
+	case "openedge":
+		return verifyOpenEdge(targetHash, candidate)
+	case "aws-sig-v4":
+		return verifyAWSSignatureV4(targetHash, candidate)
+	case "qnx-md5":
+		return verifyQNX(targetHash, candidate, "m")
+	case "qnx-sha256":
+		return verifyQNX(targetHash, candidate, "s")
+	case "qnx-sha512":
+		return verifyQNX(targetHash, candidate, "S")
+	case "sap-issha1":
+		return verifySAPIteratedSHA(targetHash, candidate, "sha1")
+	case "sap-issha256":
+		return verifySAPIteratedSHA(targetHash, candidate, "sha256")
+	case "sap-issha384":
+		return verifySAPIteratedSHA(targetHash, candidate, "sha384")
 	case "bcrypt-md5":
 		return verifyWrappedBcrypt(targetHash, candidate, "md5")
 	case "bcrypt-sha1":
 		return verifyWrappedBcrypt(targetHash, candidate, "sha1")
 	case "bcrypt-sha256":
 		return verifyWrappedBcrypt(targetHash, candidate, "sha256")
+	case "bcrypt-sha512":
+		return verifyWrappedBcrypt(targetHash, candidate, "sha512")
+	case "passlib-bcrypt-sha256":
+		return verifyPasslibBcryptSHA256(targetHash, candidate)
+	case "telegram-passcode":
+		return verifyTelegramPasscode(targetHash, candidate)
+	case "ms-sntp":
+		return verifyMSSNTP(targetHash, candidate)
+	case "citrix-pbkdf2":
+		return verifyCitrixPBKDF2(targetHash, candidate)
+	case "anope-sha256":
+		return verifyAnopeSHA256(targetHash, candidate)
+	case "citrix-sha512":
+		return verifyCitrixSHA512(targetHash, candidate)
+	case "fortigate256":
+		return verifyFortiGate256(targetHash, candidate)
+	case "umbraco-hmac-sha1":
+		return verifyUmbracoHMACSHA1(targetHash, candidate)
+	case "dahua-auth-md5":
+		return verifyDahuaAuthMD5(targetHash, candidate, false)
+	case "besder-auth-md5":
+		return verifyDahuaAuthMD5(targetHash, candidate, true)
+	case "netwitness-sha256":
+		return verifyNetWitnessSHA256(targetHash, candidate)
+	case "oracle-h":
+		return verifyOracleH(targetHash, candidate)
+	case "dnssec-nsec3":
+		return verifyNSEC3(targetHash, candidate)
+	case "ipmi-md5":
+		return verifyIPMIMD5(targetHash, candidate)
+	case "sha1-salt-user-password":
+		return verifySaltedUsernameSHA1(targetHash, candidate)
+	case "radmin3":
+		return verifyRadmin3(targetHash, candidate)
+	case "sha1-salt1-pass-salt2", "md5-salt1-sha1salt2pass", "md5-triple-passsalt-dual":
+		return verifyHashcatDualSaltComposite(targetHash, candidate, algo)
+	case "rails-restful-auth-one-round":
+		return verifyRailsRestfulAuthOneRound(targetHash, candidate)
+	case "veeam-vbk":
+		return verifyVeeamVBK(targetHash, candidate)
+	case "ms-online-account":
+		return verifyMSOnlineAccount(targetHash, candidate)
+	case "securecrt-v2":
+		return verifySecureCRTV2(targetHash, candidate)
+	case "knx-ip-secure":
+		return verifyKNXIPSecure(targetHash, candidate)
+	case "netntlmv2-nt":
+		return verifyNetNTLMv2NT(targetHash, candidate)
+	case "teamspeak3":
+		return verifyTeamSpeak3(targetHash, candidate)
 	case "shiro1-sha512":
 		return verifyShiro1(targetHash, candidate)
 	case "bcrypt":
@@ -901,8 +1060,10 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyArgon2(targetHash, candidate), nil
 	case "scrypt":
 		return verifyScrypt(targetHash, candidate)
-	case "mssql2005", "mssql2012":
+	case "mssql2005":
 		return verifyMSSQL2005(targetHash, candidate)
+	case "mssql2012":
+		return verifyMSSQL2012(targetHash, candidate)
 	case "zipcrypto":
 		return verifyZipCrypto(targetHash, candidate)
 	case "zipaes128", "zipaes192", "zipaes256":
@@ -939,8 +1100,10 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyDjango(targetHash, candidate)
 	case "mysql8":
 		return verifyMySQL8(targetHash, candidate)
-	case "veracrypt", "truecrypt":
+	case "veracrypt":
 		return verifyVeraCrypt(targetHash, candidate)
+	case "truecrypt":
+		return verifyTrueCrypt(targetHash, candidate)
 	case "bitlocker":
 		return verifyBitLocker(targetHash, candidate)
 	case "electrum":
@@ -1221,7 +1384,21 @@ func verifyMSSQL2005(targetHash, candidate string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	digest := sha1.Sum(append(saltBytes, utf16le(candidate)...))
+	digest := sha1.Sum(append(utf16le(candidate), saltBytes...))
+	got := strings.ToUpper(hex.EncodeToString(digest[:]))
+	return strings.ToUpper(v[14:]) == got, nil
+}
+
+func verifyMSSQL2012(targetHash, candidate string) (bool, error) {
+	v := strings.TrimSpace(targetHash)
+	if !strings.HasPrefix(strings.ToLower(v), "0x0200") || len(v) != 142 {
+		return false, errors.New("invalid MSSQL 2012/2014 hash format")
+	}
+	saltBytes, err := hex.DecodeString(v[6:14])
+	if err != nil {
+		return false, err
+	}
+	digest := sha512.Sum512(append(utf16le(candidate), saltBytes...))
 	got := strings.ToUpper(hex.EncodeToString(digest[:]))
 	return strings.ToUpper(v[14:]) == got, nil
 }
@@ -1234,36 +1411,84 @@ func verifyMSSQL2005(targetHash, candidate string) (bool, error) {
 // the first byte of correctly decrypted 7z header data is always in a known
 // range (LZMA property 0x5D, or LZMA2/property-IDs ≤ 0x3F).
 //
-// Hash format: $7z$<numCyclesPower>$<salt_hex>$<iv_hex>$<crc_hex>$<offset>$<data_hex>
+// Canonical Hashcat format:
+// $7z$<type>$<cycles>$<saltLen>$<salt>$<ivLen>$<iv>$<crc>$<dataLen>$<unpackSize>$<data>
+//
+// Hashsmith's earlier abbreviated extractor format is accepted for backward
+// compatibility, but canonical records are verified with their CRC and exact
+// unpacked length instead of a structural heuristic.
 func verify7z(targetHash, candidate string) (bool, error) {
-	parts := strings.SplitN(targetHash, "$", 8)
+	parts := strings.Split(targetHash, "$")
 	if len(parts) < 8 || parts[1] != "7z" {
 		return false, errors.New("invalid 7z hash format")
 	}
-	numCyclesPower, err := strconv.Atoi(parts[2])
+
+	var cyclesField, saltField, ivField, dataField string
+	var wantCRC uint64
+	var unpackSize int
+	canonical := len(parts) == 12
+	if canonical {
+		if parts[2] != "0" {
+			return false, errors.New("unsupported 7z data type")
+		}
+		cyclesField, saltField, ivField, dataField = parts[3], parts[5], parts[7], parts[11]
+		saltLen, err := strconv.Atoi(parts[4])
+		if err != nil || saltLen < 0 || saltLen > 64 {
+			return false, errors.New("invalid 7z salt length")
+		}
+		ivLen, err := strconv.Atoi(parts[6])
+		if err != nil || ivLen < 0 || ivLen > aes.BlockSize {
+			return false, errors.New("invalid 7z IV length")
+		}
+		dataLen, err := strconv.Atoi(parts[9])
+		if err != nil || dataLen < aes.BlockSize {
+			return false, errors.New("invalid 7z data length")
+		}
+		unpackSize, err = strconv.Atoi(parts[10])
+		if err != nil || unpackSize < 0 || unpackSize > dataLen {
+			return false, errors.New("invalid 7z unpack size")
+		}
+		wantCRC, err = strconv.ParseUint(parts[8], 10, 32)
+		if err != nil {
+			return false, errors.New("invalid 7z CRC")
+		}
+		if len(saltField) != saltLen*2 || len(ivField) < ivLen*2 || len(dataField) != dataLen*2 {
+			return false, errors.New("7z field length mismatch")
+		}
+	} else if len(parts) == 8 {
+		cyclesField, saltField, ivField, dataField = parts[2], parts[3], parts[4], parts[7]
+	} else {
+		return false, errors.New("invalid 7z hash field count")
+	}
+
+	numCyclesPower, err := strconv.Atoi(cyclesField)
 	if err != nil || numCyclesPower < 0 || numCyclesPower > 32 {
 		return false, errors.New("invalid 7z numCyclesPower")
 	}
-	salt, _ := hex.DecodeString(parts[3])
-	iv, err := hex.DecodeString(parts[4])
-	if err != nil || len(iv) != 16 {
+	salt, err := hex.DecodeString(saltField)
+	if err != nil {
+		return false, errors.New("invalid 7z salt")
+	}
+	iv, err := hex.DecodeString(ivField)
+	if err != nil || len(iv) > aes.BlockSize {
 		return false, errors.New("invalid 7z IV")
 	}
-	encData, err := hex.DecodeString(parts[7])
-	if err != nil || len(encData) < aes.BlockSize {
+	iv = append(iv, make([]byte, aes.BlockSize-len(iv))...)
+	encData, err := hex.DecodeString(dataField)
+	if err != nil || len(encData) < aes.BlockSize || len(encData)%aes.BlockSize != 0 {
 		return false, errors.New("invalid 7z encrypted data")
 	}
 
-	// 7-Zip KDF: single SHA-256 context fed (pw_utf16le || salt || ctr_LE8)
+	// 7-Zip KDF: single SHA-256 context fed (salt || pw_utf16le || ctr_LE8)
 	// for each of 2^numCyclesPower rounds.
 	pwBytes := utf16le(candidate)
 	h := sha256.New()
 	numRounds := uint64(1) << uint(numCyclesPower)
 	for i := uint64(0); i < numRounds; i++ {
-		h.Write(pwBytes)
 		if len(salt) > 0 {
 			h.Write(salt)
 		}
+		h.Write(pwBytes)
 		var ctr [8]byte
 		binary.LittleEndian.PutUint64(ctr[:], i)
 		h.Write(ctr[:])
@@ -1274,7 +1499,13 @@ func verify7z(targetHash, candidate string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	// Two-block structural check:
+	decrypted := make([]byte, len(encData))
+	cipher.NewCBCDecrypter(block, iv).CryptBlocks(decrypted, encData)
+	if canonical {
+		return uint64(crc32.ChecksumIEEE(decrypted[:unpackSize])) == wantCRC, nil
+	}
+
+	// Legacy two-block structural check:
 	//   Block 1: LZMA2 compressed data always has control byte ≥ 0x80.
 	//   Block 2: 7-zip zero-pads the LZMA2 stream to a multiple of 16 bytes,
 	//            so decrypted block 2 is all-zero with the correct key, but
@@ -1283,11 +1514,10 @@ func verify7z(targetHash, candidate string) (bool, error) {
 	if len(encData) < aes.BlockSize*2 {
 		// Single block available; fall back to a weak first-byte check.
 		aligned := make([]byte, aes.BlockSize)
-		cipher.NewCBCDecrypter(block, iv).CryptBlocks(aligned, encData[:aes.BlockSize])
+		copy(aligned, decrypted[:aes.BlockSize])
 		return aligned[0] >= 0x80, nil
 	}
-	aligned2 := make([]byte, aes.BlockSize*2)
-	cipher.NewCBCDecrypter(block, iv).CryptBlocks(aligned2, encData[:aes.BlockSize*2])
+	aligned2 := decrypted[:aes.BlockSize*2]
 
 	if aligned2[0] < 0x80 {
 		return false, nil // block 1: not a compressed LZMA2 control byte
@@ -1307,17 +1537,30 @@ func verify7z(targetHash, candidate string) (bool, error) {
 // Verification checks that the decrypted archive-header type byte (offset 2)
 // equals 0x73 (main archive block type).
 //
-// Hash format: $rar3$0$<salt_hex>$<data_hex>
+// Canonical Hashcat/John format: $RAR3$*0*<salt_hex>*<data_hex>.
+// Hashsmith's earlier lowercase/dollar-delimited spelling remains accepted.
 func verifyRAR4(targetHash, candidate string) (bool, error) {
-	parts := strings.Split(targetHash, "$")
-	if len(parts) != 5 || parts[1] != "rar3" {
-		return false, errors.New("invalid rar3 hash format")
+	var saltHex, dataHex string
+	canonical := false
+	if strings.HasPrefix(targetHash, "$RAR3$*0*") {
+		canonical = true
+		parts := strings.Split(targetHash, "*")
+		if len(parts) != 4 {
+			return false, errors.New("invalid RAR3 hash format")
+		}
+		saltHex, dataHex = parts[2], parts[3]
+	} else {
+		parts := strings.Split(targetHash, "$")
+		if len(parts) != 5 || !strings.EqualFold(parts[1], "rar3") || parts[2] != "0" {
+			return false, errors.New("invalid RAR3 hash format")
+		}
+		saltHex, dataHex = parts[3], parts[4]
 	}
-	salt, err := hex.DecodeString(parts[3])
+	salt, err := hex.DecodeString(saltHex)
 	if err != nil || len(salt) != 8 {
 		return false, errors.New("invalid rar3 salt (need 8 bytes)")
 	}
-	encData, err := hex.DecodeString(parts[4])
+	encData, err := hex.DecodeString(dataHex)
 	if err != nil || len(encData) < 16 {
 		return false, errors.New("invalid rar3 encrypted data (need ≥16 bytes)")
 	}
@@ -1326,16 +1569,22 @@ func verifyRAR4(targetHash, candidate string) (bool, error) {
 	// Each round feeds: password_utf16le || salt(8B) || i(3B little-endian).
 	pwBytes := utf16le(candidate)
 	h := sha1.New()
+	iv := make([]byte, 0, aes.BlockSize)
 	for i := 0; i < 0x40000; i++ {
 		h.Write(pwBytes)
 		h.Write(salt)
 		h.Write([]byte{byte(i), byte(i >> 8), byte(i >> 16)})
+		if i&0x3fff == 0 {
+			iv = append(iv, h.Sum(nil)[19])
+		}
 	}
 	digest := h.Sum(nil) // 20 bytes
 
-	key := digest[:16] // AES-128
-	iv := make([]byte, 16)
-	copy(iv, digest[16:20]) // low 4 bytes of digest; upper 12 stay zero
+	// RAR stores the SHA-1 state as four little-endian words for its AES key.
+	key := make([]byte, 16)
+	for i := 0; i < 16; i += 4 {
+		key[i], key[i+1], key[i+2], key[i+3] = digest[i+3], digest[i+2], digest[i+1], digest[i]
+	}
 
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -1343,6 +1592,10 @@ func verifyRAR4(targetHash, candidate string) (bool, error) {
 	}
 	decrypted := make([]byte, 16)
 	cipher.NewCBCDecrypter(block, iv).CryptBlocks(decrypted, encData[:16])
+	if canonical {
+		// Hashcat/JtR type-0 records retain the fixed RAR end-header marker.
+		return bytes.Equal(decrypted[:7], []byte{0xc4, 0x3d, 0x7b, 0x00, 0x40, 0x07, 0x00}), nil
+	}
 
 	// byte[2] of a valid RAR4 main archive header is always 0x73.
 	return decrypted[2] == 0x73, nil
@@ -1392,7 +1645,7 @@ var pdfPaddingBytes = []byte{
 
 // pdfComputeKey derives the PDF encryption key (Algorithm 2) from the user
 // password, /O key, /P permissions, document ID, revision, and key size.
-func pdfComputeKey(password string, oKey []byte, p int32, docID []byte, revision, keySize int) []byte {
+func pdfComputeKey(password string, oKey []byte, p int32, docID []byte, revision, keySize int, encryptMetadata bool) []byte {
 	// Pad or truncate the password to exactly 32 bytes.
 	padded := make([]byte, 32)
 	n := copy(padded, []byte(password))
@@ -1403,6 +1656,9 @@ func pdfComputeKey(password string, oKey []byte, p int32, docID []byte, revision
 	h.Write(oKey)
 	h.Write([]byte{byte(p), byte(p >> 8), byte(p >> 16), byte(p >> 24)})
 	h.Write(docID)
+	if revision >= 4 && !encryptMetadata {
+		h.Write([]byte{0xff, 0xff, 0xff, 0xff})
+	}
 	key := h.Sum(nil)[:keySize]
 
 	if revision >= 3 {
@@ -1419,25 +1675,55 @@ func pdfComputeKey(password string, oKey []byte, p int32, docID []byte, revision
 // (revisions 2-4). It derives the encryption key and validates it against the
 // /U (user key) entry stored in the hash.
 //
-// Hash format: $pdf$<R>$<keylenBits>$<P>$<id_hex>$<U_hex>$<O_hex>
+// Canonical Hashcat/John format:
+// $pdf$<V>*<R>*<keyBits>*<P>*<encryptMetadata>*<idLen>*<id>*<uLen>*<U>*<oLen>*<O>
+// Hashsmith's earlier dollar-delimited short form remains accepted.
 func verifyPDF(targetHash, candidate string) (bool, error) {
-	parts := strings.Split(targetHash, "$")
-	if len(parts) < 8 || parts[1] != "pdf" {
-		return false, errors.New("invalid pdf hash format")
+	var rField, keyField, pField, idHex, uHex, oHex string
+	encryptMetadata := true
+	if strings.HasPrefix(targetHash, "$pdf$") && strings.Contains(targetHash, "*") {
+		parts := strings.Split(strings.TrimPrefix(targetHash, "$pdf$"), "*")
+		if len(parts) != 11 {
+			return false, errors.New("invalid PDF hash field count")
+		}
+		rField, keyField, pField = parts[1], parts[2], parts[3]
+		encryptMetadata = parts[4] != "0"
+		idHex, uHex, oHex = parts[6], parts[8], parts[10]
+		idLen, err1 := strconv.Atoi(parts[5])
+		uLen, err2 := strconv.Atoi(parts[7])
+		oLen, err3 := strconv.Atoi(parts[9])
+		if err1 != nil || err2 != nil || err3 != nil || len(idHex) != idLen*2 || len(uHex) != uLen*2 || len(oHex) != oLen*2 {
+			return false, errors.New("PDF field length mismatch")
+		}
+	} else {
+		parts := strings.Split(targetHash, "$")
+		if len(parts) != 8 || parts[1] != "pdf" {
+			return false, errors.New("invalid pdf hash format")
+		}
+		rField, keyField, pField, idHex, uHex, oHex = parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]
 	}
-	R, _ := strconv.Atoi(parts[2])
-	keyLenBits, _ := strconv.Atoi(parts[3])
-	P64, _ := strconv.ParseInt(parts[4], 10, 64)
+	R, err := strconv.Atoi(rField)
+	if err != nil {
+		return false, errors.New("invalid PDF revision")
+	}
+	keyLenBits, err := strconv.Atoi(keyField)
+	if err != nil {
+		return false, errors.New("invalid PDF key length")
+	}
+	P64, err := strconv.ParseInt(pField, 10, 32)
+	if err != nil {
+		return false, errors.New("invalid PDF permissions")
+	}
 	P := int32(P64)
-	docID, err := hex.DecodeString(parts[5])
+	docID, err := hex.DecodeString(idHex)
 	if err != nil {
 		return false, errors.New("invalid pdf docID")
 	}
-	U, err := hex.DecodeString(parts[6])
+	U, err := hex.DecodeString(uHex)
 	if err != nil || len(U) < 16 {
 		return false, errors.New("invalid pdf U key (need ≥16 bytes)")
 	}
-	O, err := hex.DecodeString(parts[7])
+	O, err := hex.DecodeString(oHex)
 	if err != nil || len(O) < 32 {
 		return false, errors.New("invalid pdf O key (need 32 bytes)")
 	}
@@ -1450,7 +1736,7 @@ func verifyPDF(targetHash, candidate string) (bool, error) {
 		keySize = 16
 	}
 
-	key := pdfComputeKey(candidate, O, P, docID, R, keySize)
+	key := pdfComputeKey(candidate, O, P, docID, R, keySize, encryptMetadata)
 
 	switch R {
 	case 2:

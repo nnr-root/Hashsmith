@@ -1,12 +1,13 @@
 package main
 
-// Hashcat modes 25600, 25800, and 30600 feed the lowercase hexadecimal
+// Hashcat modes 25600, 25800, 28400, and 30600 feed the lowercase hexadecimal
 // representation of a digest into bcrypt rather than the password itself.
 
 import (
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"errors"
 
@@ -24,6 +25,9 @@ func verifyWrappedBcrypt(target, candidate, digestName string) (bool, error) {
 		digest = sum[:]
 	case "sha256":
 		sum := sha256.Sum256([]byte(candidate))
+		digest = sum[:]
+	case "sha512":
+		sum := sha512.Sum512([]byte(candidate))
 		digest = sum[:]
 	default:
 		return false, errors.New("unsupported bcrypt digest wrapper: " + digestName)

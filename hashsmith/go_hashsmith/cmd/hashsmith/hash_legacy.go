@@ -260,8 +260,12 @@ func xxhash64(data []byte) uint64 {
 }
 
 func murmur3_32(data []byte) uint32 {
+	return murmur3_32Seed(data, 0)
+}
+
+func murmur3_32Seed(data []byte, seed uint32) uint32 {
 	const c1, c2 uint32 = 0xcc9e2d51, 0x1b873593
-	var h uint32
+	h := seed
 	i := 0
 	for i <= len(data)-4 {
 		k := binary.LittleEndian.Uint32(data[i:])

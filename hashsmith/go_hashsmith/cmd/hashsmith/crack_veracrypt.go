@@ -53,8 +53,25 @@ var vcKDFs = []vcKDF{
 	{ripemd160.New, 2000},    // TrueCrypt RIPEMD-160
 }
 
+var tcKDFs = []vcKDF{
+	{ripemd160.New, 2000}, // TrueCrypt RIPEMD-160
+	{sha512.New, 1000},    // TrueCrypt SHA-512
+	{newWhirlpool, 1000},  // TrueCrypt Whirlpool
+}
+
 // verifyVeraCrypt checks a passphrase against a 512-byte volume header (hex).
 func verifyVeraCrypt(targetHash, candidate string) (bool, error) {
+	return verifyCryptHeader(targetHash, candidate, vcKDFs)
+}
+
+// verifyTrueCrypt limits the KDF search to TrueCrypt's published iteration
+// counts. Besides avoiding expensive VeraCrypt work, this keeps the two named
+// formats independently testable even though their 512-byte headers coincide.
+func verifyTrueCrypt(targetHash, candidate string) (bool, error) {
+	return verifyCryptHeader(targetHash, candidate, tcKDFs)
+}
+
+func verifyCryptHeader(targetHash, candidate string, kdfs []vcKDF) (bool, error) {
 	t := strings.TrimSpace(targetHash)
 	t = strings.TrimPrefix(t, "veracrypt:")
 	t = strings.TrimPrefix(t, "truecrypt:")
@@ -65,7 +82,7 @@ func verifyVeraCrypt(targetHash, candidate string) (bool, error) {
 	salt := header[:64]
 	encrypted := header[64:512]
 
-	for _, kdf := range vcKDFs {
+	for _, kdf := range kdfs {
 		key := pbkdf2.Key([]byte(candidate), salt, kdf.iter, 64, kdf.newHash)
 		for _, newCipher := range vcCiphers {
 			if vcHeaderValid(newCipher, key, encrypted) {

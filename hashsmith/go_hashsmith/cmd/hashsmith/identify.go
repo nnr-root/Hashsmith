@@ -303,8 +303,76 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"PKCS#8 encrypted key", 1000, "$pkcs8$ prefix — PBES2 (PBKDF2) private key"}}
 	case strings.HasPrefix(v, "$gpg$"):
 		return []candidate{{"GPG symmetric", 1000, "$gpg$ prefix — gpg -c symmetric encryption"}}
+	case strings.HasPrefix(v, "$office$2016$0$"):
+		return []candidate{{"MS Office 2016 sheet protection", 1000, "$office$2016$0$ record"}}
 	case strings.HasPrefix(v, "$office$"):
 		return []candidate{{"MS Office (encrypted document)", 1000, "$office$ prefix — Office 2007/2010/2013"}}
+	case strings.HasPrefix(v, "$mysqlna$"):
+		return []candidate{{"MySQL CRAM-SHA1", 1000, "$mysqlna$ authentication-response record"}}
+	case strings.HasPrefix(v, "$tacacs-plus$"):
+		return []candidate{{"TACACS+", 1000, "$tacacs-plus$ packet record"}}
+	case strings.HasPrefix(v, "$ASN$*"):
+		return []candidate{{"Apple Secure Notes", 1000, "$ASN$ wrapped-key verifier"}}
+	case strings.HasPrefix(v, "otm_sha256:"):
+		return []candidate{{"Oracle Transportation Management SHA-256", 1000, "otm_sha256 record"}}
+	case strings.HasPrefix(v, "$xmpp-scram$"):
+		return []candidate{{"XMPP SCRAM", 1000, "$xmpp-scram$ stored-key record"}}
+	case strings.HasPrefix(v, "$postgres$"):
+		return []candidate{{"PostgreSQL challenge-response MD5", 1000, "$postgres$ user/salt/digest record"}}
+	case strings.HasPrefix(v, "$SNMPv3$"):
+		return []candidate{{"SNMPv3 USM authentication", 1000, "$SNMPv3$ packet record"}}
+	case strings.HasPrefix(v, "@m@") || strings.HasPrefix(v, "@m,"):
+		return []candidate{{"QNX shadow MD5", 1000, "@m@ / @m,rounds@ record"}}
+	case strings.HasPrefix(v, "@s@") || strings.HasPrefix(v, "@s,"):
+		return []candidate{{"QNX shadow SHA-256", 1000, "@s@ / @s,rounds@ record"}}
+	case strings.HasPrefix(v, "@S@") || strings.HasPrefix(v, "@S,"):
+		return []candidate{{"QNX shadow SHA-512", 1000, "@S@ / @S,rounds@ record"}}
+	case strings.HasPrefix(v, "{x-issha, "):
+		return []candidate{{"SAP CODVN H iSSHA-1", 1000, "{x-issha, rounds} record"}}
+	case strings.HasPrefix(v, "{x-isSHA256, "):
+		return []candidate{{"SAP CODVN H iSSHA-256", 1000, "{x-isSHA256, rounds} record"}}
+	case strings.HasPrefix(v, "{x-isSHA384, "):
+		return []candidate{{"SAP CODVN H iSSHA-384", 1000, "{x-isSHA384, rounds} record"}}
+	case strings.HasPrefix(v, "{x-isSHA512, "):
+		return []candidate{{"SAP CODVN H iSSHA-512", 1000, "{x-isSHA512, rounds} record"}}
+	case strings.HasPrefix(v, "$stellar$"):
+		return []candidate{{"Stargazer Stellar wallet", 1000, "$stellar$ AES-GCM wallet record"}}
+	case strings.HasPrefix(v, "$telegram$0*"):
+		return []candidate{{"Telegram mobile passcode", 1000, "$telegram$0* SHA-256 record"}}
+	case strings.HasPrefix(v, "$sntp-ms$"):
+		return []candidate{{"Microsoft SNTP", 1000, "$sntp-ms$ authentication record"}}
+	case strings.HasPrefix(v, "$NSEC3$"):
+		return []candidate{{"DNSSEC NSEC3", 1000, "$NSEC3$ John the Ripper record"}}
+	case strings.HasPrefix(v, "O$"):
+		return []candidate{{"Oracle H", 1000, "O$USER#digest John the Ripper record"}}
+	case isIPMIMD5(v):
+		return []candidate{{"IPMI2 RAKP HMAC-MD5", 1000, "16-byte HMAC followed by a RAKP packet blob"}}
+	case strings.HasPrefix(v, "$radmin3$"):
+		return []candidate{{"Radmin3", 1000, "$radmin3$ username/salt/SRP verifier record"}}
+	case strings.HasPrefix(v, "$vbk$*"):
+		return []candidate{{"Veeam VBK", 1000, "$vbk$ backup-password record"}}
+	case strings.HasPrefix(v, "$MSONLINEACCOUNT$0$"):
+		return []candidate{{"Microsoft Online Account", 1000, "$MSONLINEACCOUNT$ PBKDF2/AES record"}}
+	case strings.HasPrefix(v, "S:\"Config Passphrase\"=02:"):
+		return []candidate{{"SecureCRT MasterPassphrase v2", 1000, "SecureCRT configuration passphrase record"}}
+	case strings.HasPrefix(v, "$knx-ip-secure-device-authentication-code$*"):
+		return []candidate{{"KNX IP Secure device authentication", 1000, "KNX Session_Response authentication record"}}
+	case strings.HasPrefix(v, "$teamspeak$3$"):
+		return []candidate{{"TeamSpeak 3 channel hash", 1000, "$teamspeak$3$ record"}}
+	case strings.HasPrefix(v, "$bcrypt-sha256$"):
+		return []candidate{{"Passlib bcrypt-SHA256", 1000, "$bcrypt-sha256$ record"}}
+	case strings.HasPrefix(v, "sha256:") && len(strings.Split(v, ":")) == 3:
+		return []candidate{{"Anope IRC enc_sha256", 1000, "sha256:digest:state record"}}
+	case len(v) == 129 && v[0] == '5' && isHex(v[1:]):
+		return []candidate{{"Citrix NetScaler PBKDF2", 1000, "5 + 32-byte salt + 32-byte digest"}}
+	case len(v) == 137 && v[0] == '2' && isHex(v[1:]):
+		return []candidate{{"Citrix NetScaler SHA-512", 1000, "2 + 8-character salt + SHA-512 digest"}}
+	case len(v) == 63 && strings.HasPrefix(v, "SH2"):
+		return []candidate{{"FortiGate256", 1000, "SH2 + Base64 salt/SHA-256 payload"}}
+	case strings.HasPrefix(v, "$AWS-Sig-v4$"):
+		return []candidate{{"Amazon AWS Signature Version 4", 1000, "$AWS-Sig-v4$ signing record"}}
+	case isTOTPRecord(v):
+		return []candidate{{"TOTP HMAC-SHA1", 1000, "six-digit code/timestamp pair record"}}
 	case strings.HasPrefix(v, "$keepass$"):
 		return []candidate{{"KeePass database", 1000, "$keepass$ prefix — KDBX 1/2 (AES-KDF)"}}
 	case strings.HasPrefix(v, "WPA*01*"), isLegacyPMKID(v):
@@ -428,9 +496,9 @@ func signatureMatch(v string) []candidate {
 	case reScrypt.MatchString(v):
 		return []candidate{{"scrypt", 1000, "recognized scrypt$ or Hashcat SCRYPT: record"}}
 	case isHexPair(v, 8, 8):
-		return []candidate{{"Seeded CRC32 / MurmurHash", 1000, "8-hex checksum and 8-hex initial value/seed"}}
+		return []candidate{{"Seeded CRC32/CRC32C or MurmurHash/MurmurHash3", 1000, "8-hex checksum and 8-hex initial value/seed"}}
 	case isHexPair(v, 16, 16):
-		return []candidate{{"MurmurHash64A", 1000, "16-hex checksum and 16-hex seed"}}
+		return []candidate{{"MurmurHash64A or CRC64-Jones", 1000, "16-hex checksum and 16-hex initial value/seed"}}
 	case rePostgres.MatchString(v):
 		return []candidate{{"PostgreSQL MD5", 1000, "md5 prefix + 32-char hex"}}
 	case reMySQL41.MatchString(v):
@@ -1333,6 +1401,11 @@ func stripShadowUsername(s string) string {
 
 func detectHashTypes(text string) []string {
 	t := strings.TrimSpace(text)
+	// NSEC3's colon-delimited domain can itself look like a 13-character DES
+	// crypt token, so recognize the complete record before shadow-line peeling.
+	if isNSEC3Record(t) {
+		return []string{"dnssec-nsec3"}
+	}
 	// Unix crypt(3) shadow hashes may still carry a "user:" (or full passwd/
 	// shadow line) prefix — crack the hash field directly.
 	t = stripShadowUsername(t)
@@ -1375,10 +1448,10 @@ func detectHashTypes(text string) []string {
 		return []string{"siphash"}
 	}
 	if isHexPair(t, 8, 8) {
-		return []string{"crc32-hashcat", "murmurhash"}
+		return []string{"crc32-hashcat", "crc32c-hashcat", "murmurhash", "murmur3-seeded", "skip32"}
 	}
 	if isHexPair(t, 16, 16) {
-		return []string{"murmur64a"}
+		return []string{"murmur64a", "crc64-jones"}
 	}
 	// Archive/file hash formats produced by the *2smith extractors.
 	if strings.HasPrefix(t, "$zipcrypto$") {
@@ -1396,7 +1469,7 @@ func detectHashTypes(text string) []string {
 	if strings.HasPrefix(t, "$7z$") {
 		return []string{"7z"}
 	}
-	if strings.HasPrefix(t, "$rar3$") {
+	if strings.HasPrefix(t, "$rar3$") || strings.HasPrefix(t, "$RAR3$") {
 		return []string{"rar4"}
 	}
 	if strings.HasPrefix(t, "$rar5$") {
@@ -1417,8 +1490,108 @@ func detectHashTypes(text string) []string {
 	if strings.HasPrefix(t, "$gpg$") {
 		return []string{"gpg"}
 	}
+	if strings.HasPrefix(t, "$office$2016$0$") {
+		return []string{"office2016-sheet"}
+	}
 	if strings.HasPrefix(t, "$office$") {
 		return []string{"office"}
+	}
+	if strings.HasPrefix(t, "$mysqlna$") {
+		return []string{"mysql-cram"}
+	}
+	if strings.HasPrefix(t, "$tacacs-plus$") {
+		return []string{"tacacs-plus"}
+	}
+	if strings.HasPrefix(t, "$ASN$*") {
+		return []string{"apple-secure-notes"}
+	}
+	if strings.HasPrefix(t, "otm_sha256:") {
+		return []string{"oracle-otm"}
+	}
+	if strings.HasPrefix(t, "$xmpp-scram$") {
+		return []string{"xmpp-scram"}
+	}
+	if strings.HasPrefix(t, "$postgres$") {
+		return []string{"postgres-cram"}
+	}
+	if strings.HasPrefix(t, "$SNMPv3$") {
+		return []string{"snmpv3"}
+	}
+	if strings.HasPrefix(t, "@m@") || strings.HasPrefix(t, "@m,") {
+		return []string{"qnx-md5"}
+	}
+	if strings.HasPrefix(t, "@s@") || strings.HasPrefix(t, "@s,") {
+		return []string{"qnx-sha256"}
+	}
+	if strings.HasPrefix(t, "@S@") || strings.HasPrefix(t, "@S,") {
+		return []string{"qnx-sha512"}
+	}
+	if strings.HasPrefix(t, "{x-issha, ") {
+		return []string{"sap-issha1"}
+	}
+	if strings.HasPrefix(t, "{x-isSHA256, ") {
+		return []string{"sap-issha256"}
+	}
+	if strings.HasPrefix(t, "{x-isSHA384, ") {
+		return []string{"sap-issha384"}
+	}
+	if strings.HasPrefix(t, "$stellar$") {
+		return []string{"stellar-wallet"}
+	}
+	if strings.HasPrefix(t, "$telegram$0*") {
+		return []string{"telegram-passcode"}
+	}
+	if strings.HasPrefix(t, "$sntp-ms$") {
+		return []string{"ms-sntp"}
+	}
+	if isNSEC3Record(t) {
+		return []string{"dnssec-nsec3"}
+	}
+	if _, _, ok := parseOracleH(t); ok && strings.HasPrefix(t, "O$") {
+		return []string{"oracle-h"}
+	}
+	if strings.HasPrefix(t, "$radmin3$") {
+		return []string{"radmin3"}
+	}
+	if len(t) == 137 && t[0] == '2' && isHex(t[1:]) {
+		return []string{"citrix-sha512"}
+	}
+	if len(t) == 63 && strings.HasPrefix(t, "SH2") {
+		return []string{"fortigate256"}
+	}
+	if strings.HasPrefix(t, "$vbk$*") {
+		return []string{"veeam-vbk"}
+	}
+	if strings.HasPrefix(t, "$MSONLINEACCOUNT$0$") {
+		return []string{"ms-online-account"}
+	}
+	if strings.HasPrefix(t, "S:\"Config Passphrase\"=02:") {
+		return []string{"securecrt-v2"}
+	}
+	if strings.HasPrefix(t, "$knx-ip-secure-device-authentication-code$*") {
+		return []string{"knx-ip-secure"}
+	}
+	if strings.HasPrefix(t, "$teamspeak$3$") {
+		return []string{"teamspeak3"}
+	}
+	if strings.HasPrefix(t, "$bcrypt-sha256$") {
+		return []string{"passlib-bcrypt-sha256"}
+	}
+	if fields := strings.Split(t, ":"); len(fields) == 3 && fields[0] == "sha256" &&
+		len(fields[1]) == 64 && isHex(fields[1]) && len(fields[2]) == 64 && isHex(fields[2]) {
+		return []string{"anope-sha256"}
+	}
+	if len(t) == 129 && t[0] == '5' && isHex(t[1:]) {
+		return []string{"citrix-pbkdf2"}
+	}
+	if isUmbracoHMACSHA1(t) {
+		return []string{"umbraco-hmac-sha1"}
+	}
+	if strings.HasPrefix(t, "$AWS-Sig-v4$") {
+		return []string{"aws-sig-v4"}
+	}
+	if isTOTPRecord(t) {
+		return []string{"totp"}
 	}
 	if strings.HasPrefix(t, "$keepass$") {
 		return []string{"keepass"}
@@ -1462,6 +1635,30 @@ func detectHashTypes(text string) []string {
 	if isPHPS(t) {
 		return []string{"phps"}
 	}
+	if strings.HasPrefix(t, "pbkdf2(") && strings.Contains(t, ",sha512)$") {
+		return []string{"web2py-pbkdf2"}
+	}
+	if strings.HasPrefix(t, "$wp$2") {
+		return []string{"wordpress-bcrypt"}
+	}
+	if strings.HasPrefix(t, "$krb5db$18$") {
+		return []string{"krb5db"}
+	}
+	if fields := strings.Split(t, "."); len(fields) == 3 && len(fields[2]) == 27 {
+		return []string{"flask-session"}
+	}
+	if fields := strings.Split(t, ":"); len(fields) == 2 && len(fields[0]) == 40 &&
+		isHex(fields[0]) && len(fields[1]) >= 128 && isHex(fields[1]) {
+		return []string{"peoplesoft-token"}
+	}
+	if fields := strings.Split(t, ":"); len(fields) == 3 && len(fields[0]) == 40 && isHex(fields[0]) {
+		candidates := []string{"rails-restful-auth", "sha1-salt1-pass-salt2"}
+		if len(fields[1]) <= 256 && len(fields[1])%2 == 0 && isHexOrEmpty(fields[1]) &&
+			len(fields[2]) <= 256 && len(fields[2])%2 == 0 && isHexOrEmpty(fields[2]) {
+			candidates = append(candidates, "sha1-salt-user-password")
+		}
+		return candidates
+	}
 	if isMySQL8(t) {
 		return []string{"mysql8"}
 	}
@@ -1480,8 +1677,27 @@ func detectHashTypes(text string) []string {
 	if isDjangoHash(t) {
 		return []string{"django"}
 	}
-	if strings.HasPrefix(t, "veracrypt:") || strings.HasPrefix(t, "truecrypt:") {
+	if strings.HasPrefix(t, "truecrypt:") {
+		return []string{"truecrypt"}
+	}
+	if strings.HasPrefix(t, "veracrypt:") {
 		return []string{"veracrypt"}
+	}
+	if strings.HasPrefix(t, "AK1") && len(t) == 47 {
+		return []string{"fortigate"}
+	}
+	if strings.HasPrefix(t, "{x-isSHA512, ") {
+		return []string{"sap-issha512"}
+	}
+	if fields := strings.Split(t, ":"); len(fields) == 4 && len(fields[0]) == 32 &&
+		isHex(fields[0]) && len(fields[3]) == 32 && isHex(fields[3]) {
+		return []string{"lastpass"}
+	}
+	if isChap(t) {
+		return []string{"chap"}
+	}
+	if fields := strings.Split(t, ":"); len(fields) == 3 && len(fields[0]) == 32 && isHex(fields[0]) {
+		return []string{"md5-salt1-upper-md5-salt2-pass", "md5-triple-dual-salt", "md5-salt1-sha1salt2pass", "md5-triple-passsalt-dual", "empirecms"}
 	}
 	if strings.HasPrefix(t, "$bitlocker$") {
 		return []string{"bitlocker"}
@@ -1553,13 +1769,17 @@ func detectHashTypes(text string) []string {
 		return []string{"citrix"}
 	}
 	if isCiscoASA(t) {
-		return []string{"cisco-asa"}
+		candidates := []string{"cisco-asa"}
+		if _, _, ok := parseOracleH(t); ok {
+			candidates = append(candidates, "oracle-h")
+		}
+		return candidates
 	}
 	if isIPMI(t) {
 		return []string{"ipmi"}
 	}
-	if isChap(t) {
-		return []string{"chap"}
+	if isIPMIMD5(t) {
+		return []string{"ipmi-md5"}
 	}
 	if isAIX(t) {
 		return []string{"aix"}
@@ -1585,6 +1805,9 @@ func detectHashTypes(text string) []string {
 	if isMediaWiki(t) {
 		return []string{"mediawiki"}
 	}
+	if _, _, ok := parseOracleH(t); ok {
+		return []string{"oracle-h"}
+	}
 	if generic := detectCompatSaltedTypes(t); len(generic) > 0 {
 		// App-specific formats share the same outer hash:salt structure. Keep
 		// their established precedence, then try generic Hashcat constructions.
@@ -1593,6 +1816,12 @@ func detectHashTypes(text string) []string {
 		}
 		if isVBulletin(t) {
 			generic = append([]string{"vbulletin", "dcc"}, generic...)
+		}
+		if isNetWitnessSHA256Record(t) {
+			generic = append([]string{"netwitness-sha256"}, generic...)
+		}
+		if isHexPair(t, 32, 32) {
+			generic = append([]string{"aes128-ecb-nokdf", "aes192-ecb-nokdf", "aes256-ecb-nokdf"}, generic...)
 		}
 		return generic
 	}
@@ -1625,7 +1854,10 @@ func detectHashTypes(text string) []string {
 		return []string{"mysql41"}
 	}
 	if reMSSQLNew.MatchString(t) {
-		return []string{"mssql2005", "mssql2012"}
+		if strings.HasPrefix(strings.ToLower(t), "0x0200") {
+			return []string{"mssql2012"}
+		}
+		return []string{"mssql2005"}
 	}
 	if looksLikeDescrypt(t) {
 		return []string{"descrypt"}
@@ -1633,6 +1865,9 @@ func detectHashTypes(text string) []string {
 	// A 16-char crypt-base64 token with non-hex characters is a Cisco-PIX hash.
 	if len(t) == 16 && isPixToken(t) && !isHex(t) {
 		return []string{"cisco-pix"}
+	}
+	if isDahuaAuthToken(t) {
+		return []string{"dahua-auth-md5", "besder-auth-md5"}
 	}
 	if !isHex(t) {
 		return nil
@@ -1655,7 +1890,7 @@ func detectHashTypes(text string) []string {
 	case 96:
 		return []string{"sha384", "sha3_384", "blake2b384"}
 	case 128:
-		return []string{"sha512", "sha3_512", "blake2b", "whirlpool", "streebog512", "keccak512", "shake256-512"}
+		return []string{"sha512", "sha3_512", "blake2b", "whirlpool", "streebog512", "keccak512", "shake256-512", "cisco-ise"}
 	default:
 		return nil
 	}
