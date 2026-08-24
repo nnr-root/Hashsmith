@@ -171,7 +171,8 @@ func verifyKrb5AES(candidate, realm, user string, etype, usage int, edata, check
 // than RC4 (23).
 func isKrb5AES(s string) bool {
 	return strings.HasPrefix(s, "$krb5pa$17$") || strings.HasPrefix(s, "$krb5pa$18$") ||
-		strings.HasPrefix(s, "$krb5tgs$17$") || strings.HasPrefix(s, "$krb5tgs$18$")
+		strings.HasPrefix(s, "$krb5tgs$17$") || strings.HasPrefix(s, "$krb5tgs$18$") ||
+		strings.HasPrefix(s, "$krb5asrep$17$") || strings.HasPrefix(s, "$krb5asrep$18$")
 }
 
 // verifyKrb5AESHash parses an AES Kerberos hash and verifies a candidate.
@@ -182,9 +183,13 @@ func verifyKrb5AESHash(target, candidate string) (bool, error) {
 	var body string
 	var usage int
 	isPA := strings.HasPrefix(target, "$krb5pa$")
+	isASREP := strings.HasPrefix(target, "$krb5asrep$")
 	if isPA {
 		body = target[len("$krb5pa$"):]
 		usage = 1
+	} else if isASREP {
+		body = target[len("$krb5asrep$"):]
+		usage = 3
 	} else if strings.HasPrefix(target, "$krb5tgs$") {
 		body = target[len("$krb5tgs$"):]
 		usage = 2
@@ -210,7 +215,7 @@ func verifyKrb5AESHash(target, candidate string) (bool, error) {
 		edata, checksum = blob[:len(blob)-12], blob[len(blob)-12:]
 	} else {
 		if len(f) < 5 {
-			return false, errors.New("invalid krb5tgs AES hash")
+			return false, errors.New("invalid Kerberos AES hash")
 		}
 		checksum, err = hex.DecodeString(f[3])
 		if err != nil || len(checksum) != 12 {

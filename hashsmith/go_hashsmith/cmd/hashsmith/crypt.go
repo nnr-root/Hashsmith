@@ -156,6 +156,13 @@ var sha512Params = shaCryptParams{
 	},
 }
 
+var sm3CryptParams = shaCryptParams{
+	magic:   "$sm3$",
+	newHash: func() hash.Hash { return newSM3() },
+	size:    32,
+	perm:    sha256Params.perm,
+}
+
 const (
 	shaCryptDefaultRounds = 5000
 	shaCryptMinRounds     = 1000
@@ -390,4 +397,38 @@ func verifyShaCrypt(p shaCryptParams, targetHash, candidate string) (bool, error
 	}
 	salt, rounds, explicit := parseShaCryptFields(targetHash[len(p.magic):])
 	return shaCryptRaw(p, candidate, salt, rounds, explicit) == targetHash, nil
+}
+
+func verifySM3Crypt(targetHash, candidate string) (bool, error) {
+	if !strings.HasPrefix(targetHash, sm3CryptParams.magic) {
+		return false, errors.New("invalid sm3crypt hash (missing $sm3$ prefix)")
+	}
+	body := targetHash[len(sm3CryptParams.magic):]
+	parts := strings.Split(body, "$")
+	if len(parts) != 2 && len(parts) != 3 {
+		return false, errors.New("invalid sm3crypt field count")
+	}
+	if len(parts) == 3 {
+		if !strings.HasPrefix(parts[0], "rounds=") {
+			return false, errors.New("invalid sm3crypt rounds field")
+		}
+		r, err := strconv.Atoi(strings.TrimPrefix(parts[0], "rounds="))
+		if err != nil || r < shaCryptMinRounds || r > maxKDFIterations {
+			return false, errors.New("invalid sm3crypt round count")
+		}
+	}
+	salt, rounds, explicit := parseShaCryptFields(body)
+	if len(salt) == 0 || len(salt) > 16 {
+		return false, errors.New("invalid sm3crypt salt")
+	}
+	checksum := parts[len(parts)-1]
+	if len(checksum) != 43 {
+		return false, errors.New("invalid sm3crypt checksum")
+	}
+	for _, ch := range checksum {
+		if !strings.ContainsRune(itoa64, ch) {
+			return false, errors.New("invalid sm3crypt alphabet")
+		}
+	}
+	return shaCryptRaw(sm3CryptParams, candidate, salt, rounds, explicit) == targetHash, nil
 }

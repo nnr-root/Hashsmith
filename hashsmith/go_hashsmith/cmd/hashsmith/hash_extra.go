@@ -174,7 +174,7 @@ var compatibilityHashAliases = map[string]string{
 	"ripemd-128": "ripemd128", "ripemd-256": "ripemd256", "ripemd-320": "ripemd320",
 	"11700": "streebog256", "11800": "streebog512", "31100": "sm3", "33600": "ripemd320",
 	"17300": "sha3_224", "17400": "sha3_256", "17500": "sha3_384", "17600": "sha3_512",
-	"17800": "keccak256", "18000": "keccak512",
+	"17700": "keccak224", "17800": "keccak256", "17900": "keccak384", "18000": "keccak512",
 	"5100": "half-md5",
 
 	// ── Hashcat: generic salted constructions ─────────────────────────────────
@@ -247,6 +247,8 @@ var compatibilityHashAliases = map[string]string{
 	// ── Hashcat: nested digests ───────────────────────────────────────────────
 	"2600": "md5-md5", "3500": "md5-md5-md5", "4300": "md5-upper-md5",
 	"4400": "md5-sha1", "4500": "sha1-sha1", "4700": "sha1-md5",
+	"18500": "sha1-md5-md5pass",
+	"33000": "md5-salt1-pass-salt2",
 
 	// ── Hashcat: HMAC ─────────────────────────────────────────────────────────
 	"50": "hmac-md5", "60": "hmac-md5-saltkey",
@@ -255,6 +257,8 @@ var compatibilityHashAliases = map[string]string{
 	"1750": "hmac-sha512", "1760": "hmac-sha512-saltkey",
 	"6050": "hmac-ripemd160", "6060": "hmac-ripemd160-saltkey",
 	"33300": "hmac-blake2s", "33650": "hmac-ripemd320", "33660": "hmac-ripemd320-saltkey",
+	"11750": "hmac-streebog256", "11760": "hmac-streebog256-saltkey",
+	"11850": "hmac-streebog512", "11860": "hmac-streebog512-saltkey",
 
 	// ── Hashcat: keyed and seeded checksums ───────────────────────────────────
 	"10100": "siphash", "11500": "crc32-hashcat", "25700": "murmurhash",
@@ -262,6 +266,9 @@ var compatibilityHashAliases = map[string]string{
 	"27800": "murmur3-seeded", "27900": "crc32c-hashcat", "28000": "crc64-jones",
 	"14900": "skip32",
 	"18700": "java-hashcode",
+	"125":   "arubaos", "14400": "sha1-cx", "16400": "dovecot-cram-md5",
+	"14000": "des-plaintext", "14100": "3des-plaintext", "15400": "chacha20",
+	"33500": "rc4-dropn", "33501": "rc4-dropn", "33502": "rc4-dropn",
 	"26401": "aes128-ecb-nokdf", "26402": "aes192-ecb-nokdf", "26403": "aes256-ecb-nokdf",
 
 	// ── Hashcat: Unix login / crypt(3) ────────────────────────────────────────
@@ -269,7 +276,7 @@ var compatibilityHashAliases = map[string]string{
 	"1800": "sha512crypt", "3200": "bcrypt", "7400": "sha256crypt",
 	"25600": "bcrypt-md5", "25800": "bcrypt-sha1", "30600": "bcrypt-sha256",
 	"28400": "bcrypt-sha512", "30601": "passlib-bcrypt-sha256",
-	"15100": "sha1crypt",
+	"15100": "sha1crypt", "35100": "sm3crypt",
 
 	// ── Hashcat: databases ────────────────────────────────────────────────────
 	"12": "postgres", "112": "oracle11g", "12300": "oracle12c",
@@ -286,6 +293,8 @@ var compatibilityHashAliases = map[string]string{
 	"2611": "vbulletin", "2711": "vbulletin",
 	"4520": "redmine", "4521": "redmine", "4522": "sha1-salt-sha1pass", "4711": "sha1-md5pass-salt",
 	"124": "django", "10000": "django", "12001": "atlassian", "12150": "shiro1-sha512", "16500": "jwt",
+	"16000": "tripcode", "16501": "mojolicious", "18800": "blockchain-second",
+	"35700": "phpass-md5", "35800": "symfony-legacy",
 	"32300": "empirecms", "6800": "lastpass", "9900": "radmin2",
 	"19500": "rails-restful-auth", "21600": "web2py-pbkdf2", "29100": "flask-session",
 	"27200": "rails-restful-auth-one-round",
@@ -293,8 +302,9 @@ var compatibilityHashAliases = map[string]string{
 	"22301": "telegram-passcode", "30700": "anope-sha256", "33900": "citrix-pbkdf2",
 	"28300": "teamspeak3", "31200": "veeam-vbk", "31400": "securecrt-v2",
 	"33700": "ms-online-account",
-	"16900": "ansible", "21500": "solarwinds",
+	"16900": "ansible", "21500": "solarwinds", "21501": "solarwinds",
 	"30000": "werkzeug", "30120": "werkzeug", "32060": "passlib-pbkdf2",
+	"20200": "passlib-pbkdf2", "20300": "passlib-pbkdf2", "20400": "passlib-pbkdf2",
 	"32000": "sspr", "32010": "sspr", "32020": "sspr", "32030": "sspr",
 	"32031": "sspr", "32040": "sspr", "32041": "sspr",
 	"32050": "netiq-pbkdf2", "32070": "netiq-pbkdf2",
@@ -318,7 +328,8 @@ var compatibilityHashAliases = map[string]string{
 	"101": "ldap", "111": "ldap", "1411": "ldap", "1711": "ldap",
 
 	// ── Hashcat: network capture / authentication ─────────────────────────────
-	"1100": "dcc", "2100": "dcc2",
+	"1100": "dcc", "2100": "dcc2", "31500": "dcc-nt", "31600": "dcc2-nt",
+	"2500": "wpa-hccapx", "2501": "wpa-hccapx-pmk",
 	"2400": "cisco-pix", "2410": "cisco-asa", "22": "juniper",
 	"4800": "chap", "5500": "netntlmv1", "5600": "netntlmv2",
 	"7300": "ipmi", "8100": "citrix", "10200": "cram-md5",
@@ -326,22 +337,27 @@ var compatibilityHashAliases = map[string]string{
 	"11400": "sip", "22000": "wpa",
 	"16100": "tacacs-plus", "23200": "xmpp-scram",
 	"18100": "totp", "25000": "snmpv3", "25100": "snmpv3", "28700": "aws-sig-v4",
+	"5300": "ike", "5400": "ike",
+	"16800": "wpa-pmkid", "16801": "wpa-pmk", "22001": "wpa-pmk",
 	"25200": "snmpv3", "26700": "snmpv3", "26800": "snmpv3", "26900": "snmpv3", "27300": "snmpv3",
-	"25900": "knx-ip-secure", "27100": "netntlmv2-nt", "31300": "ms-sntp",
+	"25900": "knx-ip-secure", "27000": "netntlmv1-nt", "27100": "netntlmv2-nt", "31300": "ms-sntp",
 	"7700": "sap-b", "7800": "sap-fg", "35000": "sap-issha512",
 	"10300": "sap-issha1",
 	// Kerberos: etype 23 (RC4) and the AES etypes 17/18.
 	"13100": "krb5tgs", "19600": "krb5tgs", "19700": "krb5tgs",
-	"18200": "krb5asrep", "19800": "krb5pa", "19900": "krb5pa", "28900": "krb5db",
+	"18200": "krb5asrep", "32100": "krb5asrep", "32200": "krb5asrep",
+	"19800": "krb5pa", "19900": "krb5pa", "28800": "krb5db", "28900": "krb5db",
+	"35300": "krb5tgs-nt", "35400": "krb5asrep-nt",
 
 	// ── Hashcat: wallets ──────────────────────────────────────────────────────
-	"11300": "bitcoin", "12700": "blockchain", "16600": "electrum",
-	"15600": "ethereum", "15700": "ethereum",
+	"11300": "bitcoin", "12700": "blockchain", "15200": "blockchain", "34700": "blockchain-legacy", "16600": "electrum",
+	"15600": "ethereum", "15700": "ethereum", "16300": "ethereum-presale",
+	"22400": "aescrypt", "22500": "multibit-key", "29600": "terra-wallet",
 	"6600": "1password", "23400": "bitwarden",
 	"14700": "itunes", "14800": "itunes",
 	"16200": "apple-secure-notes",
 	"25500": "stellar-wallet",
-	"19000": "qnx-md5", "19100": "qnx-sha256", "19200": "qnx-sha512",
+	"19000": "qnx-md5", "19100": "qnx-sha256", "19200": "qnx-sha512", "19210": "qnx-sha512",
 
 	// ── Hashcat: disk encryption ──────────────────────────────────────────────
 	"14600": "luks", "22100": "bitlocker",
@@ -368,7 +384,8 @@ var compatibilityHashAliases = map[string]string{
 	"raw-sha3-224": "sha3_224", "raw-sha3-256": "sha3_256",
 	"raw-sha3-384": "sha3_384", "raw-sha3-512": "sha3_512",
 	// John's Raw-SHA3 is the 512-bit variant; Raw-Keccak likewise.
-	"raw-sha3": "sha3_512", "raw-keccak": "keccak512", "raw-keccak-256": "keccak256",
+	"raw-sha3": "sha3_512", "raw-keccak": "keccak512", "raw-keccak-224": "keccak224",
+	"raw-keccak-256": "keccak256", "raw-keccak-384": "keccak384",
 	"raw-blake2": "blake2b", "raw-blake2s": "blake2s", "raw-sm3": "sm3",
 	"raw-ripemd320": "ripemd320", "nt": "ntlm", "whirlpool": "whirlpool",
 	"gost-2012-256": "streebog256", "gost-2012-512": "streebog512",

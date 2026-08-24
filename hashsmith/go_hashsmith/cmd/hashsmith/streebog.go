@@ -5,7 +5,10 @@ package main
 // streebogTR table (see streebog_tables.go); the compression g_N follows the
 // standard. Pinned to the GOST test vectors in the tests.
 
-import "hash"
+import (
+	"encoding/hex"
+	"hash"
+)
 
 // streebogDigest implements hash.Hash for Streebog-512 (size=64) or -256 (=32).
 type streebogDigest struct {
@@ -148,4 +151,43 @@ func (d *streebogDigest) Sum(in []byte) []byte {
 		}
 	}
 	return append(in, out...)
+}
+
+// HMAC-Streebog is defined over the little-endian byte string returned by the
+// GOST primitive. Hashsmith displays raw Streebog digests in the conventional
+// big-endian order, so the inner digest must be reversed before the outer hash.
+func hmacStreebogHex(newHash func() hash.Hash, key, message string) string {
+	const blockSize = 64
+	k := []byte(key)
+	if len(k) > blockSize {
+		h := newHash()
+		_, _ = h.Write(k)
+		k = h.Sum(nil)
+		reverseBytes(k)
+	}
+	ipad := make([]byte, blockSize)
+	opad := make([]byte, blockSize)
+	for i := 0; i < blockSize; i++ {
+		var b byte
+		if i < len(k) {
+			b = k[i]
+		}
+		ipad[i] = b ^ 0x36
+		opad[i] = b ^ 0x5c
+	}
+	inner := newHash()
+	_, _ = inner.Write(ipad)
+	_, _ = inner.Write([]byte(message))
+	innerRaw := inner.Sum(nil)
+	reverseBytes(innerRaw)
+	outer := newHash()
+	_, _ = outer.Write(opad)
+	_, _ = outer.Write(innerRaw)
+	return hex.EncodeToString(outer.Sum(nil))
+}
+
+func reverseBytes(b []byte) {
+	for i, j := 0, len(b)-1; i < j; i, j = i+1, j-1 {
+		b[i], b[j] = b[j], b[i]
+	}
 }

@@ -37,6 +37,7 @@ type wpaHash struct {
 	staMAC  []byte // 6 bytes
 	essid   []byte // raw SSID bytes (PBKDF2 salt)
 	anonce  []byte // 32 bytes (EAPOL only)
+	snonce  []byte // 32 bytes (EAPOL only)
 	eapol   []byte // EAPOL-Key frame with MIC zeroed (EAPOL only)
 	keyVer  int    // 1=HMAC-MD5, 2=HMAC-SHA1, 3=AES-CMAC
 }
@@ -122,7 +123,7 @@ func buildEAPOL(mic, ap, sta, essid, anonce, eapol string) (*wpaHash, error) {
 	}
 	return &wpaHash{
 		isPMKID: false, digest: d, apMAC: apb, staMAC: stab,
-		essid: essidb, anonce: anonceb, eapol: frame, keyVer: keyVer,
+		essid: essidb, anonce: anonceb, snonce: frame[17:49], eapol: frame, keyVer: keyVer,
 	}, nil
 }
 
@@ -154,8 +155,16 @@ func verifyWPA(targetHash, candidate string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	pmk := wpaPMK(candidate, w.essid)
+	return verifyWPAWithPMK(w, wpaPMK(candidate, w.essid))
+}
 
+// verifyWPAWithPMK checks a parsed WPA record using an already-derived PMK.
+// Hashcat's raw-PMK modes use this path directly; password modes first derive
+// the PMK with PBKDF2-HMAC-SHA1 in verifyWPA.
+func verifyWPAWithPMK(w *wpaHash, pmk []byte) (bool, error) {
+	if len(pmk) != 32 {
+		return false, errors.New("invalid WPA PMK (need 32 bytes)")
+	}
 	if w.isPMKID {
 		mac := hmac.New(sha1.New, pmk)
 		mac.Write([]byte("PMK Name"))
@@ -165,10 +174,9 @@ func verifyWPA(targetHash, candidate string) (bool, error) {
 	}
 
 	// EAPOL: derive the KCK via the pairwise-key-expansion PRF, then MIC it.
-	snonce := w.eapol[17:49]
 	data := make([]byte, 0, 76)
 	data = append(data, minMax(w.apMAC, w.staMAC)...)
-	data = append(data, minMax(w.anonce, snonce)...)
+	data = append(data, minMax(w.anonce, w.snonce)...)
 	kck := wpaPRF(pmk, []byte("Pairwise key expansion"), data)[:16]
 
 	var mic []byte

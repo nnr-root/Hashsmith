@@ -118,6 +118,10 @@ func sm3P0(x uint32) uint32 { return x ^ bits.RotateLeft32(x, 9) ^ bits.RotateLe
 func sm3P1(x uint32) uint32 { return x ^ bits.RotateLeft32(x, 15) ^ bits.RotateLeft32(x, 23) }
 
 func sm3Hex(data []byte) string {
+	return hex.EncodeToString(sm3Sum(data))
+}
+
+func sm3Sum(data []byte) []byte {
 	v := [8]uint32{0x7380166f, 0x4914b2b9, 0x172442d7, 0xda8a0600, 0xa96f30bc, 0x163138aa, 0xe38dee4d, 0xb0fb0e4e}
 	msg := padHashBlocks(data)
 	for off := 0; off < len(msg); off += 64 {
@@ -169,7 +173,7 @@ func sm3Hex(data []byte) string {
 	for i, word := range v {
 		binary.BigEndian.PutUint32(out[i*4:], word)
 	}
-	return hex.EncodeToString(out)
+	return out
 }
 
 func xxhash32(data []byte) uint32 {

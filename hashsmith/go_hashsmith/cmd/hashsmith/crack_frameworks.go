@@ -62,6 +62,9 @@ func parsePasslibPBKDF2(target string) (*passlibPBKDF2Hash, error) {
 		return nil, errors.New("invalid Passlib PBKDF2 format")
 	}
 	name := strings.ToLower(parts[1])
+	if name == "pbkdf2" {
+		name = "pbkdf2-sha1"
+	}
 	if !strings.HasPrefix(name, "pbkdf2-") {
 		return nil, errors.New("invalid Passlib PBKDF2 identifier")
 	}

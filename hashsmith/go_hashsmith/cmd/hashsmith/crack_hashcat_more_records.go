@@ -225,11 +225,23 @@ func verifyWordPressBcrypt(target, candidate string) (bool, error) {
 
 func verifyKrb5DB(target, candidate string) (bool, error) {
 	parts := strings.Split(target, "$")
-	if len(parts) != 6 || parts[0] != "" || parts[1] != "krb5db" || parts[2] != "18" ||
-		parts[3] == "" || parts[4] == "" || len(parts[5]) != 64 || !isHex(parts[5]) {
-		return false, errors.New("invalid Kerberos 5 DB etype 18 record")
+	if len(parts) != 6 || parts[0] != "" || parts[1] != "krb5db" ||
+		parts[3] == "" || parts[4] == "" || !isHex(parts[5]) {
+		return false, errors.New("invalid Kerberos 5 DB record")
 	}
-	got := aesString2Key(candidate, strings.ToUpper(parts[4])+parts[3], 32)
+	keyLen := 0
+	switch parts[2] {
+	case "17":
+		keyLen = 16
+	case "18":
+		keyLen = 32
+	default:
+		return false, errors.New("unsupported Kerberos 5 DB etype (want 17 or 18)")
+	}
+	if len(parts[5]) != keyLen*2 {
+		return false, errors.New("invalid Kerberos 5 DB key length")
+	}
+	got := aesString2Key(candidate, strings.ToUpper(parts[4])+parts[3], keyLen)
 	want, _ := hex.DecodeString(parts[5])
 	return bytesEqualCT(got, want), nil
 }

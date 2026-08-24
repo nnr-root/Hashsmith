@@ -269,6 +269,10 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"PEM", 1000, "BEGIN/END block with valid Base64 payload"}}
 	case strings.HasPrefix(v, "$sha1$"):
 		return []candidate{{"NetBSD / Juniper sha1crypt", 1000, "$sha1$rounds$salt$checksum modular crypt record"}}
+	case strings.HasPrefix(v, "$sm3$"):
+		return []candidate{{"SM3 crypt", 1000, "$sm3$ salt/checksum modular crypt record"}}
+	case strings.HasPrefix(v, "{CRAM-MD5}"):
+		return []candidate{{"Dovecot CRAM-MD5", 1000, "Dovecot HMAC-MD5 chaining-state record"}}
 	case strings.HasPrefix(v, "$6$"):
 		return []candidate{{"sha512crypt (Unix $6$)", 1000, "$6$ prefix — glibc SHA-512 crypt shadow hash"}}
 	case strings.HasPrefix(v, "$5$"):
@@ -1541,6 +1545,22 @@ func detectHashTypes(text string) []string {
 	if strings.HasPrefix(t, "$telegram$0*") {
 		return []string{"telegram-passcode"}
 	}
+	if strings.HasPrefix(t, "$sm3$") {
+		return []string{"sm3crypt"}
+	}
+	if strings.HasPrefix(t, "$chacha20$*") {
+		return []string{"chacha20"}
+	}
+	if strings.HasPrefix(t, "{CRAM-MD5}") && len(t) == len("{CRAM-MD5}")+64 && isHex(t[len("{CRAM-MD5}"):]) {
+		return []string{"dovecot-cram-md5"}
+	}
+	if separator := strings.LastIndex(t, "--"); separator > 0 && separator+66 == len(t) &&
+		strings.Contains(t[:separator], "=") && isHex(t[separator+2:]) {
+		return []string{"mojolicious"}
+	}
+	if _, _, _, err := parseBlockchainSecond(t); err == nil {
+		return []string{"blockchain-second"}
+	}
 	if strings.HasPrefix(t, "$sntp-ms$") {
 		return []string{"ms-sntp"}
 	}
@@ -1593,14 +1613,32 @@ func detectHashTypes(text string) []string {
 	if isTOTPRecord(t) {
 		return []string{"totp"}
 	}
+	if isHCCAPXHex(t) {
+		return []string{"wpa-hccapx"}
+	}
 	if strings.HasPrefix(t, "$keepass$") {
 		return []string{"keepass"}
 	}
 	if strings.HasPrefix(t, "WPA*01*") || strings.HasPrefix(t, "WPA*02*") || isLegacyPMKID(t) {
 		return []string{"wpa"}
 	}
+	if typ := detectWPAPMKIDRecord(t); typ != "" {
+		return []string{typ}
+	}
 	if strings.HasPrefix(t, "$ethereum$") {
+		if strings.HasPrefix(t, "$ethereum$w*") {
+			return []string{"ethereum-presale"}
+		}
 		return []string{"ethereum"}
+	}
+	if strings.HasPrefix(t, "$aescrypt$1*") {
+		return []string{"aescrypt"}
+	}
+	if strings.HasPrefix(t, "$multibit$1*") {
+		return []string{"multibit-key"}
+	}
+	if isTerraWallet(t) {
+		return []string{"terra-wallet"}
 	}
 	if strings.HasPrefix(t, "$bitcoin$") {
 		return []string{"bitcoin"}
@@ -1615,7 +1653,13 @@ func detectHashTypes(text string) []string {
 		return []string{"ansible"}
 	}
 	if strings.HasPrefix(t, "$blockchain$") {
+		if _, _, err := parseBlockchainLegacy(t); err == nil {
+			return []string{"blockchain-legacy"}
+		}
 		return []string{"blockchain"}
+	}
+	if strings.HasPrefix(t, "$rc4$") {
+		return []string{"rc4-dropn"}
 	}
 	if isShiro1(t) {
 		return []string{"shiro1-sha512"}
@@ -1641,7 +1685,7 @@ func detectHashTypes(text string) []string {
 	if strings.HasPrefix(t, "$wp$2") {
 		return []string{"wordpress-bcrypt"}
 	}
-	if strings.HasPrefix(t, "$krb5db$18$") {
+	if strings.HasPrefix(t, "$krb5db$17$") || strings.HasPrefix(t, "$krb5db$18$") {
 		return []string{"krb5db"}
 	}
 	if fields := strings.Split(t, "."); len(fields) == 3 && len(fields[2]) == 27 {
@@ -1650,6 +1694,10 @@ func detectHashTypes(text string) []string {
 	if fields := strings.Split(t, ":"); len(fields) == 2 && len(fields[0]) == 40 &&
 		isHex(fields[0]) && len(fields[1]) >= 128 && isHex(fields[1]) {
 		return []string{"peoplesoft-token"}
+	}
+	if fields := strings.Split(t, ":"); len(fields) == 2 && len(fields[0]) == 40 &&
+		isHex(fields[0]) && len(fields[1]) == 20 {
+		return []string{"sha1-cx"}
 	}
 	if fields := strings.Split(t, ":"); len(fields) == 3 && len(fields[0]) == 40 && isHex(fields[0]) {
 		candidates := []string{"rails-restful-auth", "sha1-salt1-pass-salt2"}
@@ -1697,7 +1745,7 @@ func detectHashTypes(text string) []string {
 		return []string{"chap"}
 	}
 	if fields := strings.Split(t, ":"); len(fields) == 3 && len(fields[0]) == 32 && isHex(fields[0]) {
-		return []string{"md5-salt1-upper-md5-salt2-pass", "md5-triple-dual-salt", "md5-salt1-sha1salt2pass", "md5-triple-passsalt-dual", "empirecms"}
+		return []string{"md5-salt1-pass-salt2", "md5-salt1-upper-md5-salt2-pass", "md5-triple-dual-salt", "md5-salt1-sha1salt2pass", "md5-triple-passsalt-dual", "empirecms"}
 	}
 	if strings.HasPrefix(t, "$bitlocker$") {
 		return []string{"bitlocker"}
@@ -1706,6 +1754,9 @@ func detectHashTypes(text string) []string {
 		return []string{"electrum"}
 	}
 	if isPhpassHash(t) {
+		if strings.HasPrefix(t, "$H$") {
+			return []string{"phpass", "phpass-md5"}
+		}
 		return []string{"phpass"}
 	}
 	if isDrupal7Hash(t) {
@@ -1820,15 +1871,27 @@ func detectHashTypes(text string) []string {
 		if isNetWitnessSHA256Record(t) {
 			generic = append([]string{"netwitness-sha256"}, generic...)
 		}
+		if fields := strings.SplitN(t, ":", 2); len(fields) == 2 && len(fields[0]) == 64 && isHex(fields[0]) {
+			generic = append([]string{"symfony-legacy"}, generic...)
+		}
 		if isHexPair(t, 32, 32) {
 			generic = append([]string{"aes128-ecb-nokdf", "aes192-ecb-nokdf", "aes256-ecb-nokdf"}, generic...)
+		}
+		if isHexPair(t, 16, 16) {
+			generic = append([]string{"des-plaintext", "3des-plaintext"}, generic...)
 		}
 		return generic
 	}
 	if strings.HasPrefix(t, "$krb5asrep$") {
+		if strings.HasPrefix(t, "$krb5asrep$23$") {
+			return []string{"krb5asrep", "krb5asrep-nt"}
+		}
 		return []string{"krb5asrep"}
 	}
 	if strings.HasPrefix(t, "$krb5tgs$") {
+		if strings.HasPrefix(t, "$krb5tgs$23$") {
+			return []string{"krb5tgs", "krb5tgs-nt"}
+		}
 		return []string{"krb5tgs"}
 	}
 	if strings.HasPrefix(t, "$krb5pa$") {
@@ -1872,6 +1935,9 @@ func detectHashTypes(text string) []string {
 	if !isHex(t) {
 		return nil
 	}
+	if len(t) == 50 && strings.EqualFold(t[8:10], "01") {
+		return []string{"arubaos"}
+	}
 	switch len(t) {
 	case 16:
 		return []string{"mysql323", "cisco-pix", "half-md5"}
@@ -1880,7 +1946,7 @@ func detectHashTypes(text string) []string {
 	case 40:
 		return []string{"sha1", "sha0", "ripemd160"}
 	case 56:
-		return []string{"sha224", "sha512_224", "sha3_224"}
+		return []string{"sha224", "sha512_224", "sha3_224", "keccak224"}
 	case 60:
 		return []string{"oracle11g"}
 	case 160:
@@ -1888,7 +1954,7 @@ func detectHashTypes(text string) []string {
 	case 64:
 		return []string{"sha256", "sha3_256", "sm3", "blake2s", "streebog256", "sha512_256", "keccak256", "shake128-256", "blake2b256"}
 	case 96:
-		return []string{"sha384", "sha3_384", "blake2b384"}
+		return []string{"sha384", "sha3_384", "blake2b384", "keccak384"}
 	case 128:
 		return []string{"sha512", "sha3_512", "blake2b", "whirlpool", "streebog512", "keccak512", "shake256-512", "cisco-ise"}
 	default:

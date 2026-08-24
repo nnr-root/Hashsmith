@@ -902,8 +902,58 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyAESNOKDF(targetHash, candidate, 24)
 	case "aes256-ecb-nokdf":
 		return verifyAESNOKDF(targetHash, candidate, 32)
+	case "des-plaintext":
+		return verifyDESKnownPlaintext(targetHash, candidate, false)
+	case "3des-plaintext":
+		return verifyDESKnownPlaintext(targetHash, candidate, true)
+	case "chacha20":
+		return verifyChaCha20KnownPlaintext(targetHash, candidate)
+	case "rc4-dropn":
+		return verifyRC4DropN(targetHash, candidate)
 	}
 	switch algo {
+	case "md5-salt1-pass-salt2":
+		return verifyMD5DualSalt(targetHash, candidate)
+	case "blockchain-legacy":
+		return verifyBlockchainLegacy(targetHash, candidate)
+	case "krb5tgs-nt", "krb5asrep-nt":
+		return verifyKrb5NT(targetHash, candidate)
+	case "phpass-md5":
+		return verifyPhpassMD5(targetHash, candidate)
+	case "symfony-legacy":
+		return verifySymfonyLegacy(targetHash, candidate)
+	case "wpa-pmkid":
+		return verifyWPAPMKID(targetHash, candidate, false)
+	case "wpa-pmk":
+		return verifyWPAPMKID(targetHash, candidate, true)
+	case "wpa-hccapx":
+		return verifyHCCAPX(targetHash, candidate, false)
+	case "wpa-hccapx-pmk":
+		return verifyHCCAPX(targetHash, candidate, true)
+	case "ethereum-presale":
+		return verifyEthereumPresale(targetHash, candidate)
+	case "aescrypt":
+		return verifyAESCrypt(targetHash, candidate)
+	case "multibit-key":
+		return verifyMultiBitKey(targetHash, candidate)
+	case "terra-wallet":
+		return verifyTerraWallet(targetHash, candidate)
+	case "tripcode":
+		return verifyTripcode(targetHash, candidate)
+	case "mojolicious":
+		return verifyMojolicious(targetHash, candidate)
+	case "blockchain-second":
+		return verifyBlockchainSecond(targetHash, candidate)
+	case "dcc-nt":
+		return verifyDCCNT(targetHash, candidate)
+	case "dcc2-nt":
+		return verifyDCC2NT(targetHash, candidate)
+	case "arubaos":
+		return verifyArubaOS(targetHash, candidate)
+	case "sha1-cx":
+		return verifySHA1CX(targetHash, candidate)
+	case "dovecot-cram-md5":
+		return verifyDovecotCRAMMD5(targetHash, candidate)
 	case "dane-sha256":
 		return verifyDANESHA256(targetHash, candidate)
 	case "samsung-android":
@@ -948,6 +998,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyWordPressBcrypt(targetHash, candidate)
 	case "krb5db":
 		return verifyKrb5DB(targetHash, candidate)
+	case "netntlmv1-nt":
+		return verifyNetNTLMv1NT(targetHash, candidate)
 	case "mysql-cram":
 		return verifyMySQLCRAM(targetHash, candidate)
 	case "tacacs-plus":
@@ -1054,6 +1106,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyShaCrypt(sha512Params, targetHash, candidate)
 	case "sha1crypt":
 		return verifySHA1Crypt(targetHash, candidate)
+	case "sm3crypt":
+		return verifySM3Crypt(targetHash, candidate)
 	case "descrypt":
 		return verifyDescrypt(targetHash, candidate)
 	case "argon2":

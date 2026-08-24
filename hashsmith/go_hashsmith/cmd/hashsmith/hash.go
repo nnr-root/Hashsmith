@@ -72,6 +72,7 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		// concatenation must not touch them.
 		"md5-md5": true, "sha1-sha1": true, "sha256-sha256": true,
 		"sha512-sha512": true, "sha3_256-sha3_256": true,
+		"sha1-md5-md5pass": true,
 	}
 	if _, ok := compatSaltedDigests[algo]; ok {
 		saltInAlgorithms[algo] = true
@@ -186,10 +187,14 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		return hex.EncodeToString(sum[:]), nil
 	case "sm3":
 		return sm3Hex([]byte(text)), nil
+	case "keccak224":
+		return hex.EncodeToString(legacyKeccakSum([]byte(text), 28)), nil
 	case "keccak256":
 		h := xsha3.NewLegacyKeccak256()
 		_, _ = h.Write([]byte(text))
 		return hex.EncodeToString(h.Sum(nil)), nil
+	case "keccak384":
+		return hex.EncodeToString(legacyKeccakSum([]byte(text), 48)), nil
 	case "keccak512":
 		h := xsha3.NewLegacyKeccak512()
 		_, _ = h.Write([]byte(text))
@@ -216,6 +221,11 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		return nestedCrossHex(sha1.New, md5.New, text, false), nil
 	case "sha1-md5":
 		return nestedCrossHex(md5.New, sha1.New, text, false), nil
+	case "sha1-md5-md5pass":
+		first := md5.Sum([]byte(text))
+		second := md5.Sum([]byte(hex.EncodeToString(first[:])))
+		outer := sha1.Sum([]byte(hex.EncodeToString(second[:])))
+		return hex.EncodeToString(outer[:]), nil
 	case "hmac-md5":
 		return hmacHex(md5.New, text, salt), nil
 	case "hmac-sha1":
@@ -242,6 +252,10 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		return hmacHex(newRIPEMD320, text, salt), nil
 	case "hmac-blake2s":
 		return hmacHex(newBlake2s256Hash, text, salt), nil
+	case "hmac-streebog256":
+		return hmacStreebogHex(newStreebog256, text, salt), nil
+	case "hmac-streebog512":
+		return hmacStreebogHex(newStreebog512, text, salt), nil
 	case "hmac-md5-saltkey":
 		return hmacHex(md5.New, salt, text), nil
 	case "hmac-sha1-saltkey":
@@ -266,6 +280,10 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		return hmacHex(ripemd160.New, salt, text), nil
 	case "hmac-ripemd320-saltkey":
 		return hmacHex(newRIPEMD320, salt, text), nil
+	case "hmac-streebog256-saltkey":
+		return hmacStreebogHex(newStreebog256, salt, text), nil
+	case "hmac-streebog512-saltkey":
+		return hmacStreebogHex(newStreebog512, salt, text), nil
 	case "blake2b":
 		h := blake2b.Sum512([]byte(text))
 		return hex.EncodeToString(h[:]), nil

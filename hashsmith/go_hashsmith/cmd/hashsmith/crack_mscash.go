@@ -22,8 +22,10 @@ import (
 func dccKey(password, username string) []byte {
 	nt := md4.New()
 	nt.Write(utf16le(password))
-	ntHash := nt.Sum(nil)
+	return dccKeyFromNTHash(nt.Sum(nil), username)
+}
 
+func dccKeyFromNTHash(ntHash []byte, username string) []byte {
 	d := md4.New()
 	d.Write(ntHash)
 	d.Write(utf16le(strings.ToLower(username)))

@@ -103,7 +103,7 @@ hashsmith decode -t hex "0x68:61:73:68-73 6d 69 74 68"
 
 ### Hash types
 
-Hashsmith supports **334 hash types**, and every one is validated against a
+Hashsmith supports **369 hash types**, and every one is validated against a
 known-answer vector before shipping — no unimplemented stubs, no unvalidated
 crypto. Most hashes are auto-detected, so naming a type is optional. When you want
 to pin one, pass `-t <name>`; run `hashsmith types` for the full catalogue. Beyond
@@ -135,6 +135,15 @@ hashsmith crack -t 10900 'sha256:rounds:b64salt:b64dk'
 hashsmith crack -t 32900 'PBKDF1:sha1:rounds:b64salt:b64digest'
 hashsmith crack -t 25700 '<murmur-hash>:<32-bit-seed>'
 hashsmith crack -t 34810 '$BLAKE2$<blake2b-256>:<salt>'
+hashsmith crack -t 35100 '$sm3$<salt>$<checksum>'       # SM3 crypt
+hashsmith crack -t 16400 '{CRAM-MD5}<opad-state><ipad-state>' # Dovecot state record
+hashsmith crack -t 15400 '$chacha20$*<counter>*<offset>*<iv>*<plain>*<cipher>'
+hashsmith crack -t 18800 '<base64-record>'             # Blockchain second password
+hashsmith crack -t 31500 '<dcc-hash>:<username>'       # NT hash candidates
+hashsmith crack -t 33500 '$rc4$40$<drop>$<cipher>$<offset>$<plain>'
+hashsmith crack -t 35300 '$krb5tgs$23$…'               # NT hash candidates
+hashsmith crack -t 16800 '<pmkid>:<ap>:<sta>:<essid-hex>'
+hashsmith crack -t 22400 '$aescrypt$1*<salt>*<iv>*<key>*<hmac>'
 ```
 
 The compatibility aliases cover the common raw digests, UTF-16LE digests,
@@ -154,11 +163,11 @@ MD5/SHA1/SHA224/SHA256/SHA384/SHA512, PBKDF1-SHA1, GRUB2 PBKDF2-SHA512, and ever
 encrypted-container format handled by the `*2smith` extractors.
 
 Raw additions include MD2, SHA-0, SM3, SHA-512/224, SHA-512/256, legacy
-Keccak-256/512, SHAKE128-256, SHAKE256-512, BLAKE2b-256/384, and legacy Windows
+Keccak-224/256/384/512, SHAKE128-256, SHAKE256-512, BLAKE2b-256/384, and legacy Windows
 LM. Explicit checksum modes cover CRC-32, CRC-32C, CRC-64/ECMA, Adler-32,
 FNV-1a 32/64, xxHash32/64, MurmurHash3-32, seeded CRC32, original MurmurHash,
 MurmurHash64A, seeded MurmurHash3/CRC32C, CRC-64/Jones, Skip32 known-plaintext,
-and raw AES-128/192/256-ECB known-plaintext records;
+and raw DES/3DES/AES-128/192/256-ECB, ChaCha20, and RC4 DropN known-plaintext records;
 because short checksums are highly ambiguous, specify those with `-t`.
 
 Application, device & framework hashes: **Django** (PBKDF2, scrypt, Argon2,
@@ -167,19 +176,24 @@ bcrypt-SHA256, and legacy salted hashes), **phpass** (WordPress/phpBB3),
 **Cisco-IOS 4/8/9**, **Cisco-PIX/ASA**, **Citrix NetScaler**, **Juniper NetScreen**,
 **macOS 10.8+** (`$ml$`), **Atlassian** (`{PKCS5S2}`), **JWT** (HMAC), **SIP digest**,
 **Python Passlib PBKDF2**, **Werkzeug PBKDF2/scrypt**, **ASP.NET Identity v2/v3**,
-**SolarWinds Orion**, and **Bitwarden** — all vector-tested.
+**SolarWinds Orion legacy/v2**, **ArubaOS**, `sha1(CX)`, **SM3 crypt**,
+**Mojolicious signed cookies**, **Japanese tripcodes**, **Blockchain second
+passwords and legacy AES-OFB wallets**, **phpass-over-MD5**, **Symfony legacy
+passwords**, and **Bitwarden** — all vector-tested.
 
 Canonical application records also cover **Veeam VBK**, **Microsoft Online
 Account**, **SecureCRT MasterPassphrase v2**, **KNX IP Secure**, **TeamSpeak 3**,
-Hashcat's NT-hash-input **NetNTLMv2** mode, **Dahua/Besder authentication**,
+Hashcat's NT-hash-input **NetNTLMv1/NetNTLMv2** modes, **Dahua/Besder authentication**,
 **Simpla CMS**, **RSA NetWitness**, and **Radmin3**.
 
 Database, auth & directory hashes: **MySQL** (3.23, 4.1+, and MySQL 8 `$A$`
 `caching_sha2_password`), **MSSQL**, **PostgreSQL** (incl. **SCRAM-SHA-256**),
 **MongoDB SCRAM-SHA-1/SHA-256** stored and server keys, Red Hat **389-DS
 `{PBKDF2_SHA256}`**, **Sybase ASE**, **SAP CODVN B & F/G**,
-**NTLM/NetNTLM**, **Kerberos**, Active Directory **DCC/DCC2** (mscash/mscash2),
-**CRAM-MD5**, **IPMI2 RAKP HMAC-SHA1/HMAC-MD5**, **DNSSEC NSEC3**, legacy
+**NTLM/NetNTLM**, **Kerberos** including AES AS-REP and NT-hash-input modes,
+Active Directory **DCC/DCC2** (mscash/mscash2),
+**CRAM-MD5**, **Dovecot CRAM-MD5 states**, **DCC/DCC2 plaintext and NT-hash-input modes**,
+**IPMI2 RAKP HMAC-SHA1/HMAC-MD5**, **DNSSEC NSEC3**, legacy
 **Oracle H**, and **iSCSI CHAP** — all vector-tested.
 
 ### Wireless, wallets & disk encryption
@@ -191,9 +205,13 @@ wallet examples for Bitcoin/Electrum, real VeraCrypt/BitLocker/LUKS volumes):
 | `-t` type | Format | Covers |
 |---|---|---|
 | `wpa` | `WPA*01*…` / `WPA*02*…` / `pmkid*ap*sta*essid` | WPA/WPA2 PMKID and EAPOL 4-way handshake (HMAC-MD5/SHA1, AES-CMAC) |
+| `wpa-pmkid` / `wpa-pmk` | `pmkid:ap:sta[:essid]` or `WPA*01/02*…` | Hashcat 16800 passphrase and 16801/22001 raw-PMK records |
+| `wpa-hccapx` / `wpa-hccapx-pmk` | 393-byte hccapx as hex | Legacy Hashcat 2500 passphrase and 2501 raw-PMK EAPOL records |
 | `ethereum` | `$ethereum$p*…` / `$ethereum$s*…` | Web3/Geth keystore v3 (PBKDF2 and scrypt) |
+| `ethereum-presale` | `$ethereum$w*…` | Ethereum pre-sale PBKDF2/AES wallet |
 | `bitcoin` | `$bitcoin$…` | Bitcoin/Litecoin wallet.dat (iterated SHA-512 + AES-256-CBC) |
 | `electrum` | `$electrum$1*…` | Electrum wallet salt-type 1-3 (double SHA-256 + AES-CBC) |
+| `aescrypt` / `multibit-key` / `terra-wallet` | Native Hashcat records | AES Crypt, MultiBit Classic/bitcoinj, and Terra Station wallets |
 | `veracrypt` / `truecrypt` | `veracrypt:<512-byte-header-hex>` | VeraCrypt/TrueCrypt — AES/Serpent/Twofish-XTS × SHA-512/SHA-256/Whirlpool/Streebog/RIPEMD-160 |
 | `bitlocker` | `$bitlocker$…` | BitLocker (1M-round SHA-256 + AES-CTR VMK check) |
 | `luks` | `$luks$…` (via `luks2smith`) | LUKS v1 — AES/Twofish/Serpent × XTS/CBC-ESSIV/CBC × SHA-1/256/512/RIPEMD-160/Whirlpool |
@@ -597,16 +615,16 @@ self-contained binary that tries to make the common path short.
 
 | | Hashsmith | Hashcat | John the Ripper (jumbo) |
 |---|---|---|---|
-| Hash formats | 334 | ~470 modes | ~470 formats |
+| Hash formats | 369 | ~470 modes | ~470 formats |
 | Hash-type auto-detection | yes, by default | no, `-m` required | partial, guesses per file |
-| Hashcat mode numbers accepted | 350 | native | no |
-| John format labels accepted | 187 | no | native |
+| Hashcat mode numbers accepted | 399 | native | no |
+| John format labels accepted | 189 | no | native |
 | Attack modes | dict, brute, mask, markov, hybrid, combinator | straight, combinator, mask, hybrid, association | wordlist, incremental, mask, external |
 | Rule engine | ~35 operators | full, on-GPU, the de-facto standard | full, plus C-like external mode |
 | GPU | experimental, opt-in; Metal + OpenCL, a few algorithms | mature CUDA / HIP / OpenCL / Metal across nearly every mode | OpenCL for a subset |
 | File → hash extractors | 12, built into the binary | separate `*2hashcat` scripts | 100+ separate `*2john` scripts |
 | Install | one static binary, no runtime deps | binary + GPU runtime | build or distro package + Perl/Python for extractors |
-| Built-in known-answer self-test | `hashsmith selftest`, 345 vectors over all 334 types, provenance-labelled | internal, on startup | `john --test` |
+| Built-in known-answer self-test | `hashsmith selftest`, 382 vectors over all 369 types, provenance-labelled | internal, on startup | `john --test` |
 | Distributed cracking | no | via third-party overlays | via MPI |
 
 **Where Hashsmith is the better tool.** You get one binary with no runtime
@@ -628,7 +646,7 @@ miscompilation, a bad optimisation or a corrupted download shows up here and
 nowhere else.
 
 ```bash
-hashsmith selftest              # 289 fast vectors
+hashsmith selftest              # 326 fast vectors
 hashsmith selftest -slow        # include the high-iteration KDFs
 hashsmith selftest -gaps        # list the types that have no vector yet
 ```
@@ -639,9 +657,9 @@ reference suite), `cross-checked` (computed independently with Python or
 OpenSSL) and `regression` (produced by Hashsmith itself, which catches drift but
 cannot prove the implementation was right to begin with). The summary reports
 the three separately rather than flattening them into one reassuring number, and
-tells you honestly how many catalogue types have no vector at all. All 334
-catalogue types now carry one: 232 published vectors, 106 independently
-cross-checked vectors, and 7 regression-only vectors (345 total).
+tells you honestly how many catalogue types have no vector at all. All 369
+catalogue types now carry one: 268 published vectors, 107 independently
+cross-checked vectors, and 7 regression-only vectors (382 total).
 
 **Where they are the better tool.** For a large wordlist against a fast hash on
 a real GPU, Hashcat will beat Hashsmith by orders of magnitude — its kernels are

@@ -88,6 +88,23 @@ func verifyNetNTLMv2NTHash(targetHash string, nt []byte) (bool, error) {
 
 // verifyNetNTLMv1 checks a captured NetNTLMv1 response against a candidate.
 func verifyNetNTLMv1(targetHash, candidate string) (bool, error) {
+	return verifyNetNTLMv1NTHash(targetHash, ntHash(candidate))
+}
+
+// verifyNetNTLMv1NT checks Hashcat mode 27000, where each candidate is the
+// already-computed 16-byte NT hash rather than a plaintext password.
+func verifyNetNTLMv1NT(targetHash, candidate string) (bool, error) {
+	nt, err := hex.DecodeString(candidate)
+	if err != nil || len(nt) != 16 {
+		return false, nil
+	}
+	return verifyNetNTLMv1NTHash(targetHash, nt)
+}
+
+func verifyNetNTLMv1NTHash(targetHash string, nt []byte) (bool, error) {
+	if len(nt) != 16 {
+		return false, errors.New("invalid NT hash (need 16 bytes)")
+	}
 	fields := strings.Split(targetHash, ":")
 	if len(fields) != 6 {
 		return false, errors.New("invalid NetNTLMv1 format (want user::domain:lm:nt:srvchal)")
@@ -118,7 +135,7 @@ func verifyNetNTLMv1(targetHash, candidate string) (bool, error) {
 	// NT hash padded to 21 bytes → three 7-byte DES keys, each encrypting the
 	// 8-byte server challenge; the concatenation is the 24-byte NT response.
 	key := make([]byte, 21)
-	copy(key, ntHash(candidate))
+	copy(key, nt)
 
 	got := make([]byte, 0, 24)
 	for i := 0; i < 3; i++ {

@@ -159,7 +159,7 @@ func verifySNMPv3(target, candidate string) (bool, error) {
 
 func verifyQNX(target, candidate, variant string) (bool, error) {
 	parts := strings.Split(target, "@")
-	if len(parts) != 4 || parts[0] != "" || len(parts[3]) != 16 {
+	if len(parts) != 4 || parts[0] != "" {
 		return false, errors.New("invalid QNX shadow record")
 	}
 	tagParts := strings.Split(parts[1], ",")
@@ -173,6 +173,23 @@ func verifyQNX(target, candidate, variant string) (bool, error) {
 		if err != nil || iterations < 1 || iterations > maxKDFIterations {
 			return false, errors.New("invalid QNX iteration count")
 		}
+	}
+	// QNX 7 switched the SHA-512 record to PBKDF2-HMAC-SHA512 with Base64
+	// digest and salt fields. Its default is 4096 rounds.
+	if variant == "S" && !isHex(parts[2]) {
+		if len(tagParts) == 1 {
+			iterations = 4096
+		}
+		want, digestErr := base64.StdEncoding.DecodeString(parts[2])
+		salt, saltErr := base64.StdEncoding.DecodeString(parts[3])
+		if digestErr != nil || saltErr != nil || len(want) != sha512.Size || len(salt) == 0 || len(salt) > 256 {
+			return false, errors.New("invalid QNX 7 PBKDF2 record")
+		}
+		got := pbkdf2.Key([]byte(candidate), salt, iterations, sha512.Size, sha512.New)
+		return bytesEqualCT(got, want), nil
+	}
+	if len(parts[3]) != 16 {
+		return false, errors.New("invalid QNX legacy salt")
 	}
 	var newHash func() hash.Hash
 	var digestLen int
