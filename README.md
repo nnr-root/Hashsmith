@@ -103,7 +103,7 @@ hashsmith decode -t hex "0x68:61:73:68-73 6d 69 74 68"
 
 ### Hash types
 
-Hashsmith supports **369 hash types**, and every one is validated against a
+Hashsmith supports **426 hash types**, and every one is validated against a
 known-answer vector before shipping — no unimplemented stubs, no unvalidated
 crypto. Most hashes are auto-detected, so naming a type is optional. When you want
 to pin one, pass `-t <name>`; run `hashsmith types` for the full catalogue. Beyond
@@ -212,7 +212,11 @@ wallet examples for Bitcoin/Electrum, real VeraCrypt/BitLocker/LUKS volumes):
 | `bitcoin` | `$bitcoin$…` | Bitcoin/Litecoin wallet.dat (iterated SHA-512 + AES-256-CBC) |
 | `electrum` | `$electrum$1*…` | Electrum wallet salt-type 1-3 (double SHA-256 + AES-CBC) |
 | `aescrypt` / `multibit-key` / `terra-wallet` | Native Hashcat records | AES Crypt, MultiBit Classic/bitcoinj, and Terra Station wallets |
-| `veracrypt` / `truecrypt` | `veracrypt:<512-byte-header-hex>` | VeraCrypt/TrueCrypt — AES/Serpent/Twofish-XTS × SHA-512/SHA-256/Whirlpool/Streebog/RIPEMD-160 |
+| Bitcoin WIF/raw key address modes | Mainnet P2PKH, P2WPKH, or P2SH(P2WPKH) address | Hashcat 28501-28506 and 30901-30906, compressed and uncompressed public keys |
+| `metamask` / `metamask-short` / `exodus` | Native Hashcat records | MetaMask AES-GCM and Exodus scrypt/AES-GCM wallets (26600/26610/28200) |
+| `pkcs8-pem-*` / `jks-private-key` | Native `$PEM$` / `$jksprivk$` records | PKCS#8 PBKDF2-SHA1/SHA256 and Java KeyStore private keys (24410/24420/15500) |
+| `vmware-vmx` / `virtualbox-aes*` | Native `$vmx$` / `$vbox$` records | VMware VMX and VirtualBox AES-XTS records (27400/27500/27600) |
+| `veracrypt` / `truecrypt` | `veracrypt:<header-hex>` or `$veracrypt$<salt>$<data>` | AES/Serpent/Twofish-XTS single ciphers and two-/three-cipher cascades; RIPEMD-160, SHA-256, SHA-512, Whirlpool, and Streebog-512 standard/boot schedules; legacy Hashcat 6211-6243 and 13711-13783 families plus current 29311-29343 and 29411-29483 families |
 | `bitlocker` | `$bitlocker$…` | BitLocker (1M-round SHA-256 + AES-CTR VMK check) |
 | `luks` | `$luks$…` (via `luks2smith`) | LUKS v1 — AES/Twofish/Serpent × XTS/CBC-ESSIV/CBC × SHA-1/256/512/RIPEMD-160/Whirlpool |
 | `phpass` / `drupal7` | `$P$…` / `$H$…` / `$S$…` | WordPress, phpBB3, Drupal 7 |
@@ -596,8 +600,9 @@ Extracted with a `*2smith` command and cracked with the built-in wordlist:
 
 | `-t` type | Notes |
 |---|---|
+| `ssh`     | OpenSSH, legacy PEM, and `$sshng$` records from `ssh2john`; DES/3DES/AES |
 | `pkcs8`   | PKCS#8 PBES2 private keys (via `ssh2smith`) |
-| `gpg`     | `gpg -c` symmetric (via `gpg2smith`); AES-128/192/256 |
+| `gpg`     | `gpg -c` symmetric messages and protected secret-key records from `gpg2john`; AES/CAST5/3DES |
 | `office`  | MS Office 2007 (standard), 2010 (standard), 2013 (agile) |
 | `keepass` | KeePass KDBX 1, 2 (AES-KDF) and 4 (Argon2d / Argon2id) |
 
@@ -615,16 +620,16 @@ self-contained binary that tries to make the common path short.
 
 | | Hashsmith | Hashcat | John the Ripper (jumbo) |
 |---|---|---|---|
-| Hash formats | 369 | ~470 modes | ~470 formats |
+| Hash formats | 426 | ~470 modes | ~470 formats |
 | Hash-type auto-detection | yes, by default | no, `-m` required | partial, guesses per file |
-| Hashcat mode numbers accepted | 399 | native | no |
+| Hashcat mode numbers accepted | 486 | native | no |
 | John format labels accepted | 189 | no | native |
 | Attack modes | dict, brute, mask, markov, hybrid, combinator | straight, combinator, mask, hybrid, association | wordlist, incremental, mask, external |
 | Rule engine | ~35 operators | full, on-GPU, the de-facto standard | full, plus C-like external mode |
 | GPU | experimental, opt-in; Metal + OpenCL, a few algorithms | mature CUDA / HIP / OpenCL / Metal across nearly every mode | OpenCL for a subset |
 | File → hash extractors | 12, built into the binary | separate `*2hashcat` scripts | 100+ separate `*2john` scripts |
 | Install | one static binary, no runtime deps | binary + GPU runtime | build or distro package + Perl/Python for extractors |
-| Built-in known-answer self-test | `hashsmith selftest`, 382 vectors over all 369 types, provenance-labelled | internal, on startup | `john --test` |
+| Built-in known-answer self-test | `hashsmith selftest`, 469 vectors over all 426 types, provenance-labelled | internal, on startup | `john --test` |
 | Distributed cracking | no | via third-party overlays | via MPI |
 
 **Where Hashsmith is the better tool.** You get one binary with no runtime
@@ -646,7 +651,7 @@ miscompilation, a bad optimisation or a corrupted download shows up here and
 nowhere else.
 
 ```bash
-hashsmith selftest              # 326 fast vectors
+hashsmith selftest              # 344 fast vectors
 hashsmith selftest -slow        # include the high-iteration KDFs
 hashsmith selftest -gaps        # list the types that have no vector yet
 ```
@@ -657,9 +662,9 @@ reference suite), `cross-checked` (computed independently with Python or
 OpenSSL) and `regression` (produced by Hashsmith itself, which catches drift but
 cannot prove the implementation was right to begin with). The summary reports
 the three separately rather than flattening them into one reassuring number, and
-tells you honestly how many catalogue types have no vector at all. All 369
-catalogue types now carry one: 268 published vectors, 107 independently
-cross-checked vectors, and 7 regression-only vectors (382 total).
+tells you honestly how many catalogue types have no vector at all. All 426
+catalogue types now carry one: 355 published vectors, 107 independently
+cross-checked vectors, and 7 regression-only vectors (469 total).
 
 **Where they are the better tool.** For a large wordlist against a fast hash on
 a real GPU, Hashcat will beat Hashsmith by orders of magnitude — its kernels are

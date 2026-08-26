@@ -241,6 +241,9 @@ func decodePEMBody(text, label string) ([]byte, error) {
 
 // verifySSH checks an SSH private-key password for both Hashsmith SSH formats.
 func verifySSH(targetHash, candidate string) (bool, error) {
+	if strings.HasPrefix(targetHash, "$sshng$") {
+		return verifySSHNG(targetHash, candidate)
+	}
 	parts := strings.Split(targetHash, "$")
 	// "$ssh$<subtype>$..." → ["", "ssh", subtype, ...]
 	if len(parts) < 3 || parts[1] != "ssh" {
@@ -253,6 +256,93 @@ func verifySSH(targetHash, candidate string) (bool, error) {
 		return verifyPEMKey(parts, candidate)
 	}
 	return false, fmt.Errorf("unknown ssh hash subtype %q", parts[2])
+}
+
+// verifySSHNG checks the legacy PEM records emitted by ssh2john and consumed
+// by Hashcat modes 22911/22921/22931/22941/22951. Cipher IDs select 3DES,
+// DES, or AES-CBC; all use OpenSSL's MD5 EVP_BytesToKey derivation.
+func verifySSHNG(targetHash, candidate string) (bool, error) {
+	const prefix = "$sshng$"
+	fields := strings.Split(strings.TrimPrefix(targetHash, prefix), "$")
+	if !strings.HasPrefix(targetHash, prefix) || len(fields) != 5 {
+		return false, errors.New("invalid sshng record")
+	}
+	var cipherID, saltLen, dataLen int
+	if _, err := fmt.Sscanf(fields[0], "%d", &cipherID); err != nil {
+		return false, errors.New("invalid sshng cipher ID")
+	}
+	if _, err := fmt.Sscanf(fields[1], "%d", &saltLen); err != nil {
+		return false, errors.New("invalid sshng IV length")
+	}
+	if _, err := fmt.Sscanf(fields[3], "%d", &dataLen); err != nil {
+		return false, errors.New("invalid sshng data length")
+	}
+	iv, err := hex.DecodeString(fields[2])
+	if err != nil || len(iv) != saltLen {
+		return false, errors.New("invalid sshng IV")
+	}
+	ct, err := hex.DecodeString(fields[4])
+	if err != nil || len(ct) != dataLen || len(ct) < 32 || len(ct) > 32768 {
+		return false, errors.New("invalid sshng ciphertext")
+	}
+
+	keyLen, blockSize := 0, 0
+	switch cipherID {
+	case 0:
+		keyLen, blockSize = 24, 8 // 3DES-CBC
+	case 6:
+		keyLen, blockSize = 8, 8 // DES-CBC
+	case 1, 3:
+		keyLen, blockSize = 16, 16 // AES-128-CBC
+	case 4:
+		keyLen, blockSize = 24, 16 // AES-192-CBC
+	case 5:
+		keyLen, blockSize = 32, 16 // AES-256-CBC
+	default:
+		return false, errors.New("unsupported sshng cipher ID")
+	}
+	if len(iv) != blockSize || len(ct)%blockSize != 0 {
+		return false, errors.New("invalid sshng cipher parameters")
+	}
+	if len(candidate) > 128 {
+		return false, nil
+	}
+	key := evpBytesToKeyMD5([]byte(candidate), iv[:8], keyLen)
+	var block cipher.Block
+	switch cipherID {
+	case 0:
+		block, err = des.NewTripleDESCipher(key)
+	case 6:
+		block, err = des.NewCipher(key)
+	default:
+		block, err = aes.NewCipher(key)
+	}
+	if err != nil {
+		return false, err
+	}
+	plain := make([]byte, len(ct))
+	cipher.NewCBCDecrypter(block, iv).CryptBlocks(plain, ct)
+	unpadded, ok := pkcs7Unpad(plain, blockSize)
+	return ok && validDERSequence(unpadded), nil
+}
+
+func validDERSequence(der []byte) bool {
+	if len(der) < 2 || der[0] != 0x30 {
+		return false
+	}
+	lengthByte := int(der[1])
+	if lengthByte < 0x80 {
+		return lengthByte == len(der)-2
+	}
+	lengthBytes := lengthByte & 0x7f
+	if lengthBytes < 1 || lengthBytes > 4 || len(der) < 2+lengthBytes || der[2] == 0 {
+		return false
+	}
+	contentLen := 0
+	for _, b := range der[2 : 2+lengthBytes] {
+		contentLen = contentLen<<8 | int(b)
+	}
+	return contentLen == len(der)-2-lengthBytes
 }
 
 // verifyOpenSSH derives the bcrypt_pbkdf key, decrypts the first block of the

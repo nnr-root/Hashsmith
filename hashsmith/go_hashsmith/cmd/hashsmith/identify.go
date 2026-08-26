@@ -303,8 +303,28 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"PDF (Standard encryption)", 1000, "$pdf$ prefix — PDF Standard security handler"}}
 	case strings.HasPrefix(v, "$ssh$"):
 		return []candidate{{"SSH private key", 1000, "$ssh$ prefix — encrypted SSH private key"}}
+	case strings.HasPrefix(v, "$sshng$"):
+		return []candidate{{"SSH private key", 1000, "$sshng$ record — ssh2john legacy PEM encryption"}}
 	case strings.HasPrefix(v, "$pkcs8$"):
 		return []candidate{{"PKCS#8 encrypted key", 1000, "$pkcs8$ prefix — PBES2 (PBKDF2) private key"}}
+	case strings.HasPrefix(v, "$PEM$1$"):
+		return []candidate{{"PKCS#8 PEM (PBKDF2-SHA1)", 1000, "Hashcat 24410 native $PEM$ record"}}
+	case strings.HasPrefix(v, "$PEM$2$"):
+		return []candidate{{"PKCS#8 PEM (PBKDF2-SHA256)", 1000, "Hashcat 24420 native $PEM$ record"}}
+	case strings.HasPrefix(v, "$jksprivk$*"):
+		return []candidate{{"Java KeyStore private key", 1000, "Hashcat 15500 / $jksprivk$ record"}}
+	case strings.HasPrefix(v, "$vmx$"):
+		return []candidate{{"VMware VMX encrypted key", 1000, "Hashcat 27400 / $vmx$ record"}}
+	case strings.HasPrefix(v, "$vbox$"):
+		return []candidate{{"VirtualBox encrypted password", 1000, "Hashcat 27500/27600 / $vbox$ record"}}
+	case strings.HasPrefix(v, "$metamask-short$"):
+		return []candidate{{"MetaMask short vault", 1000, "Hashcat 26610 / $metamask-short$ record"}}
+	case strings.HasPrefix(v, "$metamask$"):
+		return []candidate{{"MetaMask vault", 1000, "Hashcat 26600 / $metamask$ record"}}
+	case strings.HasPrefix(v, "EXODUS:"):
+		return []candidate{{"Exodus wallet", 1000, "Hashcat 28200 scrypt/AES-GCM record"}}
+	case strings.HasPrefix(v, "$gpg$*"):
+		return []candidate{{"GPG protected secret key", 1000, "$gpg$* record — OpenPGP S2K + CFB"}}
 	case strings.HasPrefix(v, "$gpg$"):
 		return []candidate{{"GPG symmetric", 1000, "$gpg$ prefix — gpg -c symmetric encryption"}}
 	case strings.HasPrefix(v, "$office$2016$0$"):
@@ -1488,8 +1508,41 @@ func detectHashTypes(text string) []string {
 	if strings.HasPrefix(t, "$ssh$") {
 		return []string{"ssh"}
 	}
+	if strings.HasPrefix(t, "$sshng$") {
+		return []string{"ssh"}
+	}
 	if strings.HasPrefix(t, "$pkcs8$") {
 		return []string{"pkcs8"}
+	}
+	if strings.HasPrefix(t, "$PEM$1$") {
+		return []string{"pkcs8-pem-sha1"}
+	}
+	if strings.HasPrefix(t, "$PEM$2$") {
+		return []string{"pkcs8-pem-sha256"}
+	}
+	if strings.HasPrefix(t, "$jksprivk$*") {
+		return []string{"jks-private-key"}
+	}
+	if strings.HasPrefix(t, "$vmx$") {
+		return []string{"vmware-vmx"}
+	}
+	if strings.HasPrefix(t, "$vbox$") {
+		if strings.Contains(t, "$16$") {
+			return []string{"virtualbox-aes256"}
+		}
+		return []string{"virtualbox-aes128"}
+	}
+	if strings.HasPrefix(t, "$metamask-short$") {
+		return []string{"metamask-short"}
+	}
+	if strings.HasPrefix(t, "$metamask$") {
+		return []string{"metamask"}
+	}
+	if strings.HasPrefix(t, "EXODUS:") {
+		return []string{"exodus"}
+	}
+	if types := bitcoinAddressHashTypes(t); len(types) != 0 {
+		return types
 	}
 	if strings.HasPrefix(t, "$gpg$") {
 		return []string{"gpg"}
@@ -1729,6 +1782,12 @@ func detectHashTypes(text string) []string {
 		return []string{"truecrypt"}
 	}
 	if strings.HasPrefix(t, "veracrypt:") {
+		return []string{"veracrypt"}
+	}
+	if strings.HasPrefix(t, "$truecrypt$") {
+		return []string{"truecrypt"}
+	}
+	if strings.HasPrefix(t, "$veracrypt$") {
 		return []string{"veracrypt"}
 	}
 	if strings.HasPrefix(t, "AK1") && len(t) == 47 {

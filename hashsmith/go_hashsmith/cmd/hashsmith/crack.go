@@ -875,7 +875,31 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 	if algo == "siphash" {
 		return verifySipHash(targetHash, candidate, salt)
 	}
+	if mode, ok := cryptCascadeModes[algo]; ok {
+		return verifyCryptCascadeMode(targetHash, candidate, mode.kdf, mode.bits, mode.vera, mode.boot)
+	}
 	switch algo {
+	case "bitcoin-wif-p2pkh-compressed", "bitcoin-wif-p2pkh-uncompressed",
+		"bitcoin-wif-p2wpkh-compressed", "bitcoin-wif-p2wpkh-uncompressed",
+		"bitcoin-wif-p2sh-p2wpkh-compressed", "bitcoin-wif-p2sh-p2wpkh-uncompressed",
+		"bitcoin-raw-p2pkh-compressed", "bitcoin-raw-p2pkh-uncompressed",
+		"bitcoin-raw-p2wpkh-compressed", "bitcoin-raw-p2wpkh-uncompressed",
+		"bitcoin-raw-p2sh-p2wpkh-compressed", "bitcoin-raw-p2sh-p2wpkh-uncompressed":
+		return verifyBitcoinPrivateKeyAddress(targetHash, candidate, algo)
+	case "pkcs8-pem-sha1", "pkcs8-pem-sha256":
+		return verifyHashcatPEM(targetHash, candidate, algo)
+	case "jks-private-key":
+		return verifyJKSPrivateKey(targetHash, candidate)
+	case "vmware-vmx":
+		return verifyVMX(targetHash, candidate)
+	case "virtualbox-aes128", "virtualbox-aes256":
+		return verifyVirtualBox(targetHash, candidate, algo)
+	case "metamask":
+		return verifyMetaMask(targetHash, candidate, false)
+	case "metamask-short":
+		return verifyMetaMask(targetHash, candidate, true)
+	case "exodus":
+		return verifyExodus(targetHash, candidate)
 	case "pbkdf1":
 		return verifyPBKDF1SHA1(targetHash, candidate)
 	case "crc32-hashcat":
@@ -1158,6 +1182,20 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyVeraCrypt(targetHash, candidate)
 	case "truecrypt":
 		return verifyTrueCrypt(targetHash, candidate)
+	case "truecrypt-ripemd160":
+		return verifyTrueCryptMode(targetHash, candidate, "ripemd160")
+	case "truecrypt-sha512":
+		return verifyTrueCryptMode(targetHash, candidate, "sha512")
+	case "truecrypt-whirlpool":
+		return verifyTrueCryptMode(targetHash, candidate, "whirlpool")
+	case "veracrypt-ripemd160":
+		return verifyVeraCryptMode(targetHash, candidate, "ripemd160")
+	case "veracrypt-sha512":
+		return verifyVeraCryptMode(targetHash, candidate, "sha512")
+	case "veracrypt-whirlpool":
+		return verifyVeraCryptMode(targetHash, candidate, "whirlpool")
+	case "veracrypt-sha256":
+		return verifyVeraCryptMode(targetHash, candidate, "sha256")
 	case "bitlocker":
 		return verifyBitLocker(targetHash, candidate)
 	case "electrum":

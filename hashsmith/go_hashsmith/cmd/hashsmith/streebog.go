@@ -23,6 +23,24 @@ type streebogDigest struct {
 func newStreebog512() hash.Hash { return &streebogDigest{size: 64} }
 func newStreebog256() hash.Hash { d := &streebogDigest{size: 32}; d.initH(); return d }
 
+// newStreebog512Native returns the byte order used internally by VeraCrypt's
+// HMAC/PBKDF2 construction. The public Streebog hash emits the conventional
+// big-endian display form; VeraCrypt feeds the primitive's little-endian byte
+// string into the next HMAC round instead.
+func newStreebog512Native() hash.Hash {
+	return &streebogNativeDigest{Hash: newStreebog512()}
+}
+
+type streebogNativeDigest struct {
+	hash.Hash
+}
+
+func (d *streebogNativeDigest) Sum(in []byte) []byte {
+	out := d.Hash.Sum(nil)
+	reverseBytes(out)
+	return append(in, out...)
+}
+
 func (d *streebogDigest) initH() {
 	// 256-bit variant initialises h to all-0x01 bytes.
 	for i := range d.h {

@@ -16,6 +16,7 @@ import (
 	"hash"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/cast5"
@@ -337,6 +338,9 @@ func gpgS2K(pass, salt []byte, s2kType, hashAlgo, count, keyLen int) ([]byte, er
 // verifyGPG derives the session key, decrypts the SEIPD in OpenPGP-CFB mode, and
 // checks the two-byte quick-check plus the trailing MDC (SHA-1).
 func verifyGPG(targetHash, candidate string) (bool, error) {
+	if strings.HasPrefix(targetHash, "$gpg$*") {
+		return verifyGPGSecretKey(targetHash, candidate)
+	}
 	// $gpg$<s2ktype>$<hashalgo>$<cipher>$<count>$<salt_hex>$<seipd_hex>
 	parts := strings.Split(targetHash, "$")
 	if len(parts) != 8 || parts[1] != "gpg" {
@@ -397,4 +401,91 @@ func verifyGPG(targetHash, candidate string) (bool, error) {
 	}
 	sum := sha1.Sum(plain[:mdcStart+2])
 	return bytes.Equal(sum[:], plain[mdcStart+2:]), nil
+}
+
+// verifyGPGSecretKey checks the OpenPGP secret-key records emitted by
+// gpg2john and consumed by Hashcat modes 17010/17020/17030/17040. These are
+// distinct from gpg -c messages: the protected secret-key material uses an
+// explicit IV and ends with SHA1(plaintext) when S2K usage is 254.
+func verifyGPGSecretKey(targetHash, candidate string) (bool, error) {
+	const prefix = "$gpg$*"
+	fields := strings.Split(strings.TrimPrefix(targetHash, prefix), "*")
+	if !strings.HasPrefix(targetHash, prefix) || len(fields) != 12 || fields[0] != "1" {
+		return false, errors.New("invalid GPG secret-key record")
+	}
+	parseInt := func(field, name string) (int, error) {
+		n, err := strconv.Atoi(field)
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("invalid GPG %s", name)
+		}
+		return n, nil
+	}
+	encSize, err := parseInt(fields[1], "encrypted-data size")
+	if err != nil {
+		return false, err
+	}
+	modulusBits, err := parseInt(fields[2], "modulus size")
+	if err != nil || modulusBits < 256 || modulusBits > 16384 {
+		return false, errors.New("invalid GPG modulus size")
+	}
+	enc, err := hex.DecodeString(fields[3])
+	if err != nil || len(enc) != encSize || len(enc) < 128 || len(enc) > 1536 {
+		return false, errors.New("invalid GPG encrypted data")
+	}
+	s2kType, err := parseInt(fields[4], "S2K type")
+	if err != nil || (s2kType != 1 && s2kType != 3) {
+		return false, errors.New("unsupported GPG S2K type")
+	}
+	usage, err := parseInt(fields[5], "S2K usage")
+	if err != nil || usage != 254 {
+		return false, errors.New("unsupported GPG S2K usage")
+	}
+	hashAlgo, err := parseInt(fields[6], "hash algorithm")
+	if err != nil {
+		return false, err
+	}
+	cipherAlgo, err := parseInt(fields[7], "cipher algorithm")
+	if err != nil {
+		return false, err
+	}
+	ivSize, err := parseInt(fields[8], "IV size")
+	if err != nil {
+		return false, err
+	}
+	iv, err := hex.DecodeString(fields[9])
+	if err != nil || len(iv) != ivSize {
+		return false, errors.New("invalid GPG IV")
+	}
+	count, err := parseInt(fields[10], "S2K count")
+	if err != nil || count > 65011712 || (s2kType == 3 && count < 8) || (s2kType == 1 && count != 0) {
+		return false, errors.New("invalid GPG S2K count")
+	}
+	salt, err := hex.DecodeString(fields[11])
+	if err != nil || len(salt) != 8 {
+		return false, errors.New("invalid GPG S2K salt")
+	}
+	if len(candidate) > 256 {
+		return false, nil
+	}
+
+	keyLen, blockSize, err := gpgCipherParams(cipherAlgo)
+	if err != nil {
+		return false, err
+	}
+	if ivSize != blockSize || len(enc) < sha1.Size {
+		return false, errors.New("invalid GPG cipher parameters")
+	}
+	key, err := gpgS2K([]byte(candidate), salt, s2kType, hashAlgo, count, keyLen)
+	if err != nil {
+		return false, err
+	}
+	block, err := gpgNewBlock(cipherAlgo, key)
+	if err != nil {
+		return false, err
+	}
+	plain := make([]byte, len(enc))
+	cipher.NewCFBDecrypter(block, iv).XORKeyStream(plain, enc)
+	body := plain[:len(plain)-sha1.Size]
+	want := sha1.Sum(body)
+	return bytes.Equal(want[:], plain[len(body):]), nil
 }
