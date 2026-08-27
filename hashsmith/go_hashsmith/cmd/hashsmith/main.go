@@ -87,54 +87,8 @@ func main() {
 		if err := runIdentify(rest); err != nil {
 			fail(err.Error())
 		}
-	case "extract-hash", "zip2hash", "zip2smith":
-		if err := runExtractHash(rest); err != nil {
-			fail(err.Error())
-		}
-	case "7z2smith":
-		if err := runExtract7z(rest); err != nil {
-			fail(err.Error())
-		}
-	case "rar2smith":
-		if err := runExtractRAR(rest); err != nil {
-			fail(err.Error())
-		}
-	case "pdf2smith":
-		if err := runExtractPDF(rest); err != nil {
-			fail(err.Error())
-		}
-	case "ssh2smith":
-		if err := runExtractSSH(rest); err != nil {
-			fail(err.Error())
-		}
-	case "gpg2smith":
-		if err := runExtractGPG(rest); err != nil {
-			fail(err.Error())
-		}
-	case "keepass2smith":
-		if err := runExtractKeePass(rest); err != nil {
-			fail(err.Error())
-		}
-	case "office2smith":
-		if err := runExtractOffice(rest); err != nil {
-			fail(err.Error())
-		}
-	case "shadow2smith":
-		if err := runExtractShadow(rest); err != nil {
-			fail(err.Error())
-		}
-	case "luks2smith":
-		if err := runExtractLUKS(rest); err != nil {
-			fail(err.Error())
-		}
-	case "pfx2smith", "p122smith":
-		if err := runExtractPKCS12(rest); err != nil {
-			fail(err.Error())
-		}
-	case "pwsafe2smith":
-		if err := runExtractPwsafe(rest); err != nil {
-			fail(err.Error())
-		}
+	case "extractors", "list-extractors":
+		printExtractorCatalogue()
 	case "selftest", "self-test":
 		if err := runSelfTest(rest); err != nil {
 			fail(err.Error())
@@ -168,6 +122,12 @@ func main() {
 			fail(err.Error())
 		}
 	default:
+		if extractor, ok := findExtractor(cmd); ok {
+			if err := extractor.run(rest); err != nil {
+				fail(err.Error())
+			}
+			break
+		}
 		// Bare-target shortcut: a bare hash or a file of hashes is
 		// auto-detected and cracked. The target may be preceded by flags
 		// (e.g. `hashsmith -w list.txt hash.txt`), so route to auto whenever the
@@ -201,18 +161,8 @@ func printHelp() {
 	fmt.Println("  types         list every supported -t hash type")
 	fmt.Println("  encodings     list every supported encode/decode -t type (alias: codecs)")
 	fmt.Println("  identify      [-o out] [-c]  INPUT...")
-	fmt.Println("  zip2smith     -f <zip-file>  [-o out] [-c]   (aliases: extract-hash, zip2hash)")
-	fmt.Println("  7z2smith      -f <7z-file>   [-o out] [-c]")
-	fmt.Println("  rar2smith     -f <rar-file>  [-o out] [-c]   (RAR4 -hp or RAR5)")
-	fmt.Println("  pdf2smith     -f <pdf-file>  [-o out] [-c]")
-	fmt.Println("  ssh2smith     -f <ssh-key>   [-o out] [-c]   (OpenSSH / legacy PEM / PKCS#8 keys)")
-	fmt.Println("  gpg2smith     -f <gpg-file>  [-o out] [-c]   (gpg -c symmetric encryption)")
-	fmt.Println("  keepass2smith -f <kdbx-file> [-o out] [-c]   (KeePass KDBX 3.1 database)")
-	fmt.Println("  office2smith  -f <docx/xlsx> [-o out] [-c]   (encrypted Office 2013+ document)")
-	fmt.Println("  shadow2smith  <shadow> [passwd] [-o out] [-c]   (/etc/shadow → user:hash, files any order)")
-	fmt.Println("  luks2smith    -f <volume.luks> [-o out] [-c]    (LUKS v1 volume → crackable hash)")
-	fmt.Println("  pfx2smith     -f <store.pfx>  [-o out] [-c]   (PKCS#12 / .p12 keystore)")
-	fmt.Println("  pwsafe2smith  -f <db.psafe3> [-o out] [-c]   (Password Safe v3 database)")
+	fmt.Printf("  extractors    list all %d integrated *2smith extractors and formats\n", len(universalExtractorRegistry))
+	fmt.Println("  <name>2smith  -f <file> [-o out] [-c]   extract crack-ready records; see `extractors`")
 	fmt.Println("  rules         <rulefile> [word]   preview/validate a mangling-rule file")
 	fmt.Println("  benchmark     [-t type] [-p workers]   measure cracking throughput per hash type")
 	fmt.Println("  gpu           show GPU acceleration status (build: -tags opencl any GPU, or -tags gpu Apple Metal)")

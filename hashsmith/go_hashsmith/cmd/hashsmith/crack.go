@@ -939,6 +939,12 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyRC4DropN(targetHash, candidate)
 	}
 	switch algo {
+	case "android-backup":
+		return verifyAndroidBackup(targetHash, candidate)
+	case "encfs":
+		return verifyEncFS(targetHash, candidate)
+	case "mozilla-nss":
+		return verifyMozillaNSS(targetHash, candidate)
 	case "md5-salt1-pass-salt2":
 		return verifyMD5DualSalt(targetHash, candidate)
 	case "blockchain-legacy":

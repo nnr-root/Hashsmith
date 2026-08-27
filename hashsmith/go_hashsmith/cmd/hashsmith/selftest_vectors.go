@@ -3,6 +3,10 @@ package main
 // Known-answer vectors compiled into the binary for `hashsmith selftest`.
 // See selftest.go for what each source class means.
 
+const androidBackupPublishedRecord = "$ab$3*0*10000*dc4e8723d6c1ac065878dc6428e8ad08d3912cf7f1757007a6c6793ee0c6af57c4604a0e2afb4d201d98f7cab1f24927f9319344aa25e28782b2ea8e627f1cc9*d1eb72793eae5d7e28c20e3d142c2c7cdb363e92fb03c3a6444152f83f0edbfc31a8447761074e85ecf6e07341893b9864861015139b9cd20b9474b9a96bf0c7*862f63c48ef68b0f28d784bd81f28f68*6a185cd6b9d4a44470845b9366f10881d7549b0e5d353309ac3b155ca22d8f0064a10c16919472fc6540a49472d1d9adc7f510fdc5906719b8c8aaac492433f7242186314384fd013c37cb4bc646bcb184a37c7091273ff5b54f5485a30eabe0"
+const encFSPublishedRecord = "$encfs$128*181317*0*20*e9a6d328b4c75293d07b093e8ec9846d04e22798*36*b9e83adb462ac8904695a60de2f3e6d57018ccac2227251d3f8fc6a8dd0cd7178ce7dc3f"
+const mozillaPublishedRecord = "$mozilla$*3*20*1*5199adfab24e85e3f308bacf692115f23dcd4f8f*11*2a864886f70d010c050103*16*9debdebd4596b278de029b2b2285ce2e*20*2c4d938ccb3f7f1551262185ccee947deae3b8ae"
+
 // Hashcat mode 6211 self-test header: TrueCrypt RIPEMD-160 + AES-XTS,
 // passphrase "hashcat". Kept separate because the canonical record is a raw
 // 512-byte header rather than a tagged, field-oriented string.
@@ -519,6 +523,11 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"aescrypt", "hashcat", "", "$aescrypt$1*efc648908ca7ec727f37f3316dfd885c*eff5c87a35545406a57b56de57bd0554*3a66401271aec08cbd10cf2070332214093a33f36bd0dced4a4bb09fab817184*6a3c49fea0cafb19190dc4bdadb787e73b1df244c51780beef912598bd3bdf7e", srcPublished},
 		{"multibit-key", "hashcat", "", "$multibit$1*e5912fe5c84af3d5*5f0391c219e8ef62c06505b1f6232858f5bcaa739c2b471d45dd0bd8345334de", srcPublished},
 		{"terra-wallet", "hashcat", "", "67445496c838e96c1424a8dae4b146f0fc247c8c34ef33feffeb1e4412018512wZGtBMeN84XZE2LoOKwTGvA4Ee4m7PR1lDGIdWUV6OSUZKRiKFx9tlrnZLt8r8OfOzbwUS2a2Uo+nrrP6F85fh4eHstwPJw0KwzHWB8br58=", srcPublished},
+
+		// ── John extractor compatibility ───────────────────────────────────────
+		{"android-backup", "password", "", androidBackupPublishedRecord, srcPublished},
+		{"encfs", "Jupiter", "", encFSPublishedRecord, srcPublished},
+		{"mozilla-nss", "12345678", "", mozillaPublishedRecord, srcPublished},
 
 		// ── Hashcat OpenPGP protected secret-key records ──────────────────────
 		{"gpg", "hashcat", "", gpgHashcat17010Vector, srcPublished},

@@ -311,7 +311,11 @@ func verifyTACACSPlus(target, candidate string) (bool, error) {
 
 func verifyAppleSecureNotes(target, candidate string) (bool, error) {
 	parts := strings.Split(target, "*")
-	if len(parts) != 5 || parts[0] != "$ASN$" || parts[1] != "1" ||
+	if len(parts) != 5 {
+		return false, errors.New("invalid Apple Secure Notes record")
+	}
+	id, idErr := strconv.Atoi(parts[1])
+	if parts[0] != "$ASN$" || idErr != nil || id < 1 ||
 		len(parts[3]) != 32 || !isHex(parts[3]) || len(parts[4]) != 48 || !isHex(parts[4]) {
 		return false, errors.New("invalid Apple Secure Notes record")
 	}

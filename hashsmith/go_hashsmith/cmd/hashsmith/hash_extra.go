@@ -361,6 +361,7 @@ func compatibilityHashAliasSeed() map[string]string {
 		"flask": "flask-session", "wpbcrypt": "wordpress-bcrypt",
 		"tacacs": "tacacs-plus", "oracle-otm": "oracle-otm", "xmpp-scram": "xmpp-scram",
 		"notes": "apple-secure-notes", "office2016": "office2016-sheet", "oldoffice": "office-old",
+		"androidbackup": "android-backup", "encfs": "encfs", "mozilla": "mozilla-nss",
 		"snmp": "snmpv3",
 		"qnx":  "qnx-sha512", "telegram": "telegram-passcode",
 

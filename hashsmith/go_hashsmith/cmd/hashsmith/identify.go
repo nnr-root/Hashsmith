@@ -1532,6 +1532,15 @@ func detectHashTypes(text string) []string {
 	if strings.HasPrefix(t, "$vmx$") {
 		return []string{"vmware-vmx"}
 	}
+	if strings.HasPrefix(t, "$ab$") {
+		return []string{"android-backup"}
+	}
+	if strings.HasPrefix(t, "$encfs$") {
+		return []string{"encfs"}
+	}
+	if strings.HasPrefix(t, "$mozilla$*") {
+		return []string{"mozilla-nss"}
+	}
 	if strings.HasPrefix(t, "$vbox$") {
 		if strings.Contains(t, "$16$") {
 			return []string{"virtualbox-aes256"}

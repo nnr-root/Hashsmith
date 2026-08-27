@@ -59,6 +59,7 @@ type selfTestVector struct {
 func slowSelfTestTypeSeed() map[string]bool {
 	return map[string]bool{
 		"1password": true, "ansible": true, "bitcoin": true, "bitlocker": true,
+		"android-backup": true, "encfs": true,
 		"bitwarden": true, "blockchain": true, "dcc2": true, "electrum": true,
 		"itunes": true, "keepass": true, "oracle12c": true, "pdf-r6": true,
 		"solarwinds": true, "argon2": true, "scrypt": true, "bcrypt": true,

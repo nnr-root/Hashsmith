@@ -103,7 +103,7 @@ hashsmith decode -t hex "0x68:61:73:68-73 6d 69 74 68"
 
 ### Hash types
 
-Hashsmith supports **448 universal formats**, and every one is validated against
+Hashsmith supports **451 universal formats**, and every one is validated against
 a known-answer vector before shipping — no unimplemented stubs, no unvalidated
 crypto. Most hashes are auto-detected, so naming a type is optional. When you want
 to pin one, pass `-t <name>`; run `hashsmith types` for the full registry. Beyond
@@ -534,26 +534,38 @@ A finished run (found or keyspace exhausted) removes its own session file.
 - `hash`
 - `crack`
 - `identify`
-- `decode`
-- `hash`
-- `crack`
-- `identify`
+- `extractors`
 
 ### File → hash extractors (`*2smith`)
 
 Turn a password-protected file into a crackable hash, then feed it straight to `crack`:
 
-| Command | Input | Formats |
+The binary currently contains **42 registry-backed extractors**. Run
+`hashsmith extractors` for the authoritative list generated from that same
+registry; command routing and help do not maintain separate copies.
+
+| Family | Commands | Inputs / output formats |
 |---|---|---|
-| `zip2smith` | `.zip` | ZipCrypto, WinZip AES-128/192/256 |
-| `7z2smith`  | `.7z`  | 7-Zip AES-256 |
-| `rar2smith` | `.rar` | RAR3/RAR4 (`-hp`), RAR5 |
-| `pdf2smith` | `.pdf` | Standard security handler (RC4 / AES) |
-| `ssh2smith` | SSH / private key | OpenSSH (bcrypt-pbkdf + AES), legacy PEM (AES-CBC / 3DES), PKCS#8 PBES2 (PBKDF2) |
-| `gpg2smith` | `.gpg` / `.asc` | `gpg -c` symmetric (AES-128/192/256, CAST5, 3DES) |
-| `keepass2smith` | `.kdbx` | KeePass KDBX 3.1 (AES-KDF) and KDBX 4 (Argon2d / Argon2id) |
-| `office2smith` | `.docx` / `.xlsx` / `.pptx` | MS Office 2007/2010 (standard) and 2013+ (agile) |
-| `shadow2smith` | `/etc/shadow` (+ `/etc/passwd`) | Linux/Unix login hashes — extraction to `user:hash` |
+| Archives and documents | `zip2smith`, `7z2smith`, `rar2smith`, `pdf2smith`, `office2smith` | ZipCrypto/WinZip AES, 7-Zip AES, RAR3/4/5, PDF RC4/AES, Office 2007–2013+ |
+| Keys and encrypted stores | `ssh2smith`, `gpg2smith`, `pfx2smith`, `keepass2smith`, `pwsafe2smith`, `1password2smith` | OpenSSH/PEM/PKCS#8, OpenPGP, PKCS#12, KeePass 3/4, Password Safe 3, 1Password Agile Keychain |
+| Full-disk/container | `luks2smith`, `truecrypt2smith`, `veracrypt2smith`, `bitlocker2smith`, `encfs2smith`, `dmg2smith` | LUKS1, TrueCrypt/VeraCrypt headers, BitLocker VMKs, EncFS 6, encrypted DMG v1/v2 |
+| Wallets and backups | `ethereum2smith`, `electrum2smith`, `blockchain2smith`, `bitcoin2smith`, `monero2smith`, `multibit2smith`, `itunes2smith`, `androidbackup2smith` | Web3, Electrum, Blockchain.com, Bitcoin Core SQLite, Monero export, MultiBit, iOS and Android backups |
+| Application stores and VMs | `applenotes2smith`, `lastpass2smith`, `mozilla2smith`, `vmx2smith`, `virtualbox2smith` | Apple Secure Notes, LastPass CLI, Mozilla/NSS key3.db, VMware VMX, VirtualBox keystores |
+| Operating systems/directories | `shadow2smith`, `aix2smith`, `ldif2smith`, `htpasswd2smith`, `hashdump2smith` | Unix shadow, AIX security/passwd, LDAP LDIF, Apache htpasswd, pwdump/secretsdump/NTDS |
+| Network/authentication | `hccapx2smith`, `ike2smith`, `sip2smith`, `prosody2smith`, `aruba2smith` | WPA hccapx v4, IKE-PSK, SIP digest, XMPP SCRAM, ArubaOS |
+| Universal ingestion | `scan2smith` | Finds every already-recognizable Hashsmith record in logs, configuration and arbitrary text |
+
+The John-compatible additions are independent native-Go implementations. They
+were behavior-audited against John jumbo rather than copied source-for-source,
+which keeps Hashsmith's MIT licensing intact and removes the Python/Perl runtime
+dependency.
+
+Nine of the eleven newest workflows are end-to-end: their output is detected
+and cracked by Hashsmith. `dmg2smith` and `monero2smith` currently emit standard
+portable records for transfer to John; Hashsmith does not yet claim native DMG
+or CryptoNight/Monero verification. `bitcoin2smith` reads modern Bitcoin Core
+SQLite wallets; legacy Berkeley DB wallets still need conversion or John's
+extractor.
 
 ```bash
 hashsmith ssh2smith -f id_ed25519 -o hash.txt   # extract
@@ -632,21 +644,23 @@ self-contained binary that tries to make the common path short.
 
 | | Hashsmith | Hashcat | John the Ripper (jumbo) |
 |---|---|---|---|
-| Universal hash/code formats | 448 | 450+ native hash types | hundreds of native formats |
+| Universal hash/code formats | 451 | 450+ native hash types | hundreds of native formats |
 | Hash-type auto-detection | yes, by default | yes in Hashcat 7.x; `--identify` lists possibilities | yes for recognizable ciphertexts; first matching format wins |
-| Accepted type vocabulary | 1,150 names/codes resolving into those same 448 formats, including 503 numeric Hashcat aliases | native numeric modes | native format labels |
+| Accepted type vocabulary | 1,156 names/codes resolving into those same 451 formats, including 503 numeric Hashcat aliases | native numeric modes | native format labels |
 | Attack modes | dict, brute, mask, markov, hybrid, combinator | straight, combinator, mask, hybrid, association | wordlist, incremental, mask, external |
 | Rule engine | ~35 operators | full, on-GPU, the de-facto standard | full, plus C-like external mode |
 | GPU | experimental, opt-in; Metal + OpenCL, a few algorithms | mature CUDA / HIP / OpenCL / Metal across nearly every mode | OpenCL for a subset |
-| File → hash extractors | 12, built into the binary | separate `*2hashcat` scripts | 100+ separate `*2john` scripts |
+| File → hash extractors | **42**, native and built into one registry/binary; 38 John-aligned workflows plus 4 Hashsmith-only ingestion workflows | 25 dedicated converters in the official `tools/` tree (v7.1/master audit) | 112 `run/*2john.{py,pl,lua}` scripts in bleeding-jumbo, plus compiled converters |
 | Install | one static binary, no runtime deps | binary + GPU runtime | build or distro package + Perl/Python for extractors |
-| Built-in known-answer self-test | `hashsmith selftest`, 492 vectors over all 448 formats, provenance-labelled | internal, on startup | `john --test` |
+| Built-in known-answer self-test | `hashsmith selftest`, 495 vectors over all 451 formats, provenance-labelled | internal, on startup | `john --test` |
 | Distributed cracking | no | via third-party overlays | via MPI |
 
 **Where Hashsmith is the better tool.** You get one binary with no runtime
 dependencies, hash extraction and cracking in the same place, and a universal
 registry that keeps canonical names, aliases, descriptions, vectors, and test
-policy synchronized. It also speaks both of the other tools' dialects, so a mode
+policy synchronized. Its 42 integrated extractors now exceed Hashcat's current
+official standalone converter count, while John still has the broader long-tail
+extractor ecosystem. It also speaks both of the other tools' dialects, so a mode
 number pasted from a Hashcat writeup or a `--format` label from a John tutorial
 both work unchanged:
 
@@ -663,7 +677,7 @@ miscompilation, a bad optimisation or a corrupted download shows up here and
 nowhere else.
 
 ```bash
-hashsmith selftest              # 354 fast vectors
+hashsmith selftest              # 355 fast vectors
 hashsmith selftest -slow        # include the high-iteration KDFs
 hashsmith selftest -gaps        # list the types that have no vector yet
 ```
@@ -674,15 +688,15 @@ reference suite), `cross-checked` (computed independently with Python or
 OpenSSL) and `regression` (produced by Hashsmith itself, which catches drift but
 cannot prove the implementation was right to begin with). The summary reports
 the three separately rather than flattening them into one reassuring number, and
-tells you honestly how many universal formats have no vector at all. All 448
-formats now carry one: 361 published vectors, 112 independently cross-checked
-vectors, and 19 regression-only vectors (492 total).
+tells you honestly how many universal formats have no vector at all. All 451
+formats now carry one: 364 published vectors, 112 independently cross-checked
+vectors, and 19 regression-only vectors (495 total).
 
 **Where they are the better tool.** For a large wordlist against a fast hash on
 a real GPU, Hashcat will beat Hashsmith by orders of magnitude — its kernels are
 mature and cover essentially every mode, while Hashsmith's GPU support is
 experimental and implemented for only a handful of algorithms. If the format you
-need is exotic — Lotus Domino, RACF, Mozilla key stores, Android FDE, most
+need is exotic — Lotus Domino, RACF, Android FDE, or many long-tail
 cryptocurrency wallets — John's format library and its `*2john` scripts are far
 broader. Neither of those gaps is close to being closed here, and picking the
 right tool for the job beats loyalty to any one of them.
