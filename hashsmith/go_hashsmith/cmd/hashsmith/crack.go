@@ -878,6 +878,9 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 	if mode, ok := cryptCascadeModes[algo]; ok {
 		return verifyCryptCascadeMode(targetHash, candidate, mode.kdf, mode.bits, mode.vera, mode.boot)
 	}
+	if mode, ok := luksModeSpecs[algo]; ok {
+		return verifyLUKSMode(targetHash, candidate, mode)
+	}
 	switch algo {
 	case "bitcoin-wif-p2pkh-compressed", "bitcoin-wif-p2pkh-uncompressed",
 		"bitcoin-wif-p2wpkh-compressed", "bitcoin-wif-p2wpkh-uncompressed",
@@ -1166,6 +1169,12 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyGPG(targetHash, candidate)
 	case "office":
 		return verifyOffice(targetHash, candidate)
+	case "office-old":
+		return verifyOldOffice(targetHash, candidate, "")
+	case "office-old-md5":
+		return verifyOldOffice(targetHash, candidate, "md5")
+	case "office-old-sha1":
+		return verifyOldOffice(targetHash, candidate, "sha1")
 	case "keepass":
 		return verifyKeePass(targetHash, candidate)
 	case "wpa":
@@ -1254,8 +1263,12 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyHalfMD5(targetHash, candidate)
 	case "sap-fg":
 		return verifySAPCodvnFG(targetHash, candidate)
+	case "sap-fg-rfc-read-table":
+		return verifySAPCodvnFGRFCReadTable(targetHash, candidate)
 	case "sap-b":
 		return verifySAPCodvnB(targetHash, candidate)
+	case "sap-b-rfc-read-table":
+		return verifySAPCodvnBRFCReadTable(targetHash, candidate)
 	case "sybase":
 		return verifySybaseASE(targetHash, candidate)
 	case "chap":

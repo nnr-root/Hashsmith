@@ -1,8 +1,8 @@
 package main
 
 // Official known-answer records from Hashcat's module self-tests.
-func init() {
-	selfTestVectors = append(selfTestVectors,
+func hashcatBatchSelfTestVectorSeed() []selfTestVector {
+	return []selfTestVector{
 		selfTestVector{"bitcoin-wif-p2pkh-compressed", "KxhashcatxhXkULNJYF8Fu46G28SJrC7x2qwFtRuf38kVjkWxHg3", "", "1Jv6EonXm9x4Dw4QjEPAhGfmzFxTL7b3Zj", srcPublished},                        // Hashcat 28501
 		selfTestVector{"bitcoin-wif-p2pkh-uncompressed", "5KcL859EUnBDtVG76134U6DZWnVmpE996emJnWmTLRW2hashcat", "", "1L9nr4GX4Zmd7gDL1UT75QPUqxSgNTvdHb", srcPublished},                       // Hashcat 28502
 		selfTestVector{"bitcoin-wif-p2wpkh-compressed", "KyhashcatpL2CQmMUDVMVuEXqdLSvfQ6TBjkUuyttSvBa7GMiuLi", "", "bc1qxd76a5zamfyw0g2d2rxkdh0zt9m0uzmxmwjf0q", srcPublished},               // Hashcat 28503
@@ -24,5 +24,5 @@ func init() {
 		selfTestVector{"metamask", "hashcat1", "", "$metamask$jfGI3TXguhb8GPnKSXFrMzRk2NCEc131Gt5G3kZr5+s=$h+BoIf2CQ5BEjaIOShFE7g==$R95fzGt4UQ0uwrcrVYnIi4UcSlWn9wlmer+//526ZDwYAp50K82F1u1oacYcdjjhuEvbZnWk/uBG00UkgLLlO3WbINljqmu2QWdDEwjTgo/qWR6MU9d/82rxNiONHQE8UrZ8SV+htVr6XIB0ze3aCV0E+fwI93EeP79ZeDxuOEhuHoiYT0bHWMv5nA48AdluG4DbOo7SrDAWBVCBsEdXsOfYsS3/TIh0a/iFCMX4uhxY2824JwcWp4H36SFWyBYMZCJ3/U4DYFbbjWZtGRthoJlIik5BJq4FLu3Y1jEgza0AWlAvu4MKTEqrYSpUIghfxf1a1f+kPvxsHNq0as0kRwCXu09DObbdsiggbmeoBkxMZiFq0d9ar/3Gon0r3hfc3c124Wlivzbzu1JcZ3wURhLSsUS7b5cfG86aXHJkxmQDA5urBz6lw3bsIvlEUB2ErkQy/zD+cPwCG1Rs/WKt7KNh45lppCUkHccbf+xlpdc8OfUwj01Xp7BdH8LMR7Vx1C4hZCvSdtURVl0VaAMxHDX0MjRkwmqS", srcPublished}, // Hashcat 26600
 		selfTestVector{"metamask-short", "hashcat1", "", "$metamask-short$jfGI3TXguhb8GPnKSXFrMzRk2NCEc131Gt5G3kZr5+s=$h+BoIf2CQ5BEjaIOShFE7g==$R95fzGt4UQ0uwrcrVYnIi4UcSlWn9wlmer+//526ZDwYAp50K82F1u1oacYcdjjhuEvbZnWk/uBG00UkgLLlOw==", srcPublished},                                                                                                                                                                                                                                                                                                                                                                                                                                                             // Hashcat 26610
 		selfTestVector{"exodus", "hashcat", "", "EXODUS:16384:8:1:IYkXZgFETRmFp4wQXyP8XMe3LtuOw8wMdLcBVQ+9YWE=:lq0W9ekN5sC0O7Xw:UD4a6mUUhkTbQtGWitXHZUg0pQ4RHI6W/KUyYE95m3k=:ZuNQckXOtr4r21x+DT1zpQ==", srcPublished},                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                // Hashcat 28200
-	)
+	}
 }

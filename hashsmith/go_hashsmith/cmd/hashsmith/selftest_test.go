@@ -8,10 +8,10 @@ import (
 // The vectors shipped in the binary must actually pass — otherwise `hashsmith
 // selftest` would report a broken build as healthy.
 func TestSelfTestVectorsAllPass(t *testing.T) {
-	if len(selfTestVectors) == 0 {
+	if len(universalHashRegistry.vectors) == 0 {
 		t.Fatal("no self-test vectors are compiled in")
 	}
-	for _, v := range selfTestVectors {
+	for _, v := range universalHashRegistry.vectors {
 		ok, err := verifyCandidate(v.password, v.target, v.typ, v.salt, "prefix")
 		if err != nil {
 			t.Errorf("%s: %v", v.typ, err)
@@ -30,12 +30,12 @@ func TestSelfTestVectorsAllPass(t *testing.T) {
 // Every vector must name a type the engine implements and the catalogue lists.
 func TestSelfTestVectorsNameRealTypes(t *testing.T) {
 	documented := map[string]bool{}
-	for _, group := range hashTypeCatalogue {
+	for _, group := range universalHashRegistry.groups {
 		for _, item := range group.items {
 			documented[canonicalHashType(strings.Fields(item[0])[0])] = true
 		}
 	}
-	for _, v := range selfTestVectors {
+	for _, v := range universalHashRegistry.vectors {
 		canonical := canonicalHashType(v.typ)
 		if canonical != v.typ {
 			t.Errorf("vector type %q should be spelled canonically as %q", v.typ, canonical)
@@ -86,7 +86,7 @@ func TestSelfTestCoverageAccounting(t *testing.T) {
 		seen[name] = true
 	}
 	haveVector := map[string]bool{}
-	for _, v := range selfTestVectors {
+	for _, v := range universalHashRegistry.vectors {
 		haveVector[canonicalHashType(v.typ)] = true
 	}
 	for _, name := range uncovered {

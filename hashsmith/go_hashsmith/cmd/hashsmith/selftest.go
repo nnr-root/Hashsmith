@@ -24,7 +24,6 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strings"
 )
 
 type vectorSource int
@@ -54,48 +53,54 @@ type selfTestVector struct {
 	source   vectorSource
 }
 
-// slowSelfTestTypes are the memory-hard and high-iteration KDFs. They are
+// slowSelfTestTypeSeed identifies memory-hard and high-iteration KDFs. They are
 // correct, but running them all would dominate the runtime, so they are opt-in:
 // a quick check people actually run beats a thorough one they skip.
-var slowSelfTestTypes = map[string]bool{
-	"1password": true, "ansible": true, "bitcoin": true, "bitlocker": true,
-	"bitwarden": true, "blockchain": true, "dcc2": true, "electrum": true,
-	"itunes": true, "keepass": true, "oracle12c": true, "pdf-r6": true,
-	"solarwinds": true, "argon2": true, "scrypt": true, "bcrypt": true,
-	"aix": true, "grub2": true, "passlib-pbkdf2": true, "werkzeug": true,
-	"krb5pa": true, "krb5tgs": true, "veracrypt": true, "truecrypt": true,
-	"truecrypt-ripemd160": true, "truecrypt-sha512": true, "truecrypt-whirlpool": true,
-	"veracrypt-ripemd160": true, "veracrypt-sha512": true, "veracrypt-whirlpool": true,
-	"veracrypt-sha256":            true,
-	"truecrypt-ripemd160-xts1024": true, "truecrypt-ripemd160-xts1536": true,
-	"truecrypt-sha512-xts1024": true, "truecrypt-sha512-xts1536": true,
-	"truecrypt-whirlpool-xts1024": true, "truecrypt-whirlpool-xts1536": true,
-	"truecrypt-ripemd160-boot-xts512": true, "truecrypt-ripemd160-boot-xts1024": true,
-	"truecrypt-ripemd160-boot-xts1536": true,
-	"veracrypt-ripemd160-xts1024":      true, "veracrypt-ripemd160-xts1536": true,
-	"veracrypt-sha512-xts1024": true, "veracrypt-sha512-xts1536": true,
-	"veracrypt-whirlpool-xts1024": true, "veracrypt-whirlpool-xts1536": true,
-	"veracrypt-ripemd160-boot-xts512": true, "veracrypt-ripemd160-boot-xts1024": true,
-	"veracrypt-ripemd160-boot-xts1536": true,
-	"veracrypt-sha256-xts1024":         true, "veracrypt-sha256-xts1536": true,
-	"veracrypt-sha256-boot-xts512": true, "veracrypt-sha256-boot-xts1024": true,
-	"veracrypt-sha256-boot-xts1536": true,
-	"veracrypt-streebog512":         true, "veracrypt-streebog512-xts1024": true,
-	"veracrypt-streebog512-xts1536":     true,
-	"veracrypt-streebog512-boot-xts512": true, "veracrypt-streebog512-boot-xts1024": true,
-	"veracrypt-streebog512-boot-xts1536": true,
-	"macos":                              true, "atlassian": true, "aspnet-identity": true, "mysql8": true,
-	"django": true, "cisco4": true, "luks": true, "ldap-pbkdf2": true,
-	"ethereum": true, "office": true, "7z": true, "rar4": true, "pdf": true,
-	"ssh": true, "gpg": true, "ike": true,
-	"bcrypt-md5": true, "bcrypt-sha1": true, "bcrypt-sha256": true, "pfx": true,
-	"pwsafe":   true,
-	"lastpass": true, "netiq-pbkdf2": true, "sspr": true,
-	"wordpress-bcrypt":   true,
-	"apple-secure-notes": true, "office2016-sheet": true,
-	"bcrypt-sha512": true, "passlib-bcrypt-sha256": true,
-	"knx-ip-secure":     true,
-	"virtualbox-aes128": true, "virtualbox-aes256": true, "exodus": true,
+func slowSelfTestTypeSeed() map[string]bool {
+	return map[string]bool{
+		"1password": true, "ansible": true, "bitcoin": true, "bitlocker": true,
+		"bitwarden": true, "blockchain": true, "dcc2": true, "electrum": true,
+		"itunes": true, "keepass": true, "oracle12c": true, "pdf-r6": true,
+		"solarwinds": true, "argon2": true, "scrypt": true, "bcrypt": true,
+		"aix": true, "grub2": true, "passlib-pbkdf2": true, "werkzeug": true,
+		"krb5pa": true, "krb5tgs": true, "veracrypt": true, "truecrypt": true,
+		"truecrypt-ripemd160": true, "truecrypt-sha512": true, "truecrypt-whirlpool": true,
+		"veracrypt-ripemd160": true, "veracrypt-sha512": true, "veracrypt-whirlpool": true,
+		"veracrypt-sha256":            true,
+		"truecrypt-ripemd160-xts1024": true, "truecrypt-ripemd160-xts1536": true,
+		"truecrypt-sha512-xts1024": true, "truecrypt-sha512-xts1536": true,
+		"truecrypt-whirlpool-xts1024": true, "truecrypt-whirlpool-xts1536": true,
+		"truecrypt-ripemd160-boot-xts512": true, "truecrypt-ripemd160-boot-xts1024": true,
+		"truecrypt-ripemd160-boot-xts1536": true,
+		"veracrypt-ripemd160-xts1024":      true, "veracrypt-ripemd160-xts1536": true,
+		"veracrypt-sha512-xts1024": true, "veracrypt-sha512-xts1536": true,
+		"veracrypt-whirlpool-xts1024": true, "veracrypt-whirlpool-xts1536": true,
+		"veracrypt-ripemd160-boot-xts512": true, "veracrypt-ripemd160-boot-xts1024": true,
+		"veracrypt-ripemd160-boot-xts1536": true,
+		"veracrypt-sha256-xts1024":         true, "veracrypt-sha256-xts1536": true,
+		"veracrypt-sha256-boot-xts512": true, "veracrypt-sha256-boot-xts1024": true,
+		"veracrypt-sha256-boot-xts1536": true,
+		"veracrypt-streebog512":         true, "veracrypt-streebog512-xts1024": true,
+		"veracrypt-streebog512-xts1536":     true,
+		"veracrypt-streebog512-boot-xts512": true, "veracrypt-streebog512-boot-xts1024": true,
+		"veracrypt-streebog512-boot-xts1536": true,
+		"macos":                              true, "atlassian": true, "aspnet-identity": true, "mysql8": true,
+		"django": true, "cisco4": true, "luks": true, "ldap-pbkdf2": true,
+		"luks-sha1-aes": true, "luks-sha1-serpent": true, "luks-sha1-twofish": true,
+		"luks-sha256-aes": true, "luks-sha256-serpent": true, "luks-sha256-twofish": true,
+		"luks-sha512-aes": true, "luks-sha512-serpent": true, "luks-sha512-twofish": true,
+		"luks-ripemd160-aes": true, "luks-ripemd160-serpent": true, "luks-ripemd160-twofish": true,
+		"ethereum": true, "office": true, "7z": true, "rar4": true, "pdf": true,
+		"ssh": true, "gpg": true, "ike": true,
+		"bcrypt-md5": true, "bcrypt-sha1": true, "bcrypt-sha256": true, "pfx": true,
+		"pwsafe":   true,
+		"lastpass": true, "netiq-pbkdf2": true, "sspr": true,
+		"wordpress-bcrypt":   true,
+		"apple-secure-notes": true, "office2016-sheet": true,
+		"bcrypt-sha512": true, "passlib-bcrypt-sha256": true,
+		"knx-ip-secure":     true,
+		"virtualbox-aes128": true, "virtualbox-aes256": true, "exodus": true,
+	}
 }
 
 func runSelfTest(args []string) error {
@@ -103,13 +108,13 @@ func runSelfTest(args []string) error {
 	fs.SetOutput(io.Discard)
 	only := fs.String("t", "", "test a single hash type")
 	verbose := fs.Bool("v", false, "list every vector, not just failures")
-	showGaps := fs.Bool("gaps", false, "list catalogue types that have no vector")
+	showGaps := fs.Bool("gaps", false, "list registry formats that have no vector")
 	withSlow := fs.Bool("slow", false, "include high-iteration KDFs (much slower)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
 
-	vectors := selfTestVectors
+	vectors := universalHashRegistry.vectors
 	if *only != "" {
 		want := canonicalHashType(*only)
 		var picked []selfTestVector
@@ -129,7 +134,7 @@ func runSelfTest(args []string) error {
 	skipped := 0
 
 	for _, v := range vectors {
-		if slowSelfTestTypes[canonicalHashType(v.typ)] && !*withSlow && *only == "" {
+		if universalHashRegistry.isSlow(v.typ) && !*withSlow && *only == "" {
 			skipped++
 			continue
 		}
@@ -166,7 +171,7 @@ func runSelfTest(args []string) error {
 	}
 
 	covered, uncovered := selfTestCoverage()
-	fmt.Printf("\n  %d of %d catalogue types carry a vector; %d do not.\n",
+	fmt.Printf("\n  %d of %d registry formats carry a vector; %d do not.\n",
 		len(covered), len(covered)+len(uncovered), len(uncovered))
 	if *showGaps && len(uncovered) > 0 {
 		fmt.Println("\nTypes without a self-test vector:")
@@ -205,27 +210,13 @@ func wrongPassword(password string) string {
 	return string(first) + password[1:]
 }
 
-// selfTestCoverage splits the printed catalogue into types that have a vector
-// and types that do not.  Catalogue entries that are prose rather than a type
-// name (the "sha1/sha256/sha512 …" style rows) are skipped.
+// selfTestCoverage derives coverage directly from the universal registry.
 func selfTestCoverage() (covered, uncovered []string) {
-	haveVector := map[string]bool{}
-	for _, v := range selfTestVectors {
-		haveVector[canonicalHashType(v.typ)] = true
-	}
-	seen := map[string]bool{}
-	for _, group := range hashTypeCatalogue {
-		for _, item := range group.items {
-			name := strings.Fields(item[0])[0]
-			if strings.ContainsAny(name, "/…") || seen[name] {
-				continue
-			}
-			seen[name] = true
-			if haveVector[canonicalHashType(name)] {
-				covered = append(covered, name)
-			} else {
-				uncovered = append(uncovered, name)
-			}
+	for name, format := range universalHashRegistry.formats {
+		if len(format.vectors) > 0 {
+			covered = append(covered, name)
+		} else {
+			uncovered = append(uncovered, name)
 		}
 	}
 	sort.Strings(covered)

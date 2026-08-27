@@ -11,7 +11,7 @@ import (
 // algorithm" — so an alias pointing at a type nobody handles surfaces here
 // instead of failing a user mid-run.
 func TestCompatibilityAliasesResolveToImplementedTypes(t *testing.T) {
-	for alias, canonical := range compatibilityHashAliases {
+	for alias, canonical := range universalHashRegistry.aliases {
 		if got := canonicalHashType(alias); got != canonical {
 			t.Errorf("canonicalHashType(%q) = %q, want %q", alias, got, canonical)
 		}
@@ -35,12 +35,10 @@ func TestCompatibilityAliasPrefixes(t *testing.T) {
 	}
 }
 
-// Aliases are only useful if the catalogue `hashsmith types` prints stays in
-// step with them, so spot-check that each alias target is a name the
-// catalogue or the generic-digest table knows about.
+// Aliases are only useful if the universal registry stays in step with them.
 func TestAliasTargetsAreDocumented(t *testing.T) {
 	documented := map[string]bool{}
-	for _, group := range hashTypeCatalogue {
+	for _, group := range universalHashRegistry.groups {
 		for _, item := range group.items {
 			documented[strings.Fields(item[0])[0]] = true
 		}
@@ -48,13 +46,13 @@ func TestAliasTargetsAreDocumented(t *testing.T) {
 	for name := range compatSaltedDigests {
 		documented[name] = true
 	}
-	// Types the catalogue lists under a combined heading rather than by name.
+	// Compatibility-only spellings retained for older records.
 	for _, name := range []string{"zipcrypto", "zipaes128", "zipaes192", "zipaes256",
 		"7z", "rar4", "rar5", "pdf", "ssh", "pkcs8", "gpg", "office", "keepass",
 		"gost2012-256", "gost2012-512"} {
 		documented[name] = true
 	}
-	for alias, canonical := range compatibilityHashAliases {
+	for alias, canonical := range universalHashRegistry.aliases {
 		if !documented[canonical] {
 			t.Errorf("alias %q → %q is not listed by `hashsmith types`", alias, canonical)
 		}

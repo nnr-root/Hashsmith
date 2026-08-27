@@ -23,7 +23,7 @@ func TestHashcatLegacyCryptAndStreebogExhaustive(t *testing.T) {
 	if os.Getenv("HASHSMITH_EXHAUSTIVE_CRYPTO") == "" {
 		t.Skip("set HASHSMITH_EXHAUSTIVE_CRYPTO=1 to run all high-iteration container vectors")
 	}
-	for _, item := range hashcatLegacyCryptAndStreebogVectors {
+	for _, item := range hashcatLegacyCryptAndStreebogVectorSeed() {
 		t.Run(item.mode, func(t *testing.T) {
 			v := item.vector
 			ok, err := verifyCandidate(v.password, v.target, item.mode, "", "prefix")
@@ -39,7 +39,7 @@ func TestHashcatLegacyCryptAndStreebogExhaustive(t *testing.T) {
 
 func publishedCryptVectorForMode(t *testing.T, mode string) selfTestVector {
 	t.Helper()
-	for _, item := range hashcatLegacyCryptAndStreebogVectors {
+	for _, item := range hashcatLegacyCryptAndStreebogVectorSeed() {
 		if item.mode == mode {
 			return item.vector
 		}

@@ -11,7 +11,7 @@ import (
 // with spaces, slashes, or placeholders) are skipped.
 func TestTypeCatalogueWired(t *testing.T) {
 	checked := 0
-	for _, g := range hashTypeCatalogue {
+	for _, g := range universalHashRegistry.groups {
 		for _, item := range g.items {
 			tok := item[0]
 			if strings.ContainsAny(tok, " /<(") {
@@ -35,15 +35,15 @@ func TestTypeCatalogueWired(t *testing.T) {
 // crackable (not an unimplemented stub).
 func TestDetectionResolvesToWiredTypes(t *testing.T) {
 	samples := []string{
-		"5f4dcc3b5aa765d61d8327deb882cf99",                                     // md5
+		"5f4dcc3b5aa765d61d8327deb882cf99", // md5
 		"$6$abcdefgh$yVfUwsw5T.JApa8POvClA1pQ5peiq97DUNyXCZN5IrF.BMSkiaLQ5kvpuEm/VQ1Tvh/KV2TcaWh8qinoW5dhA1", // sha512crypt
-		"$ethereum$p*1000*aa*bb*cc",                                            // ethereum
+		"$ethereum$p*1000*aa*bb*cc", // ethereum
 		"WPA*01*6d3c40446a165cfeb121c82f18bf97d8*001122334455*8899aabbccdd*49454545", // wpa
 		"$bitcoin$96*aa$16*bb$100$", // bitcoin (parse only)
 		"pbkdf2_sha256$36000$saltsalt$/7unVWV4lqLJuWJ8M0AkSFZLsgC7+Gh07a9xHYVRA54=", // django
-		"$P$984478476IagS59wHZvyQMArzfx58u.",                                   // phpass
-		"{SSHA}QZdDbujQQyJjuC5FgKJZDvWEEBxzNGx0",                               // ldap
-		"USER$ABCAD719B17E7F794DF7E686E563E9E2D24DE1D0",                        // sap-fg
+		"$P$984478476IagS59wHZvyQMArzfx58u.",                                        // phpass
+		"{SSHA}QZdDbujQQyJjuC5FgKJZDvWEEBxzNGx0",                                    // ldap
+		"USER$ABCAD719B17E7F794DF7E686E563E9E2D24DE1D0",                             // sap-fg
 	}
 	for _, s := range samples {
 		for _, typ := range detectHashTypes(s) {

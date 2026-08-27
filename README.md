@@ -103,10 +103,10 @@ hashsmith decode -t hex "0x68:61:73:68-73 6d 69 74 68"
 
 ### Hash types
 
-Hashsmith supports **426 hash types**, and every one is validated against a
-known-answer vector before shipping — no unimplemented stubs, no unvalidated
+Hashsmith supports **448 universal formats**, and every one is validated against
+a known-answer vector before shipping — no unimplemented stubs, no unvalidated
 crypto. Most hashes are auto-detected, so naming a type is optional. When you want
-to pin one, pass `-t <name>`; run `hashsmith types` for the full catalogue. Beyond
+to pin one, pass `-t <name>`; run `hashsmith types` for the full registry. Beyond
 the raw digests, Hashsmith covers salted placements, nested digests, and HMAC
 natively:
 
@@ -121,8 +121,9 @@ hashsmith types                                       # list every supported -t 
 ```
 
 Hashsmith also accepts familiar Hashcat mode numbers and John format labels for
-formats with the same text representation. The namespaced spelling is clearest
-in scripts; bare Hashcat mode numbers work too:
+formats with the same candidate semantics. These are aliases attached to the
+same universal format records, not separately counted hash implementations. The
+namespaced spelling is clearest in scripts; bare Hashcat mode numbers work too:
 
 ```bash
 hashsmith crack -t hashcat:0 5f4dcc3b5aa765d61d8327deb882cf99
@@ -144,6 +145,8 @@ hashsmith crack -t 33500 '$rc4$40$<drop>$<cipher>$<offset>$<plain>'
 hashsmith crack -t 35300 '$krb5tgs$23$…'               # NT hash candidates
 hashsmith crack -t 16800 '<pmkid>:<ap>:<sta>:<essid-hex>'
 hashsmith crack -t 22400 '$aescrypt$1*<salt>*<iv>*<key>*<hmac>'
+hashsmith crack -t 9700 '$oldoffice$0*<salt>*<verifier>*<hash>'
+hashsmith crack -t john:oldoffice '$oldoffice$3*<salt>*<verifier>*<hash>'
 ```
 
 The compatibility aliases cover the common raw digests, UTF-16LE digests,
@@ -189,7 +192,8 @@ Hashcat's NT-hash-input **NetNTLMv1/NetNTLMv2** modes, **Dahua/Besder authentica
 Database, auth & directory hashes: **MySQL** (3.23, 4.1+, and MySQL 8 `$A$`
 `caching_sha2_password`), **MSSQL**, **PostgreSQL** (incl. **SCRAM-SHA-256**),
 **MongoDB SCRAM-SHA-1/SHA-256** stored and server keys, Red Hat **389-DS
-`{PBKDF2_SHA256}`**, **Sybase ASE**, **SAP CODVN B & F/G**,
+`{PBKDF2_SHA256}`**, **Sybase ASE**, **SAP CODVN B & F/G** including the
+RFC_READ_TABLE representations from Hashcat 7701/7801,
 **NTLM/NetNTLM**, **Kerberos** including AES AS-REP and NT-hash-input modes,
 Active Directory **DCC/DCC2** (mscash/mscash2),
 **CRAM-MD5**, **Dovecot CRAM-MD5 states**, **DCC/DCC2 plaintext and NT-hash-input modes**,
@@ -216,9 +220,11 @@ wallet examples for Bitcoin/Electrum, real VeraCrypt/BitLocker/LUKS volumes):
 | `metamask` / `metamask-short` / `exodus` | Native Hashcat records | MetaMask AES-GCM and Exodus scrypt/AES-GCM wallets (26600/26610/28200) |
 | `pkcs8-pem-*` / `jks-private-key` | Native `$PEM$` / `$jksprivk$` records | PKCS#8 PBKDF2-SHA1/SHA256 and Java KeyStore private keys (24410/24420/15500) |
 | `vmware-vmx` / `virtualbox-aes*` | Native `$vmx$` / `$vbox$` records | VMware VMX and VirtualBox AES-XTS records (27400/27500/27600) |
+| `office-old*` | `$oldoffice$0/1/3/4*…` | Office 97-2003 MD5/SHA-1 + RC4, Hashcat 9700/9800 and John `oldoffice` |
 | `veracrypt` / `truecrypt` | `veracrypt:<header-hex>` or `$veracrypt$<salt>$<data>` | AES/Serpent/Twofish-XTS single ciphers and two-/three-cipher cascades; RIPEMD-160, SHA-256, SHA-512, Whirlpool, and Streebog-512 standard/boot schedules; legacy Hashcat 6211-6243 and 13711-13783 families plus current 29311-29343 and 29411-29483 families |
 | `bitlocker` | `$bitlocker$…` | BitLocker (1M-round SHA-256 + AES-CTR VMK check) |
 | `luks` | `$luks$…` (via `luks2smith`) | LUKS v1 — AES/Twofish/Serpent × XTS/CBC-ESSIV/CBC × SHA-1/256/512/RIPEMD-160/Whirlpool |
+| `luks-{sha1,sha256,sha512,ripemd160}-{aes,serpent,twofish}` | `$luks$…` (via `luks2smith`) | Strict KDF/cipher selections corresponding to Hashcat 29511-29543 |
 | `phpass` / `drupal7` | `$P$…` / `$H$…` / `$S$…` | WordPress, phpBB3, Drupal 7 |
 
 ```bash
@@ -227,7 +233,13 @@ hashsmith '$ethereum$s*262144*1*8*<salt>*<ct>*<mac>' -w wordlist.txt
 hashsmith '$bitcoin$96*…' -w wordlist.txt
 hashsmith crack -t veracrypt 'veracrypt:<header-hex>' -w wordlist.txt
 hashsmith luks2smith -f volume.luks -o luks.hash && hashsmith luks.hash -w wordlist.txt
+hashsmith crack -t 29522 luks.hash -w wordlist.txt  # require SHA-256 + Serpent
 ```
+
+The 29511-29543 mode numbers select the same KDF/cipher matrix as Hashcat, but
+they consume Hashsmith's compact `luks2smith` record. Hashcat's native split
+records include a large encrypted payload and use an entropy check, so the two
+record strings are deliberately not presented as interchangeable.
 
 Serpent, Whirlpool, and Streebog are implemented from spec and validated against
 their published test vectors (Serpent also against the real LUKS Serpent volumes),
@@ -620,23 +632,23 @@ self-contained binary that tries to make the common path short.
 
 | | Hashsmith | Hashcat | John the Ripper (jumbo) |
 |---|---|---|---|
-| Hash formats | 426 | ~470 modes | ~470 formats |
-| Hash-type auto-detection | yes, by default | no, `-m` required | partial, guesses per file |
-| Hashcat mode numbers accepted | 486 | native | no |
-| John format labels accepted | 189 | no | native |
+| Universal hash/code formats | 448 | 450+ native hash types | hundreds of native formats |
+| Hash-type auto-detection | yes, by default | yes in Hashcat 7.x; `--identify` lists possibilities | yes for recognizable ciphertexts; first matching format wins |
+| Accepted type vocabulary | 1,150 names/codes resolving into those same 448 formats, including 503 numeric Hashcat aliases | native numeric modes | native format labels |
 | Attack modes | dict, brute, mask, markov, hybrid, combinator | straight, combinator, mask, hybrid, association | wordlist, incremental, mask, external |
 | Rule engine | ~35 operators | full, on-GPU, the de-facto standard | full, plus C-like external mode |
 | GPU | experimental, opt-in; Metal + OpenCL, a few algorithms | mature CUDA / HIP / OpenCL / Metal across nearly every mode | OpenCL for a subset |
 | File → hash extractors | 12, built into the binary | separate `*2hashcat` scripts | 100+ separate `*2john` scripts |
 | Install | one static binary, no runtime deps | binary + GPU runtime | build or distro package + Perl/Python for extractors |
-| Built-in known-answer self-test | `hashsmith selftest`, 469 vectors over all 426 types, provenance-labelled | internal, on startup | `john --test` |
+| Built-in known-answer self-test | `hashsmith selftest`, 492 vectors over all 448 formats, provenance-labelled | internal, on startup | `john --test` |
 | Distributed cracking | no | via third-party overlays | via MPI |
 
 **Where Hashsmith is the better tool.** You get one binary with no runtime
-dependencies, hash extraction and cracking in the same place, and auto-detection
-that means you rarely have to name a type at all. It also speaks both of the
-other tools' dialects, so a mode number pasted from a Hashcat writeup or a
-`--format` label from a John tutorial both work unchanged:
+dependencies, hash extraction and cracking in the same place, and a universal
+registry that keeps canonical names, aliases, descriptions, vectors, and test
+policy synchronized. It also speaks both of the other tools' dialects, so a mode
+number pasted from a Hashcat writeup or a `--format` label from a John tutorial
+both work unchanged:
 
 ```bash
 hashsmith crack -t 22300 '<sha256>:<salt>'      # Hashcat mode number
@@ -651,7 +663,7 @@ miscompilation, a bad optimisation or a corrupted download shows up here and
 nowhere else.
 
 ```bash
-hashsmith selftest              # 344 fast vectors
+hashsmith selftest              # 354 fast vectors
 hashsmith selftest -slow        # include the high-iteration KDFs
 hashsmith selftest -gaps        # list the types that have no vector yet
 ```
@@ -662,9 +674,9 @@ reference suite), `cross-checked` (computed independently with Python or
 OpenSSL) and `regression` (produced by Hashsmith itself, which catches drift but
 cannot prove the implementation was right to begin with). The summary reports
 the three separately rather than flattening them into one reassuring number, and
-tells you honestly how many catalogue types have no vector at all. All 426
-catalogue types now carry one: 355 published vectors, 107 independently
-cross-checked vectors, and 7 regression-only vectors (469 total).
+tells you honestly how many universal formats have no vector at all. All 448
+formats now carry one: 361 published vectors, 112 independently cross-checked
+vectors, and 19 regression-only vectors (492 total).
 
 **Where they are the better tool.** For a large wordlist against a fast hash on
 a real GPU, Hashcat will beat Hashsmith by orders of magnitude — its kernels are

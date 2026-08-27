@@ -7,9 +7,8 @@ package main
 // a candidate master key, then PBKDF2 that master key and compare against the
 // header's master-key digest.
 //
-// Covered ciphers/hashes: AES and Twofish in xts-plain64 / cbc-essiv / cbc-plain64,
-// with SHA-1/SHA-256/SHA-512/RIPEMD-160. Serpent and the Whirlpool KDF are not in
-// the Go crypto libraries and are not attempted.
+// Covered ciphers/hashes: AES, Serpent and Twofish in xts-plain64 /
+// cbc-essiv / cbc-plain64, with SHA-1/SHA-256/SHA-512/RIPEMD-160/Whirlpool.
 
 import (
 	"crypto/aes"
@@ -32,8 +31,8 @@ import (
 
 // luksParams carries everything the cracker needs from a LUKS header + keyslot.
 type luksParams struct {
-	hashSpec    string // "sha1" | "sha256" | "sha512" | "ripemd160"
-	cipherName  string // "aes" | "twofish"
+	hashSpec    string // "sha1" | "sha256" | "sha512" | "ripemd160" | "whirlpool"
+	cipherName  string // "aes" | "serpent" | "twofish"
 	cipherMode  string // "xts-plain64" | "cbc-essiv:sha256" | "cbc-plain64"
 	keyBytes    int    // master-key length
 	mkDigest    []byte // 20 bytes
@@ -43,6 +42,29 @@ type luksParams struct {
 	slotSalt    []byte // 32 bytes
 	stripes     int
 	keyMaterial []byte // keyBytes * stripes bytes
+}
+
+type luksModeSpec struct {
+	hashSpec   string
+	cipherName string
+}
+
+// luksModeSpecs gives Hashcat's split LUKS v1 modes distinct type tokens. The
+// compact $luks$ record still comes from luks2smith, but selecting one of these
+// types also proves that the record has the KDF/cipher pair named by the mode.
+var luksModeSpecs = map[string]luksModeSpec{
+	"luks-sha1-aes":          {"sha1", "aes"},
+	"luks-sha1-serpent":      {"sha1", "serpent"},
+	"luks-sha1-twofish":      {"sha1", "twofish"},
+	"luks-sha256-aes":        {"sha256", "aes"},
+	"luks-sha256-serpent":    {"sha256", "serpent"},
+	"luks-sha256-twofish":    {"sha256", "twofish"},
+	"luks-sha512-aes":        {"sha512", "aes"},
+	"luks-sha512-serpent":    {"sha512", "serpent"},
+	"luks-sha512-twofish":    {"sha512", "twofish"},
+	"luks-ripemd160-aes":     {"ripemd160", "aes"},
+	"luks-ripemd160-serpent": {"ripemd160", "serpent"},
+	"luks-ripemd160-twofish": {"ripemd160", "twofish"},
 }
 
 // The $luks$ format packs a LUKS header and one active keyslot into a single
@@ -60,6 +82,17 @@ func verifyLUKS(targetHash, candidate string) (bool, error) {
 	return verifyLUKSParams(p, candidate)
 }
 
+func verifyLUKSMode(targetHash, candidate string, mode luksModeSpec) (bool, error) {
+	p, err := parseLUKSHash(targetHash)
+	if err != nil {
+		return false, err
+	}
+	if p.hashSpec != mode.hashSpec || p.cipherName != mode.cipherName {
+		return false, errors.New("LUKS record does not match selected hash/cipher mode")
+	}
+	return verifyLUKSParams(p, candidate)
+}
+
 func parseLUKSHash(target string) (*luksParams, error) {
 	if !strings.HasPrefix(target, "$luks$1$") {
 		return nil, errors.New("invalid LUKS hash (missing $luks$1$ prefix)")
@@ -69,23 +102,72 @@ func parseLUKSHash(target string) (*luksParams, error) {
 	if len(f) != 12 {
 		return nil, errors.New("invalid LUKS hash (need 12 fields)")
 	}
-	atoi := func(s string) int { n, _ := strconv.Atoi(s); return n }
-	dec := func(s string) []byte { b, _ := hex.DecodeString(s); return b }
+	atoi := func(name, s string) (int, error) {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return 0, errors.New("invalid LUKS " + name)
+		}
+		return n, nil
+	}
+	dec := func(name, s string) ([]byte, error) {
+		b, err := hex.DecodeString(s)
+		if err != nil {
+			return nil, errors.New("invalid LUKS " + name)
+		}
+		return b, nil
+	}
+	keyBytes, err := atoi("key size", f[4])
+	if err != nil {
+		return nil, err
+	}
+	mkDigest, err := dec("master-key digest", f[5])
+	if err != nil {
+		return nil, err
+	}
+	mkSalt, err := dec("master-key salt", f[6])
+	if err != nil {
+		return nil, err
+	}
+	mkIter, err := atoi("master-key iteration count", f[7])
+	if err != nil {
+		return nil, err
+	}
+	slotIter, err := atoi("keyslot iteration count", f[8])
+	if err != nil {
+		return nil, err
+	}
+	slotSalt, err := dec("keyslot salt", f[9])
+	if err != nil {
+		return nil, err
+	}
+	stripes, err := atoi("stripe count", f[10])
+	if err != nil {
+		return nil, err
+	}
+	keyMaterial, err := dec("key material", f[11])
+	if err != nil {
+		return nil, err
+	}
 	p := &luksParams{
 		hashSpec:    f[1],
 		cipherName:  f[2],
 		cipherMode:  f[3],
-		keyBytes:    atoi(f[4]),
-		mkDigest:    dec(f[5]),
-		mkSalt:      dec(f[6]),
-		mkIter:      atoi(f[7]),
-		slotIter:    atoi(f[8]),
-		slotSalt:    dec(f[9]),
-		stripes:     atoi(f[10]),
-		keyMaterial: dec(f[11]),
+		keyBytes:    keyBytes,
+		mkDigest:    mkDigest,
+		mkSalt:      mkSalt,
+		mkIter:      mkIter,
+		slotIter:    slotIter,
+		slotSalt:    slotSalt,
+		stripes:     stripes,
+		keyMaterial: keyMaterial,
 	}
-	if p.keyBytes <= 0 || p.stripes <= 0 || len(p.mkDigest) == 0 {
+	if p.keyBytes <= 0 || p.stripes <= 0 || p.mkIter <= 0 || p.slotIter <= 0 ||
+		len(p.mkDigest) != 20 || len(p.mkSalt) != 32 || len(p.slotSalt) != 32 {
 		return nil, errors.New("invalid LUKS hash fields")
+	}
+	maxInt := int(^uint(0) >> 1)
+	if p.stripes > maxInt/p.keyBytes || len(p.keyMaterial) != p.keyBytes*p.stripes {
+		return nil, errors.New("LUKS key material size mismatch")
 	}
 	return p, nil
 }

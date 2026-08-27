@@ -329,6 +329,8 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"GPG symmetric", 1000, "$gpg$ prefix — gpg -c symmetric encryption"}}
 	case strings.HasPrefix(v, "$office$2016$0$"):
 		return []candidate{{"MS Office 2016 sheet protection", 1000, "$office$2016$0$ record"}}
+	case strings.HasPrefix(v, "$oldoffice$"):
+		return []candidate{{"MS Office 97-2003 (RC4 encrypted document)", 1000, "$oldoffice$ record — MD5/SHA-1 verifier"}}
 	case strings.HasPrefix(v, "$office$"):
 		return []candidate{{"MS Office (encrypted document)", 1000, "$office$ prefix — Office 2007/2010/2013"}}
 	case strings.HasPrefix(v, "$mysqlna$"):
@@ -491,6 +493,10 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"Sybase ASE", 1000, "0xc007 prefix — sha256(utf16be(pass).pad.salt)"}}
 	case isJuniper(v):
 		return []candidate{{"Juniper NetScreen (ScreenOS)", 1000, "user$… — md5(user:Administration Tools:pass)"}}
+	case isSAPCodvnFGRFCReadTable(v):
+		return []candidate{{"SAP CODVN F/G from RFC_READ_TABLE", 1000, "user$truncated-sha1+zero-pad — Hashcat 7801"}}
+	case isSAPCodvnBRFCReadTable(v):
+		return []candidate{{"SAP CODVN B from RFC_READ_TABLE", 1000, "user$truncated-bcode+zero-pad — Hashcat 7701"}}
 	case isSAPCodvnFG(v):
 		return []candidate{{"SAP CODVN F/G (PASSCODE)", 900, "user$sha1 — iSSHA-1 with magic array"}}
 	case isSAPCodvnB(v):
@@ -1550,6 +1556,12 @@ func detectHashTypes(text string) []string {
 	if strings.HasPrefix(t, "$office$2016$0$") {
 		return []string{"office2016-sheet"}
 	}
+	if strings.HasPrefix(t, "$oldoffice$0*") || strings.HasPrefix(t, "$oldoffice$1*") {
+		return []string{"office-old-md5"}
+	}
+	if strings.HasPrefix(t, "$oldoffice$3*") || strings.HasPrefix(t, "$oldoffice$4*") {
+		return []string{"office-old-sha1"}
+	}
 	if strings.HasPrefix(t, "$office$") {
 		return []string{"office"}
 	}
@@ -1902,6 +1914,12 @@ func detectHashTypes(text string) []string {
 	}
 	if isSybaseASE(t) {
 		return []string{"sybase"}
+	}
+	if isSAPCodvnFGRFCReadTable(t) {
+		return []string{"sap-fg-rfc-read-table"}
+	}
+	if isSAPCodvnBRFCReadTable(t) {
+		return []string{"sap-b-rfc-read-table"}
 	}
 	if isSAPCodvnFG(t) {
 		return []string{"sap-fg"}

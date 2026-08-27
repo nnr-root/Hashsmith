@@ -73,8 +73,26 @@ func verifySAPCodvnB(targetHash, candidate string) (bool, error) {
 	if len(want) != 16 || !isHex(want) {
 		return false, errors.New("invalid SAP CODVN B hash (need 16-hex digest)")
 	}
-	pw := sapTrans(candidate, 8)
-	salt := sapTrans(user, 12)
+	out := sapCodvnBDigest(user, candidate)
+	return strings.EqualFold(hex.EncodeToString(out), want), nil
+}
+
+func verifySAPCodvnBRFCReadTable(targetHash, candidate string) (bool, error) {
+	i := strings.LastIndexByte(targetHash, '$')
+	if i <= 0 {
+		return false, errors.New("invalid SAP RFC_READ_TABLE BCODE hash (need user$hash)")
+	}
+	user, want := targetHash[:i], targetHash[i+1:]
+	if len(want) != 16 || !isHex(want) || !strings.EqualFold(want[8:], "00000000") {
+		return false, errors.New("invalid SAP RFC_READ_TABLE BCODE digest")
+	}
+	out := sapCodvnBDigest(user, candidate)
+	return strings.EqualFold(hex.EncodeToString(out[:4]), want[:8]), nil
+}
+
+func sapCodvnBDigest(user, candidate string) []byte {
+	pw := sapTrans(strings.ToUpper(candidate), 8)
+	salt := sapTrans(strings.ToUpper(user), 12)
 
 	tk := md5.New()
 	tk.Write(pw)
@@ -87,7 +105,7 @@ func verifySAPCodvnB(targetHash, candidate string) (bool, error) {
 	for j := 0; j < 8; j++ {
 		out[j] = fkSum[j] ^ fkSum[j+8]
 	}
-	return strings.EqualFold(hex.EncodeToString(out), want), nil
+	return out
 }
 
 func isSAPCodvnB(s string) bool {
@@ -96,4 +114,10 @@ func isSAPCodvnB(s string) bool {
 		return false
 	}
 	return len(s[i+1:]) == 16 && isHex(s[i+1:]) && !strings.Contains(s[:i], "$")
+}
+
+func isSAPCodvnBRFCReadTable(s string) bool {
+	i := strings.LastIndexByte(s, '$')
+	return i > 0 && len(s[i+1:]) == 16 && isHex(s[i+1:]) &&
+		strings.EqualFold(s[i+9:], "00000000") && !strings.Contains(s[:i], "$")
 }

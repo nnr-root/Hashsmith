@@ -4,7 +4,7 @@ import "testing"
 
 func publishedVectorForType(t *testing.T, typ string) selfTestVector {
 	t.Helper()
-	for _, vector := range selfTestVectors {
+	for _, vector := range universalHashRegistry.vectors {
 		if vector.typ == typ {
 			return vector
 		}
