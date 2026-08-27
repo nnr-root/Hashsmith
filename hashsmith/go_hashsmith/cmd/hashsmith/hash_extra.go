@@ -363,7 +363,7 @@ func compatibilityHashAliasSeed() map[string]string {
 		"notes": "apple-secure-notes", "office2016": "office2016-sheet", "oldoffice": "office-old",
 		"androidbackup": "android-backup", "encfs": "encfs", "mozilla": "mozilla-nss",
 		"snmp": "snmpv3",
-		"qnx":  "qnx-sha512", "telegram": "telegram-passcode",
+		"qnx":  "qnx-sha512", "telegram": "telegram-desktop", "keychain": "macos-keychain",
 
 		// ── John the Ripper: containers and wallets ───────────────────────────────
 		"rar": "rar4", "agilekeychain": "1password", "itunes-backup": "itunes",

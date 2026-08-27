@@ -6,6 +6,11 @@ package main
 const androidBackupPublishedRecord = "$ab$3*0*10000*dc4e8723d6c1ac065878dc6428e8ad08d3912cf7f1757007a6c6793ee0c6af57c4604a0e2afb4d201d98f7cab1f24927f9319344aa25e28782b2ea8e627f1cc9*d1eb72793eae5d7e28c20e3d142c2c7cdb363e92fb03c3a6444152f83f0edbfc31a8447761074e85ecf6e07341893b9864861015139b9cd20b9474b9a96bf0c7*862f63c48ef68b0f28d784bd81f28f68*6a185cd6b9d4a44470845b9366f10881d7549b0e5d353309ac3b155ca22d8f0064a10c16919472fc6540a49472d1d9adc7f510fdc5906719b8c8aaac492433f7242186314384fd013c37cb4bc646bcb184a37c7091273ff5b54f5485a30eabe0"
 const encFSPublishedRecord = "$encfs$128*181317*0*20*e9a6d328b4c75293d07b093e8ec9846d04e22798*36*b9e83adb462ac8904695a60de2f3e6d57018ccac2227251d3f8fc6a8dd0cd7178ce7dc3f"
 const mozillaPublishedRecord = "$mozilla$*3*20*1*5199adfab24e85e3f308bacf692115f23dcd4f8f*11*2a864886f70d010c050103*16*9debdebd4596b278de029b2b2285ce2e*20*2c4d938ccb3f7f1551262185ccee947deae3b8ae"
+const dmgPublishedRecord = "$dmg$1*20*f615ec6c463799eccc6a2dfbedf12c6bdc422a2a*56*a595f4a81a490e7aa6378034661da57a424f922c971d3db3f856f8d54b0784bcc5d7182905c4237153c5d250b8aee1d26410b1dca7b1cb73*48*74a060efbaf2c79d5523219d8162c425befbb2094fb46e7ffaedc7cd4f192e6f0c47d8aa91e0a3201346725d3ddadfff"
+const moneroPublishedRecord = "$monero$0*982cc13dd90ed2e2970294b2a67480826acaf8eeedec74acccc5929c33d6b7cf01609f0ddb72817579c4375bd1d8f4d47c36c67d83bd3a817d1242211c6824720e430757c24238189875fbb7fe5e643b4273ac3912c7f4f6998ed1086634cebcce035a4af0122c2a6e601ff160bcfa0cfce06d8b3dd38915aa4f6067a732f954da2029ccca5664bbf5df2b2ce046918eec9b71224ec75418686eb437678ebfba50ed3e07ce0bba39f45610775b9958f44b3a53bf3294d7c55f2c455e2ada17f4426969fbc57cc659793892e558b163dd4826889c865b685ea49c54744ecbfcce9d9d39d16e8874a35ec767ab5b69e498f0989f7dd22becb2d50797e7c2867536bc6a1e9b0ecc0d864204c5114fef9ed86d962fced5cac90dbb33a72d16753075bf"
+const signalPublishedRecord = "$signal$1$6024$011d9eedb6367df21532acc22dcbb9b2$c492a9906443732b82ba846a14fad1eb$3f53a1cdff7417f3e576d390986218fc5808ae3a1470ca6c13b1fb0ca18673f7718e7f18cf633cd42841c6305953dd43a243e7fc6bdc2c4483d018d24792b7507d34b01a$a243e7fc6bdc2c4483d018d24792b7507d34b01a"
+const keychainPublishedRecord = "$keychain$*10f7445c8510fa40d9ef6b4e0f8c772a9d37e449*f3d19b2a45cdcccb*8c3c3b1c7d48a24dad4ccbd4fd794ca9b0b3f1386a0a4527f3548bfe6e2f1001804b082076641bbedbc9f3a7c33c084b"
+const telegramDesktopPublishedRecord = "$telegram$1*4000*e693c27ff92fe83a5a247cce198a8d6a0f3a89ffedc6bcddbc39586bb1bcb50b*d6fb7ebda06a23a9c42fc57c39e2c3128da4ee1ff394f17c2fc4290229e13d1c9e45c42ef1aee64903e5904c28cffd49498358fee96eb01888f2251715b7a5e71fa130918f46da5a2117e742ad7727700e924411138bb8d4359662da0ebd4f4357d96d1aa62955e44d4acf2e2ac6e0ce057f48fe24209090fd35eeac8a905aca649cafb2aade1ef7a96a7ab44a22bd7961e79a9291b7fea8749dd415f2fcd73d0293cdb533554f396625f669315c2400ebf6f1f30e08063e88b59b2d5832a197b165cdc6b0dc9d5bfa6d5e278a79fa101e10a98c6662cc3d623aa64daada76f340a657c2cbaddfa46e35c60ecb49e8f1f57bc170b8064b70aa2b22bb326915a8121922e06e7839e62075ee045b8c82751defcba0e8fb75c32f8bbbdb8b673258"
 
 // Hashcat mode 6211 self-test header: TrueCrypt RIPEMD-160 + AES-XTS,
 // passphrase "hashcat". Kept separate because the canonical record is a raw
@@ -141,6 +146,7 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"bitcoin", "hashcat", "", "$bitcoin$96$d011a1b6a8d675b7a36d0cd2efaca32a9f8dc1d57d6d01a58399ea04e703e8bbb44899039326f7a00f171a7bbc854a54$16$1563277210780230$158555$96$628835426818227243334570448571536352510740823233055715845322741625407685873076027233865346542174$66$625882875480513751851333441623702852811440775888122046360561760525", srcPublished},
 		{"bitlocker", "hashcat", "", "$bitlocker$1$16$6f972989ddc209f1eccf07313a7266a2$1048576$12$3a33a8eaff5e6f81d907b591$60$316b0f6d4cb445fb056f0e3e0633c413526ff4481bbf588917b70a4e8f8075f5ceb45958a800b42cb7ff9b7f5e17c6145bf8561ea86f52d3592059fb", srcPublished},
 		{"bitwarden", "hashsmith", "", "$bitwarden$2*100000*dXNlckBleGFtcGxlLmNvbQ==*1T7YrDYENfccHpf9+YnmLc1iQlw0SOoKPU7xefd1bRM=", srcCrosschecked},
+		{"bitwarden", "openwall123", "", "$bitwarden$0*5000*lulu@mailinator.com*20d9c3c9daaed076026b6cb5887d3273*3bbcb4c7cec45d71c7238291573eb8a8a0f71e6191fb708b07f2cb43b26a56b533ba35a5906abdc08600baedb18fbc042a3b50f4549890210a254129b0ae749394c3c39b33ca183c605ee97b167329d3", srcPublished},
 		{"blockchain", "hashcat", "", "$blockchain$v2$5000$288$06063152445005516247820607861028813ccf6dcc5793dc0c7a82dcd604c5c3e8d91bea9531e628c2027c56328380c87356f86ae88968f179c366da9f0f11b09492cea4f4d591493a06b2ba9647faee437c2f2c0caaec9ec795026af51bfa68fc713eaac522431da8045cc6199695556fc2918ceaaabbe096f48876f81ddbbc20bec9209c6c7bc06f24097a0e9a656047ea0f90a2a2f28adfb349a9cd13852a452741e2a607dae0733851a19a670513bcf8f2070f30b115f8bcb56be2625e15139f2a357cf49d72b1c81c18b24c7485ad8af1e1a8db0dc04d906935d7475e1d3757aba32428fdc135fee63f40b16a5ea701766026066fb9fb17166a53aa2b1b5c10b65bfe685dce6962442ece2b526890bcecdeadffbac95c3e3ad32ba57c9e", srcPublished},
 		{"chap", "hashsmith", "", "81474a4f7a3dbf22e071a02c10e54b47:abcdef0123456789:1b", srcCrosschecked},
 		{"cisco8", "hashcat", "", "$8$TnGX/fE4KGHOVU$pEhnEvxrvaynpi8j4f.EMHr6M.FzU8xnZnBr/tJdFWk", srcPublished},
@@ -528,6 +534,12 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"android-backup", "password", "", androidBackupPublishedRecord, srcPublished},
 		{"encfs", "Jupiter", "", encFSPublishedRecord, srcPublished},
 		{"mozilla-nss", "12345678", "", mozillaPublishedRecord, srcPublished},
+		{"dmg", "vilefault", "", dmgPublishedRecord, srcPublished},
+		{"monero", "test", "", moneroPublishedRecord, srcPublished},
+		{"signal", "openwall", "", signalPublishedRecord, srcPublished},
+		{"macos-keychain", "password", "", keychainPublishedRecord, srcPublished},
+		{"telegram-desktop", "openwall123", "", telegramDesktopPublishedRecord, srcPublished},
+		{"vnc", "123", "", "$vnc$*7963F9BB7BA6A42A085763808156F570*475B10D05648E4110D77F03916106F98", srcPublished},
 
 		// ── Hashcat OpenPGP protected secret-key records ──────────────────────
 		{"gpg", "hashcat", "", gpgHashcat17010Vector, srcPublished},

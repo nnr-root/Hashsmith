@@ -70,6 +70,10 @@ func TestUniversalHashRegistryIntegrity(t *testing.T) {
 
 func TestUniversalHashRegistryMetrics(t *testing.T) {
 	registry := universalHashRegistry
+	provenance := map[vectorSource]int{}
+	for _, vector := range registry.vectors {
+		provenance[vector.source]++
+	}
 	if registry.numericAliases() < 400 {
 		t.Fatalf("only %d numeric compatibility identifiers", registry.numericAliases())
 	}
@@ -79,4 +83,6 @@ func TestUniversalHashRegistryMetrics(t *testing.T) {
 	t.Logf("universal formats=%d accepted identifiers=%d numeric aliases=%d vectors=%d",
 		len(registry.formats), len(registry.formats)+len(registry.aliases),
 		registry.numericAliases(), len(registry.vectors))
+	t.Logf("vector provenance: published=%d cross-checked=%d regression=%d",
+		provenance[srcPublished], provenance[srcCrosschecked], provenance[srcRegression])
 }

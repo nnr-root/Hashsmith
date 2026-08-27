@@ -83,6 +83,10 @@ func chachaQuarterRound(x *[16]uint32, a, b, c, d int) {
 // chacha20OriginalBlock implements the original 64-bit-counter/64-bit-nonce
 // ChaCha20 layout used by Hashcat mode 15400 and OpenSSH's ChaCha primitive.
 func chacha20OriginalBlock(key []byte, counter, nonce uint64) [64]byte {
+	return chachaOriginalBlock(key, counter, nonce, 20)
+}
+
+func chachaOriginalBlock(key []byte, counter, nonce uint64, rounds int) [64]byte {
 	state := [16]uint32{0x61707865, 0x3320646e, 0x79622d32, 0x6b206574}
 	for i := 0; i < 8; i++ {
 		state[4+i] = binary.LittleEndian.Uint32(key[i*4:])
@@ -90,7 +94,7 @@ func chacha20OriginalBlock(key []byte, counter, nonce uint64) [64]byte {
 	state[12], state[13] = uint32(counter), uint32(counter>>32)
 	state[14], state[15] = uint32(nonce), uint32(nonce>>32)
 	x := state
-	for i := 0; i < 10; i++ {
+	for i := 0; i < rounds/2; i++ {
 		chachaQuarterRound(&x, 0, 4, 8, 12)
 		chachaQuarterRound(&x, 1, 5, 9, 13)
 		chachaQuarterRound(&x, 2, 6, 10, 14)

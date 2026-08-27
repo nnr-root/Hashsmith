@@ -249,3 +249,25 @@ func TestJohnExtendedSQLiteExtractors(t *testing.T) {
 		}
 	})
 }
+
+func TestBitcoinLegacyBerkeleyDBExtractor(t *testing.T) {
+	fixture := make([]byte, 512)
+	binary.LittleEndian.PutUint32(fixture[12:16], 0x00053162)
+	value := []byte{48}
+	value = append(value, bytesOf(0x11, 48)...)
+	value = append(value, 8)
+	value = append(value, bytesOf(0x22, 8)...)
+	var word [4]byte
+	binary.LittleEndian.PutUint32(word[:], 0)
+	value = append(value, word[:]...)
+	binary.LittleEndian.PutUint32(word[:], 25000)
+	value = append(value, word[:]...)
+	value = append(value, 0) // empty derivation-parameters vector
+	copy(fixture[128:], value)
+
+	got, err := extractBitcoinRecords(extractorFixture(t, "wallet.dat", fixture))
+	want := "$bitcoin$64$" + strings.Repeat("11", 32) + "$16$" + strings.Repeat("22", 8) + "$25000$2$00$2$00"
+	if err != nil || len(got) != 1 || got[0] != want {
+		t.Fatalf("got %v, %v", got, err)
+	}
+}

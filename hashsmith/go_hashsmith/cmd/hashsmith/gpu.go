@@ -16,9 +16,11 @@ package main
 // the backend can be filled in without touching the attack engine.
 
 import (
+	"bufio"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -54,6 +56,8 @@ type gpuBackend interface {
 	// ntlmMask / ntlmMaskMulti are the NTLM (MD4 of UTF-16LE) equivalents.
 	ntlmMask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error)
 	ntlmMaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32, foundFlag []uint32, foundIdx []uint64) error
+	md4Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error)
+	md4MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32, foundFlag []uint32, foundIdx []uint64) error
 	sha256Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error)
 	sha256MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32, foundFlag []uint32, foundIdx []uint64) error
 	sha1Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error)
@@ -95,6 +99,119 @@ var (
 func activeGPUBackend() (gpuBackend, string) {
 	gpuOnce.Do(func() { gpuCached, gpuReasonC = detectGPU() })
 	return gpuCached, gpuReasonC
+}
+
+// gpuMD5Batcher is deliberately narrower than gpuBackend so the streaming
+// dictionary engine can be tested without mocking every mask operation.
+type gpuMD5Batcher interface {
+	md5(candidates []string, out [][16]byte) error
+}
+
+// One million candidates amortizes Metal/OpenCL buffer creation and command
+// submission. At the 55-byte kernel limit the working set remains comfortably
+// below 100 MiB (strings, packed input, offsets, labels, and 16-byte digests).
+const gpuDictBatchSize = 1 << 20
+
+// gpuDictAttack streams an MD5 wordlist through the GPU batch kernel. Rules are
+// expanded on the CPU, then their resulting candidates join the same large GPU
+// dispatches. Candidates longer than a one-block MD5 message are verified on
+// the CPU (after flushing earlier work) so --gpu never changes correctness or
+// first-match ordering.
+func gpuDictAttack(ctx context.Context, wordlistPath, targetHex string, rules *ruleEngine,
+	atomicAttempts *int64) (crackedResult, error, bool) {
+	b, _ := activeGPUBackend()
+	if b == nil {
+		return crackedResult{}, nil, false
+	}
+	result, err := gpuDictAttackWithBackend(ctx, b, wordlistPath, targetHex, rules, atomicAttempts)
+	return result, err, true
+}
+
+func gpuDictAttackWithBackend(ctx context.Context, b gpuMD5Batcher, wordlistPath, targetHex string,
+	rules *ruleEngine, atomicAttempts *int64) (crackedResult, error) {
+	targetBytes, err := hex.DecodeString(strings.TrimSpace(targetHex))
+	if err != nil || len(targetBytes) != md5.Size {
+		return crackedResult{}, errors.New("invalid MD5 target for GPU dictionary attack")
+	}
+	var target [md5.Size]byte
+	copy(target[:], targetBytes)
+
+	f, label, err := openWordlist(wordlistPath)
+	if err != nil {
+		return crackedResult{}, err
+	}
+	defer f.Close()
+	if label == defaultWordlistLabel {
+		clrYellow.Fprintf(os.Stderr, "No wordlist supplied — using %s\n", label)
+	}
+
+	candidates := make([]string, 0, gpuDictBatchSize)
+	labels := make([]string, 0, gpuDictBatchSize)
+	flush := func() (crackedResult, bool, error) {
+		if len(candidates) == 0 {
+			return crackedResult{}, false, nil
+		}
+		out := make([][md5.Size]byte, len(candidates))
+		if err := b.md5(candidates, out); err != nil {
+			return crackedResult{}, false, err
+		}
+		atomic.AddInt64(atomicAttempts, int64(len(candidates)))
+		for i := range out {
+			if out[i] == target {
+				return crackedResult{password: candidates[i], ruleLabel: labels[i]}, true, nil
+			}
+		}
+		candidates = candidates[:0]
+		labels = labels[:0]
+		return crackedResult{}, false, nil
+	}
+	add := func(candidate, ruleLabel string) (crackedResult, bool, error) {
+		select {
+		case <-ctx.Done():
+			return crackedResult{}, false, ctx.Err()
+		default:
+		}
+		if len(candidate) > maxGPUWordLen("md5") {
+			if result, found, err := flush(); found || err != nil {
+				return result, found, err
+			}
+			atomic.AddInt64(atomicAttempts, 1)
+			if md5.Sum([]byte(candidate)) == target {
+				return crackedResult{password: candidate, ruleLabel: ruleLabel}, true, nil
+			}
+			return crackedResult{}, false, nil
+		}
+		candidates = append(candidates, candidate)
+		labels = append(labels, ruleLabel)
+		if len(candidates) == gpuDictBatchSize {
+			return flush()
+		}
+		return crackedResult{}, false, nil
+	}
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1<<20), 1<<20)
+	for scanner.Scan() {
+		word := strings.TrimSpace(scanner.Text())
+		if word == "" {
+			continue
+		}
+		if result, found, err := add(word, ""); found || err != nil {
+			return result, err
+		}
+		if rules != nil {
+			for _, mangled := range rules.expand(word) {
+				if result, found, err := add(mangled.password, mangled.ruleLabel); found || err != nil {
+					return result, err
+				}
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return crackedResult{}, err
+	}
+	result, _, err := flush()
+	return result, err
 }
 
 // gpuBruteHash runs a single-target GPU brute-force for md5 or ntlm, using the
@@ -209,6 +326,8 @@ func gpuMaskMethod(b gpuBackend, typ string) func([][]byte, []byte, uint64, uint
 		return b.md5Mask
 	case "ntlm":
 		return b.ntlmMask
+	case "md4":
+		return b.md4Mask
 	case "sha256":
 		return b.sha256Mask
 	case "sha1":
@@ -224,6 +343,8 @@ func gpuMultiMethod(b gpuBackend, typ string) func([][]byte, []uint32, uint64, u
 		return b.md5MaskMulti
 	case "ntlm":
 		return b.ntlmMaskMulti
+	case "md4":
+		return b.md4MaskMulti
 	case "sha256":
 		return b.sha256MaskMulti
 	case "sha1":
@@ -275,6 +396,8 @@ func gpuAlgo(typ string) int {
 		return 2
 	case "sha1":
 		return 3
+	case "md4":
+		return 4
 	}
 	return 0
 }
@@ -442,8 +565,8 @@ func runGPUInfo(_ []string) error {
 	return gpuSelfTest(b)
 }
 
-// gpuSelfTest verifies the GPU MD5 kernel against the CPU across known vectors —
-// GPU crypto is only trustworthy once proven bit-identical to the reference.
+// gpuSelfTest verifies the batch kernel and every in-kernel mask algorithm
+// against CPU results before reporting the backend as healthy.
 func gpuSelfTest(b gpuBackend) error {
 	tests := []string{"", "a", "abc", "password", "hashsmith", "The quick brown fox jumps"}
 	out := make([][16]byte, len(tests))
@@ -463,6 +586,20 @@ func gpuSelfTest(b gpuBackend) error {
 		clrRed.Fprintf(stderr(), "  self-test: %d/%d vectors WRONG\n", bad, len(tests))
 		return nil
 	}
+	sets := [][]byte{[]byte("abc"), []byte("abc"), []byte("abc")}
+	const candidate = "cab"
+	for _, typ := range []string{"md5", "md4", "ntlm", "sha1", "sha256"} {
+		targetHex, err := hashText(candidate, typ, "", "prefix")
+		if err != nil {
+			return err
+		}
+		target, _ := hex.DecodeString(targetHex)
+		idx, found, err := gpuMaskMethod(b, typ)(sets, target, 0, 27)
+		if err != nil || !found || maskIdxToStr(int64(idx), sets) != candidate {
+			return fmt.Errorf("GPU %s mask self-test failed: found=%v index=%d error=%v", typ, found, idx, err)
+		}
+	}
+	clrGreen.Fprintln(stderr(), "  self-test: MD5, MD4, NTLM, SHA-1 and SHA-256 mask kernels match CPU ✓")
 	gpuBench(b)
 	gpuBruteDemo(b)
 	return nil
@@ -527,10 +664,10 @@ func gpuBruteDemo(b gpuBackend) {
 }
 
 // gpuReasonOrType explains why a --gpu brute fell back: the backend reason when
-// there is no GPU, else that only md5 is GPU-accelerated so far.
+// there is no GPU, else list the accelerated raw formats.
 func gpuReasonOrType(reason, typ string) string {
 	if reason != "" {
 		return reason
 	}
-	return "GPU acceleration currently supports only -t md5 / -t ntlm, got " + typ
+	return "GPU acceleration supports -t md5/md4/ntlm/sha1/sha256, got " + typ
 }

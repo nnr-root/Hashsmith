@@ -52,7 +52,7 @@ func runAuto(args []string) error {
 	restore := fs.String("restore", "", "alias for --session")
 	wordlist2 := fs.String("wordlist2", "", "right-hand wordlist for -M combinator")
 	w2 := fs.String("w2", "", "alias for --wordlist2")
-	useGPU := fs.Bool("gpu", false, "use the GPU backend for -M brute -t md5 (requires a -tags gpu build)")
+	useGPU := fs.Bool("gpu", false, "use GPU brute/mask for md5, md4, ntlm, sha1, or sha256")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}

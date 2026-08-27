@@ -165,7 +165,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 		// Multi-target on the GPU: hash-and-match every candidate against all
 		// still-unfound md5 targets in one dispatch. Falls through to the CPU
 		// batch engine when ineligible or no GPU is present.
-		if cc != nil && cc.useGPU && (t == "md5" || t == "ntlm" || t == "sha256" || t == "sha1") && (mode == "brute" || mode == "mask") {
+		if cc != nil && cc.useGPU && (t == "md5" || t == "md4" || t == "ntlm" || t == "sha256" || t == "sha1") && (mode == "brute" || mode == "mask") {
 			entries := make([]*batchTarget, len(active))
 			for i, idx := range active {
 				entries[i] = batch[idx]
@@ -399,20 +399,27 @@ func batchDictAttack(wordlistPath string, verify func(string) bool, workers int,
 		}
 	}()
 
-	try := func(pw string) bool {
-		atomic.AddInt64(atomicAttempts, 1)
-		if verify(pw) {
-			cancel()
-			return true
-		}
-		return false
-	}
-
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
-			defer wg.Done()
+			var localAttempts int64
+			defer func() {
+				atomic.AddInt64(atomicAttempts, localAttempts)
+				wg.Done()
+			}()
+			try := func(pw string) bool {
+				localAttempts++
+				if localAttempts >= 1024 {
+					atomic.AddInt64(atomicAttempts, localAttempts)
+					localAttempts = 0
+				}
+				if verify(pw) {
+					cancel()
+					return true
+				}
+				return false
+			}
 			for {
 				select {
 				case <-ctx.Done():

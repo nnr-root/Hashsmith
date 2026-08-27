@@ -197,6 +197,26 @@ func (m *metalBackend) ntlmMaskMulti(sets [][]byte, targets []uint32, start uint
 	return nil
 }
 
+func (m *metalBackend) md4Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error) {
+	if len(target) != 16 {
+		return 0, false, errors.New("invalid MD4 target")
+	}
+	targets := make([]uint32, 4)
+	for i := range targets {
+		targets[i] = le32(target[i*4:])
+	}
+	flags, indices := []uint32{0}, []uint64{0}
+	if err := m.maskSweepMulti(4, sets, 4, targets, start, uint64(count), count, flags, indices); err != nil {
+		return 0, false, err
+	}
+	return indices[0], flags[0] == 1, nil
+}
+
+func (m *metalBackend) md4MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32,
+	foundFlag []uint32, foundIdx []uint64) error {
+	return m.maskSweepMulti(4, sets, 4, targets, start, uint64(count), count, foundFlag, foundIdx)
+}
+
 // sha256Mask / sha256MaskMulti use the SHA-256 kernels (32-byte digests).
 func (m *metalBackend) sha256Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error) {
 	if count == 0 || len(sets) == 0 {

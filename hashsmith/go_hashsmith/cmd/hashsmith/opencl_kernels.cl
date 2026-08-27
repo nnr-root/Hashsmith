@@ -1,5 +1,5 @@
-// Portable OpenCL kernels for Hashsmith GPU acceleration (MD5, NTLM, SHA-256,
-// SHA-1). Candidates are generated in-kernel from a keyspace index; targets are
+// Portable OpenCL kernels for Hashsmith GPU acceleration (MD5, MD4, NTLM,
+// SHA-256, SHA-1). Candidates are generated in-kernel from a keyspace index; targets are
 // matched on-device. Runs on any OpenCL GPU (NVIDIA / AMD / Intel / Apple).
 #define ROTL(x,s) (((x)<<(s))|((x)>>(32-(s))))
 #define ROTR(x,s) (((x)>>(s))|((x)<<(32-(s))))
@@ -169,4 +169,18 @@ __kernel void md5k(__global const uchar* data, __global const uint* offsets, __g
   out[o+4]=b&0xff;out[o+5]=(b>>8)&0xff;out[o+6]=(b>>16)&0xff;out[o+7]=(b>>24)&0xff;
   out[o+8]=c&0xff;out[o+9]=(c>>8)&0xff;out[o+10]=(c>>16)&0xff;out[o+11]=(c>>24)&0xff;
   out[o+12]=d&0xff;out[o+13]=(d>>8)&0xff;out[o+14]=(d>>16)&0xff;out[o+15]=(d>>24)&0xff;
+}
+
+__kernel void md4maskmulti(__global const uchar* sets, __global const uint* setOff, const uint wordLen, const ulong startIdx, const uint count, __global const uint* targets, const uint nTargets, volatile __global uint* foundFlag, __global ulong* foundIdx){
+  uint gid=get_global_id(0); if(gid>=count) return; ulong idx=startIdx+(ulong)gid;
+  uchar msg[64]; for(int i=0;i<64;i++) msg[i]=0;
+  DECODE(msg, idx, sets, setOff, wordLen, 1);
+  BLK_LE(msg, wordLen);
+  uint M[16]; LOAD_LE(M, msg);
+  uint H[4]; md4_compress(M,&H[0],&H[1],&H[2],&H[3]);
+  int lo=0, hi=(int)nTargets-1;
+  while(lo<=hi){ int mid=(lo+hi)>>1; int cmp=0;
+    for(int j=0;j<4;j++){ uint tv=targets[mid*4+j]; if(H[j]!=tv){ cmp=(H[j]<tv)?-1:1; break; } }
+    if(cmp==0){ if(atomic_or(&foundFlag[mid],1u)==0u) foundIdx[mid]=idx; break; }
+    else if(cmp<0) hi=mid-1; else lo=mid+1; }
 }

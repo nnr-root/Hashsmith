@@ -103,7 +103,7 @@ hashsmith decode -t hex "0x68:61:73:68-73 6d 69 74 68"
 
 ### Hash types
 
-Hashsmith supports **451 universal formats**, and every one is validated against
+Hashsmith supports **457 universal formats**, and every one is validated against
 a known-answer vector before shipping — no unimplemented stubs, no unvalidated
 crypto. Most hashes are auto-detected, so naming a type is optional. When you want
 to pin one, pass `-t <name>`; run `hashsmith types` for the full registry. Beyond
@@ -388,6 +388,27 @@ ntlm            6.28 MH/s
 bcrypt         76.54 H/s
 ```
 
+For a reproducible end-to-end comparison against John and Hashcat, use the
+same deterministic dictionary and synthetic target for all three tools:
+
+```bash
+hashsmith benchmark --compare
+hashsmith benchmark --compare --gpu -t md5
+hashsmith benchmark --compare -t sha256 --candidates 1000000 --repeat 5 --json comparison.json
+hashsmith benchmark --compare --hashsmith ./hashsmith --john ./run/john --hashcat ./hashcat
+```
+
+The target password is deliberately the final dictionary entry. Reported time
+is the median wall-clock recovery time and includes process startup, input
+parsing, kernel initialization and result reporting; this measures the actual
+one-command workflow rather than mixing each project's incompatible internal
+benchmark mode. Missing executables are marked `skipped`, never assigned an
+invented score. JSON reports include the platform, logical CPU count, Go
+version, candidate count, every individual run, and SHA-256 fingerprints for
+the wordlist and available binaries. A Metal/OpenCL build can add `--gpu` to
+exercise Hashsmith's GPU dictionary path; formats without a dictionary kernel
+fall back to Hashsmith's optimized CPU verifier and say so explicitly.
+
 ## GPU acceleration (experimental, opt-in)
 
 Hashsmith ships as a **pure-Go, statically-linked, cross-platform binary** with no
@@ -403,7 +424,7 @@ go build -tags gpu       # Apple Metal backend (macOS only)
 The **OpenCL backend** (`-tags opencl`) is the portable one: the same kernels run
 on every GPU vendor via OpenCL — the same approach that lets hashcat span all
 cards. On a discrete NVIDIA/AMD GPU these kernels run at GH/s; the integrated
-Apple M2 used for development reaches ~150 MH/s. All four hash kernels were
+Apple M2 used for development reaches ~150 MH/s. All five hash kernels were
 verified bit-identical to the CPU on the M2's OpenCL.
 
 Check status (and run a correctness self-test + throughput probe):
@@ -411,7 +432,7 @@ Check status (and run a correctness self-test + throughput probe):
 ```bash
 hashsmith gpu
 # GPU acceleration: available — OpenCL (Apple M2)   # or Metal, per build
-#   self-test: MD5 matches CPU across 6 vectors ✓
+#   self-test: MD5, MD4, NTLM, SHA-1 and SHA-256 mask kernels match CPU ✓
 #   throughput: 42.91 MH/s (MD5, 1048576/dispatch)
 ```
 
@@ -430,12 +451,22 @@ the GPU, so nothing is transferred and only a match flag returns) reaches
 ~141 MH/s — **~7× the CPU fast path**, even on the small integrated M2 GPU — and
 it is verified by cracking the worst-case final index of the keyspace.
 
-`crack` uses it via `--gpu` (**MD5, NTLM, SHA-256, SHA-1**, brute/mask/multi-target, `-tags gpu` build):
+`crack` uses it via `--gpu` (**MD5 dictionaries and rules; MD5, MD4, NTLM,
+SHA-256, and SHA-1 brute/mask/multi-target**, `-tags gpu` build):
 
 ```bash
+hashsmith crack -t md5 <hash> -M dict -w candidates.txt --gpu
 hashsmith crack -t md5 <hash> -M brute -C ?l -n 1 -x 6 --gpu
 hashsmith crack -t md5 <hash> -M mask --mask '?u?l?l?l?d?d' --gpu
 ```
+
+GPU dictionaries use million-candidate streaming batches to amortize buffer and
+command-submission overhead, and CPU-generated rule candidates join those same
+batches. On the development M2, a 10M-candidate end-to-end MD5 comparison
+measured Hashsmith at 8.95 MH/s, John at 6.78 MH/s, and Hashcat at 4.88 MH/s;
+results include startup and therefore should not be treated as universal kernel
+speed rankings. Hashsmith's optimized CPU dictionary path can still win on
+short or I/O-bound jobs, so GPU remains an explicit choice.
 
 On a full a–z⁶ keyspace (309M candidates) the GPU finishes in **~3.9 s vs ~24 s on
 the CPU — ~6×**, for both brute and mask.
@@ -455,13 +486,13 @@ a 50-hash NTLM dump ran at **~165 MH/s vs ~6 MH/s on the CPU — ~27×**. SHA-25
 even though the CPU has hardware SHA — still runs **~10× faster** on the GPU (~142
 vs ~14 MH/s). The gain grows with keyspace size; for tiny keyspaces the CPU
 wins (GPU dispatch has per-batch latency), so `--gpu` is for big brute-force runs.
-Without a `-tags gpu` build, or for a non-MD5 type, `--gpu` prints a notice and
+Without a GPU-enabled build, or for an unsupported type, `--gpu` prints a notice and
 falls back to the CPU automatically.
 
 **Status & roadmap.** Verified today: the backend seam (kernels plug in without
 touching the CPU engine), a Metal MD5 kernel checked bit-identical to the CPU,
 in-kernel brute-force and mask generation, multi-target on-device matching (crack
-a whole dump on the GPU), for **MD5, NTLM, SHA-256, and SHA-1**, all wired into
+a whole dump on the GPU), for **MD5, MD4, NTLM, SHA-256, and SHA-1**, all wired into
 `crack --gpu`, capability detection, and graceful CPU fallback. Multi-target
 sweeps keep several command buffers in flight (pipelined dispatch) and use large
 in-kernel batches. On the integrated Apple M2 these two together are throughput-
@@ -540,7 +571,7 @@ A finished run (found or keyspace exhausted) removes its own session file.
 
 Turn a password-protected file into a crackable hash, then feed it straight to `crack`:
 
-The binary currently contains **42 registry-backed extractors**. Run
+The binary currently contains **47 registry-backed extractors**. Run
 `hashsmith extractors` for the authoritative list generated from that same
 registry; command routing and help do not maintain separate copies.
 
@@ -549,10 +580,10 @@ registry; command routing and help do not maintain separate copies.
 | Archives and documents | `zip2smith`, `7z2smith`, `rar2smith`, `pdf2smith`, `office2smith` | ZipCrypto/WinZip AES, 7-Zip AES, RAR3/4/5, PDF RC4/AES, Office 2007–2013+ |
 | Keys and encrypted stores | `ssh2smith`, `gpg2smith`, `pfx2smith`, `keepass2smith`, `pwsafe2smith`, `1password2smith` | OpenSSH/PEM/PKCS#8, OpenPGP, PKCS#12, KeePass 3/4, Password Safe 3, 1Password Agile Keychain |
 | Full-disk/container | `luks2smith`, `truecrypt2smith`, `veracrypt2smith`, `bitlocker2smith`, `encfs2smith`, `dmg2smith` | LUKS1, TrueCrypt/VeraCrypt headers, BitLocker VMKs, EncFS 6, encrypted DMG v1/v2 |
-| Wallets and backups | `ethereum2smith`, `electrum2smith`, `blockchain2smith`, `bitcoin2smith`, `monero2smith`, `multibit2smith`, `itunes2smith`, `androidbackup2smith` | Web3, Electrum, Blockchain.com, Bitcoin Core SQLite, Monero export, MultiBit, iOS and Android backups |
-| Application stores and VMs | `applenotes2smith`, `lastpass2smith`, `mozilla2smith`, `vmx2smith`, `virtualbox2smith` | Apple Secure Notes, LastPass CLI, Mozilla/NSS key3.db, VMware VMX, VirtualBox keystores |
+| Wallets and backups | `ethereum2smith`, `electrum2smith`, `blockchain2smith`, `bitcoin2smith`, `monero2smith`, `multibit2smith`, `itunes2smith`, `androidbackup2smith` | Web3, Electrum, Blockchain.com, Bitcoin Core SQLite and legacy Berkeley DB, Monero `.keys`, MultiBit, iOS and Android backups |
+| Application stores and VMs | `applenotes2smith`, `lastpass2smith`, `mozilla2smith`, `bitwarden2smith`, `signal2smith`, `telegram2smith`, `keychain2smith`, `vmx2smith`, `virtualbox2smith` | Apple Secure Notes, LastPass CLI, Mozilla/NSS, Bitwarden browser LevelDB/JSON and Android XML, Signal legacy preferences, Telegram Android/Desktop, legacy macOS Keychain, VMware and VirtualBox |
 | Operating systems/directories | `shadow2smith`, `aix2smith`, `ldif2smith`, `htpasswd2smith`, `hashdump2smith` | Unix shadow, AIX security/passwd, LDAP LDIF, Apache htpasswd, pwdump/secretsdump/NTDS |
-| Network/authentication | `hccapx2smith`, `ike2smith`, `sip2smith`, `prosody2smith`, `aruba2smith` | WPA hccapx v4, IKE-PSK, SIP digest, XMPP SCRAM, ArubaOS |
+| Network/authentication | `hccapx2smith`, `ike2smith`, `sip2smith`, `vncpcap2smith`, `prosody2smith`, `aruba2smith` | WPA hccapx v4, IKE-PSK, SIP digest, PCAP/PCAPNG RFB/VNC authentication, XMPP SCRAM, ArubaOS |
 | Universal ingestion | `scan2smith` | Finds every already-recognizable Hashsmith record in logs, configuration and arbitrary text |
 
 The John-compatible additions are independent native-Go implementations. They
@@ -560,12 +591,18 @@ were behavior-audited against John jumbo rather than copied source-for-source,
 which keeps Hashsmith's MIT licensing intact and removes the Python/Perl runtime
 dependency.
 
-Nine of the eleven newest workflows are end-to-end: their output is detected
-and cracked by Hashsmith. `dmg2smith` and `monero2smith` currently emit standard
-portable records for transfer to John; Hashsmith does not yet claim native DMG
-or CryptoNight/Monero verification. `bitcoin2smith` reads modern Bitcoin Core
-SQLite wallets; legacy Berkeley DB wallets still need conversion or John's
-extractor.
+Every extractor above emits a record that the same Hashsmith binary can detect
+and verify. The DMG v1/v2, Monero CryptoNight-v0 + ChaCha8/20, Signal, Telegram
+Desktop, legacy Keychain, and VNC paths are checked against published John
+vectors. `bitcoin2smith` handles both modern Bitcoin Core SQLite wallets and
+legacy Berkeley DB `wallet.dat` master-key records without a Berkeley DB runtime.
+
+`bitwarden2smith` is the meaningful Chromium workflow: it reads the Bitwarden
+extension's LevelDB and extracts a real master-password verifier. Chromium's own
+`Login Data` passwords are protected by the operating-system key store and do
+not expose a universal user-password hash, so Hashsmith does not advertise a
+misleading `chromium2smith` label. For Wireshark captures, `vncpcap2smith`
+accepts both PCAP and PCAPNG and emits the standard `$vnc$` record.
 
 ```bash
 hashsmith ssh2smith -f id_ed25519 -o hash.txt   # extract
@@ -644,22 +681,22 @@ self-contained binary that tries to make the common path short.
 
 | | Hashsmith | Hashcat | John the Ripper (jumbo) |
 |---|---|---|---|
-| Universal hash/code formats | 451 | 450+ native hash types | hundreds of native formats |
+| Universal hash/code formats | 457 | 450+ native hash types | hundreds of native formats |
 | Hash-type auto-detection | yes, by default | yes in Hashcat 7.x; `--identify` lists possibilities | yes for recognizable ciphertexts; first matching format wins |
-| Accepted type vocabulary | 1,156 names/codes resolving into those same 451 formats, including 503 numeric Hashcat aliases | native numeric modes | native format labels |
+| Accepted type vocabulary | 1,163 names/codes resolving into those same 457 formats, including 503 numeric Hashcat aliases | native numeric modes | native format labels |
 | Attack modes | dict, brute, mask, markov, hybrid, combinator | straight, combinator, mask, hybrid, association | wordlist, incremental, mask, external |
 | Rule engine | ~35 operators | full, on-GPU, the de-facto standard | full, plus C-like external mode |
-| GPU | experimental, opt-in; Metal + OpenCL, a few algorithms | mature CUDA / HIP / OpenCL / Metal across nearly every mode | OpenCL for a subset |
-| File → hash extractors | **42**, native and built into one registry/binary; 38 John-aligned workflows plus 4 Hashsmith-only ingestion workflows | 25 dedicated converters in the official `tools/` tree (v7.1/master audit) | 112 `run/*2john.{py,pl,lua}` scripts in bleeding-jumbo, plus compiled converters |
+| GPU | experimental, opt-in Metal/OpenCL; MD5 dictionary/rules plus MD5, MD4, NTLM, SHA-1, SHA-256 brute/mask/multi-target | mature CUDA / HIP / OpenCL / Metal across nearly every mode | OpenCL for a subset |
+| File → hash extractors | **47**, native and built into one registry/binary | dedicated converters in the official `tools/` tree | a much broader `run/*2john` script collection plus compiled converters |
 | Install | one static binary, no runtime deps | binary + GPU runtime | build or distro package + Perl/Python for extractors |
-| Built-in known-answer self-test | `hashsmith selftest`, 495 vectors over all 451 formats, provenance-labelled | internal, on startup | `john --test` |
+| Built-in known-answer self-test | `hashsmith selftest`, 502 vectors over all 457 formats, provenance-labelled | internal, on startup | `john --test` |
 | Distributed cracking | no | via third-party overlays | via MPI |
 
 **Where Hashsmith is the better tool.** You get one binary with no runtime
 dependencies, hash extraction and cracking in the same place, and a universal
 registry that keeps canonical names, aliases, descriptions, vectors, and test
-policy synchronized. Its 42 integrated extractors now exceed Hashcat's current
-official standalone converter count, while John still has the broader long-tail
+policy synchronized. Its 47 integrated extractors cover workflows that Hashcat
+generally leaves to separate utilities, while John still has the broader long-tail
 extractor ecosystem. It also speaks both of the other tools' dialects, so a mode
 number pasted from a Hashcat writeup or a `--format` label from a John tutorial
 both work unchanged:
@@ -688,9 +725,9 @@ reference suite), `cross-checked` (computed independently with Python or
 OpenSSL) and `regression` (produced by Hashsmith itself, which catches drift but
 cannot prove the implementation was right to begin with). The summary reports
 the three separately rather than flattening them into one reassuring number, and
-tells you honestly how many universal formats have no vector at all. All 451
-formats now carry one: 364 published vectors, 112 independently cross-checked
-vectors, and 19 regression-only vectors (495 total).
+tells you honestly how many universal formats have no vector at all. All 457
+formats now carry one: 371 published vectors, 112 independently cross-checked
+vectors, and 19 regression-only vectors (502 total).
 
 **Where they are the better tool.** For a large wordlist against a fast hash on
 a real GPU, Hashcat will beat Hashsmith by orders of magnitude — its kernels are

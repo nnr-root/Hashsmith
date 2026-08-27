@@ -45,8 +45,7 @@ func TestVendorRecordDetection(t *testing.T) {
 }
 
 func TestVendorJohnAliases(t *testing.T) {
-	telegram := "$telegram$0*518c001aeb3b4ae96c6173be4cebe60a85f67b1e087b045935849e2f815b5e41*25184098058621950709328221838128"
-	if ok, err := verifyCandidate("hashcat", telegram, "john:telegram", "", "prefix"); err != nil || !ok {
+	if ok, err := verifyCandidate("openwall123", telegramDesktopPublishedRecord, "john:telegram", "", "prefix"); err != nil || !ok {
 		t.Fatalf("John telegram alias: ok=%v err=%v", ok, err)
 	}
 	passlib := "$bcrypt-sha256$v=2,t=2b,r=12$KSOjON/ciJR86a00N5q61.$AmWZucQuHk13FGkQWhgMeiFvBfm2GCy"

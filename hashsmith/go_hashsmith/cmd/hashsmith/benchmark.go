@@ -32,8 +32,24 @@ func runBenchmark(args []string) error {
 	typ := fs.String("t", "", "benchmark a single hash type (default: a common set)")
 	workers := fs.Int("p", 0, "parallel workers (0 = NumCPU)")
 	secs := fs.Float64("d", 1.0, "seconds per hash type")
+	compare := fs.Bool("compare", false, "compare end-to-end recovery time with John and Hashcat")
+	compareGPU := fs.Bool("gpu", false, "use Hashsmith GPU dictionary acceleration with --compare")
+	candidates := fs.Int("candidates", 100000, "candidate count for --compare")
+	repeats := fs.Int("repeat", 3, "measured runs per tool and format for --compare")
+	jsonPath := fs.String("json", "", "write --compare results as JSON")
+	hashsmithPath := fs.String("hashsmith", "", "Hashsmith executable for --compare (default: current executable)")
+	johnPath := fs.String("john", "john", "John executable for --compare")
+	hashcatPath := fs.String("hashcat", "hashcat", "Hashcat executable for --compare")
+	timeout := fs.Duration("timeout", 2*time.Minute, "timeout per --compare run")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
+	}
+	if *compare {
+		return runComparisonBenchmark(comparisonConfig{
+			typ: *typ, candidates: *candidates, repeats: *repeats, jsonPath: *jsonPath,
+			hashsmithPath: *hashsmithPath, johnPath: *johnPath, hashcatPath: *hashcatPath,
+			timeout: *timeout, hashsmithGPU: *compareGPU,
+		})
 	}
 	w := *workers
 	if w < 1 {

@@ -54,7 +54,7 @@ type crackCtx struct {
 	sessName  string        // session name; "" disables sessions
 	showOnly  bool          // --show: print potfile hits only, never attack
 	wordlist2 string        // combinator right-hand list ("" when unused)
-	useGPU    bool          // --gpu: try the GPU backend (brute/md5) when built with -tags gpu
+	useGPU    bool          // --gpu: try raw-digest GPU dictionary/brute/mask kernels when available
 }
 
 // newCrackCtx loads the potfile (unless disabled) and any saved session. A nil
@@ -112,7 +112,7 @@ func runCrack(args []string) error {
 	wordlist2 := fs.String("wordlist2", "", "right-hand wordlist for -M combinator")
 	w2 := fs.String("w2", "", "alias for --wordlist2")
 	stdoutMode := fs.Bool("stdout", false, "emit the candidate stream to stdout instead of cracking (no hash needed)")
-	useGPU := fs.Bool("gpu", false, "use the GPU backend for -M brute -t md5 (requires a -tags gpu build)")
+	useGPU := fs.Bool("gpu", false, "use GPU dictionary/brute/mask kernels when supported")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -347,8 +347,20 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	switch m {
 	case "dict":
 		// An empty wordlist path uses the built-in common.txt (see openWordlist).
-		result, err = dictAttack(runCtx, wordlist,
-			targetHash, typ, salt, saltMode, workers, &atomicAttempts, rules)
+		if cc != nil && cc.useGPU && salt == "" && typ == "md5" {
+			var usedGPU bool
+			result, err, usedGPU = gpuDictAttack(runCtx, wordlist, targetHash, rules, &atomicAttempts)
+			if !usedGPU {
+				_, reason := activeGPUBackend()
+				clrYellow.Fprintf(os.Stderr, "GPU dictionary unavailable (%s) — using CPU\n", reason)
+				result, err = dictAttack(runCtx, wordlist, workers, &atomicAttempts, rules, verifyFn)
+			}
+		} else {
+			if cc != nil && cc.useGPU {
+				clrYellow.Fprintf(os.Stderr, "GPU dictionary currently supports unsalted MD5; using CPU for %s\n", typ)
+			}
+			result, err = dictAttack(runCtx, wordlist, workers, &atomicAttempts, rules, verifyFn)
+		}
 		interrupted = runCtx.Err() != nil
 	case "brute":
 		if minLen < 1 || maxLen < minLen {
@@ -640,8 +652,8 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 // Batch size is dictBatchSize to amortise channel overhead without starving
 // workers. Context cancellation propagates through both the reader and workers.
 
-func dictAttack(ctx context.Context, wordlistPath, targetHash, typ, salt, saltMode string,
-	workers int, atomicAttempts *int64, rules *ruleEngine) (crackedResult, error) {
+func dictAttack(ctx context.Context, wordlistPath string, workers int, atomicAttempts *int64,
+	rules *ruleEngine, verify func(string) bool) (crackedResult, error) {
 
 	f, label, err := openWordlist(wordlistPath)
 	if err != nil {
@@ -688,28 +700,32 @@ func dictAttack(ctx context.Context, wordlistPath, targetHash, typ, salt, saltMo
 		}
 	}()
 
-	// tryCandidate tests one candidate and fires resultCh + cancel on match.
-	// Returns true if matched so the caller can short-circuit.
-	tryCandidate := func(pw, ruleLabel string) bool {
-		atomic.AddInt64(atomicAttempts, 1)
-		matched, _ := verifyCandidate(pw, targetHash, typ, salt, saltMode)
-		if matched {
-			select {
-			case resultCh <- crackedResult{password: pw, ruleLabel: ruleLabel}:
-			default:
-			}
-			cancel()
-			return true
-		}
-		return false
-	}
-
 	// workers
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
-			defer wg.Done()
+			var localAttempts int64
+			defer func() {
+				atomic.AddInt64(atomicAttempts, localAttempts)
+				wg.Done()
+			}()
+			tryCandidate := func(pw, ruleLabel string) bool {
+				localAttempts++
+				if localAttempts >= 1024 {
+					atomic.AddInt64(atomicAttempts, localAttempts)
+					localAttempts = 0
+				}
+				if !verify(pw) {
+					return false
+				}
+				select {
+				case resultCh <- crackedResult{password: pw, ruleLabel: ruleLabel}:
+				default:
+				}
+				cancel()
+				return true
+			}
 			for {
 				select {
 				case <-innerCtx.Done():
@@ -941,6 +957,18 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 	switch algo {
 	case "android-backup":
 		return verifyAndroidBackup(targetHash, candidate)
+	case "dmg":
+		return verifyDMG(targetHash, candidate)
+	case "monero":
+		return verifyMonero(targetHash, candidate)
+	case "signal":
+		return verifySignal(targetHash, candidate)
+	case "macos-keychain":
+		return verifyKeychain(targetHash, candidate)
+	case "telegram-desktop":
+		return verifyTelegramDesktop(targetHash, candidate)
+	case "vnc":
+		return verifyVNC(targetHash, candidate)
 	case "encfs":
 		return verifyEncFS(targetHash, candidate)
 	case "mozilla-nss":

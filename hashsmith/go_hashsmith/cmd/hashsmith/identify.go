@@ -365,6 +365,14 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"Stargazer Stellar wallet", 1000, "$stellar$ AES-GCM wallet record"}}
 	case strings.HasPrefix(v, "$telegram$0*"):
 		return []candidate{{"Telegram mobile passcode", 1000, "$telegram$0* SHA-256 record"}}
+	case strings.HasPrefix(v, "$telegram$1*"), strings.HasPrefix(v, "$telegram$2*"):
+		return []candidate{{"Telegram Desktop local passcode", 1000, "$telegram$1/$2 PBKDF2 + AES-IGE record"}}
+	case strings.HasPrefix(v, "$signal$"):
+		return []candidate{{"Signal Android master password", 1000, "$signal$ PKCS#12-KDF + HMAC record"}}
+	case strings.HasPrefix(v, "$keychain$*"):
+		return []candidate{{"Legacy macOS Keychain", 1000, "$keychain$ PBKDF2-SHA1 + 3DES record"}}
+	case strings.HasPrefix(v, "$vnc$*"):
+		return []candidate{{"RFB VNC Authentication", 1000, "$vnc$ challenge-response record"}}
 	case strings.HasPrefix(v, "$sntp-ms$"):
 		return []candidate{{"Microsoft SNTP", 1000, "$sntp-ms$ authentication record"}}
 	case strings.HasPrefix(v, "$NSEC3$"):
@@ -409,6 +417,10 @@ func signatureMatch(v string) []candidate {
 		return []candidate{{"Ethereum wallet (Web3 keystore)", 1000, "$ethereum$ prefix — scrypt/PBKDF2 + keccak256 MAC"}}
 	case strings.HasPrefix(v, "$bitcoin$"):
 		return []candidate{{"Bitcoin/Litecoin wallet.dat", 1000, "$bitcoin$ prefix — iterated SHA-512 + AES-256-CBC"}}
+	case strings.HasPrefix(v, "$dmg$"):
+		return []candidate{{"Apple encrypted DMG", 1000, "$dmg$ prefix — PBKDF2-SHA1 + 3DES/AES verifier"}}
+	case strings.HasPrefix(v, "$monero$0*"):
+		return []candidate{{"Monero keys wallet", 1000, "$monero$0 CryptoNight v0 + ChaCha verifier"}}
 	case strings.HasPrefix(v, "$bitwarden$"):
 		return []candidate{{"Bitwarden vault", 1000, "$bitwarden$ prefix — layered PBKDF2-SHA256"}}
 	case strings.HasPrefix(v, "$itunes_backup$"):
@@ -1619,6 +1631,18 @@ func detectHashTypes(text string) []string {
 	if strings.HasPrefix(t, "$telegram$0*") {
 		return []string{"telegram-passcode"}
 	}
+	if strings.HasPrefix(t, "$telegram$1*") || strings.HasPrefix(t, "$telegram$2*") {
+		return []string{"telegram-desktop"}
+	}
+	if strings.HasPrefix(t, "$signal$") {
+		return []string{"signal"}
+	}
+	if strings.HasPrefix(t, "$keychain$*") {
+		return []string{"macos-keychain"}
+	}
+	if strings.HasPrefix(t, "$vnc$*") {
+		return []string{"vnc"}
+	}
 	if strings.HasPrefix(t, "$sm3$") {
 		return []string{"sm3crypt"}
 	}
@@ -1716,6 +1740,12 @@ func detectHashTypes(text string) []string {
 	}
 	if strings.HasPrefix(t, "$bitcoin$") {
 		return []string{"bitcoin"}
+	}
+	if strings.HasPrefix(t, "$dmg$") {
+		return []string{"dmg"}
+	}
+	if strings.HasPrefix(t, "$monero$0*") {
+		return []string{"monero"}
 	}
 	if strings.HasPrefix(t, "$bitwarden$") {
 		return []string{"bitwarden"}

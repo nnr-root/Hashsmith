@@ -241,6 +241,18 @@ static const char *kMSL =
 "    else if (cmp<0) hi=mid-1; else lo=mid+1;\n"
 "  }\n"
 "}\n"
+"kernel void md4maskmulti(device const uchar* sets [[buffer(0)]], device const uint* setOff [[buffer(1)]], constant uint& wordLen [[buffer(2)]], constant ulong& startIdx [[buffer(3)]], constant uint& count [[buffer(4)]], device const uint* targets [[buffer(5)]], constant uint& nTargets [[buffer(6)]], device atomic_uint* foundFlag [[buffer(7)]], device ulong* foundIdx [[buffer(8)]], uint gid [[thread_position_in_grid]]) {\n"
+"  if (gid>=count) return; ulong idx=startIdx+(ulong)gid; uchar msg[64]; for (uint i=0;i<64;i++) msg[i]=0; ulong t=idx;\n"
+"  for (int p=(int)wordLen-1;p>=0;p--){ uint off=setOff[p]; uint sz=setOff[p+1]-off; msg[p]=sets[off+(uint)(t%(ulong)sz)]; t/=(ulong)sz; }\n"
+"  build_block(msg,wordLen);\n"
+"  uint M[16]; for (uint i=0;i<16;i++) M[i]=msg[i*4]|(uint(msg[i*4+1])<<8)|(uint(msg[i*4+2])<<16)|(uint(msg[i*4+3])<<24);\n"
+"  uint H[4]; md4_compress(M,H[0],H[1],H[2],H[3]);\n"
+"  int lo=0, hi=(int)nTargets-1;\n"
+"  while (lo<=hi){ int mid=(lo+hi)>>1; int cmp=0;\n"
+"    for (int j=0;j<4;j++){ uint tv=targets[mid*4+j]; if (H[j]!=tv){ cmp=(H[j]<tv)?-1:1; break; } }\n"
+"    if (cmp==0){ if (atomic_fetch_or_explicit(&foundFlag[mid],1u,memory_order_relaxed)==0u) foundIdx[mid]=idx; break; }\n"
+"    else if (cmp<0) hi=mid-1; else lo=mid+1; }\n"
+"}\n"
 "kernel void sha256mask(device const uchar* sets [[buffer(0)]], device const uint* setOff [[buffer(1)]], constant uint& wordLen [[buffer(2)]], constant ulong& startIdx [[buffer(3)]], constant uint& count [[buffer(4)]], device const uchar* target [[buffer(5)]], device atomic_uint* found [[buffer(6)]], device ulong* foundIdx [[buffer(7)]], uint gid [[thread_position_in_grid]]) {\n"
 "  if (gid>=count) return; ulong idx=startIdx+(ulong)gid; uchar msg[64]; for (uint i=0;i<64;i++) msg[i]=0; ulong t=idx;\n"
 "  for (int p=(int)wordLen-1;p>=0;p--){ uint off=setOff[p]; uint sz=setOff[p+1]-off; msg[p]=sets[off+(uint)(t%(ulong)sz)]; t/=(ulong)sz; }\n"
@@ -295,6 +307,7 @@ typedef struct {
     id<MTLComputePipelineState> pipeShaMaskMulti;
     id<MTLComputePipelineState> pipeSha1Mask;
     id<MTLComputePipelineState> pipeSha1MaskMulti;
+    id<MTLComputePipelineState> pipeMd4MaskMulti;
     char devName[128];
 } hs_ctx;
 
@@ -334,10 +347,13 @@ void *hs_metal_init(char *errbuf, int errlen) {
         if (!p9) return NULL;
         id<MTLComputePipelineState> p10 = mkpipe(dev, lib, @"sha1maskmulti", errbuf, errlen);
         if (!p10) return NULL;
+        id<MTLComputePipelineState> p11 = mkpipe(dev, lib, @"md4maskmulti", errbuf, errlen);
+        if (!p11) return NULL;
         hs_ctx *ctx = (hs_ctx *)calloc(1, sizeof(hs_ctx));
         ctx->dev = dev; ctx->queue = [dev newCommandQueue]; ctx->pipe = p1; ctx->pipeBrute = p2; ctx->pipeMask = p3; ctx->pipeMaskMulti = p4;
         ctx->pipeNtlmMask = p5; ctx->pipeNtlmMaskMulti = p6; ctx->pipeShaMask = p7; ctx->pipeShaMaskMulti = p8;
         ctx->pipeSha1Mask = p9; ctx->pipeSha1MaskMulti = p10;
+        ctx->pipeMd4MaskMulti = p11;
         strncpy(ctx->devName, [[dev name] UTF8String], sizeof(ctx->devName)-1);
         return ctx;
     }
@@ -666,6 +682,7 @@ int hs_metal_sweep_multi(void *c, int algo,
             case 1: pipe = ctx->pipeNtlmMaskMulti; break;
             case 2: pipe = ctx->pipeShaMaskMulti; break;
             case 3: pipe = ctx->pipeSha1MaskMulti; break;
+            case 4: pipe = ctx->pipeMd4MaskMulti; break;
             default: pipe = ctx->pipeMaskMulti; break;
         }
         // Buffers shared across every in-flight dispatch (allocated once).

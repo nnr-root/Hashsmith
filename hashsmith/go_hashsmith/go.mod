@@ -3,9 +3,11 @@ module hashsmith-go
 go 1.25.0
 
 require (
+	ekyu.moe/cryptonight v0.3.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/fatih/color v1.19.0
 	github.com/schollz/progressbar/v3 v3.19.0
+	github.com/syndtr/goleveldb v1.0.0
 	github.com/xdg-go/stringprep v1.0.3
 	golang.org/x/crypto v0.31.0
 	golang.org/x/text v0.21.0
@@ -13,7 +15,10 @@ require (
 )
 
 require (
+	github.com/aead/skein v0.0.0-20160722084837-9365ae6e95d2 // indirect
+	github.com/dchest/blake256 v1.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/golang/snappy v0.0.0-20180518054509-2e65f85255db // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

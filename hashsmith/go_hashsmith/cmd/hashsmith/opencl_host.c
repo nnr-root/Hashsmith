@@ -13,15 +13,15 @@
 #include "opencl_host.h"
 
 // Kernel ids must match the Go side.
-static const char *kNames[9] = {
+static const char *kNames[10] = {
     "md5mask","md5maskmulti","ntlmmask","ntlmmaskmulti",
-    "sha256mask","sha256maskmulti","sha1mask","sha1maskmulti","md5k"};
+    "sha256mask","sha256maskmulti","sha1mask","sha1maskmulti","md5k","md4maskmulti"};
 
 typedef struct {
     cl_context ctx;
     cl_command_queue queue;
     cl_program prog;
-    cl_kernel kernels[9];
+    cl_kernel kernels[10];
     char name[128];
 } hs_ocl;
 
@@ -50,7 +50,7 @@ void *hs_ocl_init(const char *src, char *err, int errlen) {
     }
     hs_ocl *h = (hs_ocl *)calloc(1, sizeof(hs_ocl));
     h->ctx = ctx; h->queue = q; h->prog = prog;
-    for (int i = 0; i < 9; i++) {
+    for (int i = 0; i < 10; i++) {
         h->kernels[i] = clCreateKernel(prog, kNames[i], &e);
         if (e != CL_SUCCESS) { snprintf(err, errlen, "kernel %s missing", kNames[i]); free(h); return NULL; }
     }

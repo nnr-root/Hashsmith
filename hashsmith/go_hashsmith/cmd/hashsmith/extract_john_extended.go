@@ -282,7 +282,70 @@ func extractBitcoinRecords(path string) ([]string, error) {
 		}
 		db.Close()
 	}
-	return nil, errors.New("unsupported wallet.dat database (SQLite wallets are supported; Berkeley DB requires conversion)")
+	b, readErr := readExtractorFile(path)
+	if readErr != nil {
+		return nil, readErr
+	}
+	if !isBerkeleyDBFile(b) {
+		return nil, errors.New("unsupported wallet.dat database (expected Bitcoin Core SQLite or Berkeley DB)")
+	}
+	records := carveBitcoinBerkeleyMasterKeys(b)
+	if len(records) == 0 {
+		return nil, errors.New("Berkeley DB wallet contains no supported encrypted master-key record")
+	}
+	return records, nil
+}
+
+func isBerkeleyDBFile(data []byte) bool {
+	if len(data) < 16 {
+		return false
+	}
+	const (
+		btreeMagic = uint32(0x00053162)
+		hashMagic  = uint32(0x00061561)
+	)
+	le := binary.LittleEndian.Uint32(data[12:16])
+	be := binary.BigEndian.Uint32(data[12:16])
+	return le == btreeMagic || le == hashMagic || be == btreeMagic || be == hashMagic
+}
+
+// Berkeley DB leaf pages keep each key and value as separate page items, so
+// decoding the entire B-tree is unnecessary for the one record we need. A
+// serialized Bitcoin CMasterKey value has a highly constrained structure:
+// compact-size encrypted key (48/80 bytes), 8-byte salt, method 0, iteration
+// count, and an empty derivation-parameters vector. Carving that structure is
+// endian-independent at the database-page layer and still validates every
+// Bitcoin serialization field before emitting a record.
+func carveBitcoinBerkeleyMasterKeys(data []byte) []string {
+	var out []string
+	for at := 16; at < len(data); at++ {
+		if data[at] != 48 && data[at] != 80 {
+			continue
+		}
+		end := at + 1 + int(data[at]) + 1 + 8 + 4 + 4 + 1
+		if end > len(data) {
+			continue
+		}
+		value := data[at:end]
+		encrypted, rest, ok := bitcoinCompactBytes(value)
+		if !ok || (len(encrypted) != 48 && len(encrypted) != 80) {
+			continue
+		}
+		salt, rest, ok := bitcoinCompactBytes(rest)
+		if !ok || len(salt) != 8 || len(rest) < 9 || rest[8] != 0 {
+			continue
+		}
+		method := binary.LittleEndian.Uint32(rest[:4])
+		iterations := binary.LittleEndian.Uint32(rest[4:8])
+		if method != 0 || iterations < 1 || iterations > maxKDFIterations {
+			continue
+		}
+		if record, ok := bitcoinMasterKeyRecord(value); ok {
+			out = append(out, record)
+			at = end - 1
+		}
+	}
+	return uniqueNonEmpty(out)
 }
 
 func bitcoinCompactBytes(data []byte) ([]byte, []byte, bool) {

@@ -20,8 +20,8 @@ func extractorFixture(t *testing.T, name string, data []byte) string {
 }
 
 func TestExtractorRegistryIsUniqueAndRoutable(t *testing.T) {
-	if got := len(universalExtractorRegistry); got != 42 {
-		t.Fatalf("extractor registry has %d entries, want 42", got)
+	if got := len(universalExtractorRegistry); got != 47 {
+		t.Fatalf("extractor registry has %d entries, want 47", got)
 	}
 	seen := map[string]bool{}
 	for _, d := range universalExtractorRegistry {
