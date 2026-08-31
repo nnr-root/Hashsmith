@@ -8,6 +8,29 @@ are not specified in implementable detail here.
 
 ---
 
+> **ERRATUM (added after Phase 1 implementation, 2026-08-31):** Several
+> claims below did not survive contact with implementation and measurement.
+> The text is left as originally written; this note corrects it rather than
+> rewriting history.
+>
+> - **§2.3** ("Go's `crypto/md5` ships no arm64 assembly") is **false**.
+>   `md5block_arm64.s` exists in the Go standard library. The projected
+>   headroom from replacing a "generic" block function with a hand-written
+>   one never existed on that basis — MD5's arm64 assembly is simply not as
+>   fast as a dedicated SIMD-interleaved core, which is a different and much
+>   narrower argument than "no assembly at all."
+> - **§2.4**'s "JtR ~250–400 MH/s, ~25–40x gap" was an unverified estimate
+>   pulled from general knowledge, not a measurement taken on this or any
+>   comparable machine. Treat it as an order-of-magnitude guess, not a
+>   benchmark result.
+> - **§5.6**'s 100 MH/s floor and 250 MH/s parity target were set before any
+>   Phase 1 measurement existed and are retired as acceptance criteria.
+> - The actual measured outcome of Phase 1 lives in
+>   `docs/superpowers/notes/2026-08-31-phase1-measurements.md` — use that
+>   document, not the numbers below, for anything load-bearing.
+
+---
+
 ## 1. Goal
 
 Make Hashsmith a tool a working password cracker would choose over John the

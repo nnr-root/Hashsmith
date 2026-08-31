@@ -1467,7 +1467,7 @@ get a decision before starting any further core work.
 - Spec §4.4 (CI) → Task 4
 - Spec §4.5 (Phase 0 acceptance) → Tasks 1–4; verified in Task 1 Step 4, Task 3 Step 6, Task 4 Step 3
 - Spec §5.4 (SIMD cores, priority 1 = MD5) → Tasks 5/5b (spikes), 7 (productionize)
-- Spec §5.5 (correctness strategy) → Task 7 Steps 3–4: differential against `crypto/md5` at every length 0–55 on all 20 lanes, cross-chain lane independence, and the same suite run on both the NEON and fallback builds; Task 4's cross-compile job proves the fallback builds everywhere
+- Spec §5.5 (correctness strategy) → Task 7 Steps 3–4: differential against `crypto/md5` at every length 0–55 on all 20 lanes, cross-chain lane independence, and the same suite run on both the NEON and fallback builds. Task 4's cross-compile job builds the fallback for every target but does not run it — it cannot substitute for actually executing the suite on the fallback path; see the deviation entry below for what §5.5 still lacks.
 - Spec §5.6 (acceptance criteria) → Task 9, **which is required to restate them**: the 100 MH/s floor was set before any measurement and is almost certainly unreachable on this CPU
 - Spec §6 (Phase 2/3 roadmap) → out of scope for this plan
 
@@ -1488,6 +1488,37 @@ get a decision before starting any further core work.
    untouched — same gain, far smaller blast radius.
 4. **The pure-Go interleaved core (originally Task 9) is cut.** Measured at
    1.27–1.76 MH/s against a 4.27 MH/s baseline — slower, from register spilling.
+5. **§5.5's correctness strategy was 3-of-4 unmet.** Of the four numbered
+   items in spec §5.5, only item 3 (lane-independence, shipped as
+   `TestMD5GroupLanesAreIndependent`) was implemented as specified. Items 1,
+   2, and 4 were not:
+   - §5.5.1 calls for a differential property test across every length 0–256
+     (shipped only 0–55, matching this format's one-block limit — acceptable)
+     *and* across every lane-count remainder (a batch of 1, 2, 3, ...
+     candidates must match a full batch). The remainder half was never added:
+     `TestMD5GroupMatchesCryptoMD5` always fills the full 20-lane group, so no
+     CI test exercises a partially-filled group. This is the exact gap a
+     later review flagged: the portable fallback's md5Group, doubling as the
+     test oracle, read `tb.length` bytes from every lane via `candidateAt`
+     instead of each lane's own encoded bit length, so it silently hashed the
+     wrong thing on lanes `fillFromSegment` had cleaned to the empty message
+     — hiding a real padding-lane false-hit bug from CI on amd64 (the only
+     architecture CI runs). This wave's Item 1 fixes the oracle to decode
+     each lane from its own transposed words, which is a necessary
+     precondition for a real §5.5.1 remainder test but is not that test
+     itself — the dedicated 1/2/3-lane-remainder differential §5.5.1 asks for
+     still does not exist.
+   - §5.5.2's requirement that "the existing self-test vectors run against the
+     SIMD path as well as the portable path" was not implemented as written:
+     no test round-trips the standard known-answer vectors through `md5Group`
+     specifically; correctness there rests only on the fast-path integration
+     tests and the differential test above.
+   - §5.5.4's build flag that "forces the generic core so the same suite
+     proves both paths agree" does not exist. Fallback coverage today comes
+     only from cross-compiling to non-arm64 (the `!arm64` build tag on
+     `md5neon_generic.go` selects it naturally) — there is no way to force
+     the generic path on an arm64 machine to compare it against the NEON path
+     in the same run.
 
 **Known deferrals, to be planned separately once Task 9 reports:**
 - MD4/NTLM core, same structure as Task 7 (NTLM dominates Active Directory work)
