@@ -46,9 +46,11 @@ func wordIndex(i, w int) int {
 }
 
 // reset prepares the batch for candidates of candidateLen bytes, writing a
-// valid padded block into EVERY lane. Unused lanes therefore hash an empty
-// message rather than stale bytes from the previous group, which could
-// otherwise produce a spurious hit.
+// valid padded block into EVERY lane. This guarantee holds only for the fill
+// that immediately follows reset: on a batch reused across groups (the
+// intended "reset once, fill repeatedly" calling convention), it is
+// fillFromSegment's job to keep unused lanes clean on every partial group —
+// see the comment there. Do not assume the reset-time guarantee persists.
 func (tb *transposedBatch) reset(candidateLen int) error {
 	if !transposedFixedLenOK(candidateLen) {
 		return errTransposedLen
@@ -69,6 +71,17 @@ func (tb *transposedBatch) reset(candidateLen int) error {
 // of the mixed-radix segment `sets`, returning how many it wrote. It allocates
 // nothing: candidate bytes are decoded into a stack buffer and packed straight
 // into their interleaved slots.
+//
+// fillFromSegment owns the "unused lanes are harmless" invariant across
+// reuse, not just after reset: on a batch that is reset once and filled
+// repeatedly (walking a segment group by group via `from`), a shrinking
+// final fill would otherwise leave lanes n..neonGroup-1 holding the PREVIOUS
+// call's candidate bytes and nonzero bit length — a valid-looking block the
+// vector core will still hash, and a stale match would be reported as a hit
+// for a candidate that was never tried. So whenever n < neonGroup, the
+// leftover lanes are reset to the empty-message block (all words zero except
+// word 0 = 0x80) before returning. This only runs on the final partial group
+// of a segment; a full group pays nothing extra.
 func (tb *transposedBatch) fillFromSegment(sets [][]byte, from int64) int {
 	total := maskKeyspace(sets)
 	n := 0
@@ -96,6 +109,13 @@ func (tb *transposedBatch) fillFromSegment(sets [][]byte, from int64) int {
 		tb.words[wordIndex(n, full)] = tail
 		tb.words[wordIndex(n, 14)] = bitLen
 		n++
+	}
+	// Clean any leftover lanes from a previous, longer fill of this batch.
+	for i := n; i < neonGroup; i++ {
+		for w := 0; w < 16; w++ {
+			tb.words[wordIndex(i, w)] = 0
+		}
+		tb.words[wordIndex(i, 0)] = 0x80
 	}
 	tb.n = n
 	return n

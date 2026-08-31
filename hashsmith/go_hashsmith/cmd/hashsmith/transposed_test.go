@@ -95,6 +95,37 @@ func TestTransposedFillDoesNotAllocate(t *testing.T) {
 	}
 }
 
+// A batch reused across groups must not leak the previous group's candidates
+// into lanes the new fill does not reach. Those lanes are hashed by the vector
+// core, so a stale lane can be reported as a hit for a candidate that was
+// never tried.
+func TestTransposedReuseClearsStaleLanes(t *testing.T) {
+	sets := [][]byte{[]byte("abc"), []byte("de"), []byte("fg")} // 12 candidates
+	tb := newTransposedBatch()
+	if err := tb.reset(len(sets)); err != nil {
+		t.Fatal(err)
+	}
+	// First fill: as many as the segment provides.
+	first := tb.fillFromSegment(sets, 0)
+	if first == 0 {
+		t.Fatal("first fill wrote nothing")
+	}
+	// Second fill near the end of the segment: fewer candidates, no reset.
+	second := tb.fillFromSegment(sets, int64(maskKeyspace(sets))-2)
+	if second >= neonGroup {
+		t.Fatalf("second fill wrote %d, expected a partial group", second)
+	}
+	for i := second; i < neonGroup; i++ {
+		chain, lane := i/neonLanes, i%neonLanes
+		if got := tb.words[chain*64+0*4+lane]; got != 0x80 {
+			t.Errorf("lane %d word0 = %#x, want 0x80 (stale candidate left behind)", i, got)
+		}
+		if got := tb.words[chain*64+14*4+lane]; got != 0 {
+			t.Errorf("lane %d word14 = %d, want 0 (stale bit length left behind)", i, got)
+		}
+	}
+}
+
 func TestTransposedFixedLenOK(t *testing.T) {
 	for _, c := range []struct {
 		n    int
