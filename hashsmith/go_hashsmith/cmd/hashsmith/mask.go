@@ -13,6 +13,8 @@ package main
 import (
 	"context"
 	"errors"
+	"math"
+	"math/big"
 	"strings"
 )
 
@@ -130,16 +132,71 @@ func expandCustomSet(def string) string {
 	return b.String()
 }
 
-// maskKeyspace returns the total number of candidates for a set list.
+// satMul multiplies two non-negative int64s, saturating at math.MaxInt64
+// instead of wrapping. The engine indexes candidates with int64 throughout
+// (maskIdxInto is a mixed-radix decode that is correct for any index below
+// the true keyspace), so a saturated bound still enumerates only genuine
+// candidates — it is an incomplete-but-correct sweep, never a wrong one.
+func satMul(a, b int64) int64 {
+	if a < 0 || b < 0 {
+		// Defensive: keyspace math never produces negative operands. Treat
+		// a negative as "unrepresentable" rather than let it flip the sign.
+		return math.MaxInt64
+	}
+	if a == 0 || b == 0 {
+		return 0
+	}
+	if a > math.MaxInt64/b {
+		return math.MaxInt64
+	}
+	return a * b
+}
+
+// satAdd adds two non-negative int64s, saturating at math.MaxInt64 instead
+// of wrapping. See satMul for why saturation (not an error) is correct here.
+func satAdd(a, b int64) int64 {
+	if a < 0 || b < 0 {
+		return math.MaxInt64
+	}
+	if a > math.MaxInt64-b {
+		return math.MaxInt64
+	}
+	return a + b
+}
+
+// maskKeyspace returns the total number of candidates for a set list,
+// saturating at math.MaxInt64 rather than silently wrapping when the true
+// count (e.g. 95^10 for a 10-position ?a mask) exceeds int64 range. See
+// satMul for why a saturated bound is still correct, just incomplete.
 func maskKeyspace(sets [][]byte) int64 {
 	total := int64(1)
 	for _, s := range sets {
 		if len(s) == 0 {
 			return 0
 		}
-		total *= int64(len(s))
+		total = satMul(total, int64(len(s)))
 	}
 	return total
+}
+
+// maxInt64Big is math.MaxInt64 as a *big.Int, used by maskKeyspaceExact to
+// detect when maskKeyspace's saturated result is a lossy ceiling.
+var maxInt64Big = big.NewInt(math.MaxInt64)
+
+// maskKeyspaceExact returns the true candidate count for a set list with no
+// overflow (via math/big), and whether that count exceeds math.MaxInt64 —
+// i.e. whether maskKeyspace/calcMaskTotal had to saturate for this mask.
+// Used only for the user-facing "this sweep is not exhaustive" warning; the
+// hot path always uses the saturating int64 maskKeyspace.
+func maskKeyspaceExact(sets [][]byte) (exact *big.Int, overflowed bool) {
+	total := big.NewInt(1)
+	for _, s := range sets {
+		if len(s) == 0 {
+			return big.NewInt(0), false
+		}
+		total.Mul(total, big.NewInt(int64(len(s))))
+	}
+	return total, total.Cmp(maxInt64Big) > 0
 }
 
 // calcMaskTotal is the progress-bar total for a mask (sum over increment lengths).
@@ -157,9 +214,34 @@ func calcMaskTotal(cfg *maskConfig) int64 {
 		lo = 1
 	}
 	for l := lo; l <= len(sets); l++ {
-		total += maskKeyspace(sets[:l])
+		total = satAdd(total, maskKeyspace(sets[:l]))
 	}
 	return total
+}
+
+// calcMaskTotalExact mirrors calcMaskTotal with math/big so it can never
+// overflow, giving the true keyspace size regardless of int64 range. It
+// exists solely to detect and report when calcMaskTotal had to saturate.
+func calcMaskTotalExact(cfg *maskConfig) (*big.Int, bool) {
+	sets, err := parseMask(cfg)
+	if err != nil {
+		return big.NewInt(0), false
+	}
+	if !cfg.increment {
+		return maskKeyspaceExact(sets)
+	}
+	lo := cfg.incMin
+	if lo < 1 {
+		lo = 1
+	}
+	total := big.NewInt(0)
+	overflowed := false
+	for l := lo; l <= len(sets); l++ {
+		exact, of := maskKeyspaceExact(sets[:l])
+		total.Add(total, exact)
+		overflowed = overflowed || of
+	}
+	return total, overflowed || total.Cmp(maxInt64Big) > 0
 }
 
 // maskIdxToStr maps a linear index to the candidate for a mixed-radix set list.

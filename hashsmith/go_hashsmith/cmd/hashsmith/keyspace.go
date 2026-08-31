@@ -35,7 +35,10 @@ func newLayout(segments [][][]byte) *keyspaceLayout {
 	var off int64
 	for _, seg := range segments {
 		l.offsets = append(l.offsets, off)
-		off += maskKeyspace(seg)
+		// satAdd: maskKeyspace already saturates per-segment; accumulating
+		// across segments (increment-mode masks, multi-length brute-force)
+		// can itself overflow int64, so saturate here too.
+		off = satAdd(off, maskKeyspace(seg))
 	}
 	l.total = off
 	return l
