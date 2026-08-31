@@ -15,7 +15,7 @@ package main
 
 func hybridLayout(words []string, sets [][]byte, maskFirst bool) *keyspaceLayout {
 	mtotal := maskKeyspace(sets)
-	layout := &keyspaceLayout{total: int64(len(words)) * mtotal}
+	layout := &keyspaceLayout{total: satMul(int64(len(words)), mtotal)}
 	if mtotal == 0 || len(words) == 0 {
 		return layout
 	}

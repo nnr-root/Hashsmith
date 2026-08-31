@@ -493,7 +493,7 @@ func gpuBatchMaskHash(typ, mode string, mc *maskConfig, charset string, minLen, 
 	color.New(themeAttr, color.Bold).Fprintf(os.Stderr, "\n→ Testing as %s (GPU)\n", typ)
 	var total int64
 	for _, sets := range sweeps {
-		total += maskKeyspace(sets)
+		total = satAdd(total, maskKeyspace(sets))
 	}
 	var gpuAttempts int64
 	bar := newCrackBar(total)

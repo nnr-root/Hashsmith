@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 3 * * *"   # nightly slow-KDF vectors
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Build
+        run: cd hashsmith/go_hashsmith && CGO_ENABLED=0 go build ./...
+      - name: Vet
+        run: cd hashsmith/go_hashsmith && go vet ./...
+      - name: Test (fast vectors)
+        run: cd hashsmith/go_hashsmith && go test -timeout 5m ./...
+
+  test-arm64:
+    # ubuntu-24.04-arm is GitHub's hosted arm64 runner. This is the only job
+    # in this workflow that actually EXECUTES the NEON assembly: the `test`
+    # job above runs on amd64, where md5Group resolves to the generic
+    # fallback, and the `cross-compile` job below builds the arm64 binary
+    # but discards it without ever running it. Without this lane, the 4000+
+    # lines of arm64 MD5 NEON assembly in md5neon_arm64.s would never be
+    # exercised by CI. Mirrors the `test` job's steps.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Build
+        run: cd hashsmith/go_hashsmith && CGO_ENABLED=0 go build ./...
+      - name: Vet
+        run: cd hashsmith/go_hashsmith && go vet ./...
+      - name: Test (fast vectors)
+        run: cd hashsmith/go_hashsmith && go test -timeout 5m ./...
+
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      # The race detector is what guards the concurrent keyspace runner added
+      # in Phase 1. Two tests are excluded: TestBenchTypeRespectsBudgetForSlowKDF
+      # and TestFastVectorsStayWithinBudget. Both are wall-clock budget
+      # assertions, and a race build carries ~10x instrumentation overhead —
+      # under -race such a test measures the instrumentation, not the code, so
+      # an absolute millisecond threshold isn't merely strained there, it's
+      # meaningless. Do not "fix" this by loosening either budget: that would
+      # weaken these tests in the normal lane, which is where they actually do
+      # their job (e.g. catching a self-test vector that silently became a
+      # high-iteration KDF). Excluding them from a lane where they cannot be
+      # meaningful is the correct trade, applied consistently to both. Races in
+      # this file's code are still covered by the other tests in this lane.
+      - name: Test (race detector)
+        run: |
+          cd hashsmith/go_hashsmith
+          go test -race -timeout 20m \
+            -skip 'TestBenchTypeRespectsBudgetForSlowKDF|TestFastVectorsStayWithinBudget' ./...
+
+  cross-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Cross-compile all targets
+        run: |
+          cd hashsmith/go_hashsmith
+          for target in linux/amd64 linux/arm64 windows/amd64 darwin/arm64; do
+            echo "building $target"
+            GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 \
+              go build -o /dev/null ./cmd/hashsmith
+          done
+
+  slow-vectors:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Test (all vectors incl. slow KDFs)
+        run: cd hashsmith/go_hashsmith && go test -tags slowtest -timeout 60m ./...

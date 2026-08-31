@@ -276,27 +276,33 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 		if n, err := countWordlistLines(wordlist); err == nil {
 			total = n
 			if rules != nil {
-				total *= int64(1 + rules.count())
+				total = satMul(total, int64(1+rules.count()))
 			}
 		}
 	case "brute", "markov":
 		total = calcBruteTotal(charset, minLen, maxLen)
+		if exact, overflowed := calcBruteTotalExact(charset, minLen, maxLen); overflowed {
+			warnKeyspaceNotExhaustive(exact)
+		}
 	case "mask":
 		if mc != nil {
 			total = calcMaskTotal(mc)
+			if exact, overflowed := calcMaskTotalExact(mc); overflowed {
+				warnKeyspaceNotExhaustive(exact)
+			}
 		}
 	case "hybrid":
 		if mc != nil {
 			if n, err := countWordlistLines(wordlist); err == nil {
 				if sets, e := parseMask(mc); e == nil {
-					total = n * maskKeyspace(sets)
+					total = satMul(n, maskKeyspace(sets))
 				}
 			}
 		}
 	case "combinator":
 		if a, e1 := countWordlistLines(wordlist); e1 == nil {
 			if b, e2 := countWordlistLines(wordlist2); e2 == nil {
-				total = a * b
+				total = satMul(a, b)
 			}
 		}
 	}

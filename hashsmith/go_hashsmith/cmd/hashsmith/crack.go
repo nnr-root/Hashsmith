@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"math"
+	"math/big"
 	"os"
 	"os/signal"
 	"runtime"
@@ -38,6 +40,38 @@ const (
 	dictBatchSize = 512  // words per batch sent over channel
 	ctxCheckEvery = 1024 // brute-force iterations between context polls
 )
+
+// md5TargetBytes decodes a hex MD5 digest into the fixed-size array
+// runLayoutFastMD5 compares against. It returns false for anything that
+// isn't exactly 16 bytes of hex — the fast path is simply skipped in that
+// case, falling back to the scalar path's own (already-validated) handling.
+func md5TargetBytes(targetHex string) ([16]byte, bool) {
+	var t [16]byte
+	b, err := hex.DecodeString(strings.TrimSpace(targetHex))
+	if err != nil || len(b) != 16 {
+		return t, false
+	}
+	copy(t[:], b)
+	return t, true
+}
+
+// runBruteOrMaskLayout dispatches a brute-force or mask layout run to the
+// NEON fast path when it is eligible and no session resume is in play, else
+// to the existing scalar, session-aware runner. This is the only seam
+// between the two: every other format, salt, and attack mode keeps exactly
+// today's code path, since fastPathEligible returns false for all of them.
+func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *sessionState,
+	resumeFrom int64, workers int, atomicAttempts *int64,
+	typ, salt, targetHash string, verify func(string) bool) (string, bool, error) {
+
+	if sess == nil && fastPathEligible(typ, salt, layout) {
+		if target, ok := md5TargetBytes(targetHash); ok {
+			pw, err := runLayoutFastMD5(ctx, layout, resumeFrom, workers, atomicAttempts, nil, target)
+			return pw, ctx.Err() != nil, err
+		}
+	}
+	return runSessionLayout(ctx, layout, sess, resumeFrom, workers, atomicAttempts, verify)
+}
 
 // crackedResult carries the found password and an optional human-readable label
 // describing which mangling rule produced it (empty when no rule was applied).
@@ -262,23 +296,29 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			total = n
 			if rules != nil {
 				// Each word generates up to rules.count() extra candidates.
-				total *= int64(1 + rules.count())
+				total = satMul(total, int64(1+rules.count()))
 			}
 		}
 	} else if m == "brute" || m == "markov" {
 		total = calcBruteTotal(charset, minLen, maxLen)
+		if exact, overflowed := calcBruteTotalExact(charset, minLen, maxLen); overflowed {
+			warnKeyspaceNotExhaustive(exact)
+		}
 	} else if m == "mask" && mc != nil {
 		total = calcMaskTotal(mc)
+		if exact, overflowed := calcMaskTotalExact(mc); overflowed {
+			warnKeyspaceNotExhaustive(exact)
+		}
 	} else if m == "hybrid" && mc != nil {
 		if n, err := countWordlistLines(wordlist); err == nil {
 			if sets, e := parseMask(mc); e == nil {
-				total = n * maskKeyspace(sets)
+				total = satMul(n, maskKeyspace(sets))
 			}
 		}
 	} else if m == "combinator" && cc != nil && cc.wordlist2 != "" {
 		if a, e1 := countWordlistLines(wordlist); e1 == nil {
 			if b, e2 := countWordlistLines(cc.wordlist2); e2 == nil {
-				total = a * b
+				total = satMul(a, b)
 			}
 		}
 	}
@@ -375,12 +415,12 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				_, reason := activeGPUBackend()
 				clrYellow.Fprintf(os.Stderr,
 					"GPU brute unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
-				pw, interrupted, err = runSessionLayout(runCtx, bruteLayout(charset, minLen, maxLen),
-					sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+				pw, interrupted, err = runBruteOrMaskLayout(runCtx, bruteLayout(charset, minLen, maxLen),
+					sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 			}
 		} else {
-			pw, interrupted, err = runSessionLayout(runCtx, bruteLayout(charset, minLen, maxLen),
-				sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+			pw, interrupted, err = runBruteOrMaskLayout(runCtx, bruteLayout(charset, minLen, maxLen),
+				sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 		}
 		result = crackedResult{password: pw}
 	case "mask":
@@ -401,12 +441,12 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				_, reason := activeGPUBackend()
 				clrYellow.Fprintf(os.Stderr,
 					"GPU mask unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
-				pw, interrupted, err = runSessionLayout(runCtx, layout,
-					sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+				pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
+					sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 			}
 		} else {
-			pw, interrupted, err = runSessionLayout(runCtx, layout,
-				sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+			pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
+				sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 		}
 		result = crackedResult{password: pw}
 	case "markov":
@@ -833,8 +873,30 @@ func formatRate(r float64) string {
 	}
 }
 
+// warnKeyspaceNotExhaustive tells the user, once, that the requested mask or
+// brute-force range is larger than the engine can enumerate. The engine
+// indexes every candidate with an int64 (maskIdxInto is a pure mixed-radix
+// decode, correct for any index below the true keyspace), so the run still
+// proceeds and every candidate it tries is genuine — it just cannot reach
+// the full space in one pass. At ~65 MH/s even 2^63-1 candidates is on the
+// order of 4500 years, so capping the sweep (rather than refusing to start,
+// or worse, silently truncating to whatever int64 happened to wrap to) is
+// the only choice that keeps the "start a huge mask and let it run" workflow
+// usable while still being honest about what will actually be searched.
+func warnKeyspaceNotExhaustive(exact *big.Int) {
+	clrYellow.Fprintf(os.Stderr,
+		"Warning: true keyspace is %s candidates, which exceeds %d (max int64) — "+
+			"this run will only cover the first %d candidates and will NOT be exhaustive\n",
+		exact.String(), int64(math.MaxInt64), int64(math.MaxInt64))
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+// calcBruteTotal has the same overflow shape as maskKeyspace (base^length
+// summed across lengths) and is fixed the same way: saturate at
+// math.MaxInt64 via satMul/satAdd rather than silently wrap. It only feeds
+// the progress bar — the actual enumeration bound comes from keyspaceLayout
+// (bruteLayout -> newLayout), which is fixed independently in keyspace.go.
 func calcBruteTotal(charset string, minLen, maxLen int) int64 {
 	base := int64(len([]rune(charset)))
 	if base == 0 {
@@ -843,12 +905,31 @@ func calcBruteTotal(charset string, minLen, maxLen int) int64 {
 	var total, power int64
 	power = 1
 	for i := 1; i <= maxLen; i++ {
-		power *= base
+		power = satMul(power, base)
 		if i >= minLen {
-			total += power
+			total = satAdd(total, power)
 		}
 	}
 	return total
+}
+
+// calcBruteTotalExact mirrors calcBruteTotal with math/big so it can never
+// overflow, giving the true keyspace size regardless of int64 range. It
+// exists solely to detect and report when calcBruteTotal had to saturate.
+func calcBruteTotalExact(charset string, minLen, maxLen int) (*big.Int, bool) {
+	base := big.NewInt(int64(len([]rune(charset))))
+	if base.Sign() == 0 {
+		return big.NewInt(0), false
+	}
+	total := big.NewInt(0)
+	power := big.NewInt(1)
+	for i := 1; i <= maxLen; i++ {
+		power.Mul(power, base)
+		if i >= minLen {
+			total.Add(total, power)
+		}
+	}
+	return total, total.Cmp(maxInt64Big) > 0
 }
 
 // ── Hash verification ─────────────────────────────────────────────────────────

@@ -8,9 +8,12 @@ venv/
 .DS_Store
 .hashsmith-go/
 hashsmith/go_hashsmith/hashsmith
+hashsmith/go_hashsmith/cmd/hashsmith/hashsmith
 .npm-bin/
 dist/
 *.egg-info/
 *.tar.gz
 hashsmith/hashsmith
 graphify-out/
+.superpowers/
+
