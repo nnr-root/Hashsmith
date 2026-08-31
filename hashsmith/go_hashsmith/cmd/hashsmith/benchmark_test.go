@@ -87,8 +87,13 @@ func TestBenchTypeRespectsBudgetForSlowKDF(t *testing.T) {
 	// benchType pays one more op serially (its internal stride-sizing
 	// probe) before workers start, and each worker may have one op in
 	// flight past the deadline — both roughly opCost-sized under this same
-	// contention — so allow 3x opCost, plus slack for run-to-run noise.
-	allowance := budget + 3*opCost + 300*time.Millisecond
+	// contention — so allow 8x opCost, plus slack for run-to-run noise.
+	// (8x rather than 3x: measured 2-of-3 flakiness under external CPU
+	// contention, e.g. a concurrent race-detector build competing for
+	// cores. This still leaves a ~130x margin against the fixed
+	// local&1023 deadline-stride defect this test guards against, which
+	// for bcrypt would overrun by roughly 1024x opCost.)
+	allowance := budget + 8*opCost + 300*time.Millisecond
 	if elapsed > allowance {
 		t.Errorf("bcrypt benchmark overran its %v budget (opCost before=%v after=%v, allowance=%v): took %v",
 			budget, before, after, allowance, elapsed)
