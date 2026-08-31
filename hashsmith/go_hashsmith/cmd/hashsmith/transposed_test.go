@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"testing"
 )
 
@@ -226,6 +227,50 @@ func TestTransposedReuseClearsStaleLanesUTF16(t *testing.T) {
 		}
 		if got := tb.words[chain*64+14*4+lane]; got != 0 {
 			t.Errorf("lane %d word14 = %d, want 0", i, got)
+		}
+	}
+}
+
+// The generalised index formula must be a bijection for EVERY shape, not just
+// NEON's 5x4: each (candidate, word) pair maps to a distinct slot, and the
+// slots together cover the whole word array exactly once. A collision would
+// make two candidates share message words — silently corrupting digests — and
+// a gap would leave stale memory inside a message block.
+//
+// This test exists because the l=4 path is covered transitively by the rest of
+// the suite (everything is built from neonShape), so a formula that happened to
+// be right at 4 lanes and wrong at 8 would pass every other test in the package
+// right up until an 8-lane core was wired in.
+func TestTransposedShapeLayout(t *testing.T) {
+	for _, sh := range []vecShape{
+		{chains: 5, lanes: 4}, // NEON
+		{chains: 3, lanes: 8}, // AVX2
+		{chains: 2, lanes: 8},
+		{chains: 1, lanes: 4},
+	} {
+		tb := newTransposedBatch(sh)
+		wantLen := sh.chains * 16 * sh.lanes
+		if len(tb.words) != wantLen {
+			t.Fatalf("shape %+v: words len %d, want %d", sh, len(tb.words), wantLen)
+		}
+		seen := make(map[int]string, wantLen)
+		for i := 0; i < sh.group(); i++ {
+			for w := 0; w < 16; w++ {
+				idx := tb.wordIndex(i, w)
+				if idx < 0 || idx >= wantLen {
+					t.Fatalf("shape %+v: wordIndex(%d,%d) = %d, out of range [0,%d)",
+						sh, i, w, idx, wantLen)
+				}
+				if prev, dup := seen[idx]; dup {
+					t.Fatalf("shape %+v: wordIndex(%d,%d) = %d collides with %s",
+						sh, i, w, idx, prev)
+				}
+				seen[idx] = fmt.Sprintf("(cand %d, word %d)", i, w)
+			}
+		}
+		if len(seen) != wantLen {
+			t.Errorf("shape %+v: covered %d of %d slots — the mapping leaves gaps",
+				sh, len(seen), wantLen)
 		}
 	}
 }
