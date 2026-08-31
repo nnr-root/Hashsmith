@@ -1,21 +1,28 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"testing"
+
+	"golang.org/x/crypto/md4"
 )
 
 // The fast path must find exactly what the scalar path finds — same candidate,
 // same keyspace, including when the keyspace is not a multiple of the 20-wide
 // group and when the answer sits in the final partial group.
 func TestFastPathAgreesWithScalar(t *testing.T) {
+	algo, ok := fastAlgoFor("md5")
+	if !ok {
+		t.Fatal("md5 fast algo not registered")
+	}
 	for _, plain := range []string{"aaa", "abc", "zzz", "mnq"} {
 		l := bruteLayout("abcdefghijklmnopqrstuvwxyz", 3, 3)
 		sum := md5.Sum([]byte(plain))
 
 		var a1, a2 int64
-		fast, err := runLayoutFastMD5(context.Background(), l, 0, 4, &a1, nil, sum)
+		fast, err := runLayoutFast(context.Background(), l, 0, 4, &a1, nil, algo, sum)
 		if err != nil {
 			t.Fatalf("%s: fast: %v", plain, err)
 		}
@@ -42,12 +49,16 @@ func TestFastPathAgreesWithScalar(t *testing.T) {
 // lanes ever hash to md5(""), so such a target can never produce a spurious
 // hit no matter how broken the lane-count handling is.
 func TestFastPathExhaustsWithoutSpuriousHit(t *testing.T) {
+	algo, ok := fastAlgoFor("md5")
+	if !ok {
+		t.Fatal("md5 fast algo not registered")
+	}
 	l := bruteLayout("ab", 1, 3) // 2 + 4 + 8 = 14, deliberately not a multiple of 20; excludes ""
 	sum := md5.Sum([]byte(""))
 	var attempts int64
-	got, err := runLayoutFastMD5(context.Background(), l, 0, 2, &attempts, nil, sum)
+	got, err := runLayoutFast(context.Background(), l, 0, 2, &attempts, nil, algo, sum)
 	if err != nil {
-		t.Fatalf("runLayoutFastMD5: %v", err)
+		t.Fatalf("runLayoutFast: %v", err)
 	}
 	if got != "" {
 		t.Errorf("got %q, want no match", got)
@@ -69,14 +80,18 @@ func TestFastPathExhaustsWithoutSpuriousHit(t *testing.T) {
 // before the keyspace is exhausted (attempts < l.total), whereas finding
 // nothing exhausts it (attempts == l.total).
 func TestFastPathHandlesEmptyCandidate(t *testing.T) {
+	algo, ok := fastAlgoFor("md5")
+	if !ok {
+		t.Fatal("md5 fast algo not registered")
+	}
 	l := bruteLayout("ab", 0, 1)
 	if l.total == 0 {
 		t.Skip("layout does not include the empty candidate")
 	}
 	sum := md5.Sum([]byte(""))
 	var attempts int64
-	if _, err := runLayoutFastMD5(context.Background(), l, 0, 1, &attempts, nil, sum); err != nil {
-		t.Fatalf("runLayoutFastMD5: %v", err)
+	if _, err := runLayoutFast(context.Background(), l, 0, 1, &attempts, nil, algo, sum); err != nil {
+		t.Fatalf("runLayoutFast: %v", err)
 	}
 	if attempts >= l.total {
 		t.Errorf("attempts = %d, want < %d (a genuine early hit on the empty candidate, not keyspace exhaustion)", attempts, l.total)
@@ -85,13 +100,106 @@ func TestFastPathHandlesEmptyCandidate(t *testing.T) {
 
 func TestFastPathEligibility(t *testing.T) {
 	l := bruteLayout("abc", 3, 3)
-	if !fastPathEligible("md5", "", l) && md5GroupAccelerated() {
+	if _, ok := fastPathEligible("md5", "", l); !ok && md5GroupAccelerated() {
 		t.Error("plain md5 fixed-length brute should be eligible on an accelerated build")
 	}
-	if fastPathEligible("md5", "somesalt", l) {
+	if _, ok := fastPathEligible("md5", "somesalt", l); ok {
 		t.Error("salted md5 must not be eligible")
 	}
-	if fastPathEligible("sha256", "", l) {
+	if _, ok := fastPathEligible("sha256", "", l); ok {
 		t.Error("sha256 must not be eligible — there is no sha256 vector core")
+	}
+}
+
+// The fast path must find exactly what the scalar path finds, for every
+// accelerated type.
+func TestFastPathAgreesWithScalarPerAlgo(t *testing.T) {
+	if !md5GroupAccelerated() {
+		t.Skip("no vector core on this build; fastPathEligible declines everything by design")
+	}
+	cases := []struct {
+		typ    string
+		digest func(string) [16]byte
+	}{
+		{"md5", func(s string) [16]byte { return md5.Sum([]byte(s)) }},
+		{"md4", func(s string) [16]byte {
+			h := md4.New()
+			h.Write([]byte(s))
+			var d [16]byte
+			copy(d[:], h.Sum(nil))
+			return d
+		}},
+		{"ntlm", func(s string) [16]byte {
+			h := md4.New()
+			h.Write(utf16le(s))
+			var d [16]byte
+			copy(d[:], h.Sum(nil))
+			return d
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.typ, func(t *testing.T) {
+			for _, plain := range []string{"a", "zz", "cat", "wxyz"} {
+				l := bruteLayout("abcdefghijklmnopqrstuvwxyz", 1, 4)
+				algo, ok := fastPathEligible(c.typ, "", l)
+				if !ok {
+					t.Fatalf("%s should be eligible on this build", c.typ)
+				}
+				var attempts int64
+				got, err := runLayoutFast(context.Background(), l, 0, 4, &attempts, nil, algo, c.digest(plain))
+				if err != nil {
+					t.Fatalf("%s/%s: %v", c.typ, plain, err)
+				}
+				if got != plain {
+					t.Errorf("%s: got %q, want %q", c.typ, got, plain)
+				}
+			}
+		})
+	}
+}
+
+// THE ASCII GUARD. utf16le is a UTF-8 decode, so a non-ASCII charset byte
+// does NOT encode as b,0x00 — the scalar path would emit U+FFFD's bytes.
+// NTLM must decline such a layout rather than compute a different digest
+// than the rest of Hashsmith.
+func TestNTLMFastPathRejectsNonASCIICharsets(t *testing.T) {
+	if !md5GroupAccelerated() {
+		t.Skip("no vector core on this build; fastPathEligible declines everything by design")
+	}
+	ascii := bruteLayout("abc", 2, 2)
+	if _, ok := fastPathEligible("ntlm", "", ascii); !ok {
+		t.Error("ntlm over an ASCII charset should be eligible")
+	}
+	high := bruteLayout(string([]byte{'a', 0xC3, 0xFF}), 2, 2)
+	if _, ok := fastPathEligible("ntlm", "", high); ok {
+		t.Error("ntlm over a charset with bytes >= 0x80 must NOT be eligible")
+	}
+	// md4 takes raw bytes, so the same charset is fine for it.
+	if _, ok := fastPathEligible("md4", "", high); !ok {
+		t.Error("md4 over a high-byte charset should still be eligible")
+	}
+}
+
+// Proves the guard is not merely cosmetic: for a high-byte candidate the two
+// encodings genuinely differ, which is why eligibility has to exclude them.
+func TestUTF16LEDiffersFromNaiveExpansionOnHighBytes(t *testing.T) {
+	s := string([]byte{0xC3})
+	naive := []byte{0xC3, 0x00}
+	if bytes.Equal(utf16le(s), naive) {
+		t.Skip("utf16le matches naive expansion here; the ASCII guard may be unnecessary")
+	}
+	t.Logf("utf16le(%q) = %x, naive = %x — guard is load-bearing", s, utf16le(s), naive)
+}
+
+// NTLM's candidate ceiling is 27, not 55, because UTF-16LE doubles the message.
+func TestNTLMFastPathLengthCeiling(t *testing.T) {
+	if !md5GroupAccelerated() {
+		t.Skip("no vector core on this build; fastPathEligible declines everything by design")
+	}
+	if _, ok := fastPathEligible("ntlm", "", bruteLayout("ab", 27, 27)); !ok {
+		t.Error("ntlm at length 27 should be eligible")
+	}
+	if _, ok := fastPathEligible("ntlm", "", bruteLayout("ab", 28, 28)); ok {
+		t.Error("ntlm at length 28 must not be eligible (2*28 > 55)")
 	}
 }

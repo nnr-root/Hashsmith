@@ -216,46 +216,97 @@ func runLayout(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 // path's per-candidate check.
 const fastCtxCheckEvery = ctxCheckEvery / neonGroup
 
-// fastPathEligible reports whether l can be run through the NEON-accelerated
-// runLayoutFastMD5 instead of the scalar runLayout. All of the following must
-// hold:
-//   - this build has the vector core (md5GroupAccelerated());
-//   - the target type is raw MD5 with no salt — the only digest the vector
-//     core computes;
-//   - l has no gen override: a Markov (or other) generator's candidates are
-//     not mixed-radix decodable from segments, which fillFromSegment requires;
-//   - every segment's length fits one MD5 block (transposedFixedLenOK), since
-//     transposedBatch is fixed-length per reset.
-func fastPathEligible(typ, salt string, l *keyspaceLayout) bool {
-	if !md5GroupAccelerated() {
-		return false
-	}
-	if canonicalHashType(typ) != "md5" {
-		return false
-	}
-	if salt != "" {
-		return false
-	}
-	if l == nil || l.gen != nil {
-		return false
-	}
-	for _, seg := range l.segments {
-		if !transposedFixedLenOK(len(seg)) {
-			return false
-		}
-	}
-	return true
+// fastAlgo describes one algorithm the NEON fast path can run: its encoding
+// mode (how candidate bytes become message bytes — see encodeMode) and its
+// vectorised group function (neonGroup candidates hashed per call).
+type fastAlgo struct {
+	name  string
+	enc   encodeMode
+	group func(*transposedBatch, *[neonGroup][16]byte)
 }
 
-// runLayoutFastMD5 is runLayout's NEON-accelerated twin for raw unsalted MD5
-// over a fixed-length keyspace. It mirrors runLayout's chunk allocator,
-// watermark, attempt accounting and cancellation exactly, so a checkpoint
-// written by one runner resumes correctly under the other — but each worker
-// owns a transposedBatch and hashes neonGroup candidates per md5Group call
-// instead of verifying one candidate at a time.
+// fastAlgoFor returns the fast-path descriptor for a hash type, if one
+// exists. Resolved through canonicalHashType so hashcat mode numbers (e.g.
+// "900" for md4, "1000" for ntlm) and John labels route here too.
 //
-// Callers must have already confirmed fastPathEligible(typ, salt, l); this
-// function does not re-check it.
+// md4 and ntlm both run through md4Group — NTLM is MD4 over UTF-16LE(pw)
+// rather than a different digest function, so only the encoding mode
+// differs.
+func fastAlgoFor(typ string) (*fastAlgo, bool) {
+	switch canonicalHashType(typ) {
+	case "md5":
+		return &fastAlgo{name: "md5", enc: encRaw, group: md5Group}, true
+	case "md4":
+		return &fastAlgo{name: "md4", enc: encRaw, group: md4Group}, true
+	case "ntlm":
+		return &fastAlgo{name: "ntlm", enc: encUTF16LE, group: md4Group}, true
+	}
+	return nil, false
+}
+
+// fastPathEligible reports whether l can be run through the NEON-accelerated
+// runLayoutFast instead of the scalar runLayout, and if so returns the
+// algorithm descriptor to run it with. All of the following must hold:
+//   - this build has the vector core (md5GroupAccelerated());
+//   - the target type has a registered fast algorithm (fastAlgoFor) with no
+//     salt — the only digests the vector core computes;
+//   - l has no gen override: a Markov (or other) generator's candidates are
+//     not mixed-radix decodable from segments, which fillFromSegment requires;
+//   - every segment's length fits one block under the algorithm's encoding
+//     mode (transposedFixedLenOK), since transposedBatch is fixed-length per
+//     reset;
+//   - for encUTF16LE (NTLM), every byte of every charset in every segment is
+//     ASCII (< 0x80). Hashsmith's utf16le (hash.go) is a UTF-8 decode
+//     followed by a UTF-16 encode, not a naive b,0x00 byte expansion: for a
+//     non-ASCII byte the two diverge (e.g. []rune(string([]byte{0xC3})) is
+//     U+FFFD, encoding to FD FF, not C3 00). fillFromSegment's encUTF16LE
+//     path always does the naive b,0x00 expansion, so a charset containing a
+//     high byte would make the fast path compute a different digest than
+//     Hashsmith's own scalar path — silently. Declining keeps such masks on
+//     the scalar path instead.
+func fastPathEligible(typ, salt string, l *keyspaceLayout) (*fastAlgo, bool) {
+	if !md5GroupAccelerated() {
+		return nil, false
+	}
+	algo, ok := fastAlgoFor(typ)
+	if !ok {
+		return nil, false
+	}
+	if salt != "" {
+		return nil, false
+	}
+	if l == nil || l.gen != nil {
+		return nil, false
+	}
+	for _, seg := range l.segments {
+		if !transposedFixedLenOK(len(seg), algo.enc) {
+			return nil, false
+		}
+	}
+	if algo.enc == encUTF16LE {
+		for _, seg := range l.segments {
+			for _, charset := range seg {
+				for _, b := range charset {
+					if b >= 0x80 {
+						return nil, false
+					}
+				}
+			}
+		}
+	}
+	return algo, true
+}
+
+// runLayoutFast is runLayout's NEON-accelerated twin for a fast-path
+// algorithm (see fastAlgo) over a fixed-length, unsalted keyspace. It mirrors
+// runLayout's chunk allocator, watermark, attempt accounting and cancellation
+// exactly, so a checkpoint written by one runner resumes correctly under the
+// other — but each worker owns a transposedBatch and hashes neonGroup
+// candidates per algo.group call instead of verifying one candidate at a
+// time.
+//
+// Callers must have already confirmed fastPathEligible(typ, salt, l), and
+// pass the resulting algo; this function does not re-check eligibility.
 //
 // Two correctness requirements this function upholds:
 //   - a group never straddles a segment boundary: fillFromSegment already
@@ -264,10 +315,10 @@ func fastPathEligible(typ, salt string, l *keyspaceLayout) bool {
 //     either boundary;
 //   - only lanes 0..used-1 of a partial final group are considered for a
 //     hit. Unused lanes hash the empty string and would otherwise falsely
-//     match whenever the target is md5("").
-func runLayoutFastMD5(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
+//     match whenever the target is the algorithm's digest of "".
+func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 	workers int, atomicAttempts *int64, watermark *int64,
-	target [16]byte) (string, error) {
+	algo *fastAlgo, target [16]byte) (string, error) {
 
 	if l.total == 0 || resumeFrom >= l.total {
 		return "", nil
@@ -353,7 +404,7 @@ func runLayoutFastMD5(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 						// segments can have different candidate lengths, and
 						// the batch is fixed-length for its whole life
 						// between resets. Reset whenever the length changes.
-						if err := tb.reset(segLen); err != nil {
+						if err := tb.reset(segLen, algo.enc); err != nil {
 							// Cannot happen: fastPathEligible already
 							// verified every segment length satisfies
 							// transposedFixedLenOK. Bail rather than risk
@@ -387,7 +438,7 @@ func runLayoutFastMD5(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 					if remaining := end - pos; int64(used) > remaining {
 						used = int(remaining)
 					}
-					md5Group(tb, &out)
+					algo.group(tb, &out)
 					// Only lanes 0..used-1 are real candidates. Lanes beyond
 					// that (including fillFromSegment's own padding of
 					// unused lanes up to n, and anything past used) hash the
