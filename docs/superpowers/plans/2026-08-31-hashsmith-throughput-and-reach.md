@@ -223,15 +223,70 @@ Run: `cd hashsmith/go_hashsmith && go test -run 'TestSelfTest|TestFastVectors|Te
 
 Expected: `ok`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Split the four remaining heavy tests (added scope — see the ruling below)**
+
+Task 1 fixed the self-test registry, but the default suite still runs ~160–210s
+against the spec's <60s criterion. The remaining cost is four tests that call
+cracking functions directly at production iteration counts, outside the
+registry's `isSlow` classification:
+
+| Test | File | Cost | Character |
+|---|---|---|---|
+| `TestVeraCryptVector` | `crack_veracrypt_test.go:10` | 85s | **Mixed** — slow `verifyVeraCrypt`, plus a *fast* `detectHashTypes` assertion |
+| `TestVeraCryptStreebogPublishedVector` | `crack_hashcat_crypt_streebog_test.go:8` | 37s | Purely slow KDF verification |
+| `TestVeraCryptCascadeRepresentatives` | `crack_hashcat_crypt_cascades_test.go:68` | 19s | Purely slow KDF verification |
+| `TestHashcatCryptHeaderPublishedVectors` | `crack_hashcat_crypt_headers_test.go:5` | 8.7s | **Mixed** — slow verify, plus a *fast* `canonicalHashType` alias assertion |
+
+**Do not blanket-move these to the slow suite.** Two of them carry fast
+assertions that must stay in the default suite:
+
+- **Purely slow** (`TestVeraCryptStreebogPublishedVector`,
+  `TestVeraCryptCascadeRepresentatives`): move the whole test into a new
+  `//go:build slowtest` file next to its current one.
+- **Mixed** (`TestVeraCryptVector`, `TestHashcatCryptHeaderPublishedVectors`):
+  **split** them. The fast assertions — `detectHashTypes(...)` returning
+  `[veracrypt]`, and `canonicalHashType(mode)` returning the expected type —
+  stay in the default suite as their own test. Only the
+  `verifyVeraCrypt` / `verifyCandidate` calls move behind `slowtest`.
+
+Use the `slowtest` build tag, matching Task 1. Do **not** convert these to the
+pre-existing `HASHSMITH_EXHAUSTIVE_CRYPTO` env-var idiom
+(`crack_hashcat_crypt_streebog_test.go:22`) and do not change that existing
+test — a third gating mechanism is worse than two, and churning working code is
+out of scope.
+
+- [ ] **Step 6: Verify the split preserved fast coverage and hit the target**
 
 ```bash
-git add hashsmith/go_hashsmith/cmd/hashsmith/selftest_test.go \
-        hashsmith/go_hashsmith/cmd/hashsmith/selftest.go
-git commit -m "test: enforce a 50ms budget on fast-classified self-test vectors
+cd hashsmith/go_hashsmith
+# The fast assertions must still run by default — these must appear and pass:
+go test -run 'VeraCrypt|HashcatCryptHeader' -v ./cmd/hashsmith 2>&1 | grep -E '^(=== RUN|--- (PASS|FAIL))'
+# The whole default suite, timed:
+time go test -count=1 -timeout 300s ./cmd/hashsmith
+# The slow suite must still compile and contain the moved tests:
+go vet -tags slowtest ./cmd/hashsmith
+go test -tags slowtest -run 'TestVeraCryptStreebogPublishedVector' -timeout 600s ./cmd/hashsmith
+```
 
-Keeps the default suite from drifting back toward the 600s timeout as
-new high-iteration formats are added."
+Expected: the default suite under 60s; the fast detection/alias assertions
+still present and passing; the slow build compiles and the moved test runs
+under the tag. **Report the measured wall time.** If it is still above 60s,
+report what dominates rather than moving more tests on your own judgement.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add hashsmith/go_hashsmith/cmd/hashsmith/
+git commit -m "test: budget fast vectors and move heavy KDF tests to slowtest
+
+Enforces a 50ms per-vector budget so the default suite cannot drift back
+toward the 600s timeout as new high-iteration formats are added.
+
+Also moves the four remaining production-iteration tests behind the
+slowtest tag. TestVeraCryptVector and TestHashcatCryptHeaderPublishedVectors
+are split rather than moved: their detectHashTypes and canonicalHashType
+assertions are fast and stay in the default suite, so only the KDF
+verification moves to nightly."
 ```
 
 ---
