@@ -39,6 +39,38 @@ const (
 	ctxCheckEvery = 1024 // brute-force iterations between context polls
 )
 
+// md5TargetBytes decodes a hex MD5 digest into the fixed-size array
+// runLayoutFastMD5 compares against. It returns false for anything that
+// isn't exactly 16 bytes of hex — the fast path is simply skipped in that
+// case, falling back to the scalar path's own (already-validated) handling.
+func md5TargetBytes(targetHex string) ([16]byte, bool) {
+	var t [16]byte
+	b, err := hex.DecodeString(strings.TrimSpace(targetHex))
+	if err != nil || len(b) != 16 {
+		return t, false
+	}
+	copy(t[:], b)
+	return t, true
+}
+
+// runBruteOrMaskLayout dispatches a brute-force or mask layout run to the
+// NEON fast path when it is eligible and no session resume is in play, else
+// to the existing scalar, session-aware runner. This is the only seam
+// between the two: every other format, salt, and attack mode keeps exactly
+// today's code path, since fastPathEligible returns false for all of them.
+func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *sessionState,
+	resumeFrom int64, workers int, atomicAttempts *int64,
+	typ, salt, targetHash string, verify func(string) bool) (string, bool, error) {
+
+	if sess == nil && fastPathEligible(typ, salt, layout) {
+		if target, ok := md5TargetBytes(targetHash); ok {
+			pw, err := runLayoutFastMD5(ctx, layout, resumeFrom, workers, atomicAttempts, nil, target)
+			return pw, ctx.Err() != nil, err
+		}
+	}
+	return runSessionLayout(ctx, layout, sess, resumeFrom, workers, atomicAttempts, verify)
+}
+
 // crackedResult carries the found password and an optional human-readable label
 // describing which mangling rule produced it (empty when no rule was applied).
 type crackedResult struct {
@@ -375,12 +407,12 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				_, reason := activeGPUBackend()
 				clrYellow.Fprintf(os.Stderr,
 					"GPU brute unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
-				pw, interrupted, err = runSessionLayout(runCtx, bruteLayout(charset, minLen, maxLen),
-					sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+				pw, interrupted, err = runBruteOrMaskLayout(runCtx, bruteLayout(charset, minLen, maxLen),
+					sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 			}
 		} else {
-			pw, interrupted, err = runSessionLayout(runCtx, bruteLayout(charset, minLen, maxLen),
-				sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+			pw, interrupted, err = runBruteOrMaskLayout(runCtx, bruteLayout(charset, minLen, maxLen),
+				sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 		}
 		result = crackedResult{password: pw}
 	case "mask":
@@ -401,12 +433,12 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				_, reason := activeGPUBackend()
 				clrYellow.Fprintf(os.Stderr,
 					"GPU mask unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
-				pw, interrupted, err = runSessionLayout(runCtx, layout,
-					sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+				pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
+					sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 			}
 		} else {
-			pw, interrupted, err = runSessionLayout(runCtx, layout,
-				sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+			pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
+				sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 		}
 		result = crackedResult{password: pw}
 	case "markov":
