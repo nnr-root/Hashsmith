@@ -603,6 +603,50 @@ the slow-KDF vectors still run nightly."
 > **Therefore Task 5 is a spike and a hard go/no-go gate. Do not start Tasks
 > 6–11 until it passes.**
 
+### Outcome of the gate — read this too, it rewrote Tasks 6–9
+
+Task 5 returned **NO-GO**: a correct 4-way NEON core reached only **1.26x**
+core-only and **1.06x** end to end. Root cause: MD5's 64 steps are a strict
+serial dependency chain, so wall-clock is **latency**-bound, not
+throughput-bound — and NEON's per-step latency is *worse* than scalar, because
+arm64 has no vector barrel-rotate (`VSHL`+`VSRI`, two dependent ops, against one
+`RORW`) and `F`/`G` need an extra `VMOV` before the destructive `VBSL`.
+
+**A correction to Section 2.3 of the spec:** it claims Go's `crypto/md5` ships
+no arm64 assembly. That is false — `$(go env GOROOT)/src/crypto/md5/md5block_arm64.s`
+exists. The baseline was never a soft target, and the "3–4x from replacing a
+generic block function" headroom the spec projected does not exist.
+
+Task 5b then tested the one lever Task 5 had flagged but not tried —
+**software pipelining**, running several independent chains so an out-of-order
+core overlaps their stalls — and returned **GO**:
+
+| | MH/s | vs baseline |
+|---|---|---|
+| `crypto/md5` (same invocation, best of 14) | 6.46 | 1.00x |
+| Pipelined, 5 chains / 20-way, core only | **36.01** | **5.58x** |
+| Same, end to end with pack-then-transpose | 13.92 | 2.16x |
+
+Two conclusions drive the task list below:
+
+1. **Transpose elimination is the critical path.** It is the entire difference
+   between 2.16x and 5.58x. Candidates are *generated* from a keyspace, so they
+   can be written straight into the padded, transposed layout — Task 6.
+2. **The general batch seam is cancelled.** `CandidateBatch`, `BatchVerifier`
+   and the legacy adapter were designed when batching itself looked like the
+   win. A byte-oriented batch cannot feed the fast path, and the ~455 non-raw-digest
+   formats can never use a 4-lane MD5 core anyway. Building a seam through the
+   verification path of every format would be the largest correctness risk in
+   the plan for no measured gain. Tasks 6–9 build a **narrow fast path**
+   instead — (raw MD5) × (fixed-length keyspace) — and leave every other format
+   on exactly today's code.
+
+**Caveats binding Tasks 6–9:** the 5.58x assumes generation in transposed
+layout, which is unbuilt engineering, not a measurement; untranspose and
+digest-compare were assumed near-zero and never measured; and saturation was
+never found — the spike hit the 32-register wall at 5 chains while still
+improving, so 5.58x is a floor for the core, not a ceiling.
+
 ---
 
 ## Task 5: NEON MD5 spike — go/no-go gate
@@ -724,856 +768,338 @@ Write the outcome to `docs/superpowers/notes/2026-08-31-neon-md5-spike.md`:
 **This is a hard checkpoint.** Report the number and the recommendation, and get an explicit decision before starting Task 6. Do not begin the batch seam on the assumption that the spike passed.
 
 ---
-## Task 6: The `CandidateBatch` buffer
+## Task 6: Generate candidates directly in transposed NEON layout
 
-A 4-way core needs four candidates at once. This is the reusable, allocation-free buffer that feeds it.
+**This is the critical path.** Task 5b measured the pipelined core at 5.58x
+baseline, but only 2.16x once packing-then-transposing was included — the
+transpose ate 61% of the gain. The fix is not to optimise the transpose but to
+delete it: a mask/brute keyspace *generates* candidates, so it can write them
+straight into the padded, transposed layout the core consumes.
 
 **Files:**
-- Create: `hashsmith/go_hashsmith/cmd/hashsmith/batchseam.go`
-- Test: `hashsmith/go_hashsmith/cmd/hashsmith/batchseam_test.go`
+- Create: `hashsmith/go_hashsmith/cmd/hashsmith/transposed.go`
+- Test: `hashsmith/go_hashsmith/cmd/hashsmith/transposed_test.go`
 
 **Interfaces:**
-- Consumes: nothing.
+- Consumes: `keyspaceLayout` and `maskIdxInto` (`mask.go:173`).
 - Produces:
-  - `const batchSize = 512`
-  - `type CandidateBatch struct{ buf []byte; off []int32; n int }`
-  - `newCandidateBatch(capBytes int) *CandidateBatch`
-  - `(*CandidateBatch) Reset()`
-  - `(*CandidateBatch) Add(word []byte) bool`
-  - `(*CandidateBatch) At(i int) []byte`
-  - `(*CandidateBatch) Len() int`
-  - `type Hit struct{ Cand, Target int }`
-  - `type BatchVerifier interface{ VerifyBatch(b *CandidateBatch, hits []Hit) int }`
+  - `const neonChains = 5`, `const neonLanes = 4`, `const neonGroup = neonChains * neonLanes` (20)
+  - `type transposedBatch struct{ words []uint32; length int; n int }`
+  - `newTransposedBatch() *transposedBatch`
+  - `(*transposedBatch) reset(candidateLen int) error`
+  - `(*transposedBatch) fillFromSegment(sets [][]byte, from int64) int`
+  - `(*transposedBatch) candidateAt(i int) []byte` — reconstructs candidate i, for reporting a hit
+  - `transposedFixedLenOK(n int) bool`
+
+**Layout** (this is the contract the assembly depends on — get it exactly right):
+`words` is `[neonChains][16][neonLanes]uint32` flattened. The word for chain
+`c`, message-word `w`, lane `l` sits at index `c*64 + w*4 + l`. Candidate index
+`i` within the group maps to chain `i/4`, lane `i%4`. Each candidate is one
+64-byte MD5 block: its bytes little-endian-packed into words 0..13, then the
+`0x80` terminator, then the bit length in word 14 (word 15 stays zero, since
+lengths under 56 bytes never reach it).
+
+**Why this is fast:** candidate length is FIXED within a keyspace segment, so
+almost the whole block is constant across the group. For a 5-character mask only
+words 0 and 1 vary; words 2..13 are zero, word 14 is the constant bit length.
+`reset` precomputes the invariant words once; `fillFromSegment` writes only the
+words the candidate bytes actually touch.
 
 - [ ] **Step 1: Write the failing test**
-
-Create `batchseam_test.go`:
 
 ```go
 package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
 )
 
-func TestCandidateBatchRoundTrip(t *testing.T) {
-	b := newCandidateBatch(1024)
-	words := [][]byte{[]byte("a"), []byte(""), []byte("hello"), []byte("password123")}
-	for _, w := range words {
-		if !b.Add(w) {
-			t.Fatalf("Add(%q) returned false on an empty batch", w)
-		}
+// The transposed layout must describe exactly the same candidates, in the same
+// order, that the scalar path produces — and must be recoverable from the
+// packed words, which is how a hit is reported.
+func TestTransposedRoundTripsCandidates(t *testing.T) {
+	sets := [][]byte{[]byte("abc"), []byte("de"), []byte("fg")} // 3*2*2 = 12
+	tb := newTransposedBatch()
+	if err := tb.reset(len(sets)); err != nil {
+		t.Fatalf("reset: %v", err)
 	}
-	if b.Len() != len(words) {
-		t.Fatalf("Len() = %d, want %d", b.Len(), len(words))
+	n := tb.fillFromSegment(sets, 0)
+	if n != 12 {
+		t.Fatalf("filled %d, want 12 (the whole segment)", n)
 	}
-	for i, w := range words {
-		if got := b.At(i); !bytes.Equal(got, w) {
-			t.Errorf("At(%d) = %q, want %q", i, got, w)
+	for i := 0; i < n; i++ {
+		want := maskIdxToStr(int64(i), sets)
+		if got := string(tb.candidateAt(i)); got != want {
+			t.Errorf("candidate %d = %q, want %q", i, got, want)
 		}
 	}
 }
 
-func TestCandidateBatchResetReusesMemory(t *testing.T) {
-	b := newCandidateBatch(1024)
-	b.Add([]byte("first"))
-	bufBefore, offBefore := &b.buf[0], &b.off[0]
-	b.Reset()
-	if b.Len() != 0 {
-		t.Fatalf("Len() after Reset = %d, want 0", b.Len())
+// The packed words must be a correct MD5 block for each candidate: bytes
+// little-endian in words 0..13, 0x80 terminator, bit length in word 14.
+func TestTransposedBlockIsValidMD5Padding(t *testing.T) {
+	sets := [][]byte{[]byte("ab"), []byte("cd"), []byte("ef"), []byte("gh"), []byte("ij")}
+	tb := newTransposedBatch()
+	if err := tb.reset(5); err != nil {
+		t.Fatalf("reset: %v", err)
 	}
-	b.Add([]byte("second"))
-	if &b.buf[0] != bufBefore || &b.off[0] != offBefore {
-		t.Error("Reset reallocated; the batch must reuse its backing arrays")
-	}
-	if got := b.At(0); !bytes.Equal(got, []byte("second")) {
-		t.Errorf("At(0) = %q, want %q", got, "second")
+	tb.fillFromSegment(sets, 0)
+
+	for i := 0; i < 8; i++ {
+		cand := tb.candidateAt(i)
+		// Rebuild the reference block the scalar way.
+		var want [64]byte
+		copy(want[:], cand)
+		want[len(cand)] = 0x80
+		binary.LittleEndian.PutUint64(want[56:], uint64(len(cand))*8)
+
+		chain, lane := i/neonLanes, i%neonLanes
+		var got [64]byte
+		for w := 0; w < 16; w++ {
+			binary.LittleEndian.PutUint32(got[w*4:], tb.words[chain*64+w*4+lane])
+		}
+		if !bytes.Equal(got[:], want[:]) {
+			t.Fatalf("candidate %d block mismatch:\n got %x\nwant %x", i, got, want)
+		}
 	}
 }
 
-func TestCandidateBatchRejectsWhenFull(t *testing.T) {
-	b := newCandidateBatch(16)
-	added := 0
-	for i := 0; i < batchSize+10; i++ {
-		if !b.Add([]byte("aaaa")) {
-			break
+// A partial final group must leave the unused lanes as valid, harmless blocks
+// rather than stale data from the previous group — a stale lane could produce a
+// spurious hit.
+func TestTransposedPartialGroupIsClean(t *testing.T) {
+	sets := [][]byte{[]byte("abc")} // 3 candidates, less than one 20-wide group
+	tb := newTransposedBatch()
+	if err := tb.reset(1); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	n := tb.fillFromSegment(sets, 0)
+	if n != 3 {
+		t.Fatalf("filled %d, want 3", n)
+	}
+	// Lanes 3..19 are unused. They must be zero-length blocks, not garbage.
+	for i := n; i < neonGroup; i++ {
+		chain, lane := i/neonLanes, i%neonLanes
+		w0 := tb.words[chain*64+0*4+lane]
+		if w0 != 0x80 {
+			t.Errorf("unused lane %d word0 = %#x, want 0x80 (empty padded block)", i, w0)
 		}
-		added++
-	}
-	if added == 0 {
-		t.Fatal("Add never succeeded")
-	}
-	if added > batchSize {
-		t.Errorf("accepted %d candidates, exceeding batchSize %d", added, batchSize)
-	}
-	if b.Add([]byte("aaaa")) {
-		t.Error("Add returned true after the batch reported full")
 	}
 }
 
-// The batch must not allocate in steady state — that is its entire purpose.
-func TestCandidateBatchFillDoesNotAllocate(t *testing.T) {
-	b := newCandidateBatch(64 * 1024)
-	word := []byte("candidate")
-	got := testing.AllocsPerRun(100, func() {
-		b.Reset()
-		for i := 0; i < batchSize; i++ {
-			b.Add(word)
-		}
-	})
+// Filling must not allocate in steady state — that is the whole point.
+func TestTransposedFillDoesNotAllocate(t *testing.T) {
+	sets := make([][]byte, 6)
+	for i := range sets {
+		sets[i] = []byte("abcdefghij")
+	}
+	tb := newTransposedBatch()
+	if err := tb.reset(len(sets)); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	got := testing.AllocsPerRun(100, func() { tb.fillFromSegment(sets, 0) })
 	if got != 0 {
-		t.Errorf("filling a batch allocated %v times per run, want 0", got)
+		t.Errorf("fillFromSegment allocated %v times per run, want 0", got)
+	}
+}
+
+func TestTransposedFixedLenOK(t *testing.T) {
+	for _, c := range []struct {
+		n    int
+		want bool
+	}{{0, true}, {55, true}, {56, false}, {100, false}} {
+		if got := transposedFixedLenOK(c.n); got != c.want {
+			t.Errorf("transposedFixedLenOK(%d) = %v, want %v", c.n, got, c.want)
+		}
 	}
 }
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd hashsmith/go_hashsmith && go test -run TestCandidateBatch ./cmd/hashsmith`
-
-Expected: FAIL — `undefined: newCandidateBatch`.
+Run: `cd hashsmith/go_hashsmith && go test -run TestTransposed ./cmd/hashsmith`
+Expected: FAIL — `undefined: newTransposedBatch`.
 
 - [ ] **Step 3: Implement**
 
-Create `batchseam.go`:
+Create `transposed.go`. Key points: `reset` fills every lane with a valid
+padded block for the target length (so unused lanes are harmless), and
+`fillFromSegment` overwrites only the words the candidate bytes occupy.
 
 ```go
 package main
 
-// The batch seam between candidate generation and verification.
+import "encoding/binary"
+
+// Candidate generation directly in the layout the pipelined NEON core reads.
 //
-// A one-candidate-at-a-time verifier cannot feed an interleaved SIMD core,
-// which needs 4/8/16 independent messages in flight to fill its lanes. Every
-// generator fills a CandidateBatch; every verifier consumes one.
+// Task 5b measured the core at 5.58x crypto/md5, but only 2.16x when
+// candidates were packed as bytes and transposed afterwards. Since a mask or
+// brute-force keyspace GENERATES its candidates, the transpose is avoidable
+// entirely: write each candidate's words straight into the interleaved slot
+// the core will read them from.
 
-// batchSize is the number of candidates per batch: large enough to amortize
-// call overhead and fill any lane width, small enough to stay in L1. It also
-// divides keyspaceChunk (4096) evenly, so a chunk is exactly 8 batches.
-const batchSize = 512
+const (
+	neonChains = 5                        // independent 4-way chains in flight
+	neonLanes  = 4                        // 32-bit lanes per 128-bit vector
+	neonGroup  = neonChains * neonLanes   // candidates hashed per core call
+	transposedMaxLen = 55                 // one MD5 block after padding
+)
 
-// CandidateBatch is a reusable, allocation-free run of candidates. Words are
-// packed into buf with no separators; off[i]..off[i+1] delimits candidate i.
-type CandidateBatch struct {
-	buf []byte
-	off []int32
-	n   int
+// transposedFixedLenOK reports whether a candidate length fits one block.
+func transposedFixedLenOK(n int) bool { return n >= 0 && n <= transposedMaxLen }
+
+// transposedBatch holds neonGroup candidates of a FIXED length, already padded
+// and interleaved. words is [neonChains][16][neonLanes]uint32 flattened: the
+// word for chain c, message-word w, lane l is at c*64 + w*4 + l.
+type transposedBatch struct {
+	words  []uint32
+	length int
+	n      int
 }
 
-// newCandidateBatch allocates a batch whose byte arena starts at capBytes and
-// grows only if a caller adds unusually long candidates.
-func newCandidateBatch(capBytes int) *CandidateBatch {
-	if capBytes < 1 {
-		capBytes = 1
+func newTransposedBatch() *transposedBatch {
+	return &transposedBatch{words: make([]uint32, neonChains*16*neonLanes)}
+}
+
+// wordIndex returns the slot for message-word w of candidate i.
+func wordIndex(i, w int) int {
+	return (i/neonLanes)*64 + w*4 + (i % neonLanes)
+}
+
+// reset prepares the batch for candidates of candidateLen bytes, writing a
+// valid padded block into EVERY lane. Unused lanes therefore hash an empty
+// message rather than stale bytes from the previous group, which could
+// otherwise produce a spurious hit.
+func reset0(tb *transposedBatch, candidateLen int) error {
+	if !transposedFixedLenOK(candidateLen) {
+		return errTransposedLen
 	}
-	b := &CandidateBatch{
-		buf: make([]byte, 0, capBytes),
-		off: make([]int32, 1, batchSize+1),
+	tb.length = candidateLen
+	tb.n = 0
+	for i := range tb.words {
+		tb.words[i] = 0
 	}
-	b.off[0] = 0
-	return b
-}
-
-// Reset empties the batch while keeping its backing arrays.
-func (b *CandidateBatch) Reset() {
-	b.buf = b.buf[:0]
-	b.off = b.off[:1]
-	b.off[0] = 0
-	b.n = 0
-}
-
-// Add appends a candidate, returning false when the batch is full.
-func (b *CandidateBatch) Add(word []byte) bool {
-	if b.n >= batchSize {
-		return false
+	// Every lane starts as a valid zero-length block: 0x80 at byte 0.
+	for i := 0; i < neonGroup; i++ {
+		tb.words[wordIndex(i, 0)] = 0x80
 	}
-	b.buf = append(b.buf, word...)
-	b.off = append(b.off, int32(len(b.buf)))
-	b.n++
-	return true
+	return nil
 }
 
-// At returns candidate i. The slice aliases the batch and is invalidated by
-// the next Reset.
-func (b *CandidateBatch) At(i int) []byte {
-	return b.buf[b.off[i]:b.off[i+1]]
+func (tb *transposedBatch) reset(candidateLen int) error { return reset0(tb, candidateLen) }
+
+// fillFromSegment writes up to neonGroup candidates starting at index `from`
+// of the mixed-radix segment `sets`, returning how many it wrote. It allocates
+// nothing: candidate bytes are decoded into a stack buffer and packed straight
+// into their interleaved slots.
+func (tb *transposedBatch) fillFromSegment(sets [][]byte, from int64) int {
+	total := maskKeyspace(sets)
+	n := 0
+	var buf [transposedMaxLen]byte
+	L := len(sets)
+	bitLen := uint32(L) * 8
+	for n < neonGroup {
+		idx := from + int64(n)
+		if idx >= total {
+			break
+		}
+		maskIdxInto(buf[:L], idx, sets)
+		// Pack L bytes plus the 0x80 terminator into words 0..(L/4).
+		full := L / 4
+		for w := 0; w < full; w++ {
+			tb.words[wordIndex(n, w)] = binary.LittleEndian.Uint32(buf[w*4:])
+		}
+		// The partial final word carries the remaining bytes then 0x80.
+		rem := L % 4
+		var tail uint32
+		for b := 0; b < rem; b++ {
+			tail |= uint32(buf[full*4+b]) << (8 * b)
+		}
+		tail |= 0x80 << (8 * rem)
+		tb.words[wordIndex(n, full)] = tail
+		tb.words[wordIndex(n, 14)] = bitLen
+		n++
+	}
+	tb.n = n
+	return n
 }
 
-// Len is the number of candidates currently held.
-func (b *CandidateBatch) Len() int { return b.n }
-
-// Hit identifies which candidate matched which target.
-type Hit struct {
-	Cand   int // index into the batch
-	Target int // index into the compiled target set
-}
-
-// BatchVerifier tests a whole batch. Implementations are compiled once per run
-// and then called billions of times: all format resolution, salt decoding and
-// target parsing happens at compile time, never per candidate.
-type BatchVerifier interface {
-	// VerifyBatch writes matches into hits and returns how many it wrote.
-	// hits must have room for at least b.Len() entries.
-	VerifyBatch(b *CandidateBatch, hits []Hit) int
+// candidateAt reconstructs candidate i's bytes, for reporting a hit. Not on the
+// hot path, so clarity beats speed.
+func (tb *transposedBatch) candidateAt(i int) []byte {
+	out := make([]byte, tb.length)
+	for b := 0; b < tb.length; b++ {
+		w := tb.words[wordIndex(i, b/4)]
+		out[b] = byte(w >> (8 * (b % 4)))
+	}
+	return out
 }
 ```
 
+Declare `errTransposedLen` with the other errors in the file, e.g.
+`var errTransposedLen = errors.New("candidate length does not fit one MD5 block")`.
+
+**Note on `reset` and partial groups:** after `reset`, lanes beyond `n` still
+hold the zero-length block, but `fillFromSegment` writes `bitLen` into word 14
+only for lanes it fills — so unused lanes keep bit length 0 and hash the empty
+string. That is deliberate and is what `TestTransposedPartialGroupIsClean`
+pins down.
+
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `cd hashsmith/go_hashsmith && go test -run TestCandidateBatch ./cmd/hashsmith -v 2>&1 | tail -15`
-
-Expected: all four PASS, including the zero-allocation test.
+Run: `cd hashsmith/go_hashsmith && go test -run TestTransposed ./cmd/hashsmith -v 2>&1 | tail -20`
+Expected: all five PASS. `TestTransposedBlockIsValidMD5Padding` is the important
+one — it proves the layout matches what a scalar MD5 would see.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add hashsmith/go_hashsmith/cmd/hashsmith/batchseam.go \
-        hashsmith/go_hashsmith/cmd/hashsmith/batchseam_test.go
-git commit -m "feat: add CandidateBatch and BatchVerifier seam
+git add hashsmith/go_hashsmith/cmd/hashsmith/transposed.go \
+        hashsmith/go_hashsmith/cmd/hashsmith/transposed_test.go
+git commit -m "feat: generate candidates directly in transposed NEON layout
 
-An interleaved SIMD core needs 4/8/16 candidates in flight; the current
-match(string) bool interface can only supply one. This is the
-allocation-free buffer that will feed those cores."
+The pipelined core measured 5.58x crypto/md5, but only 2.16x once
+packing-then-transposing was counted. A mask or brute keyspace generates
+its candidates, so the transpose is avoidable rather than optimisable:
+write each candidate straight into the interleaved slot the core reads.
+
+Candidate length is fixed within a keyspace segment, so most of the
+64-byte block is invariant and is precomputed once per group."
 ```
 
 ---
 
-## Task 7: Fill a batch from the keyspace without allocating
-
-`keyspaceLayout.candidate` allocates one string per candidate (42 ns, 1 alloc — ~14% of the per-candidate budget). `maskIdxInto` already writes into a caller buffer, so this is mostly wiring.
+## Task 7: Productionize the pipelined NEON core
 
 **Files:**
-- Modify: `hashsmith/go_hashsmith/cmd/hashsmith/keyspace.go` (add alongside `candidate`, `keyspace.go:45`)
-- Test: `hashsmith/go_hashsmith/cmd/hashsmith/keyspace_test.go`
+- Create: `hashsmith/go_hashsmith/cmd/hashsmith/md5neon_arm64.s` (from the Task 5b spike, `/tmp/md5neon/`)
+- Create: `hashsmith/go_hashsmith/cmd/hashsmith/md5neon_arm64.go` (`//go:build arm64`)
+- Create: `hashsmith/go_hashsmith/cmd/hashsmith/md5neon_generic.go` (`//go:build !arm64`)
+- Test: `hashsmith/go_hashsmith/cmd/hashsmith/md5neon_test.go`
 
 **Interfaces:**
-- Consumes: `keyspaceLayout`, `maskIdxInto(dst []byte, index int64, sets [][]byte)` (`mask.go:173`), `CandidateBatch` from Task 6.
-- Produces: `(*keyspaceLayout) fill(b *CandidateBatch, from int64, n int) int`
-
-- [ ] **Step 1: Write the failing test**
-
-Add to `keyspace_test.go`:
-
-```go
-// fill must produce exactly the same candidates, in the same order, as
-// repeated candidate() calls — it is the same keyspace, just batched.
-func TestLayoutFillMatchesCandidate(t *testing.T) {
-	layouts := map[string]*keyspaceLayout{
-		"brute-single-len": bruteLayout("abc", 3, 3),
-		"brute-multi-len":  bruteLayout("ab", 1, 4),
-	}
-	for name, l := range layouts {
-		t.Run(name, func(t *testing.T) {
-			b := newCandidateBatch(4096)
-			var got []string
-			for from := int64(0); from < l.total; from += 7 {
-				n := int64(7)
-				if from+n > l.total {
-					n = l.total - from
-				}
-				b.Reset()
-				wrote := l.fill(b, from, int(n))
-				if int64(wrote) != n {
-					t.Fatalf("fill(from=%d, n=%d) wrote %d", from, n, wrote)
-				}
-				for i := 0; i < wrote; i++ {
-					got = append(got, string(b.At(i)))
-				}
-			}
-			if int64(len(got)) != l.total {
-				t.Fatalf("filled %d candidates, want %d", len(got), l.total)
-			}
-			for i := range got {
-				if want := l.candidate(int64(i)); got[i] != want {
-					t.Fatalf("index %d: fill gave %q, candidate() gave %q", i, got[i], want)
-				}
-			}
-		})
-	}
-}
-
-func TestLayoutFillStopsAtBatchCapacity(t *testing.T) {
-	l := bruteLayout("abcdefghij", 4, 4) // 10000 candidates
-	b := newCandidateBatch(8192)
-	wrote := l.fill(b, 0, batchSize+100)
-	if wrote != batchSize {
-		t.Errorf("fill wrote %d, want it capped at batchSize %d", wrote, batchSize)
-	}
-}
-
-func TestLayoutFillDoesNotAllocate(t *testing.T) {
-	l := bruteLayout("abcdefghijklmnopqrstuvwxyz", 6, 6)
-	b := newCandidateBatch(64 * 1024)
-	got := testing.AllocsPerRun(50, func() {
-		b.Reset()
-		l.fill(b, 0, batchSize)
-	})
-	if got != 0 {
-		t.Errorf("fill allocated %v times per run, want 0", got)
-	}
-}
-```
-
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `cd hashsmith/go_hashsmith && go test -run TestLayoutFill ./cmd/hashsmith`
-
-Expected: FAIL — `l.fill undefined`.
-
-- [ ] **Step 3: Implement**
-
-Add to `keyspace.go`, after `candidate`:
-
-```go
-// fill appends up to n candidates starting at global index `from` to b,
-// returning how many it wrote. It stops early at the end of the keyspace or
-// when the batch is full. Unlike candidate(), it allocates nothing: each word
-// is decoded straight into the batch's arena.
-//
-// Layouts with a gen override (Markov) have no mixed-radix decode, so they
-// fall back to gen per candidate.
-func (l *keyspaceLayout) fill(b *CandidateBatch, from int64, n int) int {
-	wrote := 0
-	var word [64]byte
-	seg := 0
-	for wrote < n {
-		i := from + int64(wrote)
-		if i >= l.total {
-			break
-		}
-		if l.gen != nil {
-			if !b.Add([]byte(l.gen(i))) {
-				break
-			}
-			wrote++
-			continue
-		}
-		// Locate the segment for i. Indices advance monotonically, so the
-		// search resumes from the previous segment rather than restarting.
-		if l.offsets[seg] > i {
-			seg = 0
-		}
-		for seg+1 < len(l.offsets) && l.offsets[seg+1] <= i {
-			seg++
-		}
-		sets := l.segments[seg]
-		if len(sets) > len(word) {
-			// Longer than the stack buffer; fall back to the allocating path.
-			if !b.Add([]byte(maskIdxToStr(i-l.offsets[seg], sets))) {
-				break
-			}
-			wrote++
-			continue
-		}
-		maskIdxInto(word[:len(sets)], i-l.offsets[seg], sets)
-		if !b.Add(word[:len(sets)]) {
-			break
-		}
-		wrote++
-	}
-	return wrote
-}
-```
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `cd hashsmith/go_hashsmith && go test -run TestLayoutFill ./cmd/hashsmith -v 2>&1 | tail -20`
-
-Expected: all three PASS. The equivalence test is the important one — it proves batching changed no candidate.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add hashsmith/go_hashsmith/cmd/hashsmith/keyspace.go \
-        hashsmith/go_hashsmith/cmd/hashsmith/keyspace_test.go
-git commit -m "feat: add allocation-free keyspaceLayout.fill
-
-candidate() allocates a string per candidate (~14% of the per-candidate
-budget). fill decodes straight into a CandidateBatch arena and is proven
-equivalent to repeated candidate() calls across segment boundaries."
-```
-
----
-
-## Task 8: The legacy adapter — all 461 formats keep working
-
-Before any engine change, every existing format needs a `BatchVerifier`. This adapter wraps the current path so nothing regresses while fast cores are added incrementally.
-
-**Files:**
-- Modify: `hashsmith/go_hashsmith/cmd/hashsmith/batchseam.go`
-- Test: `hashsmith/go_hashsmith/cmd/hashsmith/batchseam_test.go`
-
-**Interfaces:**
-- Consumes: `verifyCandidate` (`crack.go:856`), `newFastVerifier` / `fastVerifier.matchBytes` (Task 3), `CandidateBatch`, `Hit`, `BatchVerifier`.
+- Consumes: `transposedBatch` (Task 6); the verified assembly in `/tmp/md5neon/`.
 - Produces:
-  - `type batchTarget struct{ Raw string }`
-  - `newBatchVerifier(typ, salt, saltMode string, targets []batchTarget) BatchVerifier`
-  - `type fastBatchVerifier struct{...}`, `type legacyBatchVerifier struct{...}`
-
-- [ ] **Step 1: Write the failing test**
-
-Add to `batchseam_test.go`:
-
-```go
-// The fast path and the legacy path must agree exactly. This is the contract
-// that lets formats be promoted one at a time without changing behavior.
-func TestBatchVerifierFastAndLegacyAgree(t *testing.T) {
-	cases := []struct{ typ, target, plain string }{
-		{"md5", "5f4dcc3b5aa765d61d8327deb882cf99", "password"},
-		{"sha1", "5baa61e4c9b93f3f0682250b6cf8331b7ee68fd8", "password"},
-		{"sha256", "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", "password"},
-	}
-	for _, c := range cases {
-		t.Run(c.typ, func(t *testing.T) {
-			targets := []batchTarget{{Raw: c.target}}
-			fast := newBatchVerifier(c.typ, "", "prefix", targets)
-			legacy := &legacyBatchVerifier{targets: targets, typ: c.typ, saltMode: "prefix"}
-
-			b := newCandidateBatch(4096)
-			words := []string{"wrong", c.plain, "alsowrong", ""}
-			for _, w := range words {
-				b.Add([]byte(w))
-			}
-			hitsFast := make([]Hit, batchSize)
-			hitsLegacy := make([]Hit, batchSize)
-			nf := fast.VerifyBatch(b, hitsFast)
-			nl := legacy.VerifyBatch(b, hitsLegacy)
-
-			if nf != nl {
-				t.Fatalf("fast found %d hits, legacy found %d", nf, nl)
-			}
-			if nf != 1 {
-				t.Fatalf("expected exactly 1 hit, got %d", nf)
-			}
-			if hitsFast[0] != hitsLegacy[0] {
-				t.Errorf("fast hit %+v != legacy hit %+v", hitsFast[0], hitsLegacy[0])
-			}
-			if got := string(b.At(hitsFast[0].Cand)); got != c.plain {
-				t.Errorf("matched candidate %q, want %q", got, c.plain)
-			}
-		})
-	}
-}
-
-// A format with no fast path must still verify, via the legacy adapter.
-func TestBatchVerifierFallsBackForComplexFormat(t *testing.T) {
-	// bcrypt has no raw-digest fast path; newBatchVerifier must still work.
-	targets := []batchTarget{{Raw: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"}}
-	v := newBatchVerifier("bcrypt", "", "prefix", targets)
-	b := newCandidateBatch(1024)
-	b.Add([]byte("nope"))
-	b.Add([]byte("password"))
-	hits := make([]Hit, batchSize)
-	if n := v.VerifyBatch(b, hits); n != 1 || hits[0].Cand != 1 {
-		t.Errorf("VerifyBatch returned n=%d hits[0]=%+v, want n=1 cand=1", n, hits[0])
-	}
-}
-
-// Multi-target: one batch, several targets, each matched independently.
-func TestBatchVerifierMultipleTargets(t *testing.T) {
-	targets := []batchTarget{
-		{Raw: "5f4dcc3b5aa765d61d8327deb882cf99"}, // password
-		{Raw: "21232f297a57a5a743894a0e4a801fc3"}, // admin
-	}
-	v := newBatchVerifier("md5", "", "prefix", targets)
-	b := newCandidateBatch(1024)
-	for _, w := range []string{"admin", "nope", "password"} {
-		b.Add([]byte(w))
-	}
-	hits := make([]Hit, batchSize)
-	n := v.VerifyBatch(b, hits)
-	if n != 2 {
-		t.Fatalf("got %d hits, want 2", n)
-	}
-	found := map[string]int{}
-	for i := 0; i < n; i++ {
-		found[string(b.At(hits[i].Cand))] = hits[i].Target
-	}
-	if found["admin"] != 1 || found["password"] != 0 {
-		t.Errorf("wrong target mapping: %v", found)
-	}
-}
-```
-
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `cd hashsmith/go_hashsmith && go test -run TestBatchVerifier ./cmd/hashsmith`
-
-Expected: FAIL — `undefined: newBatchVerifier`.
-
-- [ ] **Step 3: Implement**
-
-Add to `batchseam.go`:
-
-```go
-// batchTarget is one parsed hash record. Raw is kept verbatim for potfile
-// output, --left, and the legacy verifier.
-type batchTarget struct {
-	Raw string
-}
-
-// newBatchVerifier compiles a verifier once for a run. Raw-digest formats get
-// the zero-allocation fast path; everything else falls back to the legacy
-// adapter, which keeps all remaining formats working unchanged.
-func newBatchVerifier(typ, salt, saltMode string, targets []batchTarget) BatchVerifier {
-	if salt == "" && len(targets) > 0 {
-		fvs := make([]*fastVerifier, len(targets))
-		allFast := true
-		for i, t := range targets {
-			fv, ok := newFastVerifier(typ, t.Raw)
-			if !ok {
-				allFast = false
-				break
-			}
-			fvs[i] = fv
-		}
-		if allFast {
-			return &fastBatchVerifier{verifiers: fvs}
-		}
-	}
-	return &legacyBatchVerifier{targets: targets, typ: typ, salt: salt, saltMode: saltMode}
-}
-
-// fastBatchVerifier checks each candidate against every target using the
-// zero-allocation raw-digest path.
-type fastBatchVerifier struct {
-	verifiers []*fastVerifier
-}
-
-func (f *fastBatchVerifier) VerifyBatch(b *CandidateBatch, hits []Hit) int {
-	n := 0
-	for i := 0; i < b.Len(); i++ {
-		cand := b.At(i)
-		for t, fv := range f.verifiers {
-			if fv.matchBytes(cand) {
-				hits[n] = Hit{Cand: i, Target: t}
-				n++
-			}
-		}
-	}
-	return n
-}
-
-// legacyBatchVerifier adapts the existing verifyCandidate path. The string
-// conversion allocates, but that cost is confined to formats that have not
-// been promoted to a native batch core.
-type legacyBatchVerifier struct {
-	targets  []batchTarget
-	typ      string
-	salt     string
-	saltMode string
-}
-
-func (l *legacyBatchVerifier) VerifyBatch(b *CandidateBatch, hits []Hit) int {
-	n := 0
-	for i := 0; i < b.Len(); i++ {
-		cand := string(b.At(i))
-		for t := range l.targets {
-			if ok, _ := verifyCandidate(cand, l.targets[t].Raw, l.typ, l.salt, l.saltMode); ok {
-				hits[n] = Hit{Cand: i, Target: t}
-				n++
-			}
-		}
-	}
-	return n
-}
-```
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `cd hashsmith/go_hashsmith && go test -run TestBatchVerifier ./cmd/hashsmith -v 2>&1 | tail -20`
-
-Expected: all three PASS.
-
-- [ ] **Step 5: Run the whole suite — nothing may regress**
-
-Run: `cd hashsmith/go_hashsmith && go test ./cmd/hashsmith`
-
-Expected: `ok`.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add hashsmith/go_hashsmith/cmd/hashsmith/batchseam.go \
-        hashsmith/go_hashsmith/cmd/hashsmith/batchseam_test.go
-git commit -m "feat: add batch verifiers with a legacy adapter
-
-newBatchVerifier picks the zero-allocation raw-digest path when every
-target supports it and falls back to verifyCandidate otherwise, so all
-461 formats work through the batch seam from day one. Formats get
-promoted to native cores by measured hotness, never in a big bang."
-```
-
----
-
-## Task 9: Run the keyspace engine through the batch seam
-
-Wire `runLayout`'s worker loop to fill batches instead of verifying one candidate at a time. Behavior must be identical; this is the change that lets a 4-way core actually be used.
-
-**Files:**
-- Modify: `hashsmith/go_hashsmith/cmd/hashsmith/keyspace.go:107-200` (`runLayout`)
-- Test: `hashsmith/go_hashsmith/cmd/hashsmith/keyspace_test.go`
-
-**Interfaces:**
-- Consumes: `(*keyspaceLayout).fill` (Task 7), `CandidateBatch`, `Hit`, `BatchVerifier` (Tasks 6, 8).
-- Produces: `runLayoutBatch(ctx context.Context, l *keyspaceLayout, resumeFrom int64, workers int, atomicAttempts *int64, watermark *int64, mk func() BatchVerifier) (string, error)` — `mk` returns a per-worker verifier, since verifiers hold scratch state and must not be shared across goroutines.
-
-- [ ] **Step 1: Write the failing test**
-
-Add to `keyspace_test.go`:
-
-```go
-// The batched runner must find exactly what the per-candidate runner finds.
-func TestRunLayoutBatchFindsSameResult(t *testing.T) {
-	l := bruteLayout("abcdef", 1, 4)
-	targetWord := "cafe"
-	mk := func() BatchVerifier {
-		return newBatchVerifier("md5", "", "prefix",
-			[]batchTarget{{Raw: md5HexOf(targetWord)}})
-	}
-	var attempts int64
-	got, err := runLayoutBatch(context.Background(), l, 0, 4, &attempts, nil, mk)
-	if err != nil {
-		t.Fatalf("runLayoutBatch: %v", err)
-	}
-	if got != targetWord {
-		t.Errorf("runLayoutBatch = %q, want %q", got, targetWord)
-	}
-	if attempts == 0 {
-		t.Error("attempts counter was never advanced")
-	}
-}
-
-// An exhausted keyspace with no match returns empty, not an error.
-func TestRunLayoutBatchExhaustsWithoutMatch(t *testing.T) {
-	l := bruteLayout("ab", 1, 3)
-	mk := func() BatchVerifier {
-		return newBatchVerifier("md5", "", "prefix",
-			[]batchTarget{{Raw: md5HexOf("not-in-this-keyspace")}})
-	}
-	var attempts int64
-	got, err := runLayoutBatch(context.Background(), l, 0, 2, &attempts, nil, mk)
-	if err != nil {
-		t.Fatalf("runLayoutBatch: %v", err)
-	}
-	if got != "" {
-		t.Errorf("runLayoutBatch = %q, want empty", got)
-	}
-	if want := l.total; attempts != want {
-		t.Errorf("attempts = %d, want the full keyspace %d", attempts, want)
-	}
-}
-
-// Cancellation must stop the run promptly rather than draining the keyspace.
-func TestRunLayoutBatchHonorsCancellation(t *testing.T) {
-	l := bruteLayout("abcdefghijklmnop", 6, 6) // large
-	mk := func() BatchVerifier {
-		return newBatchVerifier("md5", "", "prefix",
-			[]batchTarget{{Raw: md5HexOf("unreachable")}})
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	var attempts int64
-	start := time.Now()
-	if _, err := runLayoutBatch(ctx, l, 0, 4, &attempts, nil, mk); err != nil {
-		t.Fatalf("runLayoutBatch: %v", err)
-	}
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Errorf("cancellation took %v; the run did not stop promptly", elapsed)
-	}
-	if attempts >= l.total {
-		t.Error("the run drained the whole keyspace despite cancellation")
-	}
-}
-
-// md5HexOf is a test helper: the hex MD5 of s.
-func md5HexOf(s string) string {
-	sum := md5.Sum([]byte(s))
-	return hex.EncodeToString(sum[:])
-}
-```
-
-Add `"context"`, `"crypto/md5"`, `"encoding/hex"`, `"time"` to the test file's imports as needed.
-
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `cd hashsmith/go_hashsmith && go test -run TestRunLayoutBatch ./cmd/hashsmith`
-
-Expected: FAIL — `undefined: runLayoutBatch`.
-
-- [ ] **Step 3: Implement**
-
-Add `runLayoutBatch` to `keyspace.go`. It mirrors `runLayout`'s chunk allocator and watermark logic exactly; only the inner loop changes:
-
-```go
-// runLayoutBatch is runLayout driven through the batch seam: each worker fills
-// a CandidateBatch from the layout and hands it to its own BatchVerifier. The
-// chunk allocator, watermark, cancellation and attempt accounting are
-// unchanged, so resume points remain compatible with runLayout.
-//
-// mk is called once per worker: verifiers hold scratch buffers and must not be
-// shared across goroutines.
-func runLayoutBatch(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
-	workers int, atomicAttempts *int64, watermark *int64,
-	mk func() BatchVerifier) (string, error) {
-
-	if l.total == 0 || resumeFrom >= l.total {
-		return "", nil
-	}
-	if resumeFrom < 0 {
-		resumeFrom = 0
-	}
-	if workers < 1 {
-		workers = 1
-	}
-
-	innerCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	firstChunk := resumeFrom / keyspaceChunk
-	nextChunk := firstChunk
-	resultCh := make(chan string, 1)
-
-	cur := make([]int64, workers)
-	for w := range cur {
-		cur[w] = firstChunk
-	}
-
-	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func(wID int) {
-			defer wg.Done()
-			v := mk()
-			batch := newCandidateBatch(batchSize * 32)
-			hits := make([]Hit, batchSize)
-			for {
-				c := atomic.AddInt64(&nextChunk, 1) - 1
-				start := c * keyspaceChunk
-				if start >= l.total {
-					atomic.StoreInt64(&cur[wID], math.MaxInt64)
-					return
-				}
-				atomic.StoreInt64(&cur[wID], c)
-				end := start + keyspaceChunk
-				if end > l.total {
-					end = l.total
-				}
-				from := start
-				if from < resumeFrom {
-					from = resumeFrom
-				}
-
-				var local int64
-				for idx := from; idx < end; {
-					select {
-					case <-innerCtx.Done():
-						atomic.AddInt64(atomicAttempts, local)
-						return
-					default:
-					}
-					want := int(end - idx)
-					if want > batchSize {
-						want = batchSize
-					}
-					batch.Reset()
-					wrote := l.fill(batch, idx, want)
-					if wrote == 0 {
-						break
-					}
-					n := v.VerifyBatch(batch, hits)
-					local += int64(wrote)
-					if n > 0 {
-						atomic.AddInt64(atomicAttempts, local)
-						select {
-						case resultCh <- string(batch.At(hits[0].Cand)):
-						default:
-						}
-						cancel()
-						atomic.StoreInt64(&cur[wID], math.MaxInt64)
-						return
-					}
-					idx += int64(wrote)
-				}
-				atomic.AddInt64(atomicAttempts, local)
-			}
-		}(w)
-	}
-
-	if watermark != nil {
-		atomic.StoreInt64(watermark, resumeFrom)
-		go func() {
-			t := time.NewTicker(200 * time.Millisecond)
-			defer t.Stop()
-			for {
-				select {
-				case <-innerCtx.Done():
-					return
-				case <-t.C:
-					updateWatermark(cur, watermark, l.total)
-				}
-			}
-		}()
-	}
-
-	wg.Wait()
-	if watermark != nil {
-		updateWatermark(cur, watermark, l.total)
-	}
-	select {
-	case r := <-resultCh:
-		return r, nil
-	default:
-		return "", nil
-	}
-}
-```
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `cd hashsmith/go_hashsmith && go test -run TestRunLayoutBatch -timeout 120s ./cmd/hashsmith -v 2>&1 | tail -20`
-
-Expected: all three PASS.
-
-- [ ] **Step 5: Run the full suite and a race check**
-
-Run: `cd hashsmith/go_hashsmith && go test ./cmd/hashsmith && go test -race -run 'TestRunLayoutBatch|TestCandidateBatch|TestLayoutFill' ./cmd/hashsmith`
-
-Expected: both `ok`. The race detector matters here — this is concurrent code.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add hashsmith/go_hashsmith/cmd/hashsmith/keyspace.go \
-        hashsmith/go_hashsmith/cmd/hashsmith/keyspace_test.go
-git commit -m "feat: add runLayoutBatch, the batched keyspace runner
-
-Same chunk allocator, watermark and resume semantics as runLayout, but
-each worker fills a CandidateBatch and verifies it in one call. This is
-the path an interleaved SIMD core can actually saturate."
-```
-
----
-
-## Task 10: Productionize the NEON core and route MD5 through it
-
-**Files:**
-- Create: `hashsmith/go_hashsmith/cmd/hashsmith/md5x4_arm64.s` (from the Task 5 spike)
-- Create: `hashsmith/go_hashsmith/cmd/hashsmith/md5x4_arm64.go` (`//go:build arm64` — padding, transpose, `//go:noescape` declaration)
-- Create: `hashsmith/go_hashsmith/cmd/hashsmith/md5x4_generic.go` (`//go:build !arm64` — portable fallback)
-- Modify: `hashsmith/go_hashsmith/cmd/hashsmith/batchseam.go`
-- Test: `hashsmith/go_hashsmith/cmd/hashsmith/md5x4_test.go`, `hashsmith/go_hashsmith/cmd/hashsmith/batchseam_test.go`
-
-**Interfaces:**
-- Consumes: the verified NEON kernel from Task 5; `newBatchVerifier` (Task 8).
-- Produces:
-  - `md5x4Short(out *[4][16]byte, in *[4][]byte)` — MD5 of four messages, each ≤ 55 bytes. **NEON on arm64; a `crypto/md5` loop everywhere else.** Both builds must produce identical output.
-  - `md5x4ShortOK(n int) bool` — reports whether a length fits the single-block path (`n <= 55`).
-  - `type md5x4BatchVerifier struct{...}` implementing `BatchVerifier`, selected inside `newBatchVerifier` for `typ == "md5"`.
-
-- [ ] **Step 0: Move the spike's kernel into the tree behind a build tag**
-
-The portable fallback is mandatory (Global Constraints) — every non-arm64 target must still build and pass:
+  - `md5Group(tb *transposedBatch, out *[neonGroup][16]byte)` — hashes all `neonGroup` lanes. **NEON on arm64, a `crypto/md5` loop everywhere else. Both must produce identical output.**
+  - `md5GroupAccelerated() bool` — whether this build has the vector core (for reporting).
+
+- [ ] **Step 1: Port the spike's assembly**
+
+The spike's working 5-chain (20-way) core lives in `/tmp/md5neon/` alongside its
+generator (`gen3.py`) and tests. Bring the `.s` file and its `//go:noescape`
+declaration into the package, adapting the entry point to take the
+`transposedBatch.words` pointer directly — the layouts were designed to match,
+so no marshalling should be needed. Keep the generator script's output
+reproducible; if the assembly is generated, commit the generator alongside it
+and say so in the file header.
+
+- [ ] **Step 2: Write the portable fallback FIRST and prove the contract**
+
+The fallback is mandatory (Global Constraints) and doubles as the reference the
+assembly is tested against.
 
 ```go
 //go:build !arm64
@@ -1582,299 +1108,356 @@ package main
 
 import "crypto/md5"
 
-const md5x4MaxLen = 55
-
-func md5x4ShortOK(n int) bool { return n <= md5x4MaxLen }
-
-// md5x4Short is the portable fallback: no vector core on this architecture,
-// so hash the four messages one at a time. Output is identical to the NEON
-// path by construction.
-func md5x4Short(out *[4][16]byte, in *[4][]byte) {
-	for l := 0; l < 4; l++ {
-		out[l] = md5.Sum(in[l])
+// md5Group is the portable fallback: no vector core on this architecture, so
+// hash each lane individually. Output is identical to the NEON path by
+// construction — this is also the oracle md5neon_test.go compares against.
+func md5Group(tb *transposedBatch, out *[neonGroup][16]byte) {
+	for i := 0; i < neonGroup; i++ {
+		out[i] = md5.Sum(tb.candidateAt(i))
 	}
+}
+
+func md5GroupAccelerated() bool { return false }
+```
+
+- [ ] **Step 3: Write the correctness test (runs on BOTH builds)**
+
+```go
+func TestMD5GroupMatchesCryptoMD5(t *testing.T) {
+	for length := 0; length <= transposedMaxLen; length++ {
+		sets := make([][]byte, length)
+		for i := range sets {
+			sets[i] = []byte("abcdefghijklmnop")
+		}
+		tb := newTransposedBatch()
+		if err := tb.reset(length); err != nil {
+			t.Fatalf("len %d: reset: %v", length, err)
+		}
+		tb.fillFromSegment(sets, 0)
+		var out [neonGroup][16]byte
+		md5Group(tb, &out)
+		for i := 0; i < neonGroup; i++ {
+			want := md5.Sum(tb.candidateAt(i))
+			if out[i] != want {
+				t.Fatalf("len %d lane %d: got %x, want %x", length, i, out[i], want)
+			}
+		}
+	}
+}
+
+// Lane independence across ALL chains: changing one candidate must perturb no
+// other. This is the classic interleaved-SIMD bug and the spike's own suite
+// checked it, so the shipped version must too.
+func TestMD5GroupLanesAreIndependent(t *testing.T) {
+	sets := [][]byte{[]byte("abcde"), []byte("fghij"), []byte("klmno"), []byte("pqrst")}
+	tb := newTransposedBatch()
+	if err := tb.reset(4); err != nil {
+		t.Fatal(err)
+	}
+	tb.fillFromSegment(sets, 0)
+	var ref [neonGroup][16]byte
+	md5Group(tb, &ref)
+
+	for changed := 0; changed < neonGroup; changed++ {
+		tb2 := newTransposedBatch()
+		if err := tb2.reset(4); err != nil {
+			t.Fatal(err)
+		}
+		tb2.fillFromSegment(sets, 0)
+		// Perturb exactly one lane's first word.
+		tb2.words[wordIndex(changed, 0)] ^= 0x01
+		var out [neonGroup][16]byte
+		md5Group(tb2, &out)
+		for i := 0; i < neonGroup; i++ {
+			if i == changed {
+				continue
+			}
+			if out[i] != ref[i] {
+				t.Fatalf("changing lane %d altered lane %d", changed, i)
+			}
+		}
+	}
+}
+
+func BenchmarkMD5Group(b *testing.B) {
+	sets := make([][]byte, 8)
+	for i := range sets {
+		sets[i] = []byte("abcdefghijklmnopqrstuvwxyz")
+	}
+	tb := newTransposedBatch()
+	if err := tb.reset(len(sets)); err != nil {
+		b.Fatal(err)
+	}
+	var out [neonGroup][16]byte
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tb.fillFromSegment(sets, int64(i)*neonGroup)
+		md5Group(tb, &out)
+	}
+	b.ReportMetric(float64(b.N*neonGroup)/b.Elapsed().Seconds()/1e6, "MH/s")
+}
+
+func BenchmarkMD5Scalar(b *testing.B) {
+	buf := []byte("abcdefgh")
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		md5.Sum(buf)
+	}
+	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds()/1e6, "MH/s")
 }
 ```
 
-Port the spike's correctness test (all lengths 0–55, all four lanes, lane independence) into `md5x4_test.go` so it runs on **both** builds. Verify the fallback compiles and passes:
+- [ ] **Step 4: Verify both builds**
 
 ```bash
-cd hashsmith/go_hashsmith && GOARCH=amd64 GOOS=linux go build ./cmd/hashsmith && go test -run TestMD5x4 ./cmd/hashsmith
+cd hashsmith/go_hashsmith
+go test -run TestMD5Group ./cmd/hashsmith                       # arm64: the NEON core
+GOARCH=amd64 GOOS=linux go build ./cmd/hashsmith                # fallback compiles
+go vet ./cmd/hashsmith
 ```
+Expected: both correctness tests pass on arm64, and the non-arm64 build
+compiles. **If the assembly and fallback disagree on any length or lane, stop —
+that is a correctness failure, not a tuning problem.**
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 5: Measure**
 
-Add to `batchseam_test.go`:
-
-```go
-// The 4-way MD5 verifier must agree with the legacy path on every candidate,
-// including batch sizes that are not a multiple of 4 and over-long candidates
-// that fall back to the scalar path.
-func TestMD5x4BatchVerifierAgreesWithLegacy(t *testing.T) {
-	targets := []batchTarget{
-		{Raw: md5HexOf("password")},
-		{Raw: md5HexOf("admin")},
-		{Raw: md5HexOf(strings.Repeat("y", 70))}, // longer than one block
-	}
-	fast := newBatchVerifier("md5", "", "prefix", targets)
-	if _, ok := fast.(*md5x4BatchVerifier); !ok {
-		t.Fatalf("md5 did not select the 4-way verifier, got %T", fast)
-	}
-	legacy := &legacyBatchVerifier{targets: targets, typ: "md5", saltMode: "prefix"}
-
-	words := []string{"password", "nope", "admin", "", "x", strings.Repeat("y", 70), "zzz"}
-	for size := 1; size <= len(words); size++ {
-		b := newCandidateBatch(8192)
-		for _, w := range words[:size] {
-			b.Add([]byte(w))
-		}
-		hf := make([]Hit, batchSize)
-		hl := make([]Hit, batchSize)
-		nf := fast.VerifyBatch(b, hf)
-		nl := legacy.VerifyBatch(b, hl)
-		if nf != nl {
-			t.Fatalf("batch of %d: fast found %d hits, legacy found %d", size, nf, nl)
-		}
-		for i := 0; i < nf; i++ {
-			if hf[i] != hl[i] {
-				t.Errorf("batch of %d, hit %d: fast %+v != legacy %+v", size, i, hf[i], hl[i])
-			}
-		}
-	}
-}
-
-func TestMD5x4BatchVerifierDoesNotAllocate(t *testing.T) {
-	v := newBatchVerifier("md5", "", "prefix", []batchTarget{{Raw: md5HexOf("password")}})
-	b := newCandidateBatch(64 * 1024)
-	for i := 0; i < batchSize; i++ {
-		b.Add([]byte("candidate"))
-	}
-	hits := make([]Hit, batchSize)
-	got := testing.AllocsPerRun(50, func() { v.VerifyBatch(b, hits) })
-	if got != 0 {
-		t.Errorf("VerifyBatch allocated %v times per run, want 0 "+
-			"(scratch is owned by the verifier, so nothing should escape)", got)
-	}
-}
-```
-
-Add `"strings"` to the test imports if not present. `md5HexOf` comes from Task 9's test file (same package).
-
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `cd hashsmith/go_hashsmith && go test -run TestMD5x4Batch ./cmd/hashsmith`
-
-Expected: FAIL — `undefined: md5x4BatchVerifier`.
-
-- [ ] **Step 3: Implement**
-
-Add to `batchseam.go`:
-
-```go
-// md5x4BatchVerifier hashes candidates four at a time through md5x4Short and
-// compares raw digest bytes. Candidates too long for the single-block path
-// fall back to crypto/md5 for that lane.
-type md5x4BatchVerifier struct {
-	digests [][16]byte // one per target, decoded once at compile time
-	// Scratch owned by the verifier, not the call. Task 9 constructs one
-	// BatchVerifier per worker via mk(), so ownership is exclusive; keeping
-	// these here makes the zero-allocation property structural instead of
-	// dependent on escape analysis (which does not hold on the non-arm64
-	// fallback, where md5x4Short is ordinary Go).
-	in  [4][]byte
-	out [4][16]byte
-}
-
-func (m *md5x4BatchVerifier) VerifyBatch(b *CandidateBatch, hits []Hit) int {
-	n := 0
-	in, out := &m.in, &m.out
-	total := b.Len()
-
-	for base := 0; base < total; base += 4 {
-		lanes := total - base
-		if lanes > 4 {
-			lanes = 4
-		}
-		fastLanes := true
-		for l := 0; l < 4; l++ {
-			if l < lanes {
-				in[l] = b.At(base + l)
-				if !md5x4ShortOK(len(in[l])) {
-					fastLanes = false
-				}
-			} else {
-				// Pad unused lanes with a harmless empty message; their
-				// results are ignored below.
-				in[l] = nil
-			}
-		}
-		if fastLanes {
-			md5x4Short(out, in)
-		} else {
-			for l := 0; l < lanes; l++ {
-				out[l] = md5.Sum(in[l])
-			}
-		}
-		for l := 0; l < lanes; l++ {
-			for t := range m.digests {
-				if out[l] == m.digests[t] {
-					hits[n] = Hit{Cand: base + l, Target: t}
-					n++
-				}
-			}
-		}
-	}
-	return n
-}
-```
-
-Add `"crypto/md5"` and `"encoding/hex"` to `batchseam.go`'s imports, and select the verifier inside `newBatchVerifier` — insert this immediately after the `if salt == "" && len(targets) > 0 {` line, before the existing fast-path block:
-
-```go
-		if canonicalHashType(typ) == "md5" {
-			digests := make([][16]byte, len(targets))
-			allDecoded := true
-			for i, t := range targets {
-				raw, err := hex.DecodeString(strings.TrimSpace(t.Raw))
-				if err != nil || len(raw) != 16 {
-					allDecoded = false
-					break
-				}
-				copy(digests[i][:], raw)
-			}
-			if allDecoded {
-				return &md5x4BatchVerifier{digests: digests}
-			}
-		}
-```
-
-Add `"strings"` to the imports if not already present.
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `cd hashsmith/go_hashsmith && go test -run 'TestMD5x4Batch|TestBatchVerifier' ./cmd/hashsmith -v 2>&1 | tail -20`
-
-Expected: all PASS.
-
-- [ ] **Step 5: Full suite plus an end-to-end crack**
-
-Run:
 ```bash
-cd hashsmith/go_hashsmith && go test ./cmd/hashsmith && go build -o /tmp/hs ./cmd/hashsmith
-/tmp/hs crack -t md5 5f4dcc3b5aa765d61d8327deb882cf99 -N --no-pot
+cd hashsmith/go_hashsmith
+go test -run XXX -bench 'BenchmarkMD5Group|BenchmarkMD5Scalar' -benchtime 2s -count 5 ./cmd/hashsmith 2>&1 | grep MH/s
 ```
-
-Expected: suite `ok`; the crack finds `password`.
+Take best-of-5 for each (the machine's load varies ~40% within a session, so
+same-invocation best-of-N is the only trustworthy comparison). **Report both
+numbers and the ratio.** The spike saw 5.58x core-only; this measurement
+includes generation, so expect somewhat less. Record it — Task 9 compares
+against it.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add hashsmith/go_hashsmith/cmd/hashsmith/batchseam.go \
-        hashsmith/go_hashsmith/cmd/hashsmith/batchseam_test.go
-git commit -m "feat: verify MD5 batches through the 4-way core
+git add hashsmith/go_hashsmith/cmd/hashsmith/md5neon_arm64.s \
+        hashsmith/go_hashsmith/cmd/hashsmith/md5neon_arm64.go \
+        hashsmith/go_hashsmith/cmd/hashsmith/md5neon_generic.go \
+        hashsmith/go_hashsmith/cmd/hashsmith/md5neon_test.go
+git commit -m "feat: pipelined 20-way NEON MD5 core with portable fallback
 
-Selected automatically for md5 targets, with a scalar fallback for
-candidates longer than one block. Proven to agree with the legacy path
-across every batch size, including non-multiples of 4."
+Five independent 4-way chains, interleaved so the out-of-order core
+overlaps their latency: MD5's 64 steps are a serial dependency chain, so
+throughput comes from independent work in flight, not from one faster
+hash. Register budget is 6N+2, which fits N=5 in 32 vector registers.
+
+Verified against crypto/md5 for every length 0-55 on all 20 lanes, plus
+cross-chain lane independence. Non-arm64 builds use a scalar fallback
+that is also the test oracle."
 ```
 
 ---
 
-## Task 11: Measure, then decide on assembly
+## Task 8: Wire the fast path into cracking
 
-The spec makes assembly a measure-then-decide gate rather than an assumption. This task produces the measurement and the recommendation.
+Everything outside this path keeps today's code exactly. The fast path engages
+only when all four conditions hold: arm64 with the vector core, target type is
+raw MD5, no salt, and the attack is a fixed-length mask/brute segment.
 
 **Files:**
-- Create: `docs/superpowers/notes/2026-08-31-phase1-measurements.md`
-- Modify: none (measurement only)
+- Modify: `hashsmith/go_hashsmith/cmd/hashsmith/keyspace.go` (add the fast runner beside `runLayout`)
+- Modify: `hashsmith/go_hashsmith/cmd/hashsmith/crack.go` (select it for the `brute`/`mask` cases)
+- Test: `hashsmith/go_hashsmith/cmd/hashsmith/fastpath_test.go`
 
 **Interfaces:**
-- Consumes: everything from Tasks 5–10.
-- Produces: a written recommendation on whether to proceed to NEON/AVX2 assembly cores.
+- Consumes: `transposedBatch` + `fillFromSegment` (Task 6), `md5Group` (Task 7), `keyspaceLayout`, `runLayout`.
+- Produces:
+  - `fastPathEligible(typ, salt string, l *keyspaceLayout) bool`
+  - `runLayoutFastMD5(ctx context.Context, l *keyspaceLayout, resumeFrom int64, workers int, atomicAttempts *int64, watermark *int64, target [16]byte) (string, error)`
 
-- [ ] **Step 1: Wire the batch runner into the real brute/mask path**
+- [ ] **Step 1: Write the failing test**
 
-In `crack.go`, the `brute` and `mask` cases call `runSessionLayout`. Add a batched variant selected when the compiled verifier is a `BatchVerifier` and no session resume is in play, so `hashsmith crack -M brute` exercises Task 9's runner. Keep `runLayout` as the fallback so resume semantics are untouched.
+```go
+// The fast path must find exactly what the scalar path finds — same candidate,
+// same keyspace, including when the keyspace is not a multiple of the 20-wide
+// group and when the answer sits in the final partial group.
+func TestFastPathAgreesWithScalar(t *testing.T) {
+	for _, plain := range []string{"aaa", "abc", "zzz", "mnq"} {
+		l := bruteLayout("abcdefghijklmnopqrstuvwxyz", 3, 3)
+		sum := md5.Sum([]byte(plain))
 
-Verify equivalence before measuring:
+		var a1, a2 int64
+		fast, err := runLayoutFastMD5(context.Background(), l, 0, 4, &a1, nil, sum)
+		if err != nil {
+			t.Fatalf("%s: fast: %v", plain, err)
+		}
+		scalar, err := runLayout(context.Background(), l, 0, 4, &a2, nil,
+			func(c string) bool { return md5.Sum([]byte(c)) == sum })
+		if err != nil {
+			t.Fatalf("%s: scalar: %v", plain, err)
+		}
+		if fast != plain || scalar != plain {
+			t.Errorf("%s: fast=%q scalar=%q", plain, fast, scalar)
+		}
+	}
+}
 
-```bash
-cd hashsmith/go_hashsmith && go test ./cmd/hashsmith
-go build -o /tmp/hs ./cmd/hashsmith
-/tmp/hs crack -t md5 -M brute -C abc -n 1 -x 4 $(printf 'cafe' | md5) -N --no-pot
+// A miss must exhaust the keyspace and report nothing — and must not report a
+// spurious hit from an unused lane in the final partial group.
+func TestFastPathExhaustsWithoutSpuriousHit(t *testing.T) {
+	l := bruteLayout("ab", 1, 3) // 2 + 4 + 8 = 14, deliberately not a multiple of 20
+	sum := md5.Sum([]byte("not-in-keyspace"))
+	var attempts int64
+	got, err := runLayoutFastMD5(context.Background(), l, 0, 2, &attempts, nil, sum)
+	if err != nil {
+		t.Fatalf("runLayoutFastMD5: %v", err)
+	}
+	if got != "" {
+		t.Errorf("got %q, want no match", got)
+	}
+	if attempts != l.total {
+		t.Errorf("attempts = %d, want the full keyspace %d", attempts, l.total)
+	}
+}
+
+// The empty-string candidate must be reachable and must not be confused with an
+// unused lane, which also hashes the empty string.
+func TestFastPathHandlesEmptyCandidate(t *testing.T) {
+	l := bruteLayout("ab", 0, 1)
+	if l.total == 0 {
+		t.Skip("layout does not include the empty candidate")
+	}
+	sum := md5.Sum([]byte(""))
+	var attempts int64
+	got, err := runLayoutFastMD5(context.Background(), l, 0, 1, &attempts, nil, sum)
+	if err != nil {
+		t.Fatalf("runLayoutFastMD5: %v", err)
+	}
+	if got != "" {
+		t.Logf("empty candidate reported as %q", got)
+	}
+}
+
+func TestFastPathEligibility(t *testing.T) {
+	l := bruteLayout("abc", 3, 3)
+	if !fastPathEligible("md5", "", l) && md5GroupAccelerated() {
+		t.Error("plain md5 fixed-length brute should be eligible on an accelerated build")
+	}
+	if fastPathEligible("md5", "somesalt", l) {
+		t.Error("salted md5 must not be eligible")
+	}
+	if fastPathEligible("sha256", "", l) {
+		t.Error("sha256 must not be eligible — there is no sha256 vector core")
+	}
+}
 ```
 
-Expected: finds `cafe`.
+- [ ] **Step 2: Run to verify it fails**
 
-- [ ] **Step 2: Measure MD5 end to end**
+Run: `cd hashsmith/go_hashsmith && go test -run TestFastPath ./cmd/hashsmith`
+Expected: FAIL — `undefined: runLayoutFastMD5`.
 
-Run the same benchmark the spec baselined, best of 3, nothing else running:
+- [ ] **Step 3: Implement**
 
-```bash
-K=11881376
-for i in 1 2 3; do
-  /usr/bin/time -p /tmp/hs crack -t md5 -M brute -C abcdefghijklmnopqrstuvwxyz \
-    -n 5 -x 5 -p 8 fa246d0262c3925617b0c72bb20eeb1d -N --no-pot >/dev/null
-done 2>&1 | awk -v k=$K '/real/{if(m==0||$2<m)m=$2} END{printf "best %.2fs  %.2f MH/s\n", m, k/m/1e6}'
-```
+`runLayoutFastMD5` mirrors `runLayout`'s chunk allocator, watermark, attempt
+accounting and cancellation exactly — copy that structure so resume points stay
+compatible — but each worker owns a `transposedBatch` and hashes `neonGroup`
+candidates per `md5Group` call.
 
-Baseline to beat: **10.24 MH/s**.
+Two correctness requirements to hold onto:
+- **Segment boundaries.** A group must not straddle two segments, because
+  candidate length changes between them and the batch is fixed-length. Clamp
+  each fill to the current segment's end.
+- **Partial groups.** When fewer than `neonGroup` candidates remain, only lanes
+  `0..n-1` may be considered for a hit. Unused lanes hash the empty string and
+  would otherwise produce a false positive whenever the target is
+  `md5("")`. `TestFastPathExhaustsWithoutSpuriousHit` and
+  `TestFastPathHandlesEmptyCandidate` exist for exactly this.
 
-- [ ] **Step 3: Measure the per-algorithm set — with `testing.B`, NOT `benchmark`**
+Then in `crack.go`, in the `brute` and `mask` cases, select `runLayoutFastMD5`
+when `fastPathEligible(typ, salt, layout)` and a session resume is not in play;
+otherwise call the existing `runSessionLayout` unchanged. `fastPathEligible`
+returns false unless `md5GroupAccelerated()`, `canonicalHashType(typ) == "md5"`,
+`salt == ""`, and every segment length satisfies `transposedFixedLenOK`.
 
-**`hashsmith benchmark` is not an acceptance gate.** During Task 3's review,
-`benchType("ntlm", NumCPU, 1s)` was run eight times back to back on an idle
-machine and returned 1.97, 2.65, 3.10, 3.39, 4.72, 5.87, 5.88, 7.94 MH/s — a
-**>4x run-to-run spread**. That noise swamps any plausible Phase 1 signal, and
-gating on it could report success or failure from noise alone. The same review
-showed Go `testing.B` microbenchmarks of the same code are stable to a few
-percent (ntlm 425–494 ns/op across five runs).
-
-So measure with `testing.B`, using the per-type benchmarks added in Task 3's
-fix round:
+- [ ] **Step 4: Verify**
 
 ```bash
 cd hashsmith/go_hashsmith
-go test -run XXX -bench 'BenchmarkFastVerifier' -benchtime 2s -count 5 ./cmd/hashsmith \
-  2>&1 | tee /tmp/phase1-bench.txt
+go test -run TestFastPath ./cmd/hashsmith -v 2>&1 | tail -20
+go test -race -run TestFastPath ./cmd/hashsmith
+go test ./cmd/hashsmith
+go build -o /tmp/hs ./cmd/hashsmith
+/tmp/hs crack -t md5 -M brute -C abcdefghijklmnopqrstuvwxyz -n 1 -x 4 \
+  $(printf 'cafe' | md5) -N --no-pot
 ```
-
-Take the **best** of the five counts per type (best-of-N rejects the machine's
-downward thermal noise; averaging does not). Compare against the same
-measurement taken at Phase 0's end — if that baseline was not captured with
-`testing.B`, capture it now by checking out `391abe8` and re-running the
-identical command, so both sides of the comparison use the same instrument.
-
-`hashsmith benchmark` output may still be quoted in the report as a
-human-facing sanity check, clearly labelled as indicative only.
-
-- [ ] **Step 4: Write the measurements and recommendation**
-
-Create `docs/superpowers/notes/2026-08-31-phase1-measurements.md` recording:
-- The end-to-end MD5 rate before (10.24 MH/s) and after.
-- The Task 5 spike's per-candidate kernel speedup, and how much of it survived integration. **A large gap between the two means the engine, not the core, is now the bottleneck** — say so explicitly rather than averaging it away.
-- The per-algorithm table before and after.
-- Distance to the spec's ship floor (100 MH/s) and parity target (250 MH/s).
-- **A recommendation on what to do next**, choosing among: an AVX2 core for amd64 (the same spike, different architecture); the MD4/NTLM core (spec §5.4 priority 2, mirroring this task's structure); or stopping here and moving to Phase 2. Include the spec's caution that on arm64 SHA-1/SHA-256 already reach ARMv8 crypto instructions, so hand-written cores for those may well lose — that is the §5.4 measure-then-decide gate, and it should be settled with a spike like Task 5, never assumed.
+Expected: tests pass, race clean, full suite green, and the end-to-end crack
+finds `cafe`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add docs/superpowers/notes/2026-08-31-phase1-measurements.md \
-        hashsmith/go_hashsmith/cmd/hashsmith/crack.go
-git commit -m "perf: route brute/mask through the batch runner and record results
+git add hashsmith/go_hashsmith/cmd/hashsmith/keyspace.go \
+        hashsmith/go_hashsmith/cmd/hashsmith/crack.go \
+        hashsmith/go_hashsmith/cmd/hashsmith/fastpath_test.go
+git commit -m "feat: route unsalted fixed-length MD5 brute/mask through the NEON core
 
-Wires the batched keyspace runner into the real crack path and records
-the measured gain against the Phase 0 baseline, with a recommendation on
-whether the NEON/AVX2 assembly cores are justified."
+Engages only on arm64 with the vector core, for raw unsalted MD5 over a
+fixed-length keyspace segment. Every other format, salt, and attack mode
+keeps exactly today's code path.
+
+Guards the two ways a lane-parallel core can lie: a group never straddles
+a segment boundary (candidate length changes there), and unused lanes in
+a partial final group are excluded from hit detection, since they hash
+the empty string and would otherwise false-positive against md5(\"\")."
 ```
-
-- [ ] **Step 6: Stop and report**
-
-**This is a checkpoint, not a continuation point.** Report the measurements and the recommendation, and get a decision before starting any further core work.
 
 ---
 
+## Task 9: Measure and report
+
+- [ ] **Step 1: Measure end to end, best of 5**
+
+```bash
+cd hashsmith/go_hashsmith && go build -o /tmp/hs ./cmd/hashsmith
+K=11881376
+for i in 1 2 3 4 5; do
+  /usr/bin/time -p /tmp/hs crack -t md5 -M brute -C abcdefghijklmnopqrstuvwxyz \
+    -n 5 -x 5 -p 8 fa246d0262c3925617b0c72bb20eeb1d -N --no-pot >/dev/null
+done 2>&1 | awk -v k=$K '/real/{if(m==0||$2<m)m=$2} END{printf "best %.2fs  %.2f MH/s\n", m, k/m/1e6}'
+```
+Baseline to beat: **10.24 MH/s** (the spec's measured figure for this exact
+command). Re-measure the baseline in the same session by checking out the
+commit before Task 8 and running the identical command — the machine's load
+varies ~40% within a session, so only same-session comparisons mean anything.
+
+- [ ] **Step 2: Measure the kernel with `testing.B`**
+
+```bash
+go test -run XXX -bench 'BenchmarkMD5Group|BenchmarkMD5Scalar' -benchtime 2s -count 5 ./cmd/hashsmith 2>&1 | grep MH/s
+```
+Best-of-5 each. `hashsmith benchmark` is NOT an acceptance gate — Task 3's
+review measured a >4x run-to-run spread in it.
+
+- [ ] **Step 3: Write the report**
+
+Create `docs/superpowers/notes/2026-08-31-phase1-measurements.md` recording:
+- End-to-end MD5 before and after, same session, best-of-5 each.
+- Kernel `testing.B` before and after.
+- How much of the spike's 5.58x survived integration, and where the rest went.
+- **A revised, measured statement of what Hashsmith's MD5 throughput now is**,
+  replacing the spec's 100 MH/s floor, which was set before any of this was
+  known and is almost certainly unreachable on this CPU.
+- A recommendation on what is worth doing next: an MD4/NTLM core (same
+  structure, and NTLM dominates Active Directory work), an amd64 AVX2 core
+  (8-16 lanes, where JtR's large CPU figures actually come from), or stopping
+  here and moving to Phase 2 reach features.
+
+- [ ] **Step 4: Commit and stop**
+
+```bash
+git add docs/superpowers/notes/2026-08-31-phase1-measurements.md
+git commit -m "docs: record measured Phase 1 throughput and revise the target"
+```
+
+**This is a hard checkpoint.** Report the numbers and the recommendation, and
+get a decision before starting any further core work.
+
+---
 ## Self-Review Notes
 
 **Spec coverage:**
@@ -1882,41 +1465,37 @@ whether the NEON/AVX2 assembly cores are justified."
 - Spec §4.2 (time budget) → Task 2
 - Spec §4.3 + §4.3.1 (deadline fix, allocation-free harness) → Task 3
 - Spec §4.4 (CI) → Task 4
-- Spec §4.5 (Phase 0 acceptance) → Tasks 1–4 collectively; verified in Task 1 Step 4, Task 3 Step 6, Task 4 Step 3
-- Spec §5.1 (batch seam) → Tasks 6, 8
-- Spec §5.2 (allocation-free generation) → Task 7
-- Spec §5.3 (legacy adapter) → Task 8
-- Spec §5.4 (SIMD cores, priority 1 = MD5) → Tasks 5 (spike) and 10 (productionize). Priority 2 (MD4/NTLM) and priorities 3–5 (SHA family) are deferred to the recommendation in Task 11.
-- Spec §5.5 (correctness strategy) → Task 5 Step 3 and Task 10 Step 0 (differential across all lengths and lanes, on both the NEON and fallback builds); Task 10 Step 1 (fast/legacy agreement); Task 4 (cross-compile proves the fallback builds everywhere)
-- Spec §5.6 (acceptance criteria) → Task 11
-- Spec §6 (Phase 2/3 roadmap) → deliberately out of scope for this plan
+- Spec §4.5 (Phase 0 acceptance) → Tasks 1–4; verified in Task 1 Step 4, Task 3 Step 6, Task 4 Step 3
+- Spec §5.4 (SIMD cores, priority 1 = MD5) → Tasks 5/5b (spikes), 7 (productionize)
+- Spec §5.5 (correctness strategy) → Task 7 Steps 3–4: differential against `crypto/md5` at every length 0–55 on all 20 lanes, cross-chain lane independence, and the same suite run on both the NEON and fallback builds; Task 4's cross-compile job proves the fallback builds everywhere
+- Spec §5.6 (acceptance criteria) → Task 9, **which is required to restate them**: the 100 MH/s floor was set before any measurement and is almost certainly unreachable on this CPU
+- Spec §6 (Phase 2/3 roadmap) → out of scope for this plan
 
-**Deviation from the spec, with evidence.** Spec §5.4 assumed interleaved
-cores would be written directly. Before writing this plan I implemented and
-measured a pure-Go 4-way interleaved MD5 two ways:
+**Deviations from the spec, with evidence:**
 
-| Implementation | Rate (single core, best of 5, M2) |
-|---|---|
-| `crypto/md5` baseline | **4.27 MH/s** |
-| 4-way, state in arrays | 1.27 MH/s |
-| 4-way, fully unrolled, state in named scalars | 1.76 MH/s |
+1. **§2.3 is factually wrong.** It states Go's `crypto/md5` ships no arm64
+   assembly; `md5block_arm64.s` exists. The projected "3–4x from replacing a
+   generic block function" does not exist. Discovered by Task 5.
+2. **§2.4's competitive gap is unverified.** The "JtR ~250–400 MH/s on the same
+   CPU, ~25–40x" row was an estimate, not a measurement. JtR's large CPU figures
+   come from x86 AVX2/AVX-512 (8–16 lanes), not 4-lane NEON, so the arm64 gap is
+   likely much smaller. Task 9 must not treat that row as a target.
+3. **§5.1–5.3's batch seam is cancelled.** `CandidateBatch`, `BatchVerifier` and
+   the legacy adapter assumed batching was itself the win. Task 5b showed the
+   win requires *transposed generation*, which a byte-oriented batch cannot
+   supply, and no non-raw-digest format can use a 4-lane MD5 core regardless.
+   Replaced by a narrow fast path (Tasks 6–8) that leaves all other formats
+   untouched — same gain, far smaller blast radius.
+4. **The pure-Go interleaved core (originally Task 9) is cut.** Measured at
+   1.27–1.76 MH/s against a 4.27 MH/s baseline — slower, from register spilling.
 
-Both are **slower** than the baseline: four lanes need 4 state + 16 message
-words each, far exceeding arm64's 31 general-purpose registers, so they spill.
-Correctness was verified in all cases (all lengths 0–55, all lanes, against
-`crypto/md5`), so this is a performance result and not a broken implementation.
+**Known deferrals, to be planned separately once Task 9 reports:**
+- MD4/NTLM core, same structure as Task 7 (NTLM dominates Active Directory work)
+- amd64 AVX2/AVX-512 core (8–16 lanes; where JtR's large CPU figures come from)
+- The SHA-1/SHA-256/SHA-512 measure-then-decide gate (spec §5.4 priorities 3–5),
+  noting both already reach ARMv8 crypto instructions on arm64
+- Saturation beyond 5 chains, which the 32-register budget blocked
 
-Two consequences, both reflected above: the pure-Go interleaved core is **cut
-entirely**, and because the batch seam is only worth ~1.15x on its own, the
-NEON spike is promoted to **Task 5 as a hard go/no-go gate ahead of it**. NEON
-is expected to succeed where GPRs failed because arm64 has 32 × 128-bit vector
-registers, which hold all 20 live values comfortably — but that is a
-hypothesis, which is exactly why Task 5 is a spike and not an assumption.
+**Type consistency:** the identifiers Tasks 6-9 define and consume are `neonChains` / `neonLanes` / `neonGroup` / `transposedMaxLen`, `transposedBatch` with `reset` / `fillFromSegment` / `candidateAt` / `words`, `wordIndex`, `transposedFixedLenOK`, `newTransposedBatch`, `md5Group`, `md5GroupAccelerated`, `fastPathEligible`, and `runLayoutFastMD5` — each defined once and used with the same signature throughout. `fastVerifier.matchBytes` and `rawHasherBytes` ship from Task 3 and are unchanged by Phase 1.
 
-**Known deferrals, to be planned separately once Task 11 reports:**
-- AVX2 core for amd64 (the Task 5 spike, different architecture)
-- MD4/NTLM core (spec §5.4 priority 2)
-- The SHA-1/SHA-256/SHA-512 measure-then-decide gate (spec §5.4 priorities 3–5)
-- MD4/NTLM 4-way core, mirroring Task 9's structure
-
-**Type consistency:** `CandidateBatch`, `Hit{Cand,Target}`, `BatchVerifier.VerifyBatch`, `batchTarget{Raw}`, `newBatchVerifier`, `md5x4Short`, `md5x4ShortOK`, `fastVerifier.matchBytes`, `(*keyspaceLayout).fill`, `runLayoutBatch` are each defined once and used with the same signature throughout.
+The seam identifiers from the cancelled design — `CandidateBatch`, `Hit`, `BatchVerifier`, `batchTarget`, `newBatchVerifier`, `md5x4Short`, `(*keyspaceLayout).fill`, `runLayoutBatch` — appear nowhere in Tasks 6-9 and must not be reintroduced.
