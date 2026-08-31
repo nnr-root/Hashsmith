@@ -517,15 +517,19 @@ jobs:
         with:
           go-version: "1.25"
       # The race detector is what guards the concurrent keyspace runner added
-      # in Phase 1. TestBenchTypeRespectsBudgetForSlowKDF is excluded: it is a
-      # wall-clock assertion, and a race build's ~10x slowdown makes wall-clock
-      # timing meaningless rather than merely slow. Races in that file's code
-      # are still covered by the other tests in this lane.
+      # in Phase 1. Two tests are excluded, and NEITHER should be re-added:
+      # TestBenchTypeRespectsBudgetForSlowKDF and TestFastVectorsStayWithinBudget
+      # are both wall-clock budget assertions. A race build carries ~10x
+      # instrumentation overhead, so under -race they measure the instrumentation
+      # rather than the code — an absolute millisecond threshold is meaningless
+      # there, not merely strained. Loosening their constants to suit -race would
+      # weaken them in the normal lane, which is where they do their real work.
+      # Neither contributes anything to race detection.
       - name: Test (race detector)
         run: |
           cd hashsmith/go_hashsmith
           go test -race -timeout 20m \
-            -skip 'TestBenchTypeRespectsBudgetForSlowKDF' ./...
+            -skip 'TestBenchTypeRespectsBudgetForSlowKDF|TestFastVectorsStayWithinBudget' ./...
 
   cross-compile:
     runs-on: ubuntu-latest
