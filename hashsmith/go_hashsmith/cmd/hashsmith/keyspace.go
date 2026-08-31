@@ -226,12 +226,20 @@ type fastAlgo struct {
 }
 
 // fastAlgoFor returns the fast-path descriptor for a hash type, if one
-// exists. Only MD5 is registered so far; MD4 and NTLM (MD4(UTF-16LE(pw)))
-// arrive in a later task once the MD4 vector core lands.
+// exists. Resolved through canonicalHashType so hashcat mode numbers (e.g.
+// "900" for md4, "1000" for ntlm) and John labels route here too.
+//
+// md4 and ntlm both run through md4Group — NTLM is MD4 over UTF-16LE(pw)
+// rather than a different digest function, so only the encoding mode
+// differs.
 func fastAlgoFor(typ string) (*fastAlgo, bool) {
 	switch canonicalHashType(typ) {
 	case "md5":
 		return &fastAlgo{name: "md5", enc: encRaw, group: md5Group}, true
+	case "md4":
+		return &fastAlgo{name: "md4", enc: encRaw, group: md4Group}, true
+	case "ntlm":
+		return &fastAlgo{name: "ntlm", enc: encUTF16LE, group: md4Group}, true
 	}
 	return nil, false
 }
@@ -246,7 +254,16 @@ func fastAlgoFor(typ string) (*fastAlgo, bool) {
 //     not mixed-radix decodable from segments, which fillFromSegment requires;
 //   - every segment's length fits one block under the algorithm's encoding
 //     mode (transposedFixedLenOK), since transposedBatch is fixed-length per
-//     reset.
+//     reset;
+//   - for encUTF16LE (NTLM), every byte of every charset in every segment is
+//     ASCII (< 0x80). Hashsmith's utf16le (hash.go) is a UTF-8 decode
+//     followed by a UTF-16 encode, not a naive b,0x00 byte expansion: for a
+//     non-ASCII byte the two diverge (e.g. []rune(string([]byte{0xC3})) is
+//     U+FFFD, encoding to FD FF, not C3 00). fillFromSegment's encUTF16LE
+//     path always does the naive b,0x00 expansion, so a charset containing a
+//     high byte would make the fast path compute a different digest than
+//     Hashsmith's own scalar path — silently. Declining keeps such masks on
+//     the scalar path instead.
 func fastPathEligible(typ, salt string, l *keyspaceLayout) (*fastAlgo, bool) {
 	if !md5GroupAccelerated() {
 		return nil, false
@@ -264,6 +281,17 @@ func fastPathEligible(typ, salt string, l *keyspaceLayout) (*fastAlgo, bool) {
 	for _, seg := range l.segments {
 		if !transposedFixedLenOK(len(seg), algo.enc) {
 			return nil, false
+		}
+	}
+	if algo.enc == encUTF16LE {
+		for _, seg := range l.segments {
+			for _, charset := range seg {
+				for _, b := range charset {
+					if b >= 0x80 {
+						return nil, false
+					}
+				}
+			}
 		}
 	}
 	return algo, true
