@@ -17,15 +17,41 @@ const (
 	neonChains       = 5                      // independent 4-way chains in flight
 	neonLanes        = 4                      // 32-bit lanes per 128-bit vector
 	neonGroup        = neonChains * neonLanes // candidates hashed per core call
-	transposedMaxLen = 55                     // one MD5 block after padding
+	transposedMaxLen = 55                     // one block after padding, raw mode
+
+	// transposedMaxLenUTF16LE is the candidate-length ceiling in encUTF16LE
+	// mode: each candidate byte expands to 2 message bytes (b, 0x00), so the
+	// message is 2x the candidate length and must still fit transposedMaxLen
+	// after padding (2*27 = 54 <= 55).
+	transposedMaxLenUTF16LE = 27
+)
+
+// encodeMode selects how fillFromSegment turns candidate bytes into the
+// message bytes that get packed and hashed. Most formats hash the candidate
+// bytes verbatim (encRaw); NTLM hashes UTF-16LE(candidate) instead, so its
+// message bytes are not its candidate bytes.
+type encodeMode int
+
+const (
+	encRaw     encodeMode = iota // message bytes = candidate bytes verbatim
+	encUTF16LE                   // message bytes = candidate byte, 0x00 per char (ASCII only)
 )
 
 // errTransposedLen is returned by reset when the candidate length does not
-// fit in a single 64-byte MD5 block after padding.
-var errTransposedLen = errors.New("candidate length does not fit one MD5 block")
+// fit in a single 64-byte block after padding, for the given encoding mode.
+var errTransposedLen = errors.New("candidate length does not fit one block")
 
-// transposedFixedLenOK reports whether a candidate length fits one block.
-func transposedFixedLenOK(n int) bool { return n >= 0 && n <= transposedMaxLen }
+// transposedFixedLenOK reports whether a candidate length fits one block
+// once encoded under enc. UTF-16LE doubles the message, halving the ceiling.
+func transposedFixedLenOK(n int, enc encodeMode) bool {
+	if n < 0 {
+		return false
+	}
+	if enc == encUTF16LE {
+		return n <= transposedMaxLenUTF16LE
+	}
+	return n <= transposedMaxLen
+}
 
 // transposedBatch holds neonGroup candidates of a FIXED length, already padded
 // and interleaved. words is [neonChains][16][neonLanes]uint32 flattened: the
@@ -33,6 +59,7 @@ func transposedFixedLenOK(n int) bool { return n >= 0 && n <= transposedMaxLen }
 type transposedBatch struct {
 	words  []uint32
 	length int
+	enc    encodeMode
 	n      int
 }
 
@@ -45,17 +72,18 @@ func wordIndex(i, w int) int {
 	return (i/neonLanes)*64 + w*4 + (i % neonLanes)
 }
 
-// reset prepares the batch for candidates of candidateLen bytes, writing a
-// valid padded block into EVERY lane. This guarantee holds only for the fill
-// that immediately follows reset: on a batch reused across groups (the
-// intended "reset once, fill repeatedly" calling convention), it is
-// fillFromSegment's job to keep unused lanes clean on every partial group —
-// see the comment there. Do not assume the reset-time guarantee persists.
-func (tb *transposedBatch) reset(candidateLen int) error {
-	if !transposedFixedLenOK(candidateLen) {
+// reset prepares the batch for candidates of candidateLen bytes encoded under
+// enc, writing a valid padded block into EVERY lane. This guarantee holds
+// only for the fill that immediately follows reset: on a batch reused across
+// groups (the intended "reset once, fill repeatedly" calling convention), it
+// is fillFromSegment's job to keep unused lanes clean on every partial group
+// — see the comment there. Do not assume the reset-time guarantee persists.
+func (tb *transposedBatch) reset(candidateLen int, enc encodeMode) error {
+	if !transposedFixedLenOK(candidateLen, enc) {
 		return errTransposedLen
 	}
 	tb.length = candidateLen
+	tb.enc = enc
 	tb.n = 0
 	for i := range tb.words {
 		tb.words[i] = 0
@@ -86,24 +114,40 @@ func (tb *transposedBatch) fillFromSegment(sets [][]byte, from int64) int {
 	total := maskKeyspace(sets)
 	n := 0
 	var buf [transposedMaxLen]byte
+	var msg [transposedMaxLen]byte // staged message bytes: encoded per tb.enc
 	L := len(sets)
+	msgLen := L
 	bitLen := uint32(L) * 8
+	if tb.enc == encUTF16LE {
+		msgLen = L * 2
+		bitLen = uint32(L) * 16
+	}
 	for n < neonGroup {
 		idx := from + int64(n)
 		if idx >= total {
 			break
 		}
 		maskIdxInto(buf[:L], idx, sets)
-		// Pack L bytes plus the 0x80 terminator into words 0..(L/4).
-		full := L / 4
+		if tb.enc == encUTF16LE {
+			// Each candidate byte b expands to b, 0x00 — byte-identical to
+			// utf16le(s) for ASCII input (see hash.go's utf16le).
+			for b := 0; b < L; b++ {
+				msg[b*2] = buf[b]
+				msg[b*2+1] = 0
+			}
+		} else {
+			copy(msg[:L], buf[:L])
+		}
+		// Pack msgLen bytes plus the 0x80 terminator into words 0..(msgLen/4).
+		full := msgLen / 4
 		for w := 0; w < full; w++ {
-			tb.words[wordIndex(n, w)] = binary.LittleEndian.Uint32(buf[w*4:])
+			tb.words[wordIndex(n, w)] = binary.LittleEndian.Uint32(msg[w*4:])
 		}
 		// The partial final word carries the remaining bytes then 0x80.
-		rem := L % 4
+		rem := msgLen % 4
 		var tail uint32
 		for b := 0; b < rem; b++ {
-			tail |= uint32(buf[full*4+b]) << (8 * b)
+			tail |= uint32(msg[full*4+b]) << (8 * b)
 		}
 		tail |= 0x80 << (8 * rem)
 		tb.words[wordIndex(n, full)] = tail
@@ -122,12 +166,19 @@ func (tb *transposedBatch) fillFromSegment(sets [][]byte, from int64) int {
 }
 
 // candidateAt reconstructs candidate i's bytes, for reporting a hit. Not on the
-// hot path, so clarity beats speed.
+// hot path, so clarity beats speed. In encUTF16LE mode each candidate byte
+// occupies every other message byte (b, 0x00), so the interleaved zero bytes
+// are stripped back out.
 func (tb *transposedBatch) candidateAt(i int) []byte {
 	out := make([]byte, tb.length)
+	step := 1
+	if tb.enc == encUTF16LE {
+		step = 2
+	}
 	for b := 0; b < tb.length; b++ {
-		w := tb.words[wordIndex(i, b/4)]
-		out[b] = byte(w >> (8 * (b % 4)))
+		msgByte := b * step
+		w := tb.words[wordIndex(i, msgByte/4)]
+		out[b] = byte(w >> (8 * (msgByte % 4)))
 	}
 	return out
 }

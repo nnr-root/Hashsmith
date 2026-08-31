@@ -62,7 +62,7 @@ func TestMD5GroupMatchesCryptoMD5(t *testing.T) {
 	for length := 0; length <= transposedMaxLen; length++ {
 		sets := wideKeyspaceSets(length)
 		tb := newTransposedBatch()
-		if err := tb.reset(length); err != nil {
+		if err := tb.reset(length, encRaw); err != nil {
 			t.Fatalf("len %d: reset: %v", length, err)
 		}
 		tb.fillFromSegment(sets, 0)
@@ -84,7 +84,7 @@ func TestMD5GroupMatchesCryptoMD5(t *testing.T) {
 func TestMD5GroupLanesAreIndependent(t *testing.T) {
 	sets := [][]byte{[]byte("abcde"), []byte("fghij"), []byte("klmno"), []byte("pqrst")}
 	tb := newTransposedBatch()
-	if err := tb.reset(4); err != nil {
+	if err := tb.reset(4, encRaw); err != nil {
 		t.Fatal(err)
 	}
 	tb.fillFromSegment(sets, 0)
@@ -93,7 +93,7 @@ func TestMD5GroupLanesAreIndependent(t *testing.T) {
 
 	for changed := 0; changed < neonGroup; changed++ {
 		tb2 := newTransposedBatch()
-		if err := tb2.reset(4); err != nil {
+		if err := tb2.reset(4, encRaw); err != nil {
 			t.Fatal(err)
 		}
 		tb2.fillFromSegment(sets, 0)
@@ -118,7 +118,7 @@ func BenchmarkMD5Group(b *testing.B) {
 		sets[i] = []byte("abcdefghijklmnopqrstuvwxyz")
 	}
 	tb := newTransposedBatch()
-	if err := tb.reset(len(sets)); err != nil {
+	if err := tb.reset(len(sets), encRaw); err != nil {
 		b.Fatal(err)
 	}
 	var out [neonGroup][16]byte

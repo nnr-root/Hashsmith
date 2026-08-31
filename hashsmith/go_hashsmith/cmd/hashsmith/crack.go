@@ -42,7 +42,7 @@ const (
 )
 
 // md5TargetBytes decodes a hex MD5 digest into the fixed-size array
-// runLayoutFastMD5 compares against. It returns false for anything that
+// runLayoutFast compares against. It returns false for anything that
 // isn't exactly 16 bytes of hex — the fast path is simply skipped in that
 // case, falling back to the scalar path's own (already-validated) handling.
 func md5TargetBytes(targetHex string) ([16]byte, bool) {
@@ -64,10 +64,12 @@ func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *ses
 	resumeFrom int64, workers int, atomicAttempts *int64,
 	typ, salt, targetHash string, verify func(string) bool) (string, bool, error) {
 
-	if sess == nil && fastPathEligible(typ, salt, layout) {
-		if target, ok := md5TargetBytes(targetHash); ok {
-			pw, err := runLayoutFastMD5(ctx, layout, resumeFrom, workers, atomicAttempts, nil, target)
-			return pw, ctx.Err() != nil, err
+	if sess == nil {
+		if algo, ok := fastPathEligible(typ, salt, layout); ok {
+			if target, ok := md5TargetBytes(targetHash); ok {
+				pw, err := runLayoutFast(ctx, layout, resumeFrom, workers, atomicAttempts, nil, algo, target)
+				return pw, ctx.Err() != nil, err
+			}
 		}
 	}
 	return runSessionLayout(ctx, layout, sess, resumeFrom, workers, atomicAttempts, verify)
