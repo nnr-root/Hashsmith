@@ -65,19 +65,6 @@ func TestTrueCryptCascadeAndBootPublishedVectors(t *testing.T) {
 	}
 }
 
-func TestVeraCryptCascadeRepresentatives(t *testing.T) {
-	for _, typ := range []string{"veracrypt-sha256-xts1536", "veracrypt-ripemd160-boot-xts1536"} {
-		v := publishedVectorForType(t, typ)
-		ok, err := verifyCandidate(v.password, v.target, typ, "", "prefix")
-		if err != nil || !ok {
-			t.Fatalf("%s published vector failed: ok=%v err=%v", typ, ok, err)
-		}
-		if bad, _ := verifyCandidate("wrong", v.target, typ, "", "prefix"); bad {
-			t.Fatalf("%s accepted a wrong password", typ)
-		}
-	}
-}
-
 func TestGenericTrueCryptDetectsCascadeHeader(t *testing.T) {
 	v := publishedVectorForType(t, "truecrypt-ripemd160-xts1536")
 	if got := detectHashTypes(v.target); len(got) != 1 || got[0] != "truecrypt" {

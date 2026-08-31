@@ -2,26 +2,30 @@ package main
 
 import "testing"
 
-func TestHashcatCryptHeaderPublishedVectors(t *testing.T) {
-	tests := []struct {
-		mode, typ, password, target string
-	}{
-		{"29311", "truecrypt-ripemd160", "hashcat", cryptHeaderHashcat29311Vector},
-		{"29321", "truecrypt-sha512", "hashcat", cryptHeaderHashcat29321Vector},
-		{"29331", "truecrypt-whirlpool", "hashcat", cryptHeaderHashcat29331Vector},
-		{"29411", "veracrypt-ripemd160", "hashcat", cryptHeaderHashcat29411Vector},
-		{"29421", "veracrypt-sha512", "hashcat", cryptHeaderHashcat29421Vector},
-		{"29431", "veracrypt-whirlpool", "hashcat", cryptHeaderHashcat29431Vector},
-		{"29451", "veracrypt-sha256", "hashcat", cryptHeaderHashcat29451Vector},
-	}
-	for _, tc := range tests {
+// hashcatCryptHeaderPublishedCases is shared by the fast alias assertion
+// below and by TestHashcatCryptHeaderPublishedVectors in
+// crack_hashcat_crypt_headers_slow_test.go (slowtest tag), so the vector
+// table exists exactly once for both halves of the split.
+var hashcatCryptHeaderPublishedCases = []struct {
+	mode, typ, password, target string
+}{
+	{"29311", "truecrypt-ripemd160", "hashcat", cryptHeaderHashcat29311Vector},
+	{"29321", "truecrypt-sha512", "hashcat", cryptHeaderHashcat29321Vector},
+	{"29331", "truecrypt-whirlpool", "hashcat", cryptHeaderHashcat29331Vector},
+	{"29411", "veracrypt-ripemd160", "hashcat", cryptHeaderHashcat29411Vector},
+	{"29421", "veracrypt-sha512", "hashcat", cryptHeaderHashcat29421Vector},
+	{"29431", "veracrypt-whirlpool", "hashcat", cryptHeaderHashcat29431Vector},
+	{"29451", "veracrypt-sha256", "hashcat", cryptHeaderHashcat29451Vector},
+}
+
+// The fast half of the TestHashcatCryptHeaderPublishedVectors split: the
+// mode-to-type alias resolution. See crack_hashcat_crypt_headers_slow_test.go
+// (slowtest tag) for the slow verifyCandidate half.
+func TestHashcatCryptHeaderAliases(t *testing.T) {
+	for _, tc := range hashcatCryptHeaderPublishedCases {
 		t.Run(tc.mode, func(t *testing.T) {
 			if got := canonicalHashType(tc.mode); got != tc.typ {
 				t.Fatalf("mode alias = %q, want %q", got, tc.typ)
-			}
-			ok, err := verifyCandidate(tc.password, tc.target, tc.mode, "", "prefix")
-			if err != nil || !ok {
-				t.Fatalf("published vector: ok=%v err=%v", ok, err)
 			}
 		})
 	}

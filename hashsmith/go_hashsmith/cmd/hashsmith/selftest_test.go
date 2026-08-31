@@ -1,9 +1,37 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
+
+// fastVectorBudget is the per-vector ceiling for the default suite. A vector
+// slower than this belongs in slowSelfTestTypeSeed().
+const fastVectorBudget = 50 * time.Millisecond
+
+// A fast-classified vector that takes longer than the budget has been
+// misclassified; failing here keeps the default suite from creeping back
+// toward the 600s timeout one vector at a time.
+func TestFastVectorsStayWithinBudget(t *testing.T) {
+	var over []string
+	for _, v := range universalHashRegistry.vectors {
+		if universalHashRegistry.isSlow(v.typ) {
+			continue
+		}
+		start := time.Now()
+		verifyCandidate(v.password, v.target, v.typ, v.salt, "prefix")
+		if d := time.Since(start); d > fastVectorBudget {
+			over = append(over, fmt.Sprintf("%s took %v", v.typ, d.Round(time.Millisecond)))
+		}
+	}
+	if len(over) > 0 {
+		t.Errorf("%d fast-classified vector(s) exceeded %v; add each type to "+
+			"slowSelfTestTypeSeed() in selftest.go:\n  %s",
+			len(over), fastVectorBudget, strings.Join(over, "\n  "))
+	}
+}
 
 // checkSelfTestVector asserts one vector matches its known answer and rejects
 // a wrong password. Shared by the fast and slow suites.
@@ -53,7 +81,7 @@ func TestSlowVectorsAreExcludedFromFastSuite(t *testing.T) {
 		}
 	}
 	if slow == 0 {
-		t.Fatal("no vectors are classified slow — expected ~120 high-iteration KDFs")
+		t.Fatal("no vectors are classified slow — expected ~146 high-iteration KDFs")
 	}
 	t.Logf("slow vectors excluded from the fast suite: %d", slow)
 }
