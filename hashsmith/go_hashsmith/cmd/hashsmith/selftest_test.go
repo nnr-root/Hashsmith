@@ -7,9 +7,25 @@ import (
 	"time"
 )
 
-// fastVectorBudget is the per-vector ceiling for the default suite. A vector
-// slower than this belongs in slowSelfTestTypeSeed().
-const fastVectorBudget = 50 * time.Millisecond
+// fastVectorBudget is the per-vector ceiling for the default suite. It exists
+// to catch a self-test vector that is secretly a high-iteration or
+// memory-hard KDF hiding in the fast suite: those take *seconds* (the
+// VeraCrypt vector that originally caused a 600s suite timeout ran ~85s on
+// its own), so the guard's discriminating power lives three orders of
+// magnitude above any legitimate fast vector.
+//
+// Measured on an otherwise-busy dev machine (8 cores, ambient load average
+// ~14-21 from unrelated processes) by timing every fast-classified vector
+// across ~20 repeated runs: the slowest legitimate vectors (sha1crypt,
+// sm3crypt, symfony-legacy, snmpv3, cisco8/9, sap-issha*) sat at roughly
+// 15-30ms with the machine otherwise idle, but ambient contention alone
+// (no deliberate load) pushed isolated samples as high as ~180ms - in line
+// with two independent reviewers reproducing 64-67ms runs at load average
+// ~19 against the old 50ms budget. 500ms is ~10-30x the idle-case slowest
+// vector and still comfortably clears the contended samples we observed,
+// while remaining ~170x below a real slow KDF, so it stays a strict guard
+// against misclassification without flaking under CI/CPU contention.
+const fastVectorBudget = 500 * time.Millisecond
 
 // A fast-classified vector that takes longer than the budget has been
 // misclassified; failing here keeps the default suite from creeping back
