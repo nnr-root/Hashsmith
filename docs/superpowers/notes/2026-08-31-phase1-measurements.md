@@ -278,3 +278,301 @@ instruction it is documented, not fixed, in this task.
 - Two temporary worktrees were used for before/after builds
   (`wt-before` at `43d4c91`, `wt-after` at `42cb9b4`) and removed before
   finishing this task; `git worktree list` shows only the main checkout.
+
+---
+
+# Phase 1 measurements: MD4/NTLM fast path (Task 4 of the MD4/NTLM plan)
+
+Measured on this machine (darwin/arm64, 8 physical/8 logical cores),
+2026-08-31, in one session, same session load-drift caveat as above (this
+machine's load varies ~40% within a session). All before/after pairs
+below are **interleaved** (before, after, before, after, ...),
+**best-of-5**, N=5 stated per pair. `hashsmith benchmark` was again not
+used as evidence, for the same reason as above (measured >4x run-to-run
+spread).
+
+**Methodology correction from the prior section:** the MD5 numbers above
+used a 5-character keyspace (11,881,376), which this task's own
+measurement now shows is too small to trust — a 5-char sweep finishes in
+roughly 0.1s where process startup dominates the wall clock, and an
+independent 6-char re-measure on this same machine has previously given a
+figure ~20% lower than a 5-char run reported (65.31 MH/s vs. 84.87 MH/s
+for the same binary). **Every number in this section uses the 6-character
+keyspace, 308,915,776 candidates** (`-C abcdefghijklmnopqrstuvwxyz -n 6 -x
+6`), which runs long enough (multiple seconds) that startup cost is
+negligible.
+
+- BEFORE commit: `92d3d5f` (merge base of `md4-ntlm-fast-path`, i.e.
+  before Task 1 of this plan — MD5's fast path already existed here from
+  the prior plan; only MD4/NTLM are new in AFTER).
+- AFTER commit: `de1a156` (HEAD of `md4-ntlm-fast-path` at the start of
+  this task).
+- Both binaries were built from clean `git worktree` checkouts (`git
+  worktree add --detach /tmp/hs-before-wt 92d3d5f`, `go build`), and the
+  worktree was removed (`git worktree remove`) and pruned before this
+  task finished; the main checkout was never left dirty or detached.
+- Target hash for each algorithm was `hash(zzzzz0)` (contains a digit,
+  provably absent from the pure `a-z` 6-char keyspace under test), so
+  both BEFORE and AFTER exhaust the full 308,915,776-candidate space —
+  a fair throughput comparison, not a first-match race. stderr (which
+  carries the progress bar) was redirected to `/dev/null` for every timed
+  run so it could not distort wall-clock timing.
+
+## 1. End-to-end (CLI)
+
+Command shape (both binaries, `-p 8`):
+
+```
+crack -t <ntlm|md4|md5> -M brute -C abcdefghijklmnopqrstuvwxyz \
+  -n 6 -x 6 -p 8 <hash-not-in-keyspace> --no-pot
+```
+
+Wall-clock times (seconds) for all 5 interleaved rounds, before/after per
+algorithm:
+
+**NTLM**
+| round | BEFORE (92d3d5f) | AFTER (de1a156) |
+|---|---|---|
+| 1 | 59.035 | 5.480 |
+| 2 | 65.60  | 6.526 |
+| 3 | 53.711 | 4.528 |
+| 4 | 57.486 | 17.411 (contention outlier) |
+| 5 | 72.02  | 6.969 |
+
+Best-of-5: BEFORE = 53.711s → **5.75 MH/s**; AFTER = 4.528s →
+**68.22 MH/s**. **Ratio: 11.86x.**
+
+**MD4**
+| round | BEFORE (92d3d5f) | AFTER (de1a156) |
+|---|---|---|
+| 1 | 45.977 | 9.745 (contention outlier) |
+| 2 | 56.857 | 4.465 |
+| 3 | 32.695 | 4.057 |
+| 4 | 36.406 | 3.741 |
+| 5 | 46.196 | 4.098 |
+
+Best-of-5: BEFORE = 32.695s → **9.45 MH/s**; AFTER = 3.741s →
+**82.58 MH/s**. **Ratio: 8.74x.**
+
+**MD5 (control — must be unchanged)**
+| round | BEFORE (92d3d5f) | AFTER (de1a156) |
+|---|---|---|
+| 1 | 3.475 | 3.963 |
+| 2 | 3.719 | 3.950 |
+| 3 | 3.820 | 3.966 |
+| 4 | 3.541 | 3.883 |
+| 5 | 4.015 | 4.018 |
+
+Best-of-5 as run: BEFORE = 3.475s → 88.90 MH/s; AFTER = 3.883s →
+79.56 MH/s (ratio 0.89x) — a ~11% gap that, taken alone, would look like
+a regression. Because MD5 is the control this task is explicitly on the
+hook for (Tasks 1-3 refactored its runner), a second confirmation set was
+run with the run order reversed (AFTER, BEFORE, AFTER, BEFORE, ...) to
+separate a real regression from an order/session-drift artifact:
+
+| round | AFTER (first) | BEFORE (second) |
+|---|---|---|
+| 1 | 3.509 | 4.061 |
+| 2 | 4.054 | 3.715 |
+| 3 | 5.380 | 9.208 |
+| 4 | 5.335 | 5.720 |
+| 5 | 5.340 | 6.413 |
+
+In this reversed set AFTER's best-of-5 (3.509s) beats BEFORE's
+(3.715s). Combined across both sets (best-of-10 each side): BEFORE =
+3.475s → 88.90 MH/s, AFTER = 3.509s → **88.04 MH/s, ratio 0.99x**. The
+first set's apparent 11% gap does not hold up once run order is
+controlled for — it is session-load drift of the kind this machine is
+already known to produce (~40% swings), not a code regression. **MD5 is
+confirmed unchanged** within measurement noise.
+
+## 2. Kernel level (`testing.B`, count=5, benchtime=2s, single build at HEAD)
+
+```
+go test -run XXX -bench 'BenchmarkMD4Group|BenchmarkMD4Scalar|BenchmarkMD5Group|BenchmarkMD5Scalar' -benchtime 2s -count 5 ./cmd/hashsmith
+```
+
+Best-of-5 per benchmark:
+
+| Benchmark | Best MH/s (single-core, one `Group`/`Scalar` call) |
+|---|---|
+| `BenchmarkMD4Group`  | 20.85 |
+| `BenchmarkMD4Scalar` | 3.880 |
+| `BenchmarkMD5Group`  | 18.38 |
+| `BenchmarkMD5Scalar` | 6.475 |
+
+MD4 kernel ratio (Group/Scalar): **5.37x**. MD5 kernel ratio: **2.84x**.
+These are single-core, single-call figures (`neonGroup` = 20 lanes per
+call) and are not directly comparable to the multi-worker end-to-end
+numbers above; they isolate the vector core's own per-call speedup from
+everything else the CLI does (worker fan-out, candidate generation,
+progress reporting).
+
+MD4's kernel speedup (5.37x) is noticeably larger than MD5's (2.84x)
+because MD4 is the cheaper algorithm per hash (48 steps, 3 round
+constants, no trailing `+ b` in the step, vs. MD5's 64 steps and 64-entry
+constant table) — the scalar baseline it is compared against is
+correspondingly cheaper too, but the vector core's fixed per-call
+overhead amortizes better over MD4's shorter compute, giving it more
+relative headroom.
+
+## 3. Chain count: MD4 core is 5 chains, same as MD5, not reduced to 4
+
+`neonChains = 5` (`transposed.go`) is unchanged and shared by both the
+MD5 and MD4 cores — `md4Group` (`md4neon_arm64.go`) drives all 5 chains
+per call, exactly like `md5Group`. The plan flagged a risk that MD4's
+majority function `G` might not fit the per-chain register budget at 5
+chains, forcing a drop to 4 (and since the constant is shared, that would
+have silently cost MD5 a chain too). That risk did not materialize:
+MD4 is the *simpler* of the two algorithms in every register-relevant
+way — 48 steps instead of 64, only 3 per-pass round constants instead of
+a 64-entry table, and no trailing `+ b` in the step — so it fit
+comfortably at the full 5-chain (20-way) width already proven for MD5.
+
+## 4. Confirming the fast path actually engaged
+
+`runBruteOrMaskLayout` (`crack.go`) only takes the NEON branch when `sess
+== nil`; passing `--session <name>` forces `sess != nil`, which routes
+through `runSessionLayout` (the pre-existing scalar, session-aware
+runner) even on the AFTER binary. Single confirmation runs (not
+best-of-5 — these are a sanity check, not a throughput measurement):
+
+- **NTLM, AFTER binary, `--session bench-check-ntlm`:** 46.312s wall —
+  same order of magnitude as the scalar BEFORE binary's 53–72s range,
+  confirming the session-forced run took the scalar path. Compare to the
+  non-session AFTER best-of-5 of 4.528s: an 10x gap between "fast path
+  available" and "fast path forced off" on the identical binary, which is
+  only possible if the fast path was genuinely engaged in the unforced
+  run.
+- **MD4, AFTER binary, `--session bench-check-md4`:** 33.499s wall —
+  again matching scalar-class timing (BEFORE's 32.7–56.9s range) versus
+  the non-session AFTER best-of-5 of 3.741s.
+
+Both confirm the fast path was live for the headline numbers above, not
+silently falling back while still producing a fast-looking number for
+some other reason.
+
+## 5. What is now accelerated, precisely — and what is not
+
+**Accelerated:** unsalted, fixed-length MD5, MD4, and NTLM brute-force and
+mask attacks, on **arm64 builds only**, where NTLM is further restricted
+to candidates drawn entirely from **ASCII (< 0x80) charsets**. This is
+the complete eligibility test in `fastPathEligible` (`keyspace.go`): the
+build must have the vector core; the hash type must be MD5/MD4/NTLM with
+no salt; the attack must have no generator override (rules out Markov and
+similar); every segment must fit one fixed-length block under the
+algorithm's encoding; and for NTLM, every byte of every charset must be
+ASCII.
+
+**Not accelerated — still exactly the pre-existing scalar path:**
+- Every other hash format Hashsmith supports (there are roughly 460
+  registered formats; only 3 — md5, md4, ntlm — have a fast algorithm at
+  all).
+- Salted targets of any of the three accelerated algorithms (e.g. salted
+  MD5).
+- Dictionary attacks, session-resume runs (`--session`/`--restore`,
+  including the sanity-check runs in §4 above), Markov/hybrid/combinator
+  modes, and any attack whose candidate length varies (fast path requires
+  fixed-length segments).
+- NTLM brute/mask attacks whose charset contains any non-ASCII byte
+  (0x80–0xFF) — see §6.
+- Any non-arm64 build/platform (amd64, etc.) — see §7.
+
+Readers of the headline 8–12x figures above should not generalize them to
+"Hashsmith is now 8–12x faster" — they apply to this narrow slice of
+attacks only. Everything else runs at the pre-existing scalar rate
+(~5–10 MH/s class on this machine, format-dependent), unchanged by this
+plan.
+
+## 6. The ASCII guard, and why it exists
+
+Hashsmith's own NTLM implementation (`utf16le`, `hash.go:468`) does:
+
+```go
+func utf16le(s string) []byte {
+	runes := utf16.Encode([]rune(s))
+	...
+}
+```
+
+This is a UTF-8 **decode** (`[]rune(s)`) followed by a UTF-16 **encode**,
+not a naive per-byte `b, 0x00` expansion. For any non-ASCII byte the two
+diverge: `[]rune(string([]byte{0xC3}))` decodes the invalid UTF-8 byte
+0xC3 to U+FFFD (the replacement character), which UTF-16-encodes to bytes
+`FD FF` — not the naive expansion's `C3 00`. The fast path's transposed
+candidate generator (`fillFromSegment`'s `encUTF16LE` mode), by contrast,
+always does the naive `b, 0x00` expansion for speed. For a charset
+containing only ASCII bytes the two are identical (ASCII round-trips
+through UTF-8/UTF-16 as itself), so the divergence only matters for
+non-ASCII charsets — which is exactly what `fastPathEligible` excludes
+(`keyspace.go`, the `algo.enc == encUTF16LE` byte-range check).
+
+This was verified by mutation during the implementation tasks: with the
+ASCII guard neutered, an NTLM brute-force over charset `ab\xC3` against a
+target hash provably reachable within that keyspace exhausted all 9
+candidates (3^2) and reported "Not found" — a silent wrong answer, because
+the fast path was computing a different digest than Hashsmith's own
+scalar `utf16le` would for the same candidate. With the guard restored,
+the same run found the password in 3 attempts. Non-ASCII NTLM charsets
+therefore fall back to the scalar path rather than risk this class of
+silent miss.
+
+## 7. x86 findings, for whoever picks up that work next
+
+Rosetta 2 on this machine reports `AVX=false, AVX2=false, AVX512F=false,
+SSE4.2=true` — **AVX2 cannot be executed or benchmarked on this machine
+at all**, under emulation or otherwise. Any x86 work needs real x86
+hardware or CI from the start; there is no local spike path here.
+
+Separately, the pipelining that produced the arm64 win (5 independent
+4-lane chains in flight, `neonChains = 5`, `neonLanes = 4`, 20-way total)
+needs roughly 30 vector registers to keep 5 chains' working state live
+simultaneously. AVX2 provides only 16 YMM registers — the same
+architecture likely will not fit at anywhere near 5 chains, and a
+plain 8-way (2-chain, or single wide-lane) AVX2 implementation risks
+landing in the same ~1.26x trap that failed the original NEON gate before
+the pipelined-chain redesign fixed it (a single wide SIMD lane without
+independent chains in flight does not hide the algorithm's serial
+dependency latency). AVX-512's 32 ZMM registers are the true register-count
+analogue of what made the NEON core work.
+
+**Recommendation:** treat x86/AVX2/AVX-512 as a spike-first go/no-go gate,
+the same way Task 5 of the prior plan gated the original NEON core, run on
+real x86 hardware or CI (not this machine) and targeting AVX-512
+primarily — AVX2's register file is a poor match for the technique that
+made the arm64 core worth building.
+
+## 8. Recommendation: what's worth doing next
+
+The MD4/NTLM fast path clears its own bar decisively: 11.86x (NTLM) and
+8.74x (MD4) end-to-end, well past any reasonable go/no-go threshold, with
+MD5 confirmed unregressed (0.99x, within noise) and the fast path's
+engagement independently confirmed via the `--session`-forced scalar
+comparison. There is no correctness concern outstanding from this task —
+the ASCII guard closes the one identified silent-failure mode, and it is
+enforced, not merely documented.
+
+What's worth doing next, in priority order:
+1. **Ship this as-is.** It is a straightforward, well-tested win for the
+   two highest-value newly-accelerated targets (NTLM dominates real
+   Active Directory work; MD4 is its common building block/relative).
+   Nothing here blocks release.
+2. **x86/AVX2/AVX-512, spike-first, on real hardware or CI** — per §7.
+   This is the only path to the large multi-lane numbers the original
+   design spec's floor implied, but it is new architecture-specific
+   assembly work that cannot even be attempted correctly on this machine,
+   so it should be scoped as a dedicated go/no-go spike before any
+   committed implementation work, exactly like the prior plan's Task 5
+   gated NEON.
+3. **Salted MD5/MD4/NTLM fast path**, if there is demand — the transposed
+   generation and pipelined core both already exist; the work would be
+   threading the salt into the fixed-length block layout, which is a
+   smaller lift than either of the above once the go/no-go on #2 lands.
+
+## Repo state at time of writing
+
+- Branch: `md4-ntlm-fast-path`, clean, no stray changes.
+- One temporary worktree was used for the BEFORE build
+  (`/tmp/hs-before-wt` at `92d3d5f`) and removed (`git worktree remove`,
+  `git worktree prune`) before finishing this task; `git worktree list`
+  shows only the main checkout.
