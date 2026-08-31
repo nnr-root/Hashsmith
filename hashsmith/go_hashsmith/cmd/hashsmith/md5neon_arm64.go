@@ -80,7 +80,3 @@ func md5Group(tb *transposedBatch, out [][16]byte) {
 		}
 	}
 }
-
-// md5GroupAccelerated reports whether this build has the vector core, for
-// reporting purposes (e.g. benchmark/throughput output).
-func md5GroupAccelerated() bool { return true }
