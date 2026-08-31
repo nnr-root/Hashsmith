@@ -272,5 +272,27 @@ func TestTransposedShapeLayout(t *testing.T) {
 			t.Errorf("shape %+v: covered %d of %d slots — the mapping leaves gaps",
 				sh, len(seen), wantLen)
 		}
+
+		// Bijectivity alone is not enough: a lane-major mapping such as
+		// (i/l)*16*l + (i%l)*16 + w is ALSO a bijection over the same range,
+		// and would pass the checks above while being wrong for the vector
+		// cores, whose assembly reads word-major ("word g at byte offset
+		// g*32" for 8 lanes). Pin the strides so the layout, not merely its
+		// coverage, is what this test proves.
+		for i := 0; i < sh.group(); i++ {
+			for w := 0; w+1 < 16; w++ {
+				if got := tb.wordIndex(i, w+1) - tb.wordIndex(i, w); got != sh.lanes {
+					t.Fatalf("shape %+v: candidate %d word stride = %d, want %d "+
+						"(layout is not word-major)", sh, i, got, sh.lanes)
+				}
+			}
+			// Consecutive candidates inside one chain are adjacent lanes.
+			if (i+1)%sh.lanes != 0 && i+1 < sh.group() {
+				if got := tb.wordIndex(i+1, 0) - tb.wordIndex(i, 0); got != 1 {
+					t.Fatalf("shape %+v: lane stride between candidates %d and %d = %d, want 1",
+						sh, i, i+1, got)
+				}
+			}
+		}
 	}
 }
