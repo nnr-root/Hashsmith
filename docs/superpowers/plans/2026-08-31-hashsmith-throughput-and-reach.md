@@ -270,18 +270,28 @@ func TestBenchTypeRespectsBudgetForSlowKDF(t *testing.T) {
 	}
 }
 
-// The measurement loop must not allocate per candidate, or it measures the
-// allocator instead of the hash.
-func TestBenchTypeFastPathDoesNotAllocate(t *testing.T) {
+// matchBytes exists to remove the string conversion the measurement loop was
+// paying per candidate. It must allocate strictly less than the string path.
+//
+// Note it is NOT expected to reach zero: the local digest buffer escapes
+// because buf[:] is passed to a func-typed struct field the compiler cannot
+// see through (measured: match() is 64 B/op, 1 allocs/op). Removing that last
+// allocation would need a verifier-owned scratch field, and fastVerifier is
+// shared across workers on the non-batch path, where a mutable field would
+// race. The win being asserted here is the string conversion, nothing more.
+func TestMatchBytesAllocatesLessThanMatch(t *testing.T) {
 	fv, ok := newFastVerifier("md5", "5f4dcc3b5aa765d61d8327deb882cf99")
 	if !ok {
 		t.Fatal("md5 must have a fast verifier")
 	}
 	buf := []byte("benchAAAA")
-	got := testing.AllocsPerRun(1000, func() { fv.matchBytes(buf) })
-	if got != 0 {
-		t.Errorf("matchBytes allocated %v times per run, want 0", got)
+	viaString := testing.AllocsPerRun(1000, func() { fv.match(string(buf)) })
+	viaBytes := testing.AllocsPerRun(1000, func() { fv.matchBytes(buf) })
+	if viaBytes >= viaString {
+		t.Errorf("matchBytes allocated %v/run, match(string) allocated %v/run; "+
+			"matchBytes must allocate strictly less", viaBytes, viaString)
 	}
+	t.Logf("allocs per run: match(string)=%v matchBytes=%v", viaString, viaBytes)
 }
 ```
 
@@ -289,7 +299,7 @@ Ensure `"time"` and `"testing"` are imported.
 
 - [ ] **Step 2: Run to verify both fail**
 
-Run: `cd hashsmith/go_hashsmith && go test -run 'TestBenchTypeRespectsBudget|TestBenchTypeFastPath' -timeout 300s ./cmd/hashsmith`
+Run: `cd hashsmith/go_hashsmith && go test -run 'TestBenchTypeRespectsBudget|TestMatchBytesAllocatesLess' -timeout 300s ./cmd/hashsmith`
 
 Expected: FAIL — `fv.matchBytes undefined`, and the bcrypt test overruns.
 
@@ -1565,7 +1575,8 @@ func TestMD5x4BatchVerifierDoesNotAllocate(t *testing.T) {
 	hits := make([]Hit, batchSize)
 	got := testing.AllocsPerRun(50, func() { v.VerifyBatch(b, hits) })
 	if got != 0 {
-		t.Errorf("VerifyBatch allocated %v times per run, want 0", got)
+		t.Errorf("VerifyBatch allocated %v times per run, want 0 "+
+			"(scratch is owned by the verifier, so nothing should escape)", got)
 	}
 }
 ```
@@ -1588,12 +1599,18 @@ Add to `batchseam.go`:
 // fall back to crypto/md5 for that lane.
 type md5x4BatchVerifier struct {
 	digests [][16]byte // one per target, decoded once at compile time
+	// Scratch owned by the verifier, not the call. Task 9 constructs one
+	// BatchVerifier per worker via mk(), so ownership is exclusive; keeping
+	// these here makes the zero-allocation property structural instead of
+	// dependent on escape analysis (which does not hold on the non-arm64
+	// fallback, where md5x4Short is ordinary Go).
+	in  [4][]byte
+	out [4][16]byte
 }
 
 func (m *md5x4BatchVerifier) VerifyBatch(b *CandidateBatch, hits []Hit) int {
 	n := 0
-	var in [4][]byte
-	var out [4][16]byte
+	in, out := &m.in, &m.out
 	total := b.Len()
 
 	for base := 0; base < total; base += 4 {
@@ -1615,7 +1632,7 @@ func (m *md5x4BatchVerifier) VerifyBatch(b *CandidateBatch, hits []Hit) int {
 			}
 		}
 		if fastLanes {
-			md5x4Short(&out, &in)
+			md5x4Short(out, in)
 		} else {
 			for l := 0; l < lanes; l++ {
 				out[l] = md5.Sum(in[l])

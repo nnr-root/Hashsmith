@@ -14,3 +14,5 @@ dist/
 *.tar.gz
 hashsmith/hashsmith
 graphify-out/
+.superpowers/
+
