@@ -5,26 +5,57 @@ import (
 	"testing"
 )
 
-// The vectors shipped in the binary must actually pass — otherwise `hashsmith
-// selftest` would report a broken build as healthy.
+// checkSelfTestVector asserts one vector matches its known answer and rejects
+// a wrong password. Shared by the fast and slow suites.
+func checkSelfTestVector(t *testing.T, v selfTestVector) {
+	t.Helper()
+	ok, err := verifyCandidate(v.password, v.target, v.typ, v.salt, "prefix")
+	if err != nil {
+		t.Errorf("%s: %v", v.typ, err)
+		return
+	}
+	if !ok {
+		t.Errorf("%s: vector did not match its known answer", v.typ)
+		return
+	}
+	if bad, _ := verifyCandidate(wrongPassword(v.password), v.target, v.typ, v.salt, "prefix"); bad {
+		t.Errorf("%s: accepted a wrong password", v.typ)
+	}
+}
+
+// The fast vectors must pass on every run. Slow KDFs are covered by
+// TestSelfTestVectorsSlow behind the slowtest build tag.
 func TestSelfTestVectorsAllPass(t *testing.T) {
 	if len(universalHashRegistry.vectors) == 0 {
 		t.Fatal("no self-test vectors are compiled in")
 	}
+	ran := 0
 	for _, v := range universalHashRegistry.vectors {
-		ok, err := verifyCandidate(v.password, v.target, v.typ, v.salt, "prefix")
-		if err != nil {
-			t.Errorf("%s: %v", v.typ, err)
+		if universalHashRegistry.isSlow(v.typ) {
 			continue
 		}
-		if !ok {
-			t.Errorf("%s: vector did not match its known answer", v.typ)
-			continue
-		}
-		if bad, _ := verifyCandidate(wrongPassword(v.password), v.target, v.typ, v.salt, "prefix"); bad {
-			t.Errorf("%s: accepted a wrong password", v.typ)
+		checkSelfTestVector(t, v)
+		ran++
+	}
+	if ran == 0 {
+		t.Fatal("every vector was classified slow; the fast suite tested nothing")
+	}
+	t.Logf("fast vectors run: %d", ran)
+}
+
+// The split must actually exclude something, or the classification has
+// silently stopped being applied and the suite will creep back to 600s.
+func TestSlowVectorsAreExcludedFromFastSuite(t *testing.T) {
+	slow := 0
+	for _, v := range universalHashRegistry.vectors {
+		if universalHashRegistry.isSlow(v.typ) {
+			slow++
 		}
 	}
+	if slow == 0 {
+		t.Fatal("no vectors are classified slow — expected ~120 high-iteration KDFs")
+	}
+	t.Logf("slow vectors excluded from the fast suite: %d", slow)
 }
 
 // Every vector must name a type the engine implements and the catalogue lists.
