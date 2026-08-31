@@ -103,6 +103,32 @@ func benchType(typ string, workers int, dur time.Duration) (float64, bool) {
 	// verifier for raw digests, the generic verifier otherwise.
 	fv, fast := newFastVerifier(typ, target)
 
+	// Size the deadline-check stride from the measured cost of one op, so a
+	// slow KDF checks every iteration while a fast digest is not distorted by
+	// calling time.Now() in the hot loop.
+	probeStart := time.Now()
+	if fast {
+		fv.matchBytes([]byte("benchprobe"))
+	} else {
+		verifyCandidate("benchprobe", target, typ, "", "prefix")
+	}
+	perOp := time.Since(probeStart)
+	stride := int64(1)
+	if perOp > 0 {
+		stride = int64(time.Millisecond / perOp)
+	}
+	if stride < 1 {
+		stride = 1
+	}
+	if stride > 1024 {
+		stride = 1024
+	}
+	mask := int64(1)
+	for mask < stride {
+		mask <<= 1
+	}
+	mask--
+
 	var count int64
 	start := time.Now()
 	deadline := start.Add(dur)
@@ -116,7 +142,7 @@ func benchType(typ string, workers int, dur time.Duration) (float64, bool) {
 			var local int64
 			i := seed
 			for {
-				if local&1023 == 0 && time.Now().After(deadline) {
+				if local&mask == 0 && time.Now().After(deadline) {
 					break
 				}
 				// vary the candidate so the compiler cannot hoist the hash
@@ -124,7 +150,7 @@ func benchType(typ string, workers int, dur time.Duration) (float64, bool) {
 				buf[6] = byte('a' + (i/26)%26)
 				buf[7] = byte('a' + (i/676)%26)
 				if fast {
-					fv.match(string(buf))
+					fv.matchBytes(buf)
 				} else {
 					verifyCandidate(string(buf), target, typ, "", "prefix")
 				}
