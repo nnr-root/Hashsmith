@@ -210,11 +210,18 @@ func runLayout(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 	}
 }
 
-// fastCtxCheckEvery is the group cadence for the fast-path context poll,
-// matched to ctxCheckEvery's candidate cadence (a group is neonGroup
+// fastCtxCheckEvery returns the group cadence for the fast-path context poll,
+// matched to ctxCheckEvery's candidate cadence (a group is shape.group()
 // candidates), so cancellation responsiveness is comparable to the scalar
-// path's per-candidate check.
-const fastCtxCheckEvery = ctxCheckEvery / neonGroup
+// path's per-candidate check. Derived from the shape rather than fixed, since
+// cores differ in how many candidates they hash per call.
+func fastCtxCheckEvery(shape vecShape) int {
+	n := ctxCheckEvery / shape.group()
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
 
 // fastAlgo describes one algorithm the NEON fast path can run: its encoding
 // mode (how candidate bytes become message bytes — see encodeMode) and its
@@ -222,7 +229,12 @@ const fastCtxCheckEvery = ctxCheckEvery / neonGroup
 type fastAlgo struct {
 	name  string
 	enc   encodeMode
-	group func(*transposedBatch, *[neonGroup][16]byte)
+	shape vecShape
+	// group hashes shape.group() candidates per call. out is a slice rather
+	// than a fixed-size array so the group size is data, not part of the
+	// type: a 4-lane NEON core produces 20 digests per call and an 8-lane
+	// AVX2 core produces 24, and one signature has to express both.
+	group func(*transposedBatch, [][16]byte)
 }
 
 // fastAlgoFor returns the fast-path descriptor for a hash type, if one
@@ -235,11 +247,11 @@ type fastAlgo struct {
 func fastAlgoFor(typ string) (*fastAlgo, bool) {
 	switch canonicalHashType(typ) {
 	case "md5":
-		return &fastAlgo{name: "md5", enc: encRaw, group: md5Group}, true
+		return &fastAlgo{name: "md5", enc: encRaw, shape: neonShape, group: md5Group}, true
 	case "md4":
-		return &fastAlgo{name: "md4", enc: encRaw, group: md4Group}, true
+		return &fastAlgo{name: "md4", enc: encRaw, shape: neonShape, group: md4Group}, true
 	case "ntlm":
-		return &fastAlgo{name: "ntlm", enc: encUTF16LE, group: md4Group}, true
+		return &fastAlgo{name: "ntlm", enc: encUTF16LE, shape: neonShape, group: md4Group}, true
 	}
 	return nil, false
 }
@@ -276,6 +288,11 @@ func fastPathEligible(typ, salt string, l *keyspaceLayout) (*fastAlgo, bool) {
 		return nil, false
 	}
 	if l == nil || l.gen != nil {
+		return nil, false
+	}
+	// A descriptor with no shape would divide by zero deriving the context
+	// cadence, inside a worker goroutine, far from the cause. Refuse here.
+	if algo.shape.group() <= 0 {
 		return nil, false
 	}
 	for _, seg := range l.segments {
@@ -351,9 +368,10 @@ func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 		wg.Add(1)
 		go func(wID int) {
 			defer wg.Done()
-			tb := newTransposedBatch()
+			tb := newTransposedBatch(algo.shape)
+			ctxEvery := fastCtxCheckEvery(algo.shape)
 			curLen := -1 // no length reset yet; forces a reset on first group
-			var out [neonGroup][16]byte
+			out := make([][16]byte, algo.shape.group())
 			for {
 				c := atomic.AddInt64(&nextChunk, 1) - 1
 				start := c * keyspaceChunk
@@ -382,7 +400,7 @@ func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 					seg++
 				}
 				for pos < end {
-					if groups++; groups >= fastCtxCheckEvery {
+					if groups++; groups >= ctxEvery {
 						groups = 0
 						select {
 						case <-innerCtx.Done():
@@ -438,7 +456,7 @@ func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 					if remaining := end - pos; int64(used) > remaining {
 						used = int(remaining)
 					}
-					algo.group(tb, &out)
+					algo.group(tb, out)
 					// Only lanes 0..used-1 are real candidates. Lanes beyond
 					// that (including fillFromSegment's own padding of
 					// unused lanes up to n, and anything past used) hash the

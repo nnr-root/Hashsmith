@@ -11,7 +11,7 @@ import (
 // packed words, which is how a hit is reported.
 func TestTransposedRoundTripsCandidates(t *testing.T) {
 	sets := [][]byte{[]byte("abc"), []byte("de"), []byte("fg")} // 3*2*2 = 12
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestTransposedRoundTripsCandidates(t *testing.T) {
 // little-endian in words 0..13, 0x80 terminator, bit length in word 14.
 func TestTransposedBlockIsValidMD5Padding(t *testing.T) {
 	sets := [][]byte{[]byte("ab"), []byte("cd"), []byte("ef"), []byte("gh"), []byte("ij")}
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(5, encRaw); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestTransposedBlockIsValidMD5Padding(t *testing.T) {
 // spurious hit.
 func TestTransposedPartialGroupIsClean(t *testing.T) {
 	sets := [][]byte{[]byte("abc")} // 3 candidates, less than one 20-wide group
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(1, encRaw); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestTransposedFillDoesNotAllocate(t *testing.T) {
 	for i := range sets {
 		sets[i] = []byte("abcdefghij")
 	}
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestTransposedFillDoesNotAllocate(t *testing.T) {
 // never tried.
 func TestTransposedReuseClearsStaleLanes(t *testing.T) {
 	sets := [][]byte{[]byte("abc"), []byte("de"), []byte("fg")} // 12 candidates
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestTransposedFixedLenOK(t *testing.T) {
 // For ASCII that is byte, 0x00 per character — and the bit length doubles.
 func TestTransposedUTF16LEBlockMatchesScalar(t *testing.T) {
 	sets := [][]byte{[]byte("ab"), []byte("cd"), []byte("ef")}
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encUTF16LE); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestTransposedUTF16LEBlockMatchesScalar(t *testing.T) {
 func TestTransposedCandidateAtRoundTripsBothModes(t *testing.T) {
 	sets := [][]byte{[]byte("abc"), []byte("de")}
 	for _, enc := range []encodeMode{encRaw, encUTF16LE} {
-		tb := newTransposedBatch()
+		tb := newTransposedBatch(neonShape)
 		if err := tb.reset(len(sets), enc); err != nil {
 			t.Fatalf("enc %v: reset: %v", enc, err)
 		}
@@ -208,7 +208,7 @@ func TestTransposedFixedLenOKPerMode(t *testing.T) {
 // same consequence (a spurious hit on a candidate never tried).
 func TestTransposedReuseClearsStaleLanesUTF16(t *testing.T) {
 	sets := [][]byte{[]byte("abc"), []byte("de"), []byte("fg")}
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encUTF16LE); err != nil {
 		t.Fatal(err)
 	}

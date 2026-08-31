@@ -64,7 +64,7 @@ func init() {
 // call. tb.words is already [neonChains][16][neonLanes]uint32 flattened
 // (see transposed.go), so chain c's message block is simply
 // &tb.words[c*64] — no marshalling.
-func md5Group(tb *transposedBatch, out *[neonGroup][16]byte) {
+func md5Group(tb *transposedBatch, out [][16]byte) {
 	var outs [neonChains][4][4]uint32
 	md5g20NEON(
 		&outs[0], &outs[1], &outs[2], &outs[3], &outs[4],

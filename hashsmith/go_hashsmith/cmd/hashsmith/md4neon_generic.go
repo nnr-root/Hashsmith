@@ -18,13 +18,13 @@ import "golang.org/x/crypto/md4"
 // divergence between what this reads and what the NEON assembly reads is a
 // real bug, not a fixture mismatch. See md5neon_generic.go for the MD5
 // sibling this mirrors.
-func md4Group(tb *transposedBatch, out *[neonGroup][16]byte) {
-	for i := 0; i < neonGroup; i++ {
-		bitLen := tb.words[wordIndex(i, 14)]
+func md4Group(tb *transposedBatch, out [][16]byte) {
+	for i := 0; i < tb.shape.group(); i++ {
+		bitLen := tb.words[tb.wordIndex(i, 14)]
 		byteLen := int(bitLen / 8)
 		var buf [56]byte
 		for w := 0; w < 14; w++ {
-			word := tb.words[wordIndex(i, w)]
+			word := tb.words[tb.wordIndex(i, w)]
 			buf[w*4+0] = byte(word)
 			buf[w*4+1] = byte(word >> 8)
 			buf[w*4+2] = byte(word >> 16)

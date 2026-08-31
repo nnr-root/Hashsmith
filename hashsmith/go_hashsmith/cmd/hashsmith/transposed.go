@@ -26,6 +26,22 @@ const (
 	transposedMaxLenUTF16LE = 27
 )
 
+// vecShape describes a vector core's candidate layout: how many independent
+// pipelined chains it runs and how many 32-bit lanes each vector holds. It is
+// carried as data rather than baked into constants so cores of different
+// widths can share one generation path and one runner — NEON is 5 chains of 4
+// lanes, an AVX2 core is 3 chains of 8.
+type vecShape struct {
+	chains int
+	lanes  int
+}
+
+// group is the number of candidates hashed per core call.
+func (s vecShape) group() int { return s.chains * s.lanes }
+
+// neonShape is the shape of the shipped arm64 NEON cores.
+var neonShape = vecShape{chains: neonChains, lanes: neonLanes}
+
 // encodeMode selects how fillFromSegment turns candidate bytes into the
 // message bytes that get packed and hashed. Most formats hash the candidate
 // bytes verbatim (encRaw); NTLM hashes UTF-16LE(candidate) instead, so its
@@ -58,18 +74,25 @@ func transposedFixedLenOK(n int, enc encodeMode) bool {
 // word for chain c, message-word w, lane l is at c*64 + w*4 + l.
 type transposedBatch struct {
 	words  []uint32
+	shape  vecShape
 	length int
 	enc    encodeMode
 	n      int
 }
 
-func newTransposedBatch() *transposedBatch {
-	return &transposedBatch{words: make([]uint32, neonChains*16*neonLanes)}
+func newTransposedBatch(shape vecShape) *transposedBatch {
+	return &transposedBatch{
+		words: make([]uint32, shape.chains*16*shape.lanes),
+		shape: shape,
+	}
 }
 
-// wordIndex returns the slot for message-word w of candidate i.
-func wordIndex(i, w int) int {
-	return (i/neonLanes)*64 + w*4 + (i % neonLanes)
+// wordIndex returns the slot for message-word w of candidate i, for this
+// batch's shape: chain i/lanes holds 16 words of `lanes` uint32 each, so a
+// chain strides 16*lanes and a message word strides `lanes`.
+func (tb *transposedBatch) wordIndex(i, w int) int {
+	l := tb.shape.lanes
+	return (i/l)*(16*l) + w*l + (i % l)
 }
 
 // reset prepares the batch for candidates of candidateLen bytes encoded under
@@ -89,8 +112,8 @@ func (tb *transposedBatch) reset(candidateLen int, enc encodeMode) error {
 		tb.words[i] = 0
 	}
 	// Every lane starts as a valid zero-length block: 0x80 at byte 0.
-	for i := 0; i < neonGroup; i++ {
-		tb.words[wordIndex(i, 0)] = 0x80
+	for i := 0; i < tb.shape.group(); i++ {
+		tb.words[tb.wordIndex(i, 0)] = 0x80
 	}
 	return nil
 }
@@ -122,7 +145,7 @@ func (tb *transposedBatch) fillFromSegment(sets [][]byte, from int64) int {
 		msgLen = L * 2
 		bitLen = uint32(L) * 16
 	}
-	for n < neonGroup {
+	for n < tb.shape.group() {
 		idx := from + int64(n)
 		if idx >= total {
 			break
@@ -141,7 +164,7 @@ func (tb *transposedBatch) fillFromSegment(sets [][]byte, from int64) int {
 		// Pack msgLen bytes plus the 0x80 terminator into words 0..(msgLen/4).
 		full := msgLen / 4
 		for w := 0; w < full; w++ {
-			tb.words[wordIndex(n, w)] = binary.LittleEndian.Uint32(msg[w*4:])
+			tb.words[tb.wordIndex(n, w)] = binary.LittleEndian.Uint32(msg[w*4:])
 		}
 		// The partial final word carries the remaining bytes then 0x80.
 		rem := msgLen % 4
@@ -150,16 +173,16 @@ func (tb *transposedBatch) fillFromSegment(sets [][]byte, from int64) int {
 			tail |= uint32(msg[full*4+b]) << (8 * b)
 		}
 		tail |= 0x80 << (8 * rem)
-		tb.words[wordIndex(n, full)] = tail
-		tb.words[wordIndex(n, 14)] = bitLen
+		tb.words[tb.wordIndex(n, full)] = tail
+		tb.words[tb.wordIndex(n, 14)] = bitLen
 		n++
 	}
 	// Clean any leftover lanes from a previous, longer fill of this batch.
-	for i := n; i < neonGroup; i++ {
+	for i := n; i < tb.shape.group(); i++ {
 		for w := 0; w < 16; w++ {
-			tb.words[wordIndex(i, w)] = 0
+			tb.words[tb.wordIndex(i, w)] = 0
 		}
-		tb.words[wordIndex(i, 0)] = 0x80
+		tb.words[tb.wordIndex(i, 0)] = 0x80
 	}
 	tb.n = n
 	return n
@@ -177,7 +200,7 @@ func (tb *transposedBatch) candidateAt(i int) []byte {
 	}
 	for b := 0; b < tb.length; b++ {
 		msgByte := b * step
-		w := tb.words[wordIndex(i, msgByte/4)]
+		w := tb.words[tb.wordIndex(i, msgByte/4)]
 		out[b] = byte(w >> (8 * (msgByte % 4)))
 	}
 	return out
