@@ -1,3 +1,9 @@
+//go:build !windows
+
+// This test exercises FIFO handling via syscall.Mkfifo, which does not exist
+// on windows/amd64 (go vet fails to compile the file there without this
+// constraint). The FIFO behavior it checks is Unix-specific to begin with,
+// so excluding the whole file on windows is not a loss of coverage.
 package main
 
 import (
