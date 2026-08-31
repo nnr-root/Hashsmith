@@ -509,6 +509,24 @@ jobs:
       - name: Test (fast vectors)
         run: cd hashsmith/go_hashsmith && go test -timeout 5m ./...
 
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      # The race detector is what guards the concurrent keyspace runner added
+      # in Phase 1. TestBenchTypeRespectsBudgetForSlowKDF is excluded: it is a
+      # wall-clock assertion, and a race build's ~10x slowdown makes wall-clock
+      # timing meaningless rather than merely slow. Races in that file's code
+      # are still covered by the other tests in this lane.
+      - name: Test (race detector)
+        run: |
+          cd hashsmith/go_hashsmith
+          go test -race -timeout 20m \
+            -skip 'TestBenchTypeRespectsBudgetForSlowKDF' ./...
+
   cross-compile:
     runs-on: ubuntu-latest
     steps:
@@ -1798,13 +1816,33 @@ done 2>&1 | awk -v k=$K '/real/{if(m==0||$2<m)m=$2} END{printf "best %.2fs  %.2f
 
 Baseline to beat: **10.24 MH/s**.
 
-- [ ] **Step 3: Measure the per-algorithm set**
+- [ ] **Step 3: Measure the per-algorithm set — with `testing.B`, NOT `benchmark`**
+
+**`hashsmith benchmark` is not an acceptance gate.** During Task 3's review,
+`benchType("ntlm", NumCPU, 1s)` was run eight times back to back on an idle
+machine and returned 1.97, 2.65, 3.10, 3.39, 4.72, 5.87, 5.88, 7.94 MH/s — a
+**>4x run-to-run spread**. That noise swamps any plausible Phase 1 signal, and
+gating on it could report success or failure from noise alone. The same review
+showed Go `testing.B` microbenchmarks of the same code are stable to a few
+percent (ntlm 425–494 ns/op across five runs).
+
+So measure with `testing.B`, using the per-type benchmarks added in Task 3's
+fix round:
 
 ```bash
-for t in md5 md4 ntlm sha1 sha256 sha512; do /tmp/hs benchmark -t $t -d 1 -N 2>&1 | grep -E "^  $t "; done
+cd hashsmith/go_hashsmith
+go test -run XXX -bench 'BenchmarkFastVerifier' -benchtime 2s -count 5 ./cmd/hashsmith \
+  2>&1 | tee /tmp/phase1-bench.txt
 ```
 
-Compare against the corrected Phase 0 baseline recorded in Task 3, Step 6.
+Take the **best** of the five counts per type (best-of-N rejects the machine's
+downward thermal noise; averaging does not). Compare against the same
+measurement taken at Phase 0's end — if that baseline was not captured with
+`testing.B`, capture it now by checking out `391abe8` and re-running the
+identical command, so both sides of the comparison use the same instrument.
+
+`hashsmith benchmark` output may still be quoted in the report as a
+human-facing sanity check, clearly labelled as indicative only.
 
 - [ ] **Step 4: Write the measurements and recommendation**
 
