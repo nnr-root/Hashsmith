@@ -49,10 +49,11 @@ func runAuto(args []string) error {
 	potPath := fs.String("pot", "", "potfile path (default ~/.hashsmith/hashsmith.pot)")
 	noPot := fs.Bool("no-pot", false, "disable the potfile")
 	showOnly := fs.Bool("show", false, "print already-cracked hashes from the potfile; do not attack")
-	sessName := fs.String("session", "", "named resumable session (brute/mask/markov/hybrid/combinator)")
+	sessName := fs.String("session", "", "named resumable session (brute/mask/markov/hybrid/combinator/prince)")
 	restore := fs.String("restore", "", "alias for --session")
 	wordlist2 := fs.String("wordlist2", "", "right-hand wordlist for -M combinator")
 	w2 := fs.String("w2", "", "alias for --wordlist2")
+	princeElems := fs.Int("prince-elems", princeDefaultElems, "maximum elements concatenated into one chain (-M prince)")
 	useGPU := fs.Bool("gpu", false, "use GPU brute/mask for md5, md4, ntlm, sha1, or sha256")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
@@ -84,6 +85,7 @@ func runAuto(args []string) error {
 	if err != nil {
 		return err
 	}
+	cc.princeElems = *princeElems
 	engine, err := buildRuleEngine(rulesFiles.values, *useRules)
 	if err != nil {
 		return err

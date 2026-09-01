@@ -443,7 +443,7 @@ func TestStreamCandidatesStacked(t *testing.T) {
 	}
 	e := stackedEngine(t, []string{"c"}, []string{"$1", "$2"})
 	out := captureStdout(t, func() error {
-		return streamCandidates("dict", wordlistPath, "", "", 0, 0, nil, e, 0, 0)
+		return streamCandidates("dict", wordlistPath, "", "", 0, 0, princeDefaultElems, nil, e, 0, 0)
 	})
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	want := []string{"password", "Password1", "Password2"}

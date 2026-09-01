@@ -20,23 +20,27 @@ import (
 )
 
 type sessionState struct {
-	Name       string    `json:"name"`
-	Mode       string    `json:"mode"`
-	Type       string    `json:"type"`
-	Target     string    `json:"target"`
-	Charset    string    `json:"charset,omitempty"`
-	MinLen     int       `json:"min_len,omitempty"`
-	MaxLen     int       `json:"max_len,omitempty"`
-	Mask       string    `json:"mask,omitempty"`
-	Custom     [4]string `json:"custom,omitempty"`
-	Increment  bool      `json:"increment,omitempty"`
-	Salt       string    `json:"salt,omitempty"`
-	SaltMode   string    `json:"salt_mode,omitempty"`
-	Wordlist   string    `json:"wordlist,omitempty"`
-	Wordlist2  string    `json:"wordlist2,omitempty"`
-	Checkpoint int64     `json:"checkpoint"`
-	Total      int64     `json:"total,omitempty"`
-	Updated    string    `json:"updated"`
+	Name      string    `json:"name"`
+	Mode      string    `json:"mode"`
+	Type      string    `json:"type"`
+	Target    string    `json:"target"`
+	Charset   string    `json:"charset,omitempty"`
+	MinLen    int       `json:"min_len,omitempty"`
+	MaxLen    int       `json:"max_len,omitempty"`
+	Mask      string    `json:"mask,omitempty"`
+	Custom    [4]string `json:"custom,omitempty"`
+	Increment bool      `json:"increment,omitempty"`
+	Salt      string    `json:"salt,omitempty"`
+	SaltMode  string    `json:"salt_mode,omitempty"`
+	Wordlist  string    `json:"wordlist,omitempty"`
+	Wordlist2 string    `json:"wordlist2,omitempty"`
+	// PrinceElems is -M prince's --prince-elems. It changes the candidate
+	// stream (and therefore what a saved index means), so a session saved with
+	// one value must NOT resume against another.
+	PrinceElems int    `json:"prince_elems,omitempty"`
+	Checkpoint  int64  `json:"checkpoint"`
+	Total       int64  `json:"total,omitempty"`
+	Updated     string `json:"updated"`
 
 	path string
 }
@@ -69,13 +73,15 @@ func loadSession(name string) (*sessionState, error) {
 // matches reports whether a saved session describes the same attack as the one
 // about to run, so its checkpoint can be safely resumed.
 func (s *sessionState) matches(mode, typ, target, charset string, minLen, maxLen int,
-	mask string, custom [4]string, increment bool, salt, saltMode, wordlist, wordlist2 string) bool {
+	mask string, custom [4]string, increment bool, salt, saltMode, wordlist, wordlist2 string,
+	princeElems int) bool {
 	return s != nil &&
 		s.Mode == mode && s.Type == typ && s.Target == target &&
 		s.Charset == charset && s.MinLen == minLen && s.MaxLen == maxLen &&
 		s.Mask == mask && s.Custom == custom && s.Increment == increment &&
 		s.Salt == salt && s.SaltMode == saltMode &&
-		s.Wordlist == wordlist && s.Wordlist2 == wordlist2
+		s.Wordlist == wordlist && s.Wordlist2 == wordlist2 &&
+		s.PrinceElems == princeElems
 }
 
 func (s *sessionState) save() error {

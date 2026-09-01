@@ -36,7 +36,7 @@ func captureStdout(t *testing.T, fn func() error) string {
 func TestStreamCandidates(t *testing.T) {
 	// mask: ?l?d begins a,0 and has 260 candidates in order
 	out := captureStdout(t, func() error {
-		return streamCandidates("mask", "", "", "", 0, 0, &maskConfig{mask: "?l?d"}, nil, 0, 0)
+		return streamCandidates("mask", "", "", "", 0, 0, princeDefaultElems, &maskConfig{mask: "?l?d"}, nil, 0, 0)
 	})
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if len(lines) != 260 {
@@ -48,7 +48,7 @@ func TestStreamCandidates(t *testing.T) {
 
 	// brute ab n1..2 → a b aa ab ba bb
 	out = captureStdout(t, func() error {
-		return streamCandidates("brute", "", "", "ab", 1, 2, nil, nil, 0, 0)
+		return streamCandidates("brute", "", "", "ab", 1, 2, princeDefaultElems, nil, nil, 0, 0)
 	})
 	if got := strings.Fields(out); strings.Join(got, ",") != "a,b,aa,ab,ba,bb" {
 		t.Errorf("brute order: %v", got)
