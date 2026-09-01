@@ -355,12 +355,22 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		h := md5.Sum([]byte(text + salt))
 		return "md5" + hex.EncodeToString(h[:]), nil
 	case "bcrypt":
+		// bcrypt is not salted from the outside: GenerateFromPassword below
+		// draws its own random salt and embeds it in the record. So there is
+		// no salt to supply, and this command has no --salt flag to supply one
+		// with — the -s slot carries bcrypt's COST instead (the log2 work
+		// factor stored in the record as $2a$NN$). Both messages here name
+		// that, and only that: guidance that sends the operator to a flag
+		// which does not exist is worse than no guidance at all.
 		if salt == "" {
-			return "", errors.New("bcrypt requires a salt (use --salt)")
+			return "", errors.New("bcrypt generates its own random salt, so it takes a cost " +
+				"instead: pass the work factor with -s, e.g. `hashsmith hash -t bcrypt -s 10 <password>` " +
+				"(cost 4-31; 10 is bcrypt's default)")
 		}
 		value, err := strconv.Atoi(salt)
 		if err != nil {
-			return "", errors.New("bcrypt in Go backend accepts rounds as salt")
+			return "", fmt.Errorf("bcrypt's -s carries the cost (work factor), not a salt — "+
+				"it must be an integer, e.g. -s 10; got %q", salt)
 		}
 		rounds := value
 		hashed, err := bcrypt.GenerateFromPassword([]byte(text), rounds)

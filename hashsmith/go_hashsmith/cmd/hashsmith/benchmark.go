@@ -92,6 +92,57 @@ func benchSeed(typ string) (string, bool) {
 	return t, true
 }
 
+// benchProbeCandidate is the candidate benchVerifyPath times one verify of. It
+// is a fixed, meaningless string: the point is to pay the algorithm's real
+// per-candidate cost, not to match anything.
+const benchProbeCandidate = "benchprobe"
+
+// benchVerifyPath resolves the exact verify path the cracker itself would use
+// for this type/salt pair — the zero-allocation fast verifier for a
+// salt-independent raw digest, the generic verifier otherwise, matching
+// doCrack's own choice — and measures what ONE call to it costs.
+//
+// perOp is the single number both callers need: benchType sizes its
+// deadline-check stride from it (so a slow KDF checks every iteration while a
+// fast digest is not distorted by time.Now() in the hot loop), and the run
+// feasibility guard uses it as a cheap first-order rate estimate so a fast hash
+// pays one hash, not a full calibration probe (see checkFeasibility).
+//
+// minElapsed is how long the timed batch must run before its result is
+// trusted; the call count doubles until it does (capped at 8192 calls). Pass 0
+// for "one call is enough as long as the clock resolved it at all" — what
+// benchType wants, since it only needs an order of magnitude to pick a stride
+// and must not pay more than about one extra op before its workers start.
+// A caller that needs the number to be an actual rate should pass a real
+// budget: one cold call to a raw digest measures cache misses and branch
+// mispredicts far more than it measures the hash, and reads hundreds of times
+// slower than steady state.
+//
+// perOp is 0 only when even 8192 calls did not resolve on the clock, which
+// callers must treat as "unknown", never as "instant".
+func benchVerifyPath(typ, target, salt, saltMode string, minElapsed time.Duration) (fv *fastVerifier, fast bool, perOp time.Duration) {
+	// Only an unsalted target can take the fast verifier — the same condition
+	// doCrack applies before swapping its verifyFn.
+	if salt == "" {
+		fv, fast = newFastVerifier(typ, target)
+	}
+	probe := []byte(benchProbeCandidate)
+	for reps := 1; reps <= 8192; reps *= 2 {
+		start := time.Now()
+		for i := 0; i < reps; i++ {
+			if fast {
+				fv.matchBytes(probe)
+			} else {
+				verifyCandidate(benchProbeCandidate, target, typ, salt, saltMode)
+			}
+		}
+		if el := time.Since(start); el > 0 && el >= minElapsed {
+			return fv, fast, el / time.Duration(reps)
+		}
+	}
+	return fv, fast, 0
+}
+
 // benchType times how many candidates all workers verify against a seeded target
 // in dur, returning candidates/second.
 func benchType(typ string, workers int, dur time.Duration) (float64, bool) {
@@ -99,20 +150,19 @@ func benchType(typ string, workers int, dur time.Duration) (float64, bool) {
 	if !ok {
 		return 0, false
 	}
-	// Use the exact verify path the cracker uses: the zero-allocation fast
-	// verifier for raw digests, the generic verifier otherwise.
-	fv, fast := newFastVerifier(typ, target)
+	return benchTarget(typ, target, "", "prefix", workers, dur), true
+}
 
-	// Size the deadline-check stride from the measured cost of one op, so a
-	// slow KDF checks every iteration while a fast digest is not distorted by
-	// calling time.Now() in the hot loop.
-	probeStart := time.Now()
-	if fast {
-		fv.matchBytes([]byte("benchprobe"))
-	} else {
-		verifyCandidate("benchprobe", target, typ, "", "prefix")
-	}
-	perOp := time.Since(probeStart)
+// benchTarget is benchType against a caller-supplied target rather than a
+// synthetic seed: it measures throughput on the REAL hash a run is about to
+// attack, so a KDF's own embedded cost parameter (a bcrypt record's cost, a
+// PBKDF2 record's iteration count) is the one being timed — not benchSeed's
+// fixed cost-10 stand-in. The feasibility guard needs that; `benchmark`, which
+// reports a per-type figure for the machine, does not and keeps the seed.
+func benchTarget(typ, target, salt, saltMode string, workers int, dur time.Duration) float64 {
+	// Use the exact verify path the cracker uses, and size the deadline-check
+	// stride from the measured cost of one op.
+	fv, fast, perOp := benchVerifyPath(typ, target, salt, saltMode, 0)
 	stride := int64(1)
 	if perOp > 0 {
 		stride = int64(time.Millisecond / perOp)
@@ -152,7 +202,7 @@ func benchType(typ string, workers int, dur time.Duration) (float64, bool) {
 				if fast {
 					fv.matchBytes(buf)
 				} else {
-					verifyCandidate(string(buf), target, typ, "", "prefix")
+					verifyCandidate(string(buf), target, typ, salt, saltMode)
 				}
 				local++
 				i++
@@ -163,7 +213,7 @@ func benchType(typ string, workers int, dur time.Duration) (float64, bool) {
 	wg.Wait()
 	elapsed := time.Since(start).Seconds()
 	if elapsed <= 0 {
-		return 0, true
+		return 0
 	}
-	return float64(atomic.LoadInt64(&count)) / elapsed, true
+	return float64(atomic.LoadInt64(&count)) / elapsed
 }
