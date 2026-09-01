@@ -127,10 +127,10 @@ jobs:
       - name: Vector core benchmarks (best-of-5, same invocation)
         run: |
           cd hashsmith/go_hashsmith
-          go test -run '^$' -bench 'BenchmarkMD5AVX2Group|BenchmarkMD5Group|BenchmarkMD5Scalar|BenchmarkMD4Group|BenchmarkMD4Scalar' \
+          go test -run '^$' -bench 'BenchmarkMD5AVX2Core|BenchmarkMD5NeonCore|BenchmarkMD5AVX2Group|BenchmarkMD5Group|BenchmarkMD5Scalar|BenchmarkMD4Group|BenchmarkMD4Scalar' \
             -benchtime 2s -count 5 -cpu 1 ./cmd/hashsmith | tee /tmp/bench.out
           echo "=================== SUMMARY (sorted MH/s, best last) ==================="
-          for n in BenchmarkMD5AVX2Group BenchmarkMD5Group BenchmarkMD5Scalar BenchmarkMD4Group BenchmarkMD4Scalar; do
+          for n in BenchmarkMD5AVX2Core BenchmarkMD5NeonCore BenchmarkMD5AVX2Group BenchmarkMD5Group BenchmarkMD5Scalar BenchmarkMD4Group BenchmarkMD4Scalar; do
             vals=$(grep "^$n" /tmp/bench.out | grep -oE '[0-9.]+ MH/s' | sort -n | tr '\n' ' ')
             [ -n "$vals" ] && echo "$n: $vals"
           done
