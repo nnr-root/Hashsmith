@@ -25,6 +25,15 @@ import (
 	"github.com/fatih/color"
 )
 
+// batchBannerPrefix is the distinguishing text of the multi-hash banner below.
+// It is a named constant because a test depends on it to tell "an attack ran"
+// from "no attack ran" — asserting on the leftover target set cannot separate
+// those, since an unfindable hash looks identical either way. Sharing the
+// constant means rewording the banner updates the test with it, rather than
+// silently making the assertion match nothing in BOTH worlds and quietly
+// ceasing to guard anything.
+const batchBannerPrefix = "Multi-hash mode"
+
 // batchableTypes are the raw digests whose value depends only on the candidate.
 var batchableTypes = map[string]bool{
 	"md2": true, "md4": true, "md5": true, "sha0": true, "sha1": true,
@@ -58,6 +67,7 @@ func rawDigest(typ string) func(string) string {
 type batchTarget struct {
 	norm       string   // normalized target (potfile key / display)
 	key        string   // lower(norm) — the digest-map key
+	orig       string   // pre-normalization input key — matches cc's --username/--left bookkeeping
 	candidates []string // batchable candidate types for this target
 	flag       int32    // 0 = unfound, 1 = found (CAS-guarded)
 	password   string   // set once by the CAS winner
@@ -97,6 +107,10 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 
 	for _, raw := range targets {
 		target := strings.TrimSpace(raw)
+		// origKey is captured before any of the transformations below, so it
+		// exactly matches the hash string cc's --username/--left bookkeeping
+		// (built in runCrack from the same gathered input) is keyed by.
+		origKey := target
 		if stripped := stripShadowUsername(target); stripped != target {
 			target = stripped
 		}
@@ -107,6 +121,10 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 		if cc != nil {
 			if pw, ok := cc.pot.lookup(target); ok {
 				clrGreen.Fprintf(os.Stderr, "  %s  =>  %s  (potfile)\n", target, pw)
+				if u := cc.usernameFor(origKey); u != "" {
+					clrGreen.Fprintf(os.Stderr, "    user: %s\n", u)
+				}
+				cc.markFound(origKey)
 				continue
 			}
 		}
@@ -115,7 +133,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 			leftover = append(leftover, raw)
 			continue
 		}
-		batch = append(batch, &batchTarget{norm: target, key: strings.ToLower(target), candidates: cands})
+		batch = append(batch, &batchTarget{norm: target, key: strings.ToLower(target), orig: origKey, candidates: cands})
 		for _, c := range cands {
 			if lc := strings.ToLower(c); !seenType[lc] {
 				seenType[lc] = true
@@ -129,7 +147,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 	}
 
 	color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
-		"\n⚡ Multi-hash mode: %d target(s), hashing each candidate once against all\n", len(batch))
+		"\n⚡ "+batchBannerPrefix+": %d target(s), hashing each candidate once against all\n", len(batch))
 	if len(typeOrder) > 1 {
 		clrYellow.Fprintf(os.Stderr, "  candidate types: %s\n", strings.Join(typeOrder, ", "))
 	}
@@ -184,24 +202,55 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 	}
 
 	// Report and record.
-	var founds []string
+	var founds []string // default-format fallback lines (see below)
 	uncracked := 0
+	foundCount := 0
 	for _, e := range batch {
 		if atomic.LoadInt32(&e.flag) == 1 {
+			foundCount++
 			clrGreen.Fprintf(os.Stderr, "  %s  =>  %s\n", e.norm, e.password)
+			if u := cc.usernameFor(e.orig); u != "" {
+				clrGreen.Fprintf(os.Stderr, "    user: %s\n", u)
+			}
 			if cc != nil {
 				cc.pot.add(e.norm, e.password)
+				cc.markFound(e.orig)
 			}
-			founds = append(founds, e.norm+":"+e.password)
+			// Default line (--outfile-format unset): unchanged from before —
+			// "hash:password". --outfile-format overrides it with the
+			// selected, hashcat-style fields.
+			line := e.norm + ":" + e.password
+			if fmted, ok, err := cc.resultLine(e.orig, e.norm, e.password); err == nil && ok {
+				line = fmted
+			}
+			// Under --left, -o is repurposed entirely as the leftover-target
+			// destination (written once, after the whole run) — see doCrack's
+			// identical guard for the reasoning — so results aren't also
+			// written here.
+			leftMode := cc != nil && cc.left
+			if !leftMode {
+				if cc != nil && cc.outW != nil {
+					_ = cc.outW.writeLine(line)
+				} else {
+					founds = append(founds, line)
+				}
+			}
 		} else {
 			clrYellow.Fprintf(os.Stderr, "  %s  =>  (not found)\n", e.norm)
 			uncracked++
 		}
 	}
-	if outFile != "" && len(founds) > 0 {
+	// cc.outW (opened once for the whole run, appended to as results come in —
+	// see newOutWriter) is what actually persists results when it's set. This
+	// single-shot write only remains as a fallback for a caller that never
+	// wired up cc.outW (nothing in this codebase does that today, but it keeps
+	// runBatch usable standalone without cc.outW's truncation fix).
+	if outFile != "" && len(founds) > 0 && (cc == nil || cc.outW == nil) {
 		if err := os.WriteFile(outFile, []byte(strings.Join(founds, "\n")+"\n"), 0644); err == nil {
 			clrGreen.Fprintf(os.Stderr, "Saved %d result(s) to %s\n", len(founds), outFile)
 		}
+	} else if outFile != "" && cc != nil && cc.outW != nil && foundCount > 0 {
+		clrGreen.Fprintf(os.Stderr, "Saved %d result(s) to %s\n", foundCount, outFile)
 	}
 	return leftover, uncracked
 }

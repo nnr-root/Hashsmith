@@ -95,6 +95,79 @@ type crackCtx struct {
 	useGPU    bool          // --gpu: try raw-digest GPU dictionary/brute/mask kernels when available
 	skip      int64         // --skip: candidate index (whole-layout / word index) to start at; 0 = unset
 	limit     int64         // --limit: candidate count to try, 0 = unbounded
+
+	// ── pipeline plumbing (--username / --left / --outfile-format) ──────────
+	username bool           // --username: input lines are "user:hash"
+	left     bool           // --left: report still-uncracked targets instead of/after results
+	outFmt   []int          // --outfile-format field list (nil = default per-path format)
+	outW     *outWriter     // shared, append-only -o writer for this run (nil when unused)
+	userOf   map[string]string // input hash -> username (only populated when username is set)
+	rawOf    map[string]string // input hash -> original input line, verbatim (for --left)
+
+	foundMu sync.Mutex
+	found   map[string]bool // input hash -> cracked this run (potfile hit or freshly found)
+}
+
+// markFound records that hash was cracked (freshly, or already known via the
+// potfile) — the source of truth --left consults afterward to know which
+// targets are still outstanding. Safe to call on a nil *crackCtx.
+func (cc *crackCtx) markFound(hash string) {
+	if cc == nil {
+		return
+	}
+	cc.foundMu.Lock()
+	if cc.found == nil {
+		cc.found = map[string]bool{}
+	}
+	cc.found[hash] = true
+	cc.foundMu.Unlock()
+}
+
+func (cc *crackCtx) wasFound(hash string) bool {
+	if cc == nil {
+		return false
+	}
+	cc.foundMu.Lock()
+	defer cc.foundMu.Unlock()
+	return cc.found[hash]
+}
+
+// usernameFor returns the username --username stripped from hash's input
+// line, or "" when none is known (--username not set, or hash has no
+// username field).
+func (cc *crackCtx) usernameFor(hash string) string {
+	if cc == nil || cc.userOf == nil {
+		return ""
+	}
+	return cc.userOf[hash]
+}
+
+// rawFor returns the original, verbatim input line for hash (used by
+// --left), falling back to hash itself when no line is on record.
+func (cc *crackCtx) rawFor(hash string) string {
+	if cc != nil && cc.rawOf != nil {
+		if r, ok := cc.rawOf[hash]; ok {
+			return r
+		}
+	}
+	return hash
+}
+
+// resultLine formats a cracked result for -o when --outfile-format is set,
+// using hashField as field 1 (prefixed with the known username, if any) —
+// callers keep their own path-specific default formatting when outFmt is
+// unset, so an unadorned run's -o output is unchanged from before this flag
+// existed.
+func (cc *crackCtx) resultLine(hashKey, hashField, password string) (string, bool, error) {
+	if cc == nil || len(cc.outFmt) == 0 {
+		return "", false, nil
+	}
+	hf := hashField
+	if u := cc.usernameFor(hashKey); u != "" {
+		hf = u + ":" + hf
+	}
+	line, err := formatOutfileLine(cc.outFmt, hf, password)
+	return line, true, err
 }
 
 // newCrackCtx loads the potfile (unless disabled) and any saved session. A nil
@@ -116,6 +189,175 @@ func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool, wor
 		cc.session = s
 	}
 	return cc, nil
+}
+
+// ── -o output: fixing the truncation bug, plus --outfile-format ────────────
+//
+// Every write to -o used to be its own os.WriteFile call, which O_TRUNCs the
+// file. That's harmless when exactly one call ever happens, but a multi-target
+// run makes several calls against the SAME file over its lifetime — once per
+// batch-mode group, once per per-target crack — and each one destroyed every
+// result written before it, leaving only whichever call ran last. outWriter
+// opens the file once (truncating exactly once, at the start of the run) and
+// appends every subsequent line, so nothing already written is lost.
+
+type outWriter struct {
+	mu sync.Mutex
+	f  *os.File
+}
+
+// newOutWriter opens path for a fresh run (path == "" yields a nil, no-op
+// writer — every method below tolerates a nil receiver).
+func newOutWriter(path string) (*outWriter, error) {
+	if path == "" {
+		return nil, nil
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
+	return &outWriter{f: f}, nil
+}
+
+func (w *outWriter) writeLine(line string) error {
+	if w == nil {
+		return nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_, err := fmt.Fprintln(w.f, line)
+	return err
+}
+
+func (w *outWriter) Close() error {
+	if w == nil {
+		return nil
+	}
+	return w.f.Close()
+}
+
+// formatOutfileLine renders one -o line for --outfile-format: hashcat's
+// numbered field selection. Hashsmith currently supports:
+//
+//	1 = hash       the target as it was tested (username-prefixed under --username)
+//	2 = plain      the recovered plaintext
+//	3 = hex_plain  the recovered plaintext, hex-encoded
+//
+// Fields are joined with ':', matching hashcat's own outfile-format output.
+func formatOutfileLine(fields []int, hashField, password string) (string, error) {
+	parts := make([]string, 0, len(fields))
+	for _, f := range fields {
+		switch f {
+		case 1:
+			parts = append(parts, hashField)
+		case 2:
+			parts = append(parts, password)
+		case 3:
+			parts = append(parts, hex.EncodeToString([]byte(password)))
+		default:
+			return "", fmt.Errorf("--outfile-format: unsupported field %d — hashsmith supports "+
+				"1=hash, 2=plain, 3=hex_plain", f)
+		}
+	}
+	return strings.Join(parts, ":"), nil
+}
+
+// parseOutfileFormat parses --outfile-format's "N[,N...]" value. An empty
+// string (the flag not given) yields a nil slice — every caller treats that as
+// "use my existing default format", never an error.
+func parseOutfileFormat(s string) ([]int, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, nil
+	}
+	var out []int
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return nil, fmt.Errorf("--outfile-format: invalid field %q: not a number", p)
+		}
+		switch n {
+		case 1, 2, 3:
+			out = append(out, n)
+		default:
+			return nil, fmt.Errorf("--outfile-format: unsupported field %d — hashsmith supports "+
+				"1=hash, 2=plain, 3=hex_plain", n)
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("--outfile-format: no fields given")
+	}
+	return out, nil
+}
+
+// ── --username: "user:hash" input ───────────────────────────────────────────
+//
+// hashcat splits a "user:hash" input line on the FIRST colon only, with
+// everything after it — further colons included — treated as the hash. That
+// matters here because hashsmith supports 461 formats and many embed colons in
+// the target itself: salted digests ("hash:salt"), IKE, IPMI, CHAP, CMS,
+// 1Password and others. Splitting anywhere but the first colon would slice a
+// legitimate hash in half.
+
+// inputLine pairs one gathered input with what --username peeled off it.
+type inputLine struct {
+	raw      string // the original line, verbatim — what --left re-emits
+	hash     string // the value actually cracked
+	username string // "" when the line had no username field
+}
+
+// splitUsername implements the first-colon-only split. A line with no colon
+// at all has no username (the whole line is the hash) — hashcat's behavior
+// for a plain hash list even when --username is on.
+func splitUsername(raw string) (username, hash string) {
+	i := strings.IndexByte(raw, ':')
+	if i < 0 {
+		return "", raw
+	}
+	return raw[:i], raw[i+1:]
+}
+
+// looksLikeValidTarget reports whether hash parses as a plausible target for
+// typ (or, when typ is "" / "auto", for ANY type detection recognizes) — the
+// same up-front check doCrack itself relies on (see verifyCandidate probing
+// there), reused here so a misuse of --username can be refused before an
+// attack ever starts.
+func looksLikeValidTarget(hash, typ, salt, saltMode string) bool {
+	if typ != "" && !strings.EqualFold(typ, "auto") {
+		_, err := verifyCandidate("hashsmith-probe", hash, typ, salt, saltMode)
+		return err == nil
+	}
+	return len(detectHashTypes(hash)) > 0
+}
+
+// parseUsernameLines applies --username's split to every gathered input line.
+//
+// THE TRAP: many of hashsmith's formats already put a colon in a
+// username-less target — "hash:salt" for salted digests, plus IKE, IPMI,
+// CHAP, CMS, 1Password and others. Run --username against one of those and
+// the hash becomes the "username" while the salt becomes a bogus "hash": every
+// target then fails to crack, reported only as an unremarkable "Not found",
+// with nothing pointing at the real cause. So a split hash portion that
+// doesn't look like a valid target for the resolved type is refused outright
+// here, before any cracking starts, rather than left to silently fail later.
+func parseUsernameLines(raws []string, typ, salt, saltMode string) ([]inputLine, error) {
+	lines := make([]inputLine, 0, len(raws))
+	for _, raw := range raws {
+		r := strings.TrimSpace(raw)
+		user, hash := splitUsername(r)
+		if user != "" && !looksLikeValidTarget(hash, typ, salt, saltMode) {
+			return nil, fmt.Errorf("--username: after splitting %q on its first ':', %q doesn't "+
+				"look like a valid hash — if this line has no username, drop --username; if "+
+				"auto-detection is guessing wrong, pass -t explicitly (refusing rather than "+
+				"silently treating %q as a username and %q as the hash)", r, hash, user, hash)
+		}
+		lines = append(lines, inputLine{raw: r, hash: hash, username: user})
+	}
+	return lines, nil
 }
 
 // ── CLI entry ────────────────────────────────────────────────────────────────
@@ -156,6 +398,9 @@ func runCrack(args []string) error {
 	keyspaceOnly := fs.Bool("keyspace", false, "print the total candidate count to stdout and exit, without attacking")
 	skip := fs.Int64("skip", 0, "distributed cracking: start at candidate index N (whole-layout index, hashcat-style; word index in dict mode)")
 	limit := fs.Int64("limit", 0, "distributed cracking: try at most N candidates from --skip, then stop (0 = unbounded)")
+	username := fs.Bool("username", false, "input lines are \"user:hash\" (split on the FIRST colon only); show the username with each result")
+	left := fs.Bool("left", false, "write still-uncracked targets, in their original input form, to -o or stdout — for a second pass")
+	outfileFormat := fs.String("outfile-format", "", "comma-separated -o field selection, hashcat-style: 1=hash, 2=plain, 3=hex_plain (default: unchanged from before this flag existed)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -200,9 +445,37 @@ func runCrack(args []string) error {
 		return streamCandidates(*mode, wl, wl2, *charset, *minLen, *maxLen, mc, engine)
 	}
 
-	targets, err := gatherInputs(fs.Args())
+	outFmt, err := parseOutfileFormat(*outfileFormat)
 	if err != nil {
 		return err
+	}
+
+	rawInputs, err := gatherInputs(fs.Args())
+	if err != nil {
+		return err
+	}
+
+	// --username: split every line on its FIRST colon only (everything after,
+	// further colons included, is the hash — see parseUsernameLines). Refuses
+	// outright when a split hash portion doesn't look like a valid target, so a
+	// username-less "hash:salt" line misused with --username fails loudly
+	// instead of silently cracking garbage.
+	var lines []inputLine
+	if *username {
+		lines, err = parseUsernameLines(rawInputs, *typ, *salt, *saltMode)
+		if err != nil {
+			return err
+		}
+	} else {
+		lines = make([]inputLine, len(rawInputs))
+		for i, r := range rawInputs {
+			t := strings.TrimSpace(r)
+			lines[i] = inputLine{raw: t, hash: t}
+		}
+	}
+	targets := make([]string, len(lines))
+	for i, l := range lines {
+		targets[i] = l.hash
 	}
 
 	w := *workers
@@ -217,12 +490,77 @@ func runCrack(args []string) error {
 	if err != nil {
 		return err
 	}
+	cc.username = *username
+	cc.left = *left
+	cc.outFmt = outFmt
+	cc.userOf = map[string]string{}
+	cc.rawOf = map[string]string{}
+	for _, l := range lines {
+		cc.rawOf[l.hash] = l.raw
+		if l.username != "" {
+			cc.userOf[l.hash] = l.username
+		}
+	}
+
+	// -o's role changes under --left: it becomes the destination for the
+	// leftover-target list (written once, after the whole run) rather than the
+	// per-result writer, so the two purposes can't jumble into one file.
+	// Without --left, -o keeps writing results exactly as before — just
+	// through a single append-only handle (outWriter) instead of one
+	// truncating os.WriteFile call per result, which used to destroy every
+	// earlier result in a multi-target run.
+	if !*left {
+		ow, err := newOutWriter(*outFile)
+		if err != nil {
+			return err
+		}
+		cc.outW = ow
+		defer ow.Close()
+	}
+
 	engine, err := buildRuleEngine(*rulesFile, *useRules)
 	if err != nil {
 		return err
 	}
-	return crackTargets(targets, *typ, *mode, wl, *charset,
+	runErr := crackTargets(targets, *typ, *mode, wl, *charset,
 		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, engine, mc, cc)
+	if runErr != nil {
+		return runErr
+	}
+
+	if cc.left {
+		var leftover []string
+		for _, l := range lines {
+			if !cc.wasFound(l.hash) {
+				leftover = append(leftover, l.raw)
+			}
+		}
+		return writeLeftover(leftover, *outFile)
+	}
+	return nil
+}
+
+// writeLeftover emits --left's still-uncracked targets, one original input
+// line per line, to outFile (or stdout when outFile is ""). This is the whole
+// point of --left: piped or saved back into a second `hashsmith crack` run, it
+// must reproduce exactly the set of targets that didn't crack this time —
+// no more, no fewer — so a pipeline can iterate without losing or duplicating
+// work.
+func writeLeftover(leftover []string, outFile string) error {
+	var buf strings.Builder
+	for _, l := range leftover {
+		buf.WriteString(l)
+		buf.WriteByte('\n')
+	}
+	if outFile == "" {
+		fmt.Print(buf.String())
+		return nil
+	}
+	if err := os.WriteFile(outFile, []byte(buf.String()), 0644); err != nil {
+		return err
+	}
+	clrGreen.Fprintf(os.Stderr, "Wrote %d uncracked target(s) to %s\n", len(leftover), outFile)
+	return nil
 }
 
 // buildRuleEngine selects the mangling-rule source: a compiled rule file when
@@ -259,8 +597,13 @@ func crackTargets(targets []string, typ, mode, wordlist, charset string,
 	// so a distributed slice takes the slower but correct per-target path instead
 	// of silently attacking the whole keyspace against every target.
 	skipLimitSet := cc != nil && (cc.skip != 0 || cc.limit != 0)
+	showOnly := cc != nil && cc.showOnly
 	uncracked := 0
-	if len(targets) > 1 && salt == "" && !skipLimitSet {
+	// --show never attacks (it only reports potfile hits) — the per-target
+	// loop below already honors that via crackWithDetection's showOnly check,
+	// but runBatch does not, so a multi-target --show run must skip the batch
+	// path entirely rather than silently launching a real attack.
+	if len(targets) > 1 && salt == "" && !skipLimitSet && !showOnly {
 		var nb int
 		targets, nb = runBatch(targets, typ, mode, wordlist, charset,
 			minLen, maxLen, workers, saltMode, outFile, copyResult, rules, mc, cc)
@@ -611,6 +954,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	found := result.password != ""
 	if found && cc != nil {
 		cc.pot.add(targetHash, result.password)
+		cc.markFound(targetHash)
 	}
 	// Session bookkeeping. Three outcomes:
 	//   - found: the job is done, discard the session file.
@@ -650,8 +994,35 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		} else {
 			fmt.Fprintln(os.Stderr, result.password)
 		}
-		if outFile != "" {
-			if e := os.WriteFile(outFile, []byte(result.password+"\n"), 0644); e != nil {
+		if u := cc.usernameFor(targetHash); u != "" {
+			clrGreen.Fprintf(os.Stderr, "  user: %s\n", u)
+		}
+		// Under --left, -o is repurposed entirely as the leftover-target
+		// destination (written once, after the whole run — see runCrack), so
+		// a found result is not also written there; it would only be
+		// clobbered by that final write anyway.
+		if outFile != "" && (cc == nil || !cc.left) {
+			// Default line (--outfile-format unset): unchanged from before —
+			// just the password. --outfile-format overrides it with the
+			// selected, hashcat-style fields.
+			line := result.password
+			if fmted, ok, e := cc.resultLine(targetHash, targetHash, result.password); e != nil {
+				return true, e
+			} else if ok {
+				line = fmted
+			}
+			// cc.outW (when set) is a single handle opened once for the whole
+			// run and appended to for every result — see newOutWriter. Without
+			// it (e.g. crackReport's standalone interactive path, which has no
+			// crackCtx wiring for outW), fall back to the single-shot write
+			// that existed before, which is safe for a lone result.
+			var e error
+			if cc != nil && cc.outW != nil {
+				e = cc.outW.writeLine(line)
+			} else {
+				e = os.WriteFile(outFile, []byte(line+"\n"), 0644)
+			}
+			if e != nil {
 				return true, e
 			}
 			clrGreen.Fprintf(os.Stderr, "Saved to %s\n", outFile)
@@ -670,11 +1041,33 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	return found, nil
 }
 
-// emitResult writes an already-known password to the -o file and/or clipboard.
-// Shared by the potfile fast-path and --show, which skip the attack entirely.
-func emitResult(pw, outFile string, copyResult bool) {
-	if outFile != "" {
-		if err := os.WriteFile(outFile, []byte(pw+"\n"), 0644); err == nil {
+// emitResult writes an already-known password to the -o file and/or clipboard,
+// via cc's shared append-only outW when one is configured (falling back to a
+// single-shot write otherwise — see doCrack's identical fallback). Shared by
+// the potfile fast-path and --show, which skip the attack entirely. origKey
+// is the pre-normalization input key: what cc's --username/--left bookkeeping
+// is keyed by, so a potfile hit or --show hit still marks the target as found
+// and prints its username, exactly like a freshly-cracked result does.
+func emitResult(cc *crackCtx, origKey, pw, outFile string, copyResult bool) {
+	cc.markFound(origKey)
+	if u := cc.usernameFor(origKey); u != "" {
+		clrGreen.Fprintf(os.Stderr, "  user: %s\n", u)
+	}
+	// Under --left, -o is repurposed entirely as the leftover-target
+	// destination (written once, after the whole run) — see doCrack's
+	// identical guard for the reasoning.
+	if outFile != "" && (cc == nil || !cc.left) {
+		line := pw
+		if fmted, ok, err := cc.resultLine(origKey, origKey, pw); err == nil && ok {
+			line = fmted
+		}
+		var err error
+		if cc != nil && cc.outW != nil {
+			err = cc.outW.writeLine(line)
+		} else {
+			err = os.WriteFile(outFile, []byte(line+"\n"), 0644)
+		}
+		if err == nil {
 			clrGreen.Fprintf(os.Stderr, "Saved to %s\n", outFile)
 		}
 	}
@@ -685,11 +1078,19 @@ func emitResult(pw, outFile string, copyResult bool) {
 
 // showPotEntry implements --show: report the potfile plaintext for a hash, if
 // one has been recorded, without running any attack.
-func showPotEntry(p *potfile, target, outFile string, copyResult bool) (bool, error) {
-	if pw, ok := p.lookup(target); ok {
+func showPotEntry(cc *crackCtx, origKey, target, outFile string, copyResult bool) (bool, error) {
+	// Both call sites today gate on cc != nil before reaching here, but that's
+	// an invariant this function shouldn't have to trust — a nil cc has no
+	// potfile to look anything up in, so it's simply "not in potfile", not a
+	// nil-pointer panic on cc.pot.
+	if cc == nil {
+		clrYellow.Fprintln(os.Stderr, "Not in potfile")
+		return false, nil
+	}
+	if pw, ok := cc.pot.lookup(target); ok {
 		clrGreen.Fprint(os.Stderr, "Found (potfile): ")
 		fmt.Fprintln(os.Stderr, pw)
-		emitResult(pw, outFile, copyResult)
+		emitResult(cc, origKey, pw, outFile, copyResult)
 		return true, nil
 	}
 	clrYellow.Fprintln(os.Stderr, "Not in potfile")
@@ -726,6 +1127,10 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 	salt, saltMode, outFile string, copyResult bool, rules *ruleEngine, mc *maskConfig, cc *crackCtx) (bool, error) {
 
 	target := strings.TrimSpace(rawTarget)
+	// origKey is captured here, before any of the transformations below, so
+	// it exactly matches the hash string --username/--left bookkeeping (built
+	// in runCrack from the same gathered input) is keyed by.
+	origKey := target
 	// A "user:hash" or raw /etc/shadow line (from shadow2smith) is
 	// reduced to its crypt-hash field so the verifier sees a clean hash.
 	if stripped := stripShadowUsername(target); stripped != target {
@@ -741,14 +1146,14 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 
 	// --show reports the potfile entry (if any) for this hash and stops.
 	if cc != nil && cc.showOnly {
-		return showPotEntry(cc.pot, target, outFile, copyResult)
+		return showPotEntry(cc, origKey, target, outFile, copyResult)
 	}
 	// A hash already in the potfile is reported without re-running the attack.
 	if cc != nil {
 		if pw, ok := cc.pot.lookup(target); ok {
 			clrGreen.Fprint(os.Stderr, "Already cracked (potfile): ")
 			fmt.Fprintln(os.Stderr, pw)
-			emitResult(pw, outFile, copyResult)
+			emitResult(cc, origKey, pw, outFile, copyResult)
 			return true, nil
 		}
 	}
@@ -785,6 +1190,11 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 			continue
 		}
 		if found {
+			// doCrack already marks targetHash found; origKey is marked too in
+			// case a shadow-line/encoded-hash normalization made targetHash
+			// differ from it, so --left's bookkeeping still keys correctly on
+			// the exact string --username/--left tracked from the input.
+			cc.markFound(origKey)
 			return true, nil
 		}
 	}
