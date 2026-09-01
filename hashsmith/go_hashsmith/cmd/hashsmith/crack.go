@@ -97,12 +97,17 @@ type crackCtx struct {
 	limit     int64         // --limit: candidate count to try, 0 = unbounded
 
 	// ── pipeline plumbing (--username / --left / --outfile-format) ──────────
-	username bool              // --username: input lines are "user:hash"
-	left     bool              // --left: report still-uncracked targets instead of/after results
-	outFmt   []int             // --outfile-format field list (nil = default per-path format)
-	outW     *outWriter        // shared, append-only -o writer for this run (nil when unused)
-	userOf   map[string]string // input hash -> username (only populated when username is set)
-	rawOf    map[string]string // input hash -> original input line, verbatim (for --left)
+	username bool                // --username: input lines are "user:hash"
+	left     bool                // --left: report still-uncracked targets instead of/after results
+	outFmt   []int               // --outfile-format field list (nil = default per-path format)
+	outW     *outWriter          // shared, append-only -o writer for this run (nil when unused)
+	userOf   map[string]string   // input hash -> username (only populated when username is set)
+	rawOf    map[string]string   // input hash -> original input line, verbatim (for --left)
+	usersOf  map[string][]string // input hash -> EVERY distinct username mapped to it, in first-seen
+	// order. userOf above keeps only the last-parsed username per hash — fine
+	// for display, but --single needs every account that could own a shared
+	// hash (two accounts with the same weak password on an unsalted digest),
+	// not just whichever line happened to be parsed last. See usernamesFor.
 
 	foundMu sync.Mutex
 	found   map[string]bool // input hash -> cracked this run (potfile hit or freshly found)
@@ -216,6 +221,19 @@ func (cc *crackCtx) usernameFor(hash string) string {
 		return ""
 	}
 	return cc.userOf[hash]
+}
+
+// usernamesFor returns EVERY distinct username mapped to hash, in first-seen
+// order — unlike usernameFor, which returns only the last one parsed (fine
+// for a display label, wrong for choosing single-crack candidates). Two
+// accounts sharing one hash — the same weak password on an unsalted digest —
+// means either login could be the real one, so --single seeds from all of
+// them. Empty when --username was never set or hash carries no username.
+func (cc *crackCtx) usernamesFor(hash string) []string {
+	if cc == nil || cc.usersOf == nil {
+		return nil
+	}
+	return cc.usersOf[hash]
 }
 
 // rawFor returns the original, verbatim input line for hash (used by
@@ -590,10 +608,19 @@ func runCrack(args []string) error {
 	cc.outFmt = outFmt
 	cc.userOf = map[string]string{}
 	cc.rawOf = map[string]string{}
+	cc.usersOf = map[string][]string{}
+	seenUser := map[string]map[string]bool{} // hash -> username -> already recorded
 	for _, l := range lines {
 		cc.rawOf[l.hash] = l.raw
 		if l.username != "" {
 			cc.userOf[l.hash] = l.username
+			if seenUser[l.hash] == nil {
+				seenUser[l.hash] = map[string]bool{}
+			}
+			if !seenUser[l.hash][l.username] {
+				seenUser[l.hash][l.username] = true
+				cc.usersOf[l.hash] = append(cc.usersOf[l.hash], l.username)
+			}
 		}
 	}
 

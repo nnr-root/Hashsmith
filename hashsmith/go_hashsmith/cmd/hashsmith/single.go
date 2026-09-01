@@ -148,6 +148,19 @@ func splitUsernameComponents(u string) []string {
 // --show never attacks (its contract: report potfile hits only); --single
 // must not reintroduce an attack path there, so it mirrors runLoopback's
 // showOnly guard exactly.
+//
+// Two input lines can share one hash — two accounts with the same weak
+// password on an unsalted digest, a real and common shape in dumps (it's
+// exactly why multi-hash mode and --loopback exist at all). cc.usernameFor
+// only ever returns the LAST-parsed username for a hash, which would derive
+// seeds from the wrong account — or, if that account's own login isn't the
+// shared password, miss a password that one of the OTHER accounts sharing
+// the hash would trivially have found. cc.usernamesFor returns every
+// username associated with a hash, so runSingleCrack seeds from all of them
+// — each hash is still attacked exactly once, with the union of every
+// associated account's seed list, and that union is still tried only
+// against the hash it's associated with (isolation from OTHER hashes is
+// unaffected: usernamesFor never crosses hash keys).
 func runSingleCrack(lines []inputLine, typ string, workers int, salt, saltMode, outFile string,
 	copyResult bool, rules *ruleEngine, cc *crackCtx) error {
 	if cc == nil || cc.showOnly {
@@ -159,27 +172,43 @@ func runSingleCrack(lines []inputLine, typ string, workers int, salt, saltMode, 
 	defer func() { cc.skip, cc.limit = savedSkip, savedLimit }()
 
 	attacked := 0
+	processed := make(map[string]bool, len(lines)) // hash already single-cracked this call
 	for _, l := range lines {
-		if cc.wasFound(l.hash) {
-			continue // already cracked (e.g. a potfile hit) — nothing to gain
+		if processed[l.hash] || cc.wasFound(l.hash) {
+			continue // already handled — a shared hash needs only one pass
 		}
-		username := cc.usernameFor(l.hash)
-		seeds := singleSeeds(username)
+		processed[l.hash] = true
+
+		usernames := cc.usernamesFor(l.hash)
+		if len(usernames) == 0 {
+			continue // no username on this hash — no seeds to derive it from
+		}
+		seen := make(map[string]bool, len(usernames)*8)
+		var seeds []string
+		for _, u := range usernames {
+			for _, s := range singleSeeds(u) {
+				if !seen[s] {
+					seen[s] = true
+					seeds = append(seeds, s)
+				}
+			}
+		}
 		if len(seeds) == 0 {
-			continue // no username on this line — no seeds to derive it from
+			continue
 		}
 		tmp, err := writeTempWordlist(seeds)
 		if err != nil {
 			return fmt.Errorf("--single: %w", err)
 		}
 		attacked++
-		// len==1: THE property that matters. This target's seeds are tried
-		// against this target ONLY.
+		// len==1: THE property that matters. This target's seeds — from
+		// every account sharing this hash, but ONLY this hash — are tried
+		// against this target and no other.
 		runErr := crackTargets([]string{l.hash}, typ, "dict", tmp, "", 0, 0, workers,
 			salt, saltMode, outFile, copyResult, rules, nil, cc)
 		os.Remove(tmp)
 		if runErr != nil {
-			return fmt.Errorf("--single (user %q): %w", username, runErr)
+			return fmt.Errorf("--single (user(s) %v): %w", usernames, runErr)
 		}
 	}
 	if attacked > 0 {

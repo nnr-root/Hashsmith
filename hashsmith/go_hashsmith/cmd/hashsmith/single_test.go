@@ -226,3 +226,68 @@ func TestSingleResultsReflectedInLeft(t *testing.T) {
 		t.Errorf("--left should be empty (dave was cracked by --single), got:\n%s", left)
 	}
 }
+
+// ── shared hashes: two accounts, one unsalted digest ────────────────────────
+//
+// cc.userOf/cc.rawOf are keyed by HASH, not by input line, so when two
+// different usernames map to the same hash (a shared weak password on an
+// unsalted digest — common in real dumps, and exactly why multi-hash mode and
+// --loopback exist), a naive lookup keyed by hash only ever sees ONE of them.
+// runSingleCrack must seed from every username associated with a hash, or it
+// silently misses a password reachable from an account it simply didn't pick.
+//
+// The password below is reachable only from carol's login (capitalised),
+// never mallory's. The two tests below swap which one is parsed first, so
+// neither a "last username wins" bug (the one actually found) nor a
+// hypothetical "first username wins" fix can pass both.
+
+// carol parsed FIRST, mallory SECOND. A "last username wins" implementation
+// seeds only from mallory and must miss this.
+func TestSingleCrackSharedHashSeedsFromAllUsernames(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	wl := filepath.Join(dir, "decoy.txt")
+	mustWrite(t, wl, "totally-unrelated-word\n")
+
+	hash := md5hex("Carol") // carol's own capitalised-username seed
+	targetsFile := filepath.Join(dir, "targets.txt")
+	mustWrite(t, targetsFile, "carol:"+hash+"\nmallory:"+hash+"\n")
+
+	exitCode = 0
+	stderr := captureStderr(t, func() error {
+		return runCrack([]string{"-t", "md5", "-M", "dict", "-w", wl,
+			"--no-pot", "--username", "--single", targetsFile})
+	})
+	if exitCode != 0 {
+		t.Fatalf("shared hash should have cracked from carol's (first-parsed) seed; stderr:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "Found: Carol") {
+		t.Errorf("expected the shared hash to crack as %q; stderr:\n%s", "Carol", stderr)
+	}
+}
+
+// Same shared hash, opposite parse order: mallory FIRST, carol SECOND. This
+// guards against the test only passing by accident of a "first username
+// wins" fix rather than a true union of every associated username.
+func TestSingleCrackSharedHashSeedsFromAllUsernamesReversed(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	wl := filepath.Join(dir, "decoy.txt")
+	mustWrite(t, wl, "totally-unrelated-word\n")
+
+	hash := md5hex("Carol")
+	targetsFile := filepath.Join(dir, "targets.txt")
+	mustWrite(t, targetsFile, "mallory:"+hash+"\ncarol:"+hash+"\n")
+
+	exitCode = 0
+	stderr := captureStderr(t, func() error {
+		return runCrack([]string{"-t", "md5", "-M", "dict", "-w", wl,
+			"--no-pot", "--username", "--single", targetsFile})
+	})
+	if exitCode != 0 {
+		t.Fatalf("shared hash should have cracked from carol's (second-parsed) seed; stderr:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "Found: Carol") {
+		t.Errorf("expected the shared hash to crack as %q; stderr:\n%s", "Carol", stderr)
+	}
+}
