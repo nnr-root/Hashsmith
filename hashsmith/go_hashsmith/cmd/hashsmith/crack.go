@@ -483,8 +483,9 @@ func runCrack(args []string) error {
 	fs.SetOutput(io.Discard)
 	typ := fs.String("t", "", "hash type (omit or 'auto' to auto-detect)")
 	mode := fs.String("M", "dict", "attack mode: dict|brute")
-	wordlist := fs.String("w", "", "wordlist path (dict mode; defaults to built-in common.txt)")
+	wordlist := fs.String("w", "", "wordlist path (dict mode; auto-detects an installed rockyou.txt, else the built-in common.txt — see `hashsmith wordlists`)")
 	wordlistLong := fs.String("wordlist", "", "alias for -w")
+	noAutoWordlist := fs.Bool("no-auto-wordlist", false, "skip wordlist auto-detection and use the built-in common.txt, for scripted runs that need the same keyspace on every machine (ignored when -w is given, which never auto-detects anyway)")
 	charset := fs.String("C", "abcdefghijklmnopqrstuvwxyz0123456789", "charset (brute mode)")
 	minLen := fs.Int("n", 1, "min length (brute)")
 	maxLen := fs.Int("x", 4, "max length (brute)")
@@ -571,6 +572,26 @@ func runCrack(args []string) error {
 	if wl2 == "" {
 		wl2 = *w2
 	}
+
+	// Resolve the wordlist ONCE, here, before anything reads it. Everything
+	// downstream — the pre-count that sizes the progress bar, the feasibility
+	// ETA, --keyspace, --stdout and the attack itself — receives the resolved
+	// path, so they all describe the same list. Resolving lower down (per
+	// target, or inside dictAttack) would let the ETA be computed from the
+	// embedded default's 230,930 words while the attack actually ran a
+	// 14M-word rockyou, which is exactly the kind of confidently wrong number
+	// the feasibility guard exists to prevent.
+	wlChoice, err := resolveWordlistForMode(*mode, wl, *noAutoWordlist)
+	if err != nil {
+		return err
+	}
+	wl = wlChoice.path
+
+	// A distributed slice built on a per-machine default does not line up.
+	if warn := distributedWordlistWarning(wlChoice, *skip, *limit, *keyspaceOnly); warn != "" {
+		clrYellow.Fprintln(os.Stderr, warn)
+	}
+
 	mc := buildMaskConfig(*maskStr, *cs1, *cs2, *cs3, *cs4, *increment, *minLen, *maskFirst)
 
 	// --keyspace: report the total candidate count and exit — no target or
@@ -1656,14 +1677,13 @@ func dictWordBounds(skip, limit int64) (lo, upper int64) {
 func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, workers int, atomicAttempts *int64,
 	rules *ruleEngine, verify func(string) bool) (crackedResult, error) {
 
-	f, label, err := openWordlist(wordlistPath)
+	// The source line ("Wordlist: ...") is announced once per run at the CLI
+	// entry point (resolveWordlistForMode), not once per target here.
+	f, _, err := openWordlist(wordlistPath)
 	if err != nil {
 		return crackedResult{}, err
 	}
 	defer f.Close()
-	if label == defaultWordlistLabel {
-		clrYellow.Fprintf(os.Stderr, "No wordlist supplied — using %s\n", label)
-	}
 	skip, upper := dictWordBounds(skip, limit)
 
 	innerCtx, cancel := context.WithCancel(ctx)
