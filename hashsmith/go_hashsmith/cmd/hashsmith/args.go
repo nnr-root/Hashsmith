@@ -29,6 +29,27 @@ func parseArgsFlexible(fs *flag.FlagSet, args []string) error {
 	return fs.Parse(reorderArgs(args, boolFlags))
 }
 
+// stringSliceFlag is a flag.Value that accumulates every occurrence of a
+// repeatable flag, in the order given on the command line (e.g. `--rules
+// a.rule --rules b.rule` yields []string{"a.rule", "b.rule"}). Use with
+// fs.Var; a flag not passed at all leaves values nil, matching the zero
+// value of the fs.String equivalent it replaces.
+type stringSliceFlag struct {
+	values []string
+}
+
+func (s *stringSliceFlag) String() string {
+	if s == nil {
+		return ""
+	}
+	return strings.Join(s.values, ",")
+}
+
+func (s *stringSliceFlag) Set(v string) error {
+	s.values = append(s.values, v)
+	return nil
+}
+
 // reorderArgs moves every positional argument after all flags (and their
 // values), preserving relative order within each group. boolFlags names the
 // flags that do not take a separate value token.

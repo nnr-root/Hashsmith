@@ -478,7 +478,8 @@ func runCrack(args []string) error {
 	outFile := fs.String("o", "", "write result to file")
 	copyResult := fs.Bool("c", false, "copy result to clipboard")
 	useRules := fs.Bool("r", false, "enable the built-in mangling rules in dict mode")
-	rulesFile := fs.String("rules", "", "path to a rule file (dict mode; overrides -r)")
+	var rulesFiles stringSliceFlag
+	fs.Var(&rulesFiles, "rules", "path to a rule file (dict mode; overrides -r); repeatable to stack rule files left-to-right, e.g. --rules a.rule --rules b.rule")
 	maskStr := fs.String("mask", "", "mask for -M mask (e.g. ?u?l?l?l?d?d)")
 	cs1 := fs.String("1", "", "custom charset 1 (mask -1)")
 	cs2 := fs.String("2", "", "custom charset 2 (mask -2)")
@@ -551,7 +552,7 @@ func runCrack(args []string) error {
 
 	// --stdout: generate candidates only, no target or hashing required.
 	if *stdoutMode {
-		engine, err := buildRuleEngine(*rulesFile, *useRules)
+		engine, err := buildRuleEngine(rulesFiles.values, *useRules)
 		if err != nil {
 			return err
 		}
@@ -640,7 +641,7 @@ func runCrack(args []string) error {
 		defer ow.Close()
 	}
 
-	engine, err := buildRuleEngine(*rulesFile, *useRules)
+	engine, err := buildRuleEngine(rulesFiles.values, *useRules)
 	if err != nil {
 		return err
 	}
@@ -860,16 +861,24 @@ func writeTempWordlist(words []string) (string, error) {
 	return f.Name(), nil
 }
 
-// buildRuleEngine selects the mangling-rule source: a compiled rule file when
-// one is given (reporting any skipped invalid rules), else the built-in set when
-// -r is present, else nil (no rules).
-func buildRuleEngine(rulesFile string, useBuiltin bool) (*ruleEngine, error) {
-	if rulesFile != "" {
-		e, bad, err := loadRuleFile(rulesFile)
+// buildRuleEngine selects the mangling-rule source: one or more compiled rule
+// files when given (reporting any skipped invalid rules; 2+ files are stacked
+// as a cross product — see loadRuleFiles/expandStacked), else the built-in set
+// when -r is present, else nil (no rules). A single rulesFiles entry produces
+// output byte-identical to before stacking existed.
+func buildRuleEngine(rulesFiles []string, useBuiltin bool) (*ruleEngine, error) {
+	if len(rulesFiles) > 0 {
+		e, bad, err := loadRuleFiles(rulesFiles)
 		if err != nil {
 			return nil, err
 		}
-		msg := fmt.Sprintf("Loaded %d rules from %s", e.count(), rulesFile)
+		var msg string
+		if len(rulesFiles) == 1 {
+			msg = fmt.Sprintf("Loaded %d rules from %s", e.count(), rulesFiles[0])
+		} else {
+			msg = fmt.Sprintf("Loaded stacked rules from %s: %d candidates per word",
+				strings.Join(rulesFiles, " + "), e.count())
+		}
 		if bad > 0 {
 			msg += fmt.Sprintf(" (%d invalid rule(s) skipped)", bad)
 		}

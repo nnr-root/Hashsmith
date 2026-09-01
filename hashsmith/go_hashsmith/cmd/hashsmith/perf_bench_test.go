@@ -28,6 +28,42 @@ func BenchmarkRuleEngineFile(b *testing.B) {
 	}
 }
 
+// BenchmarkStackedRuleEngine64x64 measures a realistic stacked-rule workload:
+// two 64-rule files (best64.rule-sized), stacked, giving 4,096 candidates per
+// word. Reports time and allocations per expand() call.
+func BenchmarkStackedRuleEngine64x64(b *testing.B) {
+	mkLayer := func(prefix string) []string {
+		base := []string{":", "l", "u", "c", "C", "r", "d", "f", "q", "{", "}", "[", "]", "k", "K", "T0"}
+		var lines []string
+		for i := 0; i < 64; i++ {
+			lines = append(lines, base[i%len(base)]+prefix+string(rune('0'+i%10)))
+		}
+		return lines
+	}
+	e := &ruleEngine{}
+	for _, layerLines := range [][]string{mkLayer("$"), mkLayer("^")} {
+		var progs []ruleProgram
+		for _, ln := range layerLines {
+			p, err := compileRuleLine(ln)
+			if err != nil {
+				b.Fatalf("%q: %v", ln, err)
+			}
+			progs = append(progs, p)
+		}
+		e.layers = append(e.layers, progs)
+	}
+	e.stackedCount = 64 * 64
+	words := []string{"password", "summer2024", "qwerty", "dragon", "letmein"}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		out := e.expand(words[i%len(words)])
+		if len(out) == 0 {
+			b.Fatal("expected candidates")
+		}
+	}
+}
+
 func BenchmarkMD5Verify(b *testing.B) {
 	target := rawDigest("md5")("zzzzzz")
 	b.ReportAllocs()
