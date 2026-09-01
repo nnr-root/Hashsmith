@@ -271,15 +271,30 @@ func printShadowUsage() {
 	fmt.Println("  hashsmith hashes.txt                                       # auto-detect & crack")
 }
 
-// parsePasswdUsers reads the usernames from an /etc/passwd file in file order.
-func parsePasswdUsers(path string) ([]string, error) {
+// passwdRecord is one parsed /etc/passwd line: the login name plus its GECOS
+// (real-name) field. The other passwd fields (uid, gid, home, shell) aren't
+// needed anywhere in this codebase, so they aren't carried through.
+type passwdRecord struct {
+	user  string
+	gecos string
+}
+
+// parsePasswdRecords reads an /etc/passwd-format file into one passwdRecord
+// per account, in file order — the shared scan that parsePasswdUsers and
+// parsePasswdGecos both build on, so there is exactly one passwd line parser
+// in this codebase, not two with subtly different comment/blank-line
+// handling. A line with fewer than 5 colon-separated fields
+// (user:passwd:uid:gid:gecos:home:shell) has no GECOS field; it is recorded
+// with gecos == "" rather than dropped, so parsePasswdUsers keeps seeing
+// every account exactly as it did before this field existed.
+func parsePasswdRecords(path string) ([]passwdRecord, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open passwd file %q: %w", path, err)
 	}
 	defer f.Close()
 
-	var users []string
+	var records []passwdRecord
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
 	for scanner.Scan() {
@@ -291,12 +306,53 @@ func parsePasswdUsers(path string) ([]string, error) {
 		if len(fields) < 1 || fields[0] == "" {
 			continue
 		}
-		users = append(users, fields[0])
+		rec := passwdRecord{user: fields[0]}
+		if len(fields) >= 5 {
+			rec.gecos = fields[4]
+		}
+		records = append(records, rec)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
+	return records, nil
+}
+
+// parsePasswdUsers reads the usernames from an /etc/passwd file in file order.
+func parsePasswdUsers(path string) ([]string, error) {
+	records, err := parsePasswdRecords(path)
+	if err != nil {
+		return nil, err
+	}
+	users := make([]string, len(records))
+	for i, r := range records {
+		users[i] = r.user
+	}
 	return users, nil
+}
+
+// parsePasswdGecos reads an /etc/passwd-format file into a username -> GECOS
+// map, for --single's name-derived seeds (see single.go's gecosSeeds). A
+// username with an empty, absent, or truncated GECOS field simply maps to
+// "" — every caller treats that exactly like the account being altogether
+// absent from the map (no name-derived seeds, fall back to username-only),
+// never as an error.
+//
+// This is the "read the name from the passwd file directly" half of
+// --single's GECOS support: shadow2smith's "user:hash" output format is
+// deliberately left untouched (see single.go's package doc for why), so
+// --passwd on the crack command re-parses the operator's own passwd file
+// instead of expecting the name to have been smuggled through the hash list.
+func parsePasswdGecos(path string) (map[string]string, error) {
+	records, err := parsePasswdRecords(path)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(records))
+	for _, r := range records {
+		out[r.user] = r.gecos
+	}
+	return out, nil
 }
 
 // isRealHashField reports whether a shadow password field holds an actual hash

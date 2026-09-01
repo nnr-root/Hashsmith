@@ -113,6 +113,14 @@ type crackCtx struct {
 	// hash (two accounts with the same weak password on an unsalted digest),
 	// not just whichever line happened to be parsed last. See usernamesFor.
 
+	// passwdGecos is --passwd's username -> GECOS map (parsePasswdGecos in
+	// extract_shadow.go), consulted only by runSingleCrack (single.go) to
+	// add name-derived seeds alongside the username-derived ones. nil when
+	// --passwd wasn't given (or --single wasn't), which single.go treats
+	// identically to "this account has no GECOS entry" — never an error and
+	// never a reason to skip an account.
+	passwdGecos map[string]string
+
 	foundMu sync.Mutex
 	found   map[string]bool // input hash -> cracked this run (potfile hit or freshly found)
 
@@ -509,6 +517,7 @@ func runCrack(args []string) error {
 	outfileFormat := fs.String("outfile-format", "", "comma-separated -o field selection, hashcat-style: 1=hash, 2=plain, 3=hex_plain (default: unchanged from before this flag existed)")
 	loopback := fs.Bool("loopback", false, "after the main attack, feed newly cracked plaintexts (plus, if the potfile is enabled, plaintexts already on record there) back as dict-mode candidates against any still-uncracked targets, with --rules/-r applied; repeats until a pass finds nothing new")
 	single := fs.Bool("single", false, "single-crack mode: before the main attack, try candidates derived from each account's own username (via --username), tried only against that account's hash — with --rules/-r applied; requires --username")
+	passwdPath := fs.String("passwd", "", "optional /etc/passwd-format file for --single: also derive candidates from each account's GECOS/real-name field (\"John Smith\" -> jsmith, johns, smithj, john.smith, ...), tried only against that account's hash; unused without --single")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -534,6 +543,17 @@ func runCrack(args []string) error {
 	if *single && !*username {
 		return fmt.Errorf("--single requires --username (its candidates come from each " +
 			"account's login name, so there must be a username to derive them from)")
+	}
+
+	// --passwd only feeds --single (see runSingleCrack / gecosSeeds in
+	// single.go); using it without --single isn't wrong, just pointless. Say
+	// so instead of silently accepting and ignoring it — the same "make a
+	// no-op loud" principle behind the --single-without-username refusal
+	// above, just a warning rather than a refusal since --passwd genuinely
+	// has no other job to do here.
+	if *passwdPath != "" && !*single {
+		clrYellow.Fprintln(os.Stderr, "--passwd given without --single; ignored "+
+			"(GECOS-derived seeds only apply to --single)")
 	}
 
 	// Resolve wordlist from either -w or its --wordlist alias. An empty value
@@ -629,6 +649,20 @@ func runCrack(args []string) error {
 				cc.usersOf[l.hash] = append(cc.usersOf[l.hash], l.username)
 			}
 		}
+	}
+
+	// --passwd: build the username -> GECOS map --single consults for
+	// name-derived seeds (single.go's gecosSeeds). Parsed only when --single
+	// is actually on — the warning above already told the operator --passwd
+	// is a no-op otherwise, so there is nothing to gain by opening the file
+	// in that case. A read failure here (bad path, unreadable file) fails
+	// the whole run loudly, same as any other input file this command reads.
+	if *single && *passwdPath != "" {
+		gecos, gerr := parsePasswdGecos(*passwdPath)
+		if gerr != nil {
+			return fmt.Errorf("--passwd: %w", gerr)
+		}
+		cc.passwdGecos = gecos
 	}
 
 	// -o's role changes under --left: it becomes the destination for the
