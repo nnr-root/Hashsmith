@@ -214,6 +214,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 			}
 			if cc != nil {
 				cc.pot.add(e.norm, e.password)
+				cc.recordPlain(e.password)
 				cc.markFound(e.orig)
 			}
 			// Default line (--outfile-format unset): unchanged from before —
