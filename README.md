@@ -281,6 +281,9 @@ hashsmith crack -t md5 <hash> -M hybrid -w words.txt --mask '?d?d?d' --mask-firs
 
 # Markov — brute-force ordered by likelihood (likely characters first)
 hashsmith crack -t md5 <hash> -M markov -C ?l -n 1 -x 8 -w rockyou.txt              # trained on a wordlist
+
+# PRINCE — concatenate wordlist elements into passphrase-style candidates, shortest first
+hashsmith crack -t md5 <hash> -M prince -w words.txt --prince-elems 3 -n 1 -x 16   # love+you+123 -> loveyou123
 ```
 
 **Markov** ordering trains a first-order statistical model from a wordlist —
@@ -306,6 +309,12 @@ hashsmith crack -t md5 <hash> -M combinator -w left.txt --wordlist2 right.txt
 right word (`super` + `man` → `superman`), for passphrase-style passwords built
 from two real words that neither a plain wordlist nor a mask would reach.
 `--w2` is a short alias for `--wordlist2`.
+
+**PRINCE** concatenates several wordlist elements into one candidate, shortest
+chains first (`love` + `you` + `123` → `loveyou123`), reaching passphrase-style
+passwords a dictionary attack can't (it's not a single word) and a mask attack
+can't (it's too long to brute-force). `--prince-elems N` caps how many elements
+one chain may concatenate (default 4).
 
 **Mask placeholders:** `?l` a-z · `?u` A-Z · `?d` 0-9 · `?s` symbols · `?a` all
 printable · `?h`/`?H` lower/upper hex · `?b` any byte. Define up to four custom
@@ -365,28 +374,108 @@ c $2 $0 $2 $4        # Capitalize + '2024'    → Password2024
 so0 sa@ c            # leet o→0, a→@, cap      → P@ssw0rd
 ```
 
+`--rules` is repeatable, and stacked files apply as a cross product left to
+right — two small, maintained rule files combine into far more mutations than
+either holds on its own:
+
+```bash
+hashsmith crack -t md5 <hash> -w words.txt --rules caps.rule --rules digits.rule
+# caps.rule (case variants) x digits.rule (trailing digits) = every combination
+```
+
+A rule that rejects a word (`<N`, `>N`, `_N`, `!X`, `/X`) short-circuits that
+chain: if `caps.rule`'s rule rejects a given word, `digits.rule`'s rule for that
+chain never runs, and only the base word is tried. Files are evaluated in the
+order given, so put the cheapest/most-selective rejects first.
+
+## Wordlist selection
+
+With no `-w`, Hashsmith searches 56 known locations for an installed
+`rockyou.txt` — Kali, Parrot and BlackArch, SecLists under the paths its
+installers actually use, Homebrew, `/opt/wordlists`, John's and Hashcat's
+share directories, `~/wordlists`, `~/Downloads`, `~/Desktop`, the WSL bridge,
+and more — before falling back to the built-in `common.txt`. A `.gz` copy is
+read directly; no separate `gunzip` step is needed.
+
+Resolution order, first match wins: `-w` > `$HASHSMITH_WORDLIST` > saved
+default > auto-detection > built-in `common.txt`.
+
+```bash
+hashsmith wordlists                                # show the order and which entry wins
+hashsmith wordlists --scan                         # search the whole disk for wordlist-shaped files
+hashsmith wordlists --set-default /path/rockyou.txt.gz   # pin a choice in ~/.hashsmith/config.json
+hashsmith wordlists --clear-default                # forget it
+hashsmith crack -t md5 <hash> --no-auto-wordlist   # force the built-in list, for reproducible runs
+```
+
+The wordlist a run actually used is always printed. Auto-detection (and a
+saved default) is per-machine, so combining either with `--skip`/`--limit`/
+`--keyspace` prints a warning — see Distributed cracking below.
+
+## Distributed cracking
+
+Split a job across machines with `--keyspace`, `--skip`, and `--limit` —
+semantics follow Hashcat, so existing driver scripts port unchanged.
+`--keyspace` prints one integer to stdout so a script can divide it; `--skip N
+--limit M` then runs one slice, starting at candidate index `N` and stopping
+after `M`.
+
+The one subtlety worth knowing: in **dictionary mode**, `--keyspace`/`--skip`/
+`--limit` count **words**, not word×rule candidates — a word's whole rule
+expansion travels with it into whichever slice it lands in, so a rule that
+turns one word into 200 mutations is never split across two machines. Brute,
+mask, hybrid, combinator and PRINCE count actual candidates, as usual.
+
+```bash
+# machine 1
+N=$(hashsmith crack --keyspace -w rockyou.txt --rules best64.rule)
+HALF=$((N / 2))
+hashsmith crack -t md5 dump.txt -w rockyou.txt --rules best64.rule --skip 0 --limit $HALF
+
+# machine 2 — the second half of the same word stream
+hashsmith crack -t md5 dump.txt -w rockyou.txt --rules best64.rule --skip $HALF
+```
+
+This only lines up if every machine enumerates the *same* candidate stream, so
+the wordlist must be pinned identically everywhere — an auto-detected or
+saved-default wordlist is machine-local and Hashsmith warns rather than
+silently producing slices that overlap or leave gaps:
+
+```
+Warning: this wordlist was auto-detected, and --skip/--limit/--keyspace only
+line up when every machine enumerates the SAME candidate stream.
+  ...
+  Pin every machine to the same list: -w <path> (or HASHSMITH_WORDLIST=<path>).
+```
+
 ## Performance
 
 Hashsmith runs on the CPU across all cores. For the salt-independent raw digests
 that dominate cracking (MD5, SHA-1/224/256/384/512, NTLM, MD4, RIPEMD-160,
 BLAKE2), the hot loop hashes each candidate straight into a stack buffer and
 compares raw bytes — no hex encoding, no per-candidate heap allocation — and
-worker attempt-counters are batched to avoid cache-line contention. Combined,
-these lift single-target MD5 brute-force from ~1.8 MH/s to ~20 MH/s on an 8-core
-laptop. Multi-hash mode (below) multiplies that further when cracking a dump.
+worker attempt-counters are batched to avoid cache-line contention. MD5 and
+MD4/NTLM also get a vectorized core: AVX2 on x86-64, NEON on arm64 (AVX2 is
+new — this used to be arm64-only). Multi-hash mode (below) multiplies
+throughput further when cracking a dump.
 
-Measure throughput on your own machine with the `benchmark` command:
+Measure throughput on your own machine with the `benchmark` command, or with a
+real crack:
 
 ```bash
 hashsmith benchmark                 # a common set of hash types
 hashsmith benchmark -t sha256       # a single type
+hashsmith crack -t md5 <hash> -M mask --mask '?l?l?l?l?l'   # a real 5-char end-to-end crack
 ```
-```
-md5            20.42 MH/s
-sha256         14.05 MH/s
-ntlm            6.28 MH/s
-bcrypt         76.54 H/s
-```
+
+Measured end-to-end (full 5-char lowercase mask, `Attempts / Elapsed` from the
+crack output above) on an Apple M2 (8-core, 4P+4E): MD5 ran 50-60 MH/s and NTLM
+17-35 MH/s across repeated runs. That machine was under heavy unrelated load
+during measurement (video encoding pinning several cores, load average ~130),
+so these are a noisy lower bound, not a clean best-case figure — `benchmark`'s
+own output swung between 1 and 7 MH/s for the same reason. Run `benchmark` and
+a real crack on quiet hardware for a number you can trust; the AVX2 path has
+not yet been measured on x86-64.
 
 For a reproducible end-to-end comparison against John and Hashcat, use the
 same deterministic dictionary and synthetic target for all three tools:
@@ -408,6 +497,30 @@ version, candidate count, every individual run, and SHA-256 fingerprints for
 the wordlist and available binaries. A Metal/OpenCL build can add `--gpu` to
 exercise Hashsmith's GPU dictionary path; formats without a dictionary kernel
 fall back to Hashsmith's optimized CPU verifier and say so explicitly.
+
+## Feasibility guard
+
+Every attack estimates its throughput and prints an ETA before it starts, and
+refuses to run when that ETA exceeds one year. This exists because a slow-hash
+mask attack that can't finish looks identical to one that's merely enormous —
+a bcrypt mask job over 6.6 quadrillion candidates used to just print 0% forever
+and eventually report "not found", which is indistinguishable from "the
+password was never in this keyspace." The guard turns that silent ambiguity
+into an upfront refusal:
+
+```bash
+hashsmith crack -t bcrypt <hash> -M mask --mask '?a?a?a?a?a?a?a?a'
+```
+```
+Keyspace 6,634,204,312,890,625 at ~1.93 H/s -> ETA ~108,770,994 years
+Error: this run cannot finish: ETA ~108,770,994 years exceeds the 1 year feasibility limit (6,634,204,312,890,625 candidates at ~1.93 H/s).
+  Narrow it (a shorter mask, a smaller charset, a wordlist instead of brute force), split it across machines with --skip/--limit, or pass --force to start it anyway.
+```
+
+`--force` starts the run anyway — the ETA is still measured and printed, it
+just no longer blocks. A `--skip`/`--limit` slice is judged on its own slice
+size rather than the full keyspace, so splitting a job with Distributed
+cracking (above) is itself a legitimate way past the guard.
 
 ## GPU acceleration (experimental, opt-in)
 
@@ -431,10 +544,19 @@ Check status (and run a correctness self-test + throughput probe):
 
 ```bash
 hashsmith gpu
-# GPU acceleration: available — OpenCL (Apple M2)   # or Metal, per build
+# GPU acceleration: available — Metal (Apple M2)   # or OpenCL, per build
 #   self-test: MD5, MD4, NTLM, SHA-1 and SHA-256 mask kernels match CPU ✓
-#   throughput: 42.91 MH/s (MD5, 1048576/dispatch)
+#   throughput: 22.51 MH/s (MD5, 1048576/dispatch)
 ```
+
+That `throughput:` line is a **raw single-kernel dispatch measurement**, not
+end-to-end cracking speed — it times one GPU batch, nothing else. Treat it as
+a diagnostic, not a headline: on the same M2 in this session it ranged from
+15 to 24 MH/s across repeated probes, and `hashsmith gpu` prints its own live
+figure on every run, so read that number for the hardware in front of you
+rather than any figure printed here. End-to-end GPU cracking throughput has
+not been reliably benchmarked yet — measure `crack --gpu` against the
+equivalent CPU-only run on your own hardware before deciding it's worth using.
 
 The Metal MD5 kernel is compiled at runtime (no offline shader toolchain needed)
 and is **verified bit-identical to the CPU** on every run before use — GPU crypto
@@ -462,11 +584,17 @@ hashsmith crack -t md5 <hash> -M mask --mask '?u?l?l?l?d?d' --gpu
 
 GPU dictionaries use million-candidate streaming batches to amortize buffer and
 command-submission overhead, and CPU-generated rule candidates join those same
-batches. On the development M2, a 10M-candidate end-to-end MD5 comparison
-measured Hashsmith at 8.95 MH/s, John at 6.78 MH/s, and Hashcat at 4.88 MH/s;
-results include startup and therefore should not be treated as universal kernel
-speed rankings. Hashsmith's optimized CPU dictionary path can still win on
-short or I/O-bound jobs, so GPU remains an explicit choice.
+batches. Hashsmith's optimized CPU path can win outright on short or I/O-bound
+jobs, so GPU remains an explicit choice.
+
+> **The GPU speed figures below are stale and are being re-measured.** They were
+> taken before the NEON/AVX2 CPU cores landed, so every "GPU vs CPU" ratio in
+> this section is computed against a CPU baseline several times slower than the
+> one you get today — the ratios are inflated by roughly that factor, and a
+> previously published head-to-head against John and Hashcat did not survive
+> re-measurement either. Treat this whole section as unverified until it is
+> re-benchmarked on an idle machine. `hashsmith gpu` prints live figures for
+> your own hardware; trust those over anything written here.
 
 On a full a–z⁶ keyspace (309M candidates) the GPU finishes in **~3.9 s vs ~24 s on
 the CPU — ~6×**, for both brute and mask.
@@ -481,7 +609,10 @@ hashsmith crack -t md5  dump.txt -M mask --mask '?l?l?l?l?l' --gpu
 hashsmith crack -t ntlm dump.txt -M mask --mask '?l?l?l?l?l' --gpu   # NTLM too
 ```
 
-NTLM (MD4/UTF-16LE) has no CPU hardware acceleration, so its GPU gain is largest:
+NTLM (MD4/UTF-16LE) had no CPU vector core when these figures were taken, which
+is why its measured GPU gain was the largest here; it now has both NEON and AVX2
+MD4 cores (`md4neon_arm64.s`, `md4avx2_amd64.s`), so this particular ratio is the
+most stale of them all:
 a 50-hash NTLM dump ran at **~165 MH/s vs ~6 MH/s on the CPU — ~27×**. SHA-256 —
 even though the CPU has hardware SHA — still runs **~10× faster** on the GPU (~142
 vs ~14 MH/s). The gain grows with keyspace size; for tiny keyspaces the CPU
@@ -527,6 +658,67 @@ Output pairs each hash with its plaintext:
 Salted or expensive hashes in the same file (bcrypt, crypt(3), PBKDF2,
 containers, network captures) are automatically split out and cracked
 individually, since a per-target salt makes shared work impossible.
+
+## Single-crack mode
+
+`--single` tries a small, per-account candidate set derived from that
+account's own identity — its login name, case variants, and components split
+on the usual login-name separators — tried only against that account's own
+hash, with `--rules`/`-r` applied. It requires `--username` (below), so each
+account's seeds never leak into another account's attack. On real engagements
+this is often the highest-yield mode there is: people build passwords from
+their own login far more than a wordlist would suggest.
+
+`--passwd <file>` goes further, mining the GECOS/real-name field of an
+`/etc/passwd`-format file: `John Smith` yields `jsmith`, `johns`, `smithj`,
+`john.smith`, and more — tried only against that same account's hash.
+
+```bash
+# passwd.txt: jds1001:x:1001:1001:John Smith:/home/jds1001:/bin/bash
+# hashes.txt: jds1001:39ce7e2a8573b41ce73b5ba41617f8f7        (md5 of "jsmith")
+hashsmith crack -t md5 hashes.txt --username --single                      # tries jds1001, JDS1001, Jds1001...
+hashsmith crack -t md5 hashes.txt --username --single --passwd passwd.txt  # + jsmith, johns, smithj, john.smith...
+# Found: jsmith
+#   user: jds1001
+```
+
+`--single` runs before the main attack, so a hit here means the dictionary or
+mask pass that follows never has to start.
+
+## Pipeline: `--username`, `--left`, `--outfile-format`, `--loopback`
+
+`--username` accepts `user:hash` input — split on the *first* colon only, so
+hash formats that legitimately contain colons (NetNTLMv2, salted digests, …)
+still parse — and shows the username next to each result. `--left` writes
+still-uncracked targets, in their original input form, to `-o` or stdout, for
+a second pass with a bigger wordlist or a different attack. `--outfile-format`
+selects Hashcat-style numbered `-o` fields: `1`=hash, `2`=plain, `3`=hex_plain.
+
+```bash
+# users.txt:  alice:5f4dcc3b5aa765d61d8327deb882cf99
+#             bob:589d0ca58f8273c8d3e23dfe77f74076
+hashsmith crack -t md5 users.txt -w rockyou.txt --username --left -o still-uncracked.txt
+#   5f4dcc3b5aa765d61d8327deb882cf99  =>  password
+#     user: alice
+#   589d0ca58f8273c8d3e23dfe77f74076  =>  (not found)
+# Wrote 1 uncracked target(s) to still-uncracked.txt
+hashsmith crack -t md5 still-uncracked.txt -w bigger.txt --username   # second pass, only bob's hash
+
+hashsmith crack -t md5 <hash> -w words.txt -o out.txt --outfile-format 1,2   # hash:plain, Hashcat-style
+```
+
+`--loopback` feeds newly cracked plaintexts (plus, with the potfile enabled,
+everything already on record there) back into the run as dict-mode candidates
+against whatever is still uncracked, with `--rules`/`-r` applied again —
+password reuse across accounts, including a second application of the same
+ruleset to an already-mangled plaintext, often falls straight out of this:
+
+```bash
+hashsmith crack -t md5 dump.txt -w words.txt --rules append1.rule --loopback
+# main pass  : "pass"  + rule $1  -> pass1    (from the wordlist)
+# loopback 1 : "pass1" + rule $1  -> pass11   (the cracked plaintext, fed back through the same rule)
+#   loopback pass 1: 1 new target(s) cracked
+```
 
 ## Potfile & resumable sessions
 
@@ -684,13 +876,13 @@ self-contained binary that tries to make the common path short.
 | Universal hash/code formats | 457 | 450+ native hash types | hundreds of native formats |
 | Hash-type auto-detection | yes, by default | yes in Hashcat 7.x; `--identify` lists possibilities | yes for recognizable ciphertexts; first matching format wins |
 | Accepted type vocabulary | 1,163 names/codes resolving into those same 457 formats, including 503 numeric Hashcat aliases | native numeric modes | native format labels |
-| Attack modes | dict, brute, mask, markov, hybrid, combinator | straight, combinator, mask, hybrid, association | wordlist, incremental, mask, external |
+| Attack modes | dict, brute, mask, markov, hybrid, combinator, PRINCE | straight, combinator, mask, hybrid, association | wordlist, incremental, mask, external |
 | Rule engine | ~35 operators | full, on-GPU, the de-facto standard | full, plus C-like external mode |
 | GPU | experimental, opt-in Metal/OpenCL; MD5 dictionary/rules plus MD5, MD4, NTLM, SHA-1, SHA-256 brute/mask/multi-target | mature CUDA / HIP / OpenCL / Metal across nearly every mode | OpenCL for a subset |
 | File → hash extractors | **47**, native and built into one registry/binary | dedicated converters in the official `tools/` tree | a much broader `run/*2john` script collection plus compiled converters |
 | Install | one static binary, no runtime deps | binary + GPU runtime | build or distro package + Perl/Python for extractors |
 | Built-in known-answer self-test | `hashsmith selftest`, 502 vectors over all 457 formats, provenance-labelled | internal, on startup | `john --test` |
-| Distributed cracking | no | via third-party overlays | via MPI |
+| Distributed cracking | native `--keyspace`/`--skip`/`--limit` (Hashcat-compatible semantics) | via third-party overlays | via MPI |
 
 **Where Hashsmith is the better tool.** You get one binary with no runtime
 dependencies, hash extraction and cracking in the same place, and a universal
