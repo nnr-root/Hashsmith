@@ -105,6 +105,36 @@ jobs:
               go build -o /dev/null ./cmd/hashsmith
           done
 
+  gpu-build:
+    # The GPU backends need cgo; the CPU vector cores are Go assembly. Go
+    # forbids ONE package from holding both, which is why the cgo code lives in
+    # internal/gpubackend and package main keeps the assembly. That separation
+    # is invisible to every other job here — the default build is pure Go and
+    # never compiles a GPU backend — so `-tags gpu` broke once and stayed broken
+    # for an entire development session across six green jobs. This job exists
+    # solely to make that failure loud.
+    #
+    # Build-only, deliberately: compiling the kernels needs no GPU present, and
+    # hosted runners have no usable one. macOS carries both the Metal and the
+    # OpenCL frameworks, so one runner covers both backends.
+    #
+    # NOT covered: OpenCL on Linux (needs ocl-icd-opencl-dev) and any actual
+    # kernel EXECUTION. A kernel that compiles but computes the wrong digest
+    # would still pass this job.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
+      - name: Build Metal backend (-tags gpu)
+        run: cd hashsmith/go_hashsmith && CGO_ENABLED=1 go build -tags gpu -o /dev/null ./cmd/hashsmith
+      - name: Build OpenCL backend (-tags opencl)
+        run: cd hashsmith/go_hashsmith && CGO_ENABLED=1 go build -tags opencl -o /dev/null ./cmd/hashsmith
+      - name: Default build must stay pure Go (no cgo)
+        run: cd hashsmith/go_hashsmith && CGO_ENABLED=0 go build -o /dev/null ./cmd/hashsmith
+
   bench:
     # Throughput measurement for the vector cores. These run on BOTH
     # architectures because the two backends are different code: arm64

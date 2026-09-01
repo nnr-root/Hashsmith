@@ -1,6 +1,6 @@
 //go:build gpu && darwin && !opencl
 
-package main
+package gpubackend
 
 /*
 #cgo darwin LDFLAGS: -framework Metal -framework Foundation
@@ -21,7 +21,7 @@ type metalBackend struct {
 	dev string
 }
 
-func newGPUBackend() (gpuBackend, string) {
+func New() (Backend, string) {
 	var errbuf [256]C.char
 	ctx := C.hs_metal_init(&errbuf[0], 256)
 	if ctx == nil {
@@ -30,9 +30,9 @@ func newGPUBackend() (gpuBackend, string) {
 	return &metalBackend{ctx: ctx, dev: C.GoString(C.hs_metal_name(ctx))}, ""
 }
 
-func (m *metalBackend) name() string { return "Metal (" + m.dev + ")" }
+func (m *metalBackend) Name() string { return "Metal (" + m.dev + ")" }
 
-func (m *metalBackend) close() {
+func (m *metalBackend) Close() {
 	if m.ctx != nil {
 		C.hs_metal_free(m.ctx)
 		m.ctx = nil
@@ -40,7 +40,7 @@ func (m *metalBackend) close() {
 }
 
 // md5 hashes candidates (each ≤55 bytes) in one GPU dispatch.
-func (m *metalBackend) md5(cands []string, out [][16]byte) error {
+func (m *metalBackend) MD5(cands []string, out [][16]byte) error {
 	n := len(cands)
 	if n == 0 {
 		return nil
@@ -72,7 +72,7 @@ func (m *metalBackend) md5(cands []string, out [][16]byte) error {
 }
 
 // md5Brute dispatches the in-kernel brute-force search over [start, start+count).
-func (m *metalBackend) md5Brute(charset string, wordLen int, target [16]byte, start uint64, count uint32) (uint64, bool, error) {
+func (m *metalBackend) MD5Brute(charset string, wordLen int, target [16]byte, start uint64, count uint32) (uint64, bool, error) {
 	if count == 0 || len(charset) == 0 {
 		return 0, false, nil
 	}
@@ -90,7 +90,7 @@ func (m *metalBackend) md5Brute(charset string, wordLen int, target [16]byte, st
 }
 
 // md5Mask dispatches the in-kernel mask search over [start, start+count).
-func (m *metalBackend) md5Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error) {
+func (m *metalBackend) MD5Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error) {
 	if count == 0 || len(sets) == 0 {
 		return 0, false, nil
 	}
@@ -119,7 +119,7 @@ func (m *metalBackend) md5Mask(sets [][]byte, target []byte, start uint64, count
 // md5MaskMulti searches [start, start+count) for candidates matching any of the
 // sorted targets (each 4 uint32). foundFlag/foundIdx are in/out state carried
 // across dispatches: a target already flagged is skipped by the kernel.
-func (m *metalBackend) md5MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32,
+func (m *metalBackend) MD5MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32,
 	foundFlag []uint32, foundIdx []uint64) error {
 	if count == 0 || len(sets) == 0 || len(foundFlag) == 0 {
 		return nil
@@ -146,7 +146,7 @@ func (m *metalBackend) md5MaskMulti(sets [][]byte, targets []uint32, start uint6
 }
 
 // ntlmMask / ntlmMaskMulti mirror the md5 variants using the NTLM kernels.
-func (m *metalBackend) ntlmMask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error) {
+func (m *metalBackend) NTLMMask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error) {
 	if count == 0 || len(sets) == 0 {
 		return 0, false, nil
 	}
@@ -171,7 +171,7 @@ func (m *metalBackend) ntlmMask(sets [][]byte, target []byte, start uint64, coun
 	return uint64(outIdx), rc == 1, nil
 }
 
-func (m *metalBackend) ntlmMaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32,
+func (m *metalBackend) NTLMMaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32,
 	foundFlag []uint32, foundIdx []uint64) error {
 	if count == 0 || len(sets) == 0 || len(foundFlag) == 0 {
 		return nil
@@ -197,28 +197,28 @@ func (m *metalBackend) ntlmMaskMulti(sets [][]byte, targets []uint32, start uint
 	return nil
 }
 
-func (m *metalBackend) md4Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error) {
+func (m *metalBackend) MD4Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error) {
 	if len(target) != 16 {
 		return 0, false, errors.New("invalid MD4 target")
 	}
 	targets := make([]uint32, 4)
 	for i := range targets {
-		targets[i] = le32(target[i*4:])
+		targets[i] = LE32(target[i*4:])
 	}
 	flags, indices := []uint32{0}, []uint64{0}
-	if err := m.maskSweepMulti(4, sets, 4, targets, start, uint64(count), count, flags, indices); err != nil {
+	if err := m.MaskSweepMulti(4, sets, 4, targets, start, uint64(count), count, flags, indices); err != nil {
 		return 0, false, err
 	}
 	return indices[0], flags[0] == 1, nil
 }
 
-func (m *metalBackend) md4MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32,
+func (m *metalBackend) MD4MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32,
 	foundFlag []uint32, foundIdx []uint64) error {
-	return m.maskSweepMulti(4, sets, 4, targets, start, uint64(count), count, foundFlag, foundIdx)
+	return m.MaskSweepMulti(4, sets, 4, targets, start, uint64(count), count, foundFlag, foundIdx)
 }
 
 // sha256Mask / sha256MaskMulti use the SHA-256 kernels (32-byte digests).
-func (m *metalBackend) sha256Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error) {
+func (m *metalBackend) SHA256Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error) {
 	if count == 0 || len(sets) == 0 {
 		return 0, false, nil
 	}
@@ -243,7 +243,7 @@ func (m *metalBackend) sha256Mask(sets [][]byte, target []byte, start uint64, co
 	return uint64(outIdx), rc == 1, nil
 }
 
-func (m *metalBackend) sha256MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32,
+func (m *metalBackend) SHA256MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32,
 	foundFlag []uint32, foundIdx []uint64) error {
 	if count == 0 || len(sets) == 0 || len(foundFlag) == 0 {
 		return nil
@@ -270,7 +270,7 @@ func (m *metalBackend) sha256MaskMulti(sets [][]byte, targets []uint32, start ui
 }
 
 // sha1Mask / sha1MaskMulti use the SHA-1 kernels (20-byte digests).
-func (m *metalBackend) sha1Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error) {
+func (m *metalBackend) SHA1Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error) {
 	if count == 0 || len(sets) == 0 {
 		return 0, false, nil
 	}
@@ -295,7 +295,7 @@ func (m *metalBackend) sha1Mask(sets [][]byte, target []byte, start uint64, coun
 	return uint64(outIdx), rc == 1, nil
 }
 
-func (m *metalBackend) sha1MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32,
+func (m *metalBackend) SHA1MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32,
 	foundFlag []uint32, foundIdx []uint64) error {
 	if count == 0 || len(sets) == 0 || len(foundFlag) == 0 {
 		return nil
@@ -324,7 +324,7 @@ func (m *metalBackend) sha1MaskMulti(sets [][]byte, targets []uint32, start uint
 // maskSweepMulti runs a pipelined multi-target sweep over [start, start+span),
 // keeping several command buffers in flight so the GPU never idles between
 // chunks. foundFlag/foundIdx are in/out (accumulated).
-func (m *metalBackend) maskSweepMulti(algo int, sets [][]byte, targetWords int, targets []uint32,
+func (m *metalBackend) MaskSweepMulti(algo int, sets [][]byte, targetWords int, targets []uint32,
 	start, span uint64, chunk uint32, foundFlag []uint32, foundIdx []uint64) error {
 	if span == 0 || len(sets) == 0 || len(foundFlag) == 0 {
 		return nil

@@ -1,9 +1,11 @@
-//go:build !gpu && !opencl
-
 package main
 
-// Default build: no GPU. newGPUBackend explains how to enable it. Keeping this
-// the default preserves the pure-Go, statically-linked, cross-platform binary.
+import "hashsmith-go/internal/gpubackend"
+
+// newGPUBackend resolves the GPU backend for this build. main itself carries no
+// cgo — it cannot, since it holds the vector cores' Go assembly — so the choice
+// between the Metal, OpenCL and no-op backends is made by build tags inside
+// internal/gpubackend, and this is a thin pass-through.
 func newGPUBackend() (gpuBackend, string) {
-	return nil, "built without GPU support — rebuild with `go build -tags gpu` (requires cgo + a Metal GPU on macOS)"
+	return gpubackend.New()
 }

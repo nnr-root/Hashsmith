@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hashsmith-go/internal/gpubackend"
 	"os"
 	"sort"
 	"strings"
@@ -35,39 +36,10 @@ import (
 // gpuBackend accelerates raw-digest hashing on the GPU. A batch of candidates is
 // hashed in one dispatch; the CPU then checks the digests against the target set
 // (the same map used by multi-hash mode). Implementations must be safe to Close.
-type gpuBackend interface {
-	// name identifies the backend and device (e.g. "Metal (Apple M2)").
-	name() string
-	// md5 writes the 16-byte MD5 digest of each candidate into out[i].
-	// len(out) must equal len(candidates). It is the first kernel; further
-	// digests (sha1/sha256/ntlm…) extend this interface as kernels are added.
-	md5(candidates []string, out [][16]byte) error
-	// md5Brute searches indices [start, start+count) of the fixed-length brute
-	// keyspace over charset (candidates generated in-kernel — no transfer) for
-	// one whose MD5 equals target. Returns (matchedIndex, found, error).
-	md5Brute(charset string, wordLen int, target [16]byte, start uint64, count uint32) (uint64, bool, error)
-	// md5Mask is like md5Brute but with a per-position charset (a parsed mask):
-	// candidates are generated in-kernel over the mixed-radix mask keyspace.
-	md5Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error)
-	// md5MaskMulti searches for candidates matching ANY of the sorted targets in
-	// one dispatch (multi-hash on the GPU). foundFlag/foundIdx accumulate across
-	// dispatches.
-	md5MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32, foundFlag []uint32, foundIdx []uint64) error
-	// ntlmMask / ntlmMaskMulti are the NTLM (MD4 of UTF-16LE) equivalents.
-	ntlmMask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error)
-	ntlmMaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32, foundFlag []uint32, foundIdx []uint64) error
-	md4Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error)
-	md4MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32, foundFlag []uint32, foundIdx []uint64) error
-	sha256Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error)
-	sha256MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32, foundFlag []uint32, foundIdx []uint64) error
-	sha1Mask(sets [][]byte, target []byte, start uint64, count uint32) (uint64, bool, error)
-	sha1MaskMulti(sets [][]byte, targets []uint32, start uint64, count uint32, foundFlag []uint32, foundIdx []uint64) error
-	// maskSweepMulti runs a pipelined multi-target sweep (several dispatches in
-	// flight) over [start, start+span).
-	maskSweepMulti(algo int, sets [][]byte, targetWords int, targets []uint32, start, span uint64, chunk uint32, foundFlag []uint32, foundIdx []uint64) error
-	// close releases GPU resources.
-	close()
-}
+// gpuBackend aliases the backend interface, which lives in internal/gpubackend
+// together with the cgo implementations: Go forbids one package from holding
+// both cgo and the Go assembly of our vector cores. See that package's doc.
+type gpuBackend = gpubackend.Backend
 
 // bruteIndexToString decodes a keyspace index back to its candidate (mixed
 // radix, last position fastest — matching the kernel's generation).
@@ -104,7 +76,7 @@ func activeGPUBackend() (gpuBackend, string) {
 // gpuMD5Batcher is deliberately narrower than gpuBackend so the streaming
 // dictionary engine can be tested without mocking every mask operation.
 type gpuMD5Batcher interface {
-	md5(candidates []string, out [][16]byte) error
+	MD5(candidates []string, out [][16]byte) error
 }
 
 // One million candidates amortizes Metal/OpenCL buffer creation and command
@@ -152,7 +124,7 @@ func gpuDictAttackWithBackend(ctx context.Context, b gpuMD5Batcher, wordlistPath
 			return crackedResult{}, false, nil
 		}
 		out := make([][md5.Size]byte, len(candidates))
-		if err := b.md5(candidates, out); err != nil {
+		if err := b.MD5(candidates, out); err != nil {
 			return crackedResult{}, false, err
 		}
 		atomic.AddInt64(atomicAttempts, int64(len(candidates)))
@@ -323,15 +295,15 @@ func gpuMaskHash(targetHex, typ string, mc *maskConfig, atomicAttempts *int64) (
 func gpuMaskMethod(b gpuBackend, typ string) func([][]byte, []byte, uint64, uint32) (uint64, bool, error) {
 	switch strings.ToLower(typ) {
 	case "md5":
-		return b.md5Mask
+		return b.MD5Mask
 	case "ntlm":
-		return b.ntlmMask
+		return b.NTLMMask
 	case "md4":
-		return b.md4Mask
+		return b.MD4Mask
 	case "sha256":
-		return b.sha256Mask
+		return b.SHA256Mask
 	case "sha1":
-		return b.sha1Mask
+		return b.SHA1Mask
 	}
 	return nil
 }
@@ -340,15 +312,15 @@ func gpuMaskMethod(b gpuBackend, typ string) func([][]byte, []byte, uint64, uint
 func gpuMultiMethod(b gpuBackend, typ string) func([][]byte, []uint32, uint64, uint32, []uint32, []uint64) error {
 	switch strings.ToLower(typ) {
 	case "md5":
-		return b.md5MaskMulti
+		return b.MD5MaskMulti
 	case "ntlm":
-		return b.ntlmMaskMulti
+		return b.NTLMMaskMulti
 	case "md4":
-		return b.md4MaskMulti
+		return b.MD4MaskMulti
 	case "sha256":
-		return b.sha256MaskMulti
+		return b.SHA256MaskMulti
 	case "sha1":
-		return b.sha1MaskMulti
+		return b.SHA1MaskMulti
 	}
 	return nil
 }
@@ -402,9 +374,10 @@ func gpuAlgo(typ string) int {
 	return 0
 }
 
-func le32(b []byte) uint32 {
-	return uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24
-}
+// le32 delegates to gpubackend.LE32 so the byte order the kernels expect is
+// defined in exactly one place, on the same side of the boundary as the
+// kernels themselves.
+func le32(b []byte) uint32 { return gpubackend.LE32(b) }
 
 // gpuBatchMaskMD5 runs a multi-target MD5 brute/mask search on the GPU for the
 // given batch entries (each entry's .norm is its md5 hex). It marks matched
@@ -517,7 +490,7 @@ func gpuBatchMaskHash(typ, mode string, mc *maskConfig, charset string, minLen, 
 			if done+span > total {
 				span = total - done
 			}
-			if err := b.maskSweepMulti(algo, sets, words, targets, done, span, chunk, foundFlag, foundIdx); err != nil {
+			if err := b.MaskSweepMulti(algo, sets, words, targets, done, span, chunk, foundFlag, foundIdx); err != nil {
 				return true
 			}
 			atomic.AddInt64(&gpuAttempts, int64(span))
@@ -560,8 +533,8 @@ func runGPUInfo(_ []string) error {
 		fmt.Fprintln(stderr(), "  Hashsmith runs fully on the CPU; GPU support is opt-in and in progress.")
 		return nil
 	}
-	defer b.close()
-	clrGreen.Fprintf(stderr(), "GPU acceleration: available — %s\n", b.name())
+	defer b.Close()
+	clrGreen.Fprintf(stderr(), "GPU acceleration: available — %s\n", b.Name())
 	return gpuSelfTest(b)
 }
 
@@ -570,7 +543,7 @@ func runGPUInfo(_ []string) error {
 func gpuSelfTest(b gpuBackend) error {
 	tests := []string{"", "a", "abc", "password", "hashsmith", "The quick brown fox jumps"}
 	out := make([][16]byte, len(tests))
-	if err := b.md5(tests, out); err != nil {
+	if err := b.MD5(tests, out); err != nil {
 		return err
 	}
 	bad := 0
@@ -618,11 +591,11 @@ func gpuBench(b gpuBackend) {
 	}
 	out := make([][16]byte, batch)
 	// warm up
-	_ = b.md5(cands, out)
+	_ = b.MD5(cands, out)
 	start := time.Now()
 	var total int64
 	for time.Since(start) < time.Second {
-		if err := b.md5(cands, out); err != nil {
+		if err := b.MD5(cands, out); err != nil {
 			return
 		}
 		total += batch
@@ -639,10 +612,10 @@ func gpuFallbackNotice() {
 		clrYellow.Fprintf(stderr(), "GPU requested but unavailable: %s — using CPU\n", reason)
 		return
 	}
-	defer b.close()
+	defer b.Close()
 	clrYellow.Fprintf(stderr(),
 		"GPU backend detected (%s); kernel dispatch not yet wired into the attack loop — using CPU\n",
-		b.name())
+		b.Name())
 }
 
 // gpuBruteDemo cracks a known target with in-kernel candidate generation,
