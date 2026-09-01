@@ -96,9 +96,14 @@ func allBatchable(typ, target string) ([]string, bool) {
 // runBatch handles every purely-batchable target as a group and returns the
 // targets it did NOT handle (to be cracked individually by the caller). It
 // reports and records results for the ones it does handle.
+// runBatch returns the targets it could not handle (for per-hash cracking), the
+// number it attacked and did not crack, and — when the run feasibility guard
+// refused the attack (see checkFeasibility) — that refusal. A refusal stops the
+// remaining passes but still reports whatever earlier passes already cracked,
+// so nothing found is thrown away on the way out.
 func runBatch(targets []string, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int, saltMode, outFile string, copyResult bool,
-	rules *ruleEngine, mc *maskConfig, cc *crackCtx) ([]string, int) {
+	rules *ruleEngine, mc *maskConfig, cc *crackCtx) ([]string, int, error) {
 
 	var batch []*batchTarget
 	var leftover []string
@@ -143,7 +148,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 	}
 
 	if len(batch) == 0 {
-		return leftover, 0
+		return leftover, 0, nil
 	}
 
 	color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
@@ -153,6 +158,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 	}
 
 	remaining := int64(len(batch))
+	var refusal error
 	for _, t := range typeOrder {
 		if atomic.LoadInt64(&remaining) == 0 {
 			break
@@ -197,8 +203,14 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 				continue
 			}
 		}
-		batchRunType(t, mode, active, batch, &remaining,
-			wordlist, wl2, charset, minLen, maxLen, princeElemsFor(cc), workers, rules, mc)
+		if err := batchRunType(t, mode, active, batch, &remaining,
+			wordlist, wl2, charset, minLen, maxLen, princeElemsFor(cc), workers, rules, mc,
+			cc != nil && cc.force); err != nil {
+			// Stop, but fall through to the reporting loop below so anything an
+			// earlier pass cracked is still reported and recorded.
+			refusal = err
+			break
+		}
 	}
 
 	// Report and record.
@@ -253,14 +265,14 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 	} else if outFile != "" && cc != nil && cc.outW != nil && foundCount > 0 {
 		clrGreen.Fprintf(os.Stderr, "Saved %d result(s) to %s\n", foundCount, outFile)
 	}
-	return leftover, uncracked
+	return leftover, uncracked, refusal
 }
 
 // batchRunType runs one attack pass for a single type against all unfound
 // targets in digestToIdx, wrapping the shared engines with a progress bar.
 func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 	remaining *int64, wordlist, wordlist2, charset string, minLen, maxLen, princeElems, workers int,
-	rules *ruleEngine, mc *maskConfig) {
+	rules *ruleEngine, mc *maskConfig, force bool) error {
 
 	start := time.Now()
 	var atomicAttempts int64
@@ -380,6 +392,18 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 			total = princeLay.total
 		}
 	}
+	// Run feasibility guard — same estimate the per-hash path makes in doCrack,
+	// over the same number that sizes the progress bar. Multi-hash mode is only
+	// ever entered with no --skip/--limit (crackTargets sends a bounded run
+	// down the per-target path instead), so this run is never a slice: bounded
+	// is false. The probe times the first still-unfound target of this type,
+	// which is representative — every target in this pass is the same type, and
+	// multi-hash mode hashes each candidate ONCE for all of them, so the rate
+	// does not scale with the target count.
+	if err := checkFeasibility(total, false, typ, batch[active[0]].norm, "", "prefix", workers, force); err != nil {
+		return err
+	}
+
 	bar := newCrackBar(total)
 	tickCtx, tickCancel := context.WithCancel(context.Background())
 	go progressTicker(tickCtx, bar, &atomicAttempts)
@@ -433,6 +457,7 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 	}
 	color.New(themeAttr).Fprintf(os.Stderr,
 		"Attempts: %d | Elapsed: %.2fs | Rate: %s\n", attempts, elapsed, formatRate(rate))
+	return nil
 }
 
 // batchDictAttack is the dictionary engine for multi-hash mode: it never stops

@@ -95,6 +95,10 @@ type crackCtx struct {
 	useGPU    bool          // --gpu: try raw-digest GPU dictionary/brute/mask kernels when available
 	skip      int64         // --skip: candidate index (whole-layout / word index) to start at; 0 = unset
 	limit     int64         // --limit: candidate count to try, 0 = unbounded
+	// force is --force: start an attack the feasibility guard would otherwise
+	// refuse (see checkFeasibility). The ETA is still measured and printed —
+	// --force suppresses the refusal, never the honesty.
+	force bool
 	// princeElems is --prince-elems: the maximum number of elements PRINCE
 	// concatenates into one chain. 0 means unset — see princeElemsFor, which
 	// resolves it to princeDefaultElems.
@@ -517,6 +521,7 @@ func runCrack(args []string) error {
 	outfileFormat := fs.String("outfile-format", "", "comma-separated -o field selection, hashcat-style: 1=hash, 2=plain, 3=hex_plain (default: unchanged from before this flag existed)")
 	loopback := fs.Bool("loopback", false, "after the main attack, feed newly cracked plaintexts (plus, if the potfile is enabled, plaintexts already on record there) back as dict-mode candidates against any still-uncracked targets, with --rules/-r applied; repeats until a pass finds nothing new")
 	single := fs.Bool("single", false, "single-crack mode: before the main attack, try candidates derived from each account's own username (via --username), tried only against that account's hash — with --rules/-r applied; requires --username")
+	force := fs.Bool("force", false, "start an attack even when the feasibility guard estimates it cannot finish (the ETA is still measured and printed)")
 	passwdPath := fs.String("passwd", "", "optional /etc/passwd-format file for --single: also derive candidates from each account's GECOS/real-name field (\"John Smith\" -> jsmith, johns, smithj, john.smith, ...), tried only against that account's hash; unused without --single")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
@@ -630,6 +635,7 @@ func runCrack(args []string) error {
 		return err
 	}
 	cc.princeElems = *princeElems
+	cc.force = *force
 	cc.username = *username
 	cc.left = *left
 	cc.outFmt = outFmt
@@ -951,9 +957,16 @@ func crackTargets(targets []string, typ, mode, wordlist, charset string,
 	// path entirely rather than silently launching a real attack.
 	if len(targets) > 1 && salt == "" && !skipLimitSet && !showOnly {
 		var nb int
-		targets, nb = runBatch(targets, typ, mode, wordlist, charset,
+		var berr error
+		targets, nb, berr = runBatch(targets, typ, mode, wordlist, charset,
 			minLen, maxLen, workers, saltMode, outFile, copyResult, rules, mc, cc)
 		uncracked += nb
+		if berr != nil {
+			if uncracked > 0 {
+				exitCode = 1
+			}
+			return berr
+		}
 		if len(targets) == 0 {
 			if uncracked > 0 {
 				exitCode = 1
@@ -971,7 +984,9 @@ func crackTargets(targets []string, typ, mode, wordlist, charset string,
 		found, err := crackWithDetection(tgt, typ, mode, wordlist, charset,
 			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, rules, mc, cc)
 		if err != nil {
-			if len(targets) == 1 {
+			// Same reasoning as crackWithDetection's: a refusal applies to the
+			// attack itself, so every remaining target would be refused too.
+			if len(targets) == 1 || isFeasibilityRefusal(err) {
 				return err
 			}
 			clrRed.Fprintf(os.Stderr, "  error: %v\n", err)
@@ -1147,6 +1162,30 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		if princeExact != nil && princeExact.Cmp(maxInt64Big) > 0 {
 			warnKeyspaceNotExhaustive(princeExact)
 		}
+	}
+
+	// ── run feasibility guard ───────────────────────────────────────────────
+	// total is exactly the work THIS run will attempt, which is what the ETA
+	// has to be measured over:
+	//
+	//   - boundWordIdx has already narrowed it to the --skip/--limit slice. A
+	//     distributed job splits an enormous keyspace across many machines and
+	//     each slice is perfectly feasible, so estimating from the full
+	//     keyspace would refuse every distributed run.
+	//   - In dict mode it has already been multiplied by the rule expansion
+	//     (1 + rules.count(), the product for stacked rule files). --keyspace
+	//     deliberately reports the WORD count instead, without that multiplier,
+	//     because that is --skip/--limit's unit — slicing moves whole words,
+	//     each carrying its full rule expansion (see printKeyspace and
+	//     TestKeyspaceUnitIsSkipStepsToCoverDictRun). So --keyspace and this
+	//     ETA disagree on purpose: --keyspace is about slicing, the ETA is
+	//     about time, and time is words x rules.
+	//
+	// This runs after every setup error above and before the progress bar, so a
+	// refused run has started nothing and has nothing to tear down.
+	if err := checkFeasibility(total, resumeFrom != 0 || limit > 0,
+		typ, targetHash, salt, saltMode, workers, cc != nil && cc.force); err != nil {
+		return false, err
 	}
 
 	bar := newCrackBar(total)
@@ -1561,7 +1600,12 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 		found, err := doCrack(target, t, mode, wordlist, charset,
 			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, rules, mc, cc)
 		if err != nil {
-			if len(types) == 1 {
+			// A feasibility refusal is about the ATTACK, not about this
+			// candidate type — every remaining type would be refused on the
+			// same grounds. Swallowing it here and moving on would end the run
+			// with "Not found", which is the exact lie the guard exists to
+			// prevent, so it aborts the whole run instead.
+			if len(types) == 1 || isFeasibilityRefusal(err) {
 				return false, err
 			}
 			// One candidate's hash format may be invalid; keep trying the rest.

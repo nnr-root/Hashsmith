@@ -55,6 +55,7 @@ func runAuto(args []string) error {
 	w2 := fs.String("w2", "", "alias for --wordlist2")
 	princeElems := fs.Int("prince-elems", princeDefaultElems, "maximum elements concatenated into one chain (-M prince)")
 	useGPU := fs.Bool("gpu", false, "use GPU brute/mask for md5, md4, ntlm, sha1, or sha256")
+	force := fs.Bool("force", false, "start an attack even when the feasibility guard estimates it cannot finish (the ETA is still measured and printed)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -86,6 +87,7 @@ func runAuto(args []string) error {
 		return err
 	}
 	cc.princeElems = *princeElems
+	cc.force = *force
 	engine, err := buildRuleEngine(rulesFiles.values, *useRules)
 	if err != nil {
 		return err
