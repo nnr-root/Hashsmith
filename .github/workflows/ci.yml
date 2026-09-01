@@ -129,6 +129,28 @@ jobs:
           cd hashsmith/go_hashsmith
           go test -run '^$' -bench 'BenchmarkMD5AVX2Core|BenchmarkMD5NeonCore|BenchmarkMD5AVX2Group|BenchmarkMD5Group|BenchmarkMD5Scalar|BenchmarkMD4Group|BenchmarkMD4Scalar' \
             -benchtime 2s -count 5 -cpu 1 ./cmd/hashsmith | tee /tmp/bench.out
+      - name: End-to-end crack rate (fast path vs forced-scalar, same binary)
+        run: |
+          cd hashsmith/go_hashsmith
+          go build -o /tmp/hs ./cmd/hashsmith
+          K=308915776   # 6-char lowercase; hash below is deliberately NOT in it,
+          MISS=00000000000000000000000000000001   # so both sides exhaust the space
+          run() {  # $1=label, $2...=extra flags
+            local label="$1"; shift
+            local best=99999
+            for i in 1 2 3; do
+              local t
+              t=$( { /usr/bin/time -f %e /tmp/hs crack -t md5 -M brute \
+                     -C abcdefghijklmnopqrstuvwxyz -n 6 -x 6 -p "$(nproc)" \
+                     "$MISS" -N --no-pot "$@" >/dev/null; } 2>&1 | tail -1 )
+              best=$(awk -v a="$t" -v b="$best" 'BEGIN{print (a<b)?a:b}')
+            done
+            awk -v k=$K -v t="$best" -v l="$label" \
+              'BEGIN{printf "E2E %-16s best %7.2fs -> %7.2f MH/s\n", l, t, k/t/1e6}'
+          }
+          run "fast-path"
+          run "forced-scalar" --session cibench
+          rm -rf ~/.hashsmith/sessions/cibench* 2>/dev/null || true
           echo "=================== SUMMARY (sorted MH/s, best last) ==================="
           for n in BenchmarkMD5AVX2Core BenchmarkMD5NeonCore BenchmarkMD5AVX2Group BenchmarkMD5Group BenchmarkMD5Scalar BenchmarkMD4Group BenchmarkMD4Scalar; do
             vals=$(grep "^$n" /tmp/bench.out | grep -oE '[0-9.]+ MH/s' | sort -n | tr '\n' ' ')
