@@ -271,3 +271,39 @@ func TestAVX2BackendExcludesMD4AndNTLM(t *testing.T) {
 		t.Errorf("md5 AVX2 descriptor shape = %+v, want %+v", algo.shape, avx2Shape)
 	}
 }
+
+// TestAVX2BackendExcludesMD4AndNTLM drives fastAlgoForBackend with the literal
+// string "avx2", which is deliberate — it makes the MD4/NTLM hazard testable on
+// any machine. But it leaves a seam: if vectorBackendName() ever returned a
+// label fastAlgoForBackend does not match (a typo like "AVX2", or a rename
+// applied to one and not the other), the fast path would silently switch off on
+// real hardware. That is not a wrong answer, so no correctness test would catch
+// it — it would just quietly cost users the whole speedup.
+//
+// This ties the two together: whatever the live backend is, it must resolve.
+func TestLiveBackendLabelResolves(t *testing.T) {
+	backend := vectorBackendName()
+	if backend == "" {
+		t.Skip("no vector backend on this build; nothing to resolve")
+	}
+	algo, ok := fastAlgoForBackend(backend, "md5")
+	if !ok {
+		t.Fatalf("vectorBackendName() = %q, but fastAlgoForBackend(%q, \"md5\") "+
+			"does not resolve — the label and the switch have diverged, and the "+
+			"fast path is silently disabled", backend, backend)
+	}
+	if algo.shape.group() <= 0 {
+		t.Errorf("backend %q resolved to an empty shape %+v", backend, algo.shape)
+	}
+	// And the shape must be the one that backend's core actually expects.
+	switch backend {
+	case "neon":
+		if algo.shape != neonShape {
+			t.Errorf("backend neon resolved to shape %+v, want %+v", algo.shape, neonShape)
+		}
+	case "avx2":
+		if algo.shape != avx2Shape {
+			t.Errorf("backend avx2 resolved to shape %+v, want %+v", algo.shape, avx2Shape)
+		}
+	}
+}
