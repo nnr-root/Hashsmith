@@ -2,12 +2,20 @@ package main
 
 // ── `hashsmith wordlists` ────────────────────────────────────────────────────
 //
-// Two jobs, deliberately separated by a flag:
+// Three jobs, deliberately separated by flags:
 //
 //   - The default listing is the SAME stat list resolveWordlist walks, in the
-//     same order, so it can never disagree with what a real run would pick. It
-//     answers "why is hashsmith using the built-in list on this box?" in about
-//     ten os.Stat calls.
+//     same order, plus the two sources that outrank it (the environment
+//     variable and the saved default), so it can never disagree with what a
+//     real run would pick. It answers "why is hashsmith using the built-in
+//     list on this box?" in a few dozen os.Stat calls.
+//
+//   - `--set-default` / `--clear-default` write the operator's own pinned
+//     default to ~/.hashsmith/config.json (see wordlist_config.go), so it
+//     survives across runs without an exported variable in every shell.
+//     --set-default validates BEFORE it saves: a persisted setting is applied
+//     silently forever, so the one moment the operator is watching is the only
+//     good moment to refuse a bad path.
 //
 //   - `--scan` is the slow filesystem walk. It exists because the fixed list
 //     cannot know about /home/op/ctf/lists/rockyou-full.txt — but it is opt-in
@@ -267,15 +275,31 @@ func runWordlists(args []string) error {
 	scanRoot := fs2.String("scan-root", "", "restrict --scan to this directory instead of the whole filesystem")
 	timeout := fs2.Duration("scan-timeout", wordlistScanDefaultTimeout, "give up on --scan after this long and report what was found")
 	minSize := fs2.Int64("scan-min-size", wordlistScanMinSize, "ignore --scan hits smaller than this many bytes")
+	setDefault := fs2.String("set-default", "", "save this wordlist as the default for every later run (validated before it is saved)")
+	clearDefault := fs2.Bool("clear-default", false, "forget the saved default wordlist")
 	if err := parseArgsFlexible(fs2, args); err != nil {
 		return err
+	}
+
+	// The two settings actions run instead of the listing, not before it: they
+	// are a write, and pairing a write with a snapshot of the state it just
+	// changed reads as though the listing were the "before".
+	if strings.TrimSpace(*setDefault) != "" && *clearDefault {
+		return fmt.Errorf("--set-default and --clear-default contradict each other; pass one")
+	}
+	if strings.TrimSpace(*setDefault) != "" {
+		return runWordlistSetDefault(os.Stdout, *setDefault)
+	}
+	if *clearDefault {
+		return runWordlistClearDefault(os.Stdout)
 	}
 
 	printWordlistCandidateTable(os.Stdout)
 
 	if !*scan {
 		fmt.Fprintln(os.Stdout)
-		fmt.Fprintln(os.Stdout, "Pin a specific list with -w <path> or "+wordlistEnvVar+"=<path>.")
+		fmt.Fprintln(os.Stdout, "Pin a specific list with -w <path>, "+wordlistEnvVar+"=<path>,")
+		fmt.Fprintln(os.Stdout, "or permanently with `hashsmith wordlists --set-default <path>`.")
 		fmt.Fprintln(os.Stdout, "Search the filesystem for others with `hashsmith wordlists --scan` (slow).")
 		return nil
 	}
@@ -334,24 +358,101 @@ func runWordlists(args []string) error {
 	}
 	fmt.Fprintf(os.Stdout, "\nTo use one of these by default:\n  export %s=%s\n",
 		wordlistEnvVar, best.path)
+	fmt.Fprintf(os.Stdout, "Or save it permanently:\n  hashsmith wordlists --set-default %s\n", best.path)
 	fmt.Fprintf(os.Stdout, "Or for a single run:\n  hashsmith crack -w %s <hash>\n", best.path)
 	return nil
 }
 
+// runWordlistSetDefault validates and saves the operator's default. It prints
+// WHERE the setting was saved, because a setting that changes what every later
+// run attacks and does not say where it lives is a setting nobody can undo by
+// hand when the tool is not around to do it for them.
+func runWordlistSetDefault(w io.Writer, path string) error {
+	saved, err := setSavedWordlistDefault(path)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "Default wordlist set to %s\n", saved)
+	fmt.Fprintf(w, "Saved in %s\n", hashsmithConfigPath())
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "It applies whenever -w and $"+wordlistEnvVar+" are both absent.")
+	fmt.Fprintln(w, "Undo with `hashsmith wordlists --clear-default`.")
+	return nil
+}
+
+// runWordlistClearDefault forgets the saved default. It reports whether there
+// was one, so an operator following the stale-default warning can tell the
+// difference between "cleared it" and "there was nothing to clear, so the
+// warning came from somewhere else".
+func runWordlistClearDefault(w io.Writer) error {
+	had, existed, err := clearSavedWordlistDefault()
+	if err != nil {
+		return err
+	}
+	if existed {
+		fmt.Fprintf(w, "Cleared the saved default wordlist (was %s)\n", had)
+	} else {
+		fmt.Fprintln(w, "No saved default wordlist was set; nothing to clear.")
+	}
+	fmt.Fprintf(w, "Settings file: %s\n", hashsmithConfigPath())
+	fmt.Fprintln(w, "Runs now fall back to $"+wordlistEnvVar+", then auto-detection, then "+defaultWordlistLabel+".")
+	return nil
+}
+
 // printWordlistCandidateTable writes the fast listing: every location checked,
-// in resolution order, and which one a run would actually take.
+// in resolution order, and which one a run would actually take. The saved
+// default and the environment variable are rows in the SAME table as the
+// candidate paths, because the question the table answers is "why is this
+// machine attacking that list?", and answering it in two separate places is
+// how an operator ends up believing the config won when the environment did.
 func printWordlistCandidateTable(w io.Writer) {
+	// Resolve first, so every row can be marked against the real decision
+	// rather than against a second, independent guess at it.
+	choice, resolveErr := resolveWordlist("", false)
+
+	fmt.Fprintf(w, "Settings file: %s\n", hashsmithConfigPath())
+	saved, cfgErr := savedWordlistDefault()
+	switch {
+	case cfgErr != nil:
+		fmt.Fprintf(w, "  UNUSABLE: %v\n", cfgErr)
+	case saved == "":
+		fmt.Fprintln(w, "  no saved default wordlist (set one with --set-default <path>)")
+	default:
+		fmt.Fprintf(w, "  saved default wordlist: %s\n", saved)
+	}
+	fmt.Fprintln(w)
+
 	fmt.Fprintln(w, "Wordlist resolution order (used when -w is not given; first match wins):")
 	fmt.Fprintln(w)
+
+	mark := func(hit bool) string {
+		if hit {
+			return "  <== USED"
+		}
+		return ""
+	}
 
 	env := strings.TrimSpace(os.Getenv(wordlistEnvVar))
 	switch {
 	case env == "":
 		fmt.Fprintf(w, "   0  $%-56s not set\n", wordlistEnvVar)
 	case usableWordlistFile(env):
-		fmt.Fprintf(w, "   0  $%-56s %s  %s\n", wordlistEnvVar, "FOUND", env)
+		fmt.Fprintf(w, "   0  $%-56s %s  %s%s\n", wordlistEnvVar, "FOUND", env,
+			mark(choice.origin == wordlistFromEnv))
 	default:
 		fmt.Fprintf(w, "   0  $%-56s SET BUT UNREADABLE  %s\n", wordlistEnvVar, env)
+	}
+
+	switch {
+	case cfgErr != nil:
+		fmt.Fprintf(w, "   1  %-57s UNUSABLE SETTINGS FILE\n", "saved default")
+	case saved == "":
+		fmt.Fprintf(w, "   1  %-57s not set\n", "saved default")
+	case wordlistFileProblem(saved) == "":
+		fmt.Fprintf(w, "   1  %-57s FOUND  %s%s\n", "saved default: "+saved, "",
+			mark(choice.origin == wordlistFromConfig))
+	default:
+		fmt.Fprintf(w, "   1  %-57s MISSING — %s\n", "saved default: "+saved, wordlistFileProblem(saved))
 	}
 
 	for i, c := range wordlistCandidateStatus() {
@@ -360,17 +461,21 @@ func printWordlistCandidateTable(w io.Writer) {
 		if c.exists {
 			status = "FOUND  " + humanWordlistSize(c.size)
 		}
-		fmt.Fprintf(w, "  %2d  %-57s %s\n", i+1, label, status)
+		fmt.Fprintf(w, "  %2d  %-57s %s%s\n", i+2, label, status,
+			mark(choice.origin == wordlistAutoDetected && choice.path == c.path))
 	}
-	fmt.Fprintf(w, "  %2d  %-57s always available\n", len(wordlistCandidatePaths)+1, defaultWordlistLabel)
+	fmt.Fprintf(w, "  %2d  %-57s always available%s\n", len(wordlistCandidatePaths)+2,
+		defaultWordlistLabel, mark(choice.origin == wordlistEmbeddedDefault))
 
 	fmt.Fprintln(w)
 	// Reported through the same resolver a run uses, so this line is the
 	// answer, not a second guess at it.
-	choice, err := resolveWordlist("", false)
-	if err != nil {
-		fmt.Fprintf(w, "Selected: ERROR — %v\n", err)
+	if resolveErr != nil {
+		fmt.Fprintf(w, "Selected: ERROR — %v\n", resolveErr)
 		return
+	}
+	for _, warn := range choice.warnings() {
+		fmt.Fprintln(w, warn)
 	}
 	fmt.Fprintf(w, "Selected: %s\n", choice.menuLabel())
 }
