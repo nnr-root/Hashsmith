@@ -16,7 +16,7 @@ func TestTransposedRoundTripsCandidates(t *testing.T) {
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	n := tb.fillFromSegment(sets, 0)
+	n := tb.fillFromSegment(sets, 0, maskKeyspace(sets))
 	if n != 12 {
 		t.Fatalf("filled %d, want 12 (the whole segment)", n)
 	}
@@ -36,7 +36,7 @@ func TestTransposedBlockIsValidMD5Padding(t *testing.T) {
 	if err := tb.reset(5, encRaw); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	tb.fillFromSegment(sets, 0)
+	tb.fillFromSegment(sets, 0, maskKeyspace(sets))
 
 	for i := 0; i < 8; i++ {
 		cand := tb.candidateAt(i)
@@ -66,7 +66,7 @@ func TestTransposedPartialGroupIsClean(t *testing.T) {
 	if err := tb.reset(1, encRaw); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	n := tb.fillFromSegment(sets, 0)
+	n := tb.fillFromSegment(sets, 0, maskKeyspace(sets))
 	if n != 3 {
 		t.Fatalf("filled %d, want 3", n)
 	}
@@ -90,7 +90,8 @@ func TestTransposedFillDoesNotAllocate(t *testing.T) {
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	got := testing.AllocsPerRun(100, func() { tb.fillFromSegment(sets, 0) })
+	total := maskKeyspace(sets)
+	got := testing.AllocsPerRun(100, func() { tb.fillFromSegment(sets, 0, total) })
 	if got != 0 {
 		t.Errorf("fillFromSegment allocated %v times per run, want 0", got)
 	}
@@ -102,17 +103,18 @@ func TestTransposedFillDoesNotAllocate(t *testing.T) {
 // never tried.
 func TestTransposedReuseClearsStaleLanes(t *testing.T) {
 	sets := [][]byte{[]byte("abc"), []byte("de"), []byte("fg")} // 12 candidates
+	total := maskKeyspace(sets)
 	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		t.Fatal(err)
 	}
 	// First fill: as many as the segment provides.
-	first := tb.fillFromSegment(sets, 0)
+	first := tb.fillFromSegment(sets, 0, total)
 	if first == 0 {
 		t.Fatal("first fill wrote nothing")
 	}
 	// Second fill near the end of the segment: fewer candidates, no reset.
-	second := tb.fillFromSegment(sets, int64(maskKeyspace(sets))-2)
+	second := tb.fillFromSegment(sets, int64(total)-2, total)
 	if second >= neonGroup {
 		t.Fatalf("second fill wrote %d, expected a partial group", second)
 	}
@@ -146,7 +148,7 @@ func TestTransposedUTF16LEBlockMatchesScalar(t *testing.T) {
 	if err := tb.reset(len(sets), encUTF16LE); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	n := tb.fillFromSegment(sets, 0)
+	n := tb.fillFromSegment(sets, 0, maskKeyspace(sets))
 	if n == 0 {
 		t.Fatal("filled nothing")
 	}
@@ -178,7 +180,7 @@ func TestTransposedCandidateAtRoundTripsBothModes(t *testing.T) {
 		if err := tb.reset(len(sets), enc); err != nil {
 			t.Fatalf("enc %v: reset: %v", enc, err)
 		}
-		n := tb.fillFromSegment(sets, 0)
+		n := tb.fillFromSegment(sets, 0, maskKeyspace(sets))
 		for i := 0; i < n; i++ {
 			want := maskIdxToStr(int64(i), sets)
 			if got := string(tb.candidateAt(i)); got != want {
@@ -209,14 +211,15 @@ func TestTransposedFixedLenOKPerMode(t *testing.T) {
 // same consequence (a spurious hit on a candidate never tried).
 func TestTransposedReuseClearsStaleLanesUTF16(t *testing.T) {
 	sets := [][]byte{[]byte("abc"), []byte("de"), []byte("fg")}
+	total := maskKeyspace(sets)
 	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encUTF16LE); err != nil {
 		t.Fatal(err)
 	}
-	if first := tb.fillFromSegment(sets, 0); first == 0 {
+	if first := tb.fillFromSegment(sets, 0, total); first == 0 {
 		t.Fatal("first fill wrote nothing")
 	}
-	second := tb.fillFromSegment(sets, maskKeyspace(sets)-2)
+	second := tb.fillFromSegment(sets, total-2, total)
 	if second >= neonGroup {
 		t.Fatalf("second fill wrote %d, expected a partial group", second)
 	}
@@ -292,6 +295,167 @@ func TestTransposedShapeLayout(t *testing.T) {
 					t.Fatalf("shape %+v: lane stride between candidates %d and %d = %d, want 1",
 						sh, i, i+1, got)
 				}
+			}
+		}
+	}
+}
+
+// --- Odometer correctness -------------------------------------------------
+//
+// fillFromSegment used to decode every candidate from scratch with
+// maskIdxInto (a division and modulo per character position — profiling
+// showed this as generation's dominant cost). It now decodes `from` once and
+// advances an odometer (increment the last position, carry left on
+// overflow) for the rest of the group. The odometer MUST produce
+// byte-identical candidates to maskIdxInto/maskIdxToStr for every index: an
+// off-by-one in the carry silently skips or repeats candidates, and a
+// skipped candidate is a password that is never tried but reported "not
+// found". These tests are the oracle-comparison the doc comment on
+// fillFromSegment references.
+
+// fillExhaustiveGroupAligned walks the WHOLE keyspace of sets through
+// fillFromSegment, one neonGroup-sized fill at a time (from = 0, group,
+// 2*group, …), and checks every candidate it writes against
+// maskIdxToStr(idx, sets) — the untouched, division-based oracle.
+func fillExhaustiveGroupAligned(t *testing.T, name string, sets [][]byte) {
+	t.Helper()
+	total := maskKeyspace(sets)
+	tb := newTransposedBatch(neonShape)
+	if err := tb.reset(len(sets), encRaw); err != nil {
+		t.Fatalf("%s: reset: %v", name, err)
+	}
+	var checked int64
+	for from := int64(0); from < total; from += int64(neonShape.group()) {
+		n := tb.fillFromSegment(sets, from, total)
+		if n == 0 {
+			t.Fatalf("%s: from=%d: fillFromSegment wrote 0 candidates before reaching total=%d", name, from, total)
+		}
+		for i := 0; i < n; i++ {
+			idx := from + int64(i)
+			want := maskIdxToStr(idx, sets)
+			got := string(tb.candidateAt(i))
+			if got != want {
+				t.Fatalf("%s: index %d = %q, want %q (oracle)", name, idx, got, want)
+			}
+			checked++
+		}
+	}
+	if checked != total {
+		t.Fatalf("%s: checked %d candidates, want exactly total=%d", name, checked, total)
+	}
+}
+
+// fillExhaustiveArbitraryFrom calls fillFromSegment from EVERY possible
+// starting index in [0, total) — group-aligned or not, including the last
+// partial group right up against total — and checks every candidate it
+// writes against the oracle. fillFromSegment only has to be internally
+// consistent within one call (it cannot assume continuity ACROSS calls), so
+// this is the test that actually exercises "decode once at an arbitrary
+// `from`, then odometer for the rest of this call's group" rather than only
+// ever decoding at a multiple of the group size.
+func fillExhaustiveArbitraryFrom(t *testing.T, name string, sets [][]byte) {
+	t.Helper()
+	total := maskKeyspace(sets)
+	tb := newTransposedBatch(neonShape)
+	if err := tb.reset(len(sets), encRaw); err != nil {
+		t.Fatalf("%s: reset: %v", name, err)
+	}
+	for from := int64(0); from < total; from++ {
+		n := tb.fillFromSegment(sets, from, total)
+		wantN := int(total - from)
+		if wantN > neonShape.group() {
+			wantN = neonShape.group()
+		}
+		if n != wantN {
+			t.Fatalf("%s: from=%d: fillFromSegment wrote %d, want %d", name, from, n, wantN)
+		}
+		for i := 0; i < n; i++ {
+			idx := from + int64(i)
+			want := maskIdxToStr(idx, sets)
+			got := string(tb.candidateAt(i))
+			if got != want {
+				t.Fatalf("%s: from=%d index %d = %q, want %q (oracle)", name, from, idx, got, want)
+			}
+		}
+	}
+}
+
+// TestFillFromSegmentMatchesMaskIdxInto is the exhaustive correctness proof
+// for the odometer, across several segment shapes chosen to defeat a
+// uniform-radix bug (which would pass with same-size sets at every
+// position): uniform sets, sets whose sizes differ per position (a
+// uniform-radix carry bug survives uniform tests), a single position, and a
+// maximum-length (55-position) segment. Every shape's ENTIRE keyspace is
+// enumerated through fillFromSegment, both group-aligned and from every
+// arbitrary starting index, and compared against maskIdxToStr at the same
+// index.
+func TestFillFromSegmentMatchesMaskIdxInto(t *testing.T) {
+	byteSet := func(n int) []byte {
+		s := make([]byte, n)
+		for i := range s {
+			s[i] = byte('A' + i)
+		}
+		return s
+	}
+
+	shapes := map[string][][]byte{
+		// Uniform: every position the same size (4^3 = 64).
+		"uniform": {byteSet(4), byteSet(4), byteSet(4)},
+		// Mixed sizes per position (3*1*7*2 = 42) — the case a uniform-radix
+		// carry bug would NOT be caught by.
+		"mixed-size": {byteSet(3), byteSet(1), byteSet(7), byteSet(2)},
+		// Single position.
+		"single-position": {byteSet(10)},
+		// Maximum length (one full block, 55 positions): singleton at every
+		// position except the last two, which are small and variable so the
+		// whole keyspace (3*4 = 12) stays enumerable while still exercising
+		// a carry across a long run of positions.
+		"max-length": func() [][]byte {
+			sets := make([][]byte, transposedMaxLen)
+			for i := range sets {
+				sets[i] = []byte{'x'}
+			}
+			sets[transposedMaxLen-2] = byteSet(3)
+			sets[transposedMaxLen-1] = byteSet(4)
+			return sets
+		}(),
+	}
+
+	for name, sets := range shapes {
+		t.Run(name+"/group-aligned", func(t *testing.T) {
+			fillExhaustiveGroupAligned(t, name, sets)
+		})
+		t.Run(name+"/arbitrary-from", func(t *testing.T) {
+			fillExhaustiveArbitraryFrom(t, name, sets)
+		})
+	}
+}
+
+// TestFillFromSegmentSingleCallHasNoCrossCallState confirms fillFromSegment
+// does not (and must not) assume continuity across calls: two calls with
+// the SAME `from` on freshly-reset batches must agree, regardless of what
+// other calls happened on the batch in between (a stateful odometer cached
+// on tb between calls, rather than re-decoded at each call's `from`, would
+// break this the moment a caller seeks backwards or skips forward — exactly
+// what chunk boundaries and --skip/--limit do).
+func TestFillFromSegmentSingleCallHasNoCrossCallState(t *testing.T) {
+	sets := [][]byte{[]byte("ABC"), []byte("X"), []byte("0123456"), []byte("ab")} // 42
+	total := maskKeyspace(sets)
+
+	tb := newTransposedBatch(neonShape)
+	if err := tb.reset(len(sets), encRaw); err != nil {
+		t.Fatal(err)
+	}
+	// Walk forward, then jump backward, then forward again non-monotonically —
+	// mimicking multiple workers claiming out-of-order chunks.
+	order := []int64{0, 20, 5, total - 3, 10, 1}
+	for _, from := range order {
+		n := tb.fillFromSegment(sets, from, total)
+		for i := 0; i < n; i++ {
+			idx := from + int64(i)
+			want := maskIdxToStr(idx, sets)
+			if got := string(tb.candidateAt(i)); got != want {
+				t.Fatalf("from=%d index %d = %q, want %q", from, idx, got, want)
 			}
 		}
 	}

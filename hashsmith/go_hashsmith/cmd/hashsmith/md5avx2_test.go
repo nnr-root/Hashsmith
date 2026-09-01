@@ -49,7 +49,7 @@ func TestMD5AVX2GroupMatchesCryptoMD5(t *testing.T) {
 			if err := tb.reset(length, enc); err != nil {
 				t.Fatalf("enc %v len %d: reset: %v", enc, length, err)
 			}
-			tb.fillFromSegment(sets, 0)
+			tb.fillFromSegment(sets, 0, maskKeyspace(sets))
 			out := make([][16]byte, avx2Shape.group())
 			md5GroupAVX2(tb, out)
 			for i := 0; i < avx2Shape.group(); i++ {
@@ -72,11 +72,12 @@ func TestMD5AVX2GroupMatchesCryptoMD5(t *testing.T) {
 // the AVX2 core must too.
 func TestMD5AVX2GroupLanesAreIndependent(t *testing.T) {
 	sets := [][]byte{[]byte("abcde"), []byte("fghij"), []byte("klmno"), []byte("pqrst")}
+	total := maskKeyspace(sets)
 	tb := newTransposedBatch(avx2Shape)
 	if err := tb.reset(4, encRaw); err != nil {
 		t.Fatal(err)
 	}
-	tb.fillFromSegment(sets, 0)
+	tb.fillFromSegment(sets, 0, total)
 	ref := make([][16]byte, avx2Shape.group())
 	md5GroupAVX2(tb, ref)
 
@@ -85,7 +86,7 @@ func TestMD5AVX2GroupLanesAreIndependent(t *testing.T) {
 		if err := tb2.reset(4, encRaw); err != nil {
 			t.Fatal(err)
 		}
-		tb2.fillFromSegment(sets, 0)
+		tb2.fillFromSegment(sets, 0, total)
 		// Perturb exactly one lane's first word.
 		tb2.words[tb2.wordIndex(changed, 0)] ^= 0x01
 		out := make([][16]byte, avx2Shape.group())
@@ -106,6 +107,7 @@ func BenchmarkMD5AVX2Group(b *testing.B) {
 	for i := range sets {
 		sets[i] = []byte("abcdefghijklmnopqrstuvwxyz")
 	}
+	total := maskKeyspace(sets)
 	tb := newTransposedBatch(avx2Shape)
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		b.Fatal(err)
@@ -113,7 +115,7 @@ func BenchmarkMD5AVX2Group(b *testing.B) {
 	out := make([][16]byte, avx2Shape.group())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tb.fillFromSegment(sets, int64(i)*int64(avx2Shape.group()))
+		tb.fillFromSegment(sets, int64(i)*int64(avx2Shape.group()), total)
 		md5GroupAVX2(tb, out)
 	}
 	b.ReportMetric(float64(b.N*avx2Shape.group())/b.Elapsed().Seconds()/1e6, "MH/s")

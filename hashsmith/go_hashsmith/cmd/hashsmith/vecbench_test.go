@@ -27,7 +27,7 @@ func benchFilledBatch(b *testing.B, shape vecShape) *transposedBatch {
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		b.Fatalf("reset: %v", err)
 	}
-	tb.fillFromSegment(sets, 0)
+	tb.fillFromSegment(sets, 0, maskKeyspace(sets))
 	return tb
 }
 

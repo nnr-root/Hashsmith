@@ -40,7 +40,7 @@ func TestMD4GroupMatchesScalar(t *testing.T) {
 			// what a lane truly holds, so it is only a valid oracle for
 			// lanes < n; for the cleaned lanes >= n the true message is
 			// empty, independent of tb.length.
-			n := tb.fillFromSegment(sets, 0)
+			n := tb.fillFromSegment(sets, 0, maskKeyspace(sets))
 			out := make([][16]byte, neonShape.group())
 			md4Group(tb, out)
 			for i := 0; i < neonGroup; i++ {
@@ -69,11 +69,12 @@ func TestMD4GroupMatchesScalar(t *testing.T) {
 // shipped MD4 core must too.
 func TestMD4GroupLanesAreIndependent(t *testing.T) {
 	sets := [][]byte{[]byte("abcde"), []byte("fghij"), []byte("klmno"), []byte("pqrst")}
+	total := maskKeyspace(sets)
 	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(4, encRaw); err != nil {
 		t.Fatal(err)
 	}
-	tb.fillFromSegment(sets, 0)
+	tb.fillFromSegment(sets, 0, total)
 	ref := make([][16]byte, neonShape.group())
 	md4Group(tb, ref)
 	for changed := 0; changed < neonGroup; changed++ {
@@ -81,7 +82,7 @@ func TestMD4GroupLanesAreIndependent(t *testing.T) {
 		if err := tb2.reset(4, encRaw); err != nil {
 			t.Fatal(err)
 		}
-		tb2.fillFromSegment(sets, 0)
+		tb2.fillFromSegment(sets, 0, total)
 		tb2.words[tb2.wordIndex(changed, 0)] ^= 0x01
 		out := make([][16]byte, neonShape.group())
 		md4Group(tb2, out)
@@ -98,6 +99,7 @@ func BenchmarkMD4Group(b *testing.B) {
 	for i := range sets {
 		sets[i] = []byte("abcdefghijklmnopqrstuvwxyz")
 	}
+	total := maskKeyspace(sets)
 	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		b.Fatal(err)
@@ -105,7 +107,7 @@ func BenchmarkMD4Group(b *testing.B) {
 	out := make([][16]byte, neonShape.group())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tb.fillFromSegment(sets, int64(i)*neonGroup)
+		tb.fillFromSegment(sets, int64(i)*neonGroup, total)
 		md4Group(tb, out)
 	}
 	b.ReportMetric(float64(b.N*neonGroup)/b.Elapsed().Seconds()/1e6, "MH/s")

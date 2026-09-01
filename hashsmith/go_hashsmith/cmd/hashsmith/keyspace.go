@@ -441,7 +441,9 @@ func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom, limit int
 			defer wg.Done()
 			tb := newTransposedBatch(algo.shape)
 			ctxEvery := fastCtxCheckEvery(algo.shape)
-			curLen := -1 // no length reset yet; forces a reset on first group
+			curLen := -1  // no length reset yet; forces a reset on first group
+			lastSeg := -1 // no segment cached yet; forces a maskKeyspace on first group
+			var segTotal int64
 			out := make([][16]byte, algo.shape.group())
 			for {
 				c := atomic.AddInt64(&nextChunk, 1) - 1
@@ -488,6 +490,14 @@ func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom, limit int
 					}
 					sets := l.segments[seg]
 					segLen := len(sets)
+					if seg != lastSeg {
+						// maskKeyspace(sets) is invariant for this segment
+						// but costs a multiply per position; the segment is
+						// filled group-by-group across many calls, so cache
+						// it here rather than recomputing on every group.
+						segTotal = maskKeyspace(sets)
+						lastSeg = seg
+					}
 					if segLen != curLen {
 						// A group must never straddle a segment boundary:
 						// segments can have different candidate lengths, and
@@ -510,7 +520,7 @@ func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom, limit int
 						curLen = segLen
 					}
 					localFrom := pos - l.offsets[seg]
-					n := tb.fillFromSegment(sets, localFrom)
+					n := tb.fillFromSegment(sets, localFrom, segTotal)
 					if n == 0 {
 						// Segment exhausted; should not happen since end is
 						// bounded by l.total and pos < end. Guard anyway.

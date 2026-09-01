@@ -65,7 +65,7 @@ func TestMD5GroupMatchesCryptoMD5(t *testing.T) {
 		if err := tb.reset(length, encRaw); err != nil {
 			t.Fatalf("len %d: reset: %v", length, err)
 		}
-		tb.fillFromSegment(sets, 0)
+		tb.fillFromSegment(sets, 0, maskKeyspace(sets))
 		out := make([][16]byte, neonShape.group())
 		md5Group(tb, out)
 		for i := 0; i < neonGroup; i++ {
@@ -83,11 +83,12 @@ func TestMD5GroupMatchesCryptoMD5(t *testing.T) {
 // version must too.
 func TestMD5GroupLanesAreIndependent(t *testing.T) {
 	sets := [][]byte{[]byte("abcde"), []byte("fghij"), []byte("klmno"), []byte("pqrst")}
+	total := maskKeyspace(sets)
 	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(4, encRaw); err != nil {
 		t.Fatal(err)
 	}
-	tb.fillFromSegment(sets, 0)
+	tb.fillFromSegment(sets, 0, total)
 	ref := make([][16]byte, neonShape.group())
 	md5Group(tb, ref)
 
@@ -96,7 +97,7 @@ func TestMD5GroupLanesAreIndependent(t *testing.T) {
 		if err := tb2.reset(4, encRaw); err != nil {
 			t.Fatal(err)
 		}
-		tb2.fillFromSegment(sets, 0)
+		tb2.fillFromSegment(sets, 0, total)
 		// Perturb exactly one lane's first word.
 		tb2.words[tb2.wordIndex(changed, 0)] ^= 0x01
 		out := make([][16]byte, neonShape.group())
@@ -117,6 +118,7 @@ func BenchmarkMD5Group(b *testing.B) {
 	for i := range sets {
 		sets[i] = []byte("abcdefghijklmnopqrstuvwxyz")
 	}
+	total := maskKeyspace(sets)
 	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		b.Fatal(err)
@@ -124,10 +126,31 @@ func BenchmarkMD5Group(b *testing.B) {
 	out := make([][16]byte, neonShape.group())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tb.fillFromSegment(sets, int64(i)*neonGroup)
+		tb.fillFromSegment(sets, int64(i)*neonGroup, total)
 		md5Group(tb, out)
 	}
 	b.ReportMetric(float64(b.N*neonGroup)/b.Elapsed().Seconds()/1e6, "MH/s")
+}
+
+// BenchmarkMD5GroupFillOnly isolates generation cost from the core: it fills
+// the batch every iteration (what BenchmarkMD5Group does) but never calls
+// the vector core. Compared against BenchmarkMD5Group, the difference is
+// what fillFromSegment costs — the number this task is optimising.
+func BenchmarkMD5GroupFillOnly(b *testing.B) {
+	sets := make([][]byte, 8)
+	for i := range sets {
+		sets[i] = []byte("abcdefghijklmnopqrstuvwxyz")
+	}
+	total := maskKeyspace(sets)
+	tb := newTransposedBatch(neonShape)
+	if err := tb.reset(len(sets), encRaw); err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tb.fillFromSegment(sets, int64(i)*neonGroup, total)
+	}
+	b.ReportMetric(float64(b.N*neonGroup)/b.Elapsed().Seconds()/1e6, "Mcand/s")
 }
 
 func BenchmarkMD5Scalar(b *testing.B) {
