@@ -1079,6 +1079,14 @@ func emitResult(cc *crackCtx, origKey, pw, outFile string, copyResult bool) {
 // showPotEntry implements --show: report the potfile plaintext for a hash, if
 // one has been recorded, without running any attack.
 func showPotEntry(cc *crackCtx, origKey, target, outFile string, copyResult bool) (bool, error) {
+	// Both call sites today gate on cc != nil before reaching here, but that's
+	// an invariant this function shouldn't have to trust — a nil cc has no
+	// potfile to look anything up in, so it's simply "not in potfile", not a
+	// nil-pointer panic on cc.pot.
+	if cc == nil {
+		clrYellow.Fprintln(os.Stderr, "Not in potfile")
+		return false, nil
+	}
 	if pw, ok := cc.pot.lookup(target); ok {
 		clrGreen.Fprint(os.Stderr, "Found (potfile): ")
 		fmt.Fprintln(os.Stderr, pw)

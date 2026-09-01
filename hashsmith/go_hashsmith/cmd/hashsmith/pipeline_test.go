@@ -5,6 +5,7 @@ package main
 // handing uncracked targets to the next tool.
 
 import (
+	"bufio"
 	"encoding/hex"
 	"os"
 	"path/filepath"
@@ -383,6 +384,17 @@ func TestLeftTreatsPotfileHitAsCracked(t *testing.T) {
 // --left composes with --show: a multi-target --show run must still never
 // attack (see the showOnly gate in crackTargets), and --left reports exactly
 // the targets --show didn't find in the potfile.
+//
+// IMPORTANT: the leftover set alone cannot prove --show skipped the attack —
+// an unfindable hash produces the identical "not found" leftover whether or
+// not a real attack was launched against it (the built-in wordlist won't
+// crack "zzz-never-attacked" either way). A version of this test that only
+// checked the leftover set passed even after the showOnly gate in
+// crackTargets was reverted, silently reintroducing the bug it exists to
+// catch. So this also asserts on something that DOES differ between the two
+// worlds: runBatch's own "Multi-hash mode" banner, which is only ever
+// printed when a real attack is actually launched — its presence in stderr
+// is direct proof an attack ran, not just a coincidental "not found".
 func TestShowComposesWithLeft(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
@@ -401,9 +413,15 @@ func TestShowComposesWithLeft(t *testing.T) {
 	leftFile := filepath.Join(dir, "left.txt")
 
 	exitCode = 0
-	if err := runCrack([]string{"--pot", potPath, "--show", "--left", "-o", leftFile, targetsFile}); err != nil {
-		t.Fatalf("runCrack: %v", err)
+	stderr := captureStderr(t, func() error {
+		return runCrack([]string{"--pot", potPath, "--show", "--left", "-o", leftFile, targetsFile})
+	})
+
+	if strings.Contains(stderr, "Multi-hash mode") {
+		t.Fatalf("--show launched a real attack (the multi-hash batch banner is in stderr) — "+
+			"--show must only report potfile hits, never attack:\n%s", stderr)
 	}
+
 	got := strings.TrimSpace(mustRead(t, leftFile))
 	if got != uncrackedHash {
 		t.Fatalf("--show --left output = %q, want %q", got, uncrackedHash)
@@ -430,6 +448,39 @@ func TestLeftWritesToStdoutWithoutOutfile(t *testing.T) {
 }
 
 // ── test helpers ─────────────────────────────────────────────────────────────
+
+// captureStderr runs fn while capturing everything written to os.Stderr —
+// the mirror of stdout_test.go's captureStdout. Used where the thing that
+// actually distinguishes two behaviors is what gets logged, not the final
+// on-disk result (see TestShowComposesWithLeft: an unfindable hash's
+// "not found" leftover looks identical whether or not an attack was ever
+// launched against it, so the leftover set alone can't prove --show skipped
+// the attack — only the absence of the attack's own log output can).
+func captureStderr(t *testing.T, fn func() error) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	done := make(chan string)
+	go func() {
+		var sb strings.Builder
+		sc := bufio.NewScanner(r)
+		sc.Buffer(make([]byte, 1<<20), 1<<20)
+		for sc.Scan() {
+			sb.WriteString(sc.Text())
+			sb.WriteByte('\n')
+		}
+		done <- sb.String()
+	}()
+	err := fn()
+	w.Close()
+	os.Stderr = old
+	out := <-done
+	if err != nil {
+		t.Fatalf("captureStderr: %v", err)
+	}
+	return out
+}
 
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
