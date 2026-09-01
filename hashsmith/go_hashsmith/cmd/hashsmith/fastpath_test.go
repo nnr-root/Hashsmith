@@ -15,7 +15,11 @@ import (
 func TestFastPathAgreesWithScalar(t *testing.T) {
 	algo, ok := fastAlgoFor("md5")
 	if !ok {
-		t.Fatal("md5 fast algo not registered")
+		// No vector backend on this build (e.g. amd64 without AVX2, or
+		// under Rosetta, which reports no AVX at all). fastAlgoFor is
+		// backend-dependent since the runtime-selection change, so there is
+		// no descriptor to exercise and the scalar path is correct here.
+		t.Skipf("md5 has no fast-path descriptor on backend %q", vectorBackendName())
 	}
 	for _, plain := range []string{"aaa", "abc", "zzz", "mnq"} {
 		l := bruteLayout("abcdefghijklmnopqrstuvwxyz", 3, 3)
@@ -51,7 +55,11 @@ func TestFastPathAgreesWithScalar(t *testing.T) {
 func TestFastPathExhaustsWithoutSpuriousHit(t *testing.T) {
 	algo, ok := fastAlgoFor("md5")
 	if !ok {
-		t.Fatal("md5 fast algo not registered")
+		// No vector backend on this build (e.g. amd64 without AVX2, or
+		// under Rosetta, which reports no AVX at all). fastAlgoFor is
+		// backend-dependent since the runtime-selection change, so there is
+		// no descriptor to exercise and the scalar path is correct here.
+		t.Skipf("md5 has no fast-path descriptor on backend %q", vectorBackendName())
 	}
 	l := bruteLayout("ab", 1, 3) // 2 + 4 + 8 = 14, deliberately not a multiple of 20; excludes ""
 	sum := md5.Sum([]byte(""))
@@ -82,7 +90,11 @@ func TestFastPathExhaustsWithoutSpuriousHit(t *testing.T) {
 func TestFastPathHandlesEmptyCandidate(t *testing.T) {
 	algo, ok := fastAlgoFor("md5")
 	if !ok {
-		t.Fatal("md5 fast algo not registered")
+		// No vector backend on this build (e.g. amd64 without AVX2, or
+		// under Rosetta, which reports no AVX at all). fastAlgoFor is
+		// backend-dependent since the runtime-selection change, so there is
+		// no descriptor to exercise and the scalar path is correct here.
+		t.Skipf("md5 has no fast-path descriptor on backend %q", vectorBackendName())
 	}
 	l := bruteLayout("ab", 0, 1)
 	if l.total == 0 {
