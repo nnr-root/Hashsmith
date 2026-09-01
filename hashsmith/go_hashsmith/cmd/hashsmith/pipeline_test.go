@@ -392,7 +392,7 @@ func TestLeftTreatsPotfileHitAsCracked(t *testing.T) {
 // checked the leftover set passed even after the showOnly gate in
 // crackTargets was reverted, silently reintroducing the bug it exists to
 // catch. So this also asserts on something that DOES differ between the two
-// worlds: runBatch's own "Multi-hash mode" banner, which is only ever
+// worlds: runBatch's own batchBannerPrefix banner, which is only ever
 // printed when a real attack is actually launched — its presence in stderr
 // is direct proof an attack ran, not just a coincidental "not found".
 func TestShowComposesWithLeft(t *testing.T) {
@@ -417,7 +417,7 @@ func TestShowComposesWithLeft(t *testing.T) {
 		return runCrack([]string{"--pot", potPath, "--show", "--left", "-o", leftFile, targetsFile})
 	})
 
-	if strings.Contains(stderr, "Multi-hash mode") {
+	if strings.Contains(stderr, batchBannerPrefix) {
 		t.Fatalf("--show launched a real attack (the multi-hash batch banner is in stderr) — "+
 			"--show must only report potfile hits, never attack:\n%s", stderr)
 	}

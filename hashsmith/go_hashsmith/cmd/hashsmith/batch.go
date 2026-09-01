@@ -25,6 +25,15 @@ import (
 	"github.com/fatih/color"
 )
 
+// batchBannerPrefix is the distinguishing text of the multi-hash banner below.
+// It is a named constant because a test depends on it to tell "an attack ran"
+// from "no attack ran" — asserting on the leftover target set cannot separate
+// those, since an unfindable hash looks identical either way. Sharing the
+// constant means rewording the banner updates the test with it, rather than
+// silently making the assertion match nothing in BOTH worlds and quietly
+// ceasing to guard anything.
+const batchBannerPrefix = "Multi-hash mode"
+
 // batchableTypes are the raw digests whose value depends only on the candidate.
 var batchableTypes = map[string]bool{
 	"md2": true, "md4": true, "md5": true, "sha0": true, "sha1": true,
@@ -138,7 +147,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 	}
 
 	color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
-		"\n⚡ Multi-hash mode: %d target(s), hashing each candidate once against all\n", len(batch))
+		"\n⚡ "+batchBannerPrefix+": %d target(s), hashing each candidate once against all\n", len(batch))
 	if len(typeOrder) > 1 {
 		clrYellow.Fprintf(os.Stderr, "  candidate types: %s\n", strings.Join(typeOrder, ", "))
 	}
