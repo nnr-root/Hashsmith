@@ -198,7 +198,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 			}
 		}
 		batchRunType(t, mode, active, batch, &remaining,
-			wordlist, wl2, charset, minLen, maxLen, workers, rules, mc)
+			wordlist, wl2, charset, minLen, maxLen, princeElemsFor(cc), workers, rules, mc)
 	}
 
 	// Report and record.
@@ -259,7 +259,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 // batchRunType runs one attack pass for a single type against all unfound
 // targets in digestToIdx, wrapping the shared engines with a progress bar.
 func batchRunType(typ, mode string, active []int, batch []*batchTarget,
-	remaining *int64, wordlist, wordlist2, charset string, minLen, maxLen, workers int,
+	remaining *int64, wordlist, wordlist2, charset string, minLen, maxLen, princeElems, workers int,
 	rules *ruleEngine, mc *maskConfig) {
 
 	start := time.Now()
@@ -318,9 +318,29 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 		}
 	}
 
+	// PRINCE's chain table is built once here and reused for both the progress
+	// bar total and the run itself (see doCrack for the same shape). A refusal
+	// leaves princeLay nil, which the run switch treats as "nothing to do" —
+	// the same way the other modes' setup errors are handled in this function.
+	m := strings.ToLower(mode)
+	var princeLay *keyspaceLayout
+	if m == "prince" {
+		if elems, _, err := loadWordlistSlice(wordlist); err == nil {
+			if lay, ex, e := princeLayout(elems, minLen, maxLen, princeElems); e == nil {
+				princeLay = lay
+				if ex.Cmp(maxInt64Big) > 0 {
+					warnKeyspaceNotExhaustive(ex)
+				}
+			} else {
+				clrRed.Fprintf(os.Stderr, "  prince error: %v\n", e)
+			}
+		} else {
+			clrRed.Fprintf(os.Stderr, "  element list error: %v\n", err)
+		}
+	}
+
 	// progress bar total
 	var total int64 = -1
-	m := strings.ToLower(mode)
 	switch m {
 	case "dict":
 		if n, err := countWordlistLines(wordlist); err == nil {
@@ -354,6 +374,10 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 			if b, e2 := countWordlistLines(wordlist2); e2 == nil {
 				total = satMul(a, b)
 			}
+		}
+	case "prince":
+		if princeLay != nil {
+			total = princeLay.total
 		}
 	}
 	bar := newCrackBar(total)
@@ -389,6 +413,10 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 					_, _ = runLayout(context.Background(), combinatorLayout(left, right), 0, 0, workers, &atomicAttempts, nil, verify)
 				}
 			}
+		}
+	case "prince":
+		if princeLay != nil {
+			_, _ = runLayout(context.Background(), princeLay, 0, 0, workers, &atomicAttempts, nil, verify)
 		}
 	default: // dict
 		batchDictAttack(wordlist, verify, workers, rules, &atomicAttempts)

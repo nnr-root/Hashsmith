@@ -26,7 +26,7 @@ import (
 )
 
 func streamCandidates(mode, wordlist, wordlist2, charset string,
-	minLen, maxLen int, mc *maskConfig, rules *ruleEngine, skip, limit int64) error {
+	minLen, maxLen, princeElems int, mc *maskConfig, rules *ruleEngine, skip, limit int64) error {
 
 	w := bufio.NewWriterSize(os.Stdout, 1<<20)
 	defer w.Flush()
@@ -93,6 +93,17 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 			return err
 		}
 		_, err = runLayout(context.Background(), combinatorLayout(left, right), skip, limit, 1, &dummy, nil, emit)
+		return err
+	case "prince":
+		elems, _, err := loadWordlistSlice(wordlist)
+		if err != nil {
+			return err
+		}
+		layout, _, err := princeLayout(elems, minLen, maxLen, princeElems)
+		if err != nil {
+			return err
+		}
+		_, err = runLayout(context.Background(), layout, skip, limit, 1, &dummy, nil, emit)
 		return err
 	default: // dict
 		f, _, err := openWordlist(wordlist)

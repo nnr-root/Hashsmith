@@ -218,7 +218,7 @@ func TestStdoutDictMatchesAttackSlicing(t *testing.T) {
 				attempted := collectDictAttempts(t, wordlistPath, eng.e, c.skip, c.limit)
 
 				out := captureStdout(t, func() error {
-					return streamCandidates("dict", wordlistPath, "", "", 0, 0, nil, eng.e, c.skip, c.limit)
+					return streamCandidates("dict", wordlistPath, "", "", 0, 0, princeDefaultElems, nil, eng.e, c.skip, c.limit)
 				})
 				var printed []string
 				if out != "" {

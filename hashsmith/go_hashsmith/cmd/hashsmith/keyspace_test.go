@@ -63,13 +63,13 @@ func TestRunLayoutResumeFindsAndSkips(t *testing.T) {
 func TestSessionMatch(t *testing.T) {
 	s := &sessionState{Mode: "brute", Type: "md5", Target: "x", Charset: "ab",
 		MinLen: 1, MaxLen: 3, SaltMode: "prefix"}
-	if !s.matches("brute", "md5", "x", "ab", 1, 3, "", [4]string{}, false, "", "prefix", "", "") {
+	if !s.matches("brute", "md5", "x", "ab", 1, 3, "", [4]string{}, false, "", "prefix", "", "", 0) {
 		t.Error("identical params should match")
 	}
-	if s.matches("brute", "md5", "x", "ab", 1, 4, "", [4]string{}, false, "", "prefix", "", "") {
+	if s.matches("brute", "md5", "x", "ab", 1, 4, "", [4]string{}, false, "", "prefix", "", "", 0) {
 		t.Error("different maxLen must not match")
 	}
-	if s.matches("brute", "md5", "x", "ab", 1, 3, "", [4]string{}, false, "", "prefix", "other.txt", "") {
+	if s.matches("brute", "md5", "x", "ab", 1, 3, "", [4]string{}, false, "", "prefix", "other.txt", "", 0) {
 		t.Error("different wordlist must not match")
 	}
 }
@@ -100,7 +100,7 @@ func TestKeyspaceUnitIsSkipStepsToCoverDictRun(t *testing.T) {
 
 	// --keyspace's own reported value, via the real --keyspace code path.
 	out := captureStdout(t, func() error {
-		return printKeyspace("dict", wordlistPath, "", "", 0, 0, nil)
+		return printKeyspace("dict", wordlistPath, "", "", 0, 0, princeDefaultElems, nil)
 	})
 	var keyspace int64
 	if _, err := fmt.Sscanf(strings.TrimSpace(out), "%d", &keyspace); err != nil {

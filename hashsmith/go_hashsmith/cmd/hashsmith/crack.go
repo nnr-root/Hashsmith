@@ -95,6 +95,10 @@ type crackCtx struct {
 	useGPU    bool          // --gpu: try raw-digest GPU dictionary/brute/mask kernels when available
 	skip      int64         // --skip: candidate index (whole-layout / word index) to start at; 0 = unset
 	limit     int64         // --limit: candidate count to try, 0 = unbounded
+	// princeElems is --prince-elems: the maximum number of elements PRINCE
+	// concatenates into one chain. 0 means unset — see princeElemsFor, which
+	// resolves it to princeDefaultElems.
+	princeElems int
 
 	// ── pipeline plumbing (--username / --left / --outfile-format) ──────────
 	username bool                // --username: input lines are "user:hash"
@@ -490,10 +494,11 @@ func runCrack(args []string) error {
 	potPath := fs.String("pot", "", "potfile path (default ~/.hashsmith/hashsmith.pot)")
 	noPot := fs.Bool("no-pot", false, "disable the potfile (do not read or record cracked hashes)")
 	showOnly := fs.Bool("show", false, "print already-cracked hashes from the potfile; do not attack")
-	sessName := fs.String("session", "", "named resumable session (brute/mask/markov/hybrid/combinator)")
+	sessName := fs.String("session", "", "named resumable session (brute/mask/markov/hybrid/combinator/prince)")
 	restore := fs.String("restore", "", "alias for --session: resume a saved session by name")
 	wordlist2 := fs.String("wordlist2", "", "right-hand wordlist for -M combinator")
 	w2 := fs.String("w2", "", "alias for --wordlist2")
+	princeElems := fs.Int("prince-elems", princeDefaultElems, "maximum elements concatenated into one chain (-M prince)")
 	stdoutMode := fs.Bool("stdout", false, "emit the candidate stream to stdout instead of cracking (no hash needed)")
 	useGPU := fs.Bool("gpu", false, "use GPU dictionary/brute/mask kernels when supported")
 	keyspaceOnly := fs.Bool("keyspace", false, "print the total candidate count to stdout and exit, without attacking (dict mode: word count, not words×rules — matches --skip/--limit's unit)")
@@ -547,7 +552,7 @@ func runCrack(args []string) error {
 	// hashing required, and no attack runs. Handled before --stdout / gatherInputs
 	// so it works with or without a hash argument.
 	if *keyspaceOnly {
-		return printKeyspace(*mode, wl, wl2, *charset, *minLen, *maxLen, mc)
+		return printKeyspace(*mode, wl, wl2, *charset, *minLen, *maxLen, *princeElems, mc)
 	}
 
 	// --stdout: generate candidates only, no target or hashing required.
@@ -556,7 +561,7 @@ func runCrack(args []string) error {
 		if err != nil {
 			return err
 		}
-		return streamCandidates(*mode, wl, wl2, *charset, *minLen, *maxLen, mc, engine, *skip, *limit)
+		return streamCandidates(*mode, wl, wl2, *charset, *minLen, *maxLen, *princeElems, mc, engine, *skip, *limit)
 	}
 
 	outFmt, err := parseOutfileFormat(*outfileFormat)
@@ -604,6 +609,7 @@ func runCrack(args []string) error {
 	if err != nil {
 		return err
 	}
+	cc.princeElems = *princeElems
 	cc.username = *username
 	cc.left = *left
 	cc.outFmt = outFmt
@@ -977,7 +983,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	runCtx := context.Background()
 	var sess *sessionState
 	var resumeFrom int64
-	if cc != nil && cc.sessName != "" && (m == "brute" || m == "mask" || m == "markov" || m == "hybrid" || m == "combinator") {
+	if cc != nil && cc.sessName != "" && (m == "brute" || m == "mask" || m == "markov" || m == "hybrid" || m == "combinator" || m == "prince") {
 		var cancel context.CancelFunc
 		runCtx, cancel = context.WithCancel(context.Background())
 		sigCh := make(chan os.Signal, 1)
@@ -990,7 +996,8 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			maskStr, custom, inc = mc.mask, mc.custom, mc.increment
 		}
 		wl2 := cc.wordlist2
-		if cc.session.matches(m, typ, targetHash, charset, minLen, maxLen, maskStr, custom, inc, salt, saltMode, wordlist, wl2) {
+		pe := princeElemsFor(cc)
+		if cc.session.matches(m, typ, targetHash, charset, minLen, maxLen, maskStr, custom, inc, salt, saltMode, wordlist, wl2, pe) {
 			sess = cc.session
 			resumeFrom = sess.Checkpoint
 			if resumeFrom > 0 {
@@ -1003,7 +1010,8 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				Charset: charset, MinLen: minLen, MaxLen: maxLen,
 				Mask: maskStr, Custom: custom, Increment: inc,
 				Salt: salt, SaltMode: saltMode, Wordlist: wordlist, Wordlist2: wl2,
-				path: sessionPath(cc.sessName),
+				PrinceElems: pe,
+				path:        sessionPath(cc.sessName),
 			}
 		}
 	}
@@ -1048,6 +1056,24 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		return remaining
 	}
 
+	// PRINCE builds its chain table up front: it is needed both to size the
+	// progress bar and to run the attack, and building it twice would re-read
+	// and re-bucket the whole element list. Errors here (an oversized element
+	// list, an unenumerable chain count, a bad -n/-x range) surface before the
+	// progress bar and ticker exist, so there is nothing to tear down.
+	var princeLay *keyspaceLayout
+	var princeExact *big.Int
+	if m == "prince" {
+		elems, _, e := loadWordlistSlice(wordlist)
+		if e != nil {
+			return false, e
+		}
+		princeLay, princeExact, e = princeLayout(elems, minLen, maxLen, princeElemsFor(cc))
+		if e != nil {
+			return false, e
+		}
+	}
+
 	var total int64 = -1
 	if m == "dict" {
 		// An empty wordlist path counts the embedded common.txt. Bound the raw
@@ -1081,6 +1107,11 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			if b, e2 := countWordlistLines(cc.wordlist2); e2 == nil {
 				total = boundWordIdx(satMul(a, b))
 			}
+		}
+	} else if m == "prince" && princeLay != nil {
+		total = boundWordIdx(princeLay.total)
+		if princeExact != nil && princeExact.Cmp(maxInt64Big) > 0 {
+			warnKeyspaceNotExhaustive(princeExact)
 		}
 	}
 
@@ -1238,9 +1269,16 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		pw, interrupted, err = runSessionLayout(runCtx, combinatorLayout(left, right),
 			sess, resumeFrom, limit, workers, &atomicAttempts, verifyFn)
 		result = crackedResult{password: pw}
+	case "prince":
+		// princeLay was built above (before the progress bar), so any refusal
+		// has already been reported; it is never nil here.
+		var pw string
+		pw, interrupted, err = runSessionLayout(runCtx, princeLay,
+			sess, resumeFrom, limit, workers, &atomicAttempts, verifyFn)
+		result = crackedResult{password: pw}
 	default:
 		tickCancel()
-		return false, errors.New("unknown mode: use dict, brute, mask, markov, hybrid or combinator")
+		return false, errors.New("unknown mode: use dict, brute, mask, markov, hybrid, combinator or prince")
 	}
 
 	tickCancel()
@@ -1781,7 +1819,7 @@ func exactWordlistCount(path string) (int64, error) {
 	return n, nil
 }
 
-func printKeyspace(mode, wordlist, wordlist2, charset string, minLen, maxLen int, mc *maskConfig) error {
+func printKeyspace(mode, wordlist, wordlist2, charset string, minLen, maxLen, princeElems int, mc *maskConfig) error {
 	m := strings.ToLower(mode)
 	var exact *big.Int
 	switch m {
@@ -1822,6 +1860,21 @@ func printKeyspace(mode, wordlist, wordlist2, charset string, minLen, maxLen int
 			return err
 		}
 		exact = new(big.Int).Mul(big.NewInt(a), big.NewInt(b))
+	case "prince":
+		// Unlike dict/combinator/hybrid, this does not go through
+		// exactWordlistCount: PRINCE needs the element STRINGS (to bucket them
+		// by rune length), not just a count, so it reads the list in full. That
+		// works for a pipe or stdin too, and the resulting number is exact —
+		// which is the property --keyspace's refusal exists to protect.
+		elems, _, err := loadWordlistSlice(wordlist)
+		if err != nil {
+			return err
+		}
+		_, ex, err := princeLayout(elems, minLen, maxLen, princeElems)
+		if err != nil {
+			return err
+		}
+		exact = ex
 	case "dict":
 		n, err := exactWordlistCount(wordlist)
 		if err != nil {
@@ -1829,7 +1882,7 @@ func printKeyspace(mode, wordlist, wordlist2, charset string, minLen, maxLen int
 		}
 		exact = big.NewInt(n)
 	default:
-		return errors.New("unknown mode: use dict, brute, mask, markov, hybrid or combinator")
+		return errors.New("unknown mode: use dict, brute, mask, markov, hybrid, combinator or prince")
 	}
 	if exact.Cmp(maxInt64Big) > 0 {
 		return fmt.Errorf("true keyspace is %s candidates, which exceeds %d (max int64) — "+

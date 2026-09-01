@@ -72,7 +72,7 @@ func TestPrintKeyspaceRefusesUncountableWordlist(t *testing.T) {
 	}
 	origStdout := os.Stdout
 	os.Stdout = w
-	kErr := printKeyspace("dict", fifo, "", "", 0, 0, nil)
+	kErr := printKeyspace("dict", fifo, "", "", 0, 0, princeDefaultElems, nil)
 	os.Stdout = origStdout
 	w.Close()
 	var buf bytes.Buffer
@@ -100,7 +100,7 @@ func TestPrintKeyspaceRefusesUncountableCombinatorWordlist(t *testing.T) {
 		t.Skipf("mkfifo unsupported: %v", err)
 	}
 
-	if err := printKeyspace("combinator", left, fifo, "", 0, 0, nil); err == nil {
+	if err := printKeyspace("combinator", left, fifo, "", 0, 0, princeDefaultElems, nil); err == nil {
 		t.Fatal("want an error when the right-hand wordlist is not seekable, got nil")
 	}
 }
