@@ -1,6 +1,6 @@
 //go:build opencl
 
-package main
+package gpubackend
 
 /*
 #cgo darwin LDFLAGS: -framework OpenCL
@@ -18,14 +18,14 @@ import (
 //go:embed opencl_kernels.cl
 var openclSrc string
 
-// oclBackend implements gpuBackend on any OpenCL device (NVIDIA / AMD / Intel /
+// oclBackend implements Backend on any OpenCL device (NVIDIA / AMD / Intel /
 // Apple), so the same kernels accelerate cracking across every GPU vendor.
 type oclBackend struct {
 	ctx unsafe.Pointer
 	dev string
 }
 
-func newGPUBackend() (gpuBackend, string) {
+func New() (Backend, string) {
 	var errbuf [512]C.char
 	csrc := C.CString(openclSrc)
 	defer C.free(unsafe.Pointer(csrc))
@@ -36,15 +36,15 @@ func newGPUBackend() (gpuBackend, string) {
 	return &oclBackend{ctx: ctx, dev: C.GoString(C.hs_ocl_name(ctx))}, ""
 }
 
-func (o *oclBackend) name() string { return "OpenCL (" + o.dev + ")" }
-func (o *oclBackend) close() {
+func (o *oclBackend) Name() string { return "OpenCL (" + o.dev + ")" }
+func (o *oclBackend) Close() {
 	if o.ctx != nil {
 		C.hs_ocl_free(o.ctx)
 		o.ctx = nil
 	}
 }
 
-func (o *oclBackend) md5(cands []string, out [][16]byte) error {
+func (o *oclBackend) MD5(cands []string, out [][16]byte) error {
 	n := len(cands)
 	if n == 0 {
 		return nil
@@ -98,19 +98,19 @@ func (o *oclBackend) maskOne(kid int, sets [][]byte, target []byte, start uint64
 	return uint64(outIdx), rc == 1, nil
 }
 
-func (o *oclBackend) md5Mask(s [][]byte, t []byte, st uint64, c uint32) (uint64, bool, error) {
+func (o *oclBackend) MD5Mask(s [][]byte, t []byte, st uint64, c uint32) (uint64, bool, error) {
 	return o.maskOne(0, s, t, st, c)
 }
-func (o *oclBackend) ntlmMask(s [][]byte, t []byte, st uint64, c uint32) (uint64, bool, error) {
+func (o *oclBackend) NTLMMask(s [][]byte, t []byte, st uint64, c uint32) (uint64, bool, error) {
 	return o.maskOne(2, s, t, st, c)
 }
-func (o *oclBackend) md4Mask(s [][]byte, t []byte, st uint64, c uint32) (uint64, bool, error) {
+func (o *oclBackend) MD4Mask(s [][]byte, t []byte, st uint64, c uint32) (uint64, bool, error) {
 	words := make([]uint32, 4)
 	if len(t) != 16 {
 		return 0, false, errors.New("invalid MD4 target")
 	}
 	for i := range words {
-		words[i] = le32(t[i*4:])
+		words[i] = LE32(t[i*4:])
 	}
 	ff, fi := []uint32{0}, []uint64{0}
 	if err := o.sweep(9, 4, s, words, st, uint64(c), c, ff, fi); err != nil {
@@ -118,10 +118,10 @@ func (o *oclBackend) md4Mask(s [][]byte, t []byte, st uint64, c uint32) (uint64,
 	}
 	return fi[0], ff[0] == 1, nil
 }
-func (o *oclBackend) sha256Mask(s [][]byte, t []byte, st uint64, c uint32) (uint64, bool, error) {
+func (o *oclBackend) SHA256Mask(s [][]byte, t []byte, st uint64, c uint32) (uint64, bool, error) {
 	return o.maskOne(4, s, t, st, c)
 }
-func (o *oclBackend) sha1Mask(s [][]byte, t []byte, st uint64, c uint32) (uint64, bool, error) {
+func (o *oclBackend) SHA1Mask(s [][]byte, t []byte, st uint64, c uint32) (uint64, bool, error) {
 	return o.maskOne(6, s, t, st, c)
 }
 
@@ -149,22 +149,22 @@ func (o *oclBackend) sweep(kid, words int, sets [][]byte, targets []uint32, star
 	}
 	return nil
 }
-func (o *oclBackend) md5MaskMulti(s [][]byte, t []uint32, st uint64, c uint32, ff []uint32, fi []uint64) error {
+func (o *oclBackend) MD5MaskMulti(s [][]byte, t []uint32, st uint64, c uint32, ff []uint32, fi []uint64) error {
 	return o.sweep(1, 4, s, t, st, uint64(c), c, ff, fi)
 }
-func (o *oclBackend) ntlmMaskMulti(s [][]byte, t []uint32, st uint64, c uint32, ff []uint32, fi []uint64) error {
+func (o *oclBackend) NTLMMaskMulti(s [][]byte, t []uint32, st uint64, c uint32, ff []uint32, fi []uint64) error {
 	return o.sweep(3, 4, s, t, st, uint64(c), c, ff, fi)
 }
-func (o *oclBackend) md4MaskMulti(s [][]byte, t []uint32, st uint64, c uint32, ff []uint32, fi []uint64) error {
+func (o *oclBackend) MD4MaskMulti(s [][]byte, t []uint32, st uint64, c uint32, ff []uint32, fi []uint64) error {
 	return o.sweep(9, 4, s, t, st, uint64(c), c, ff, fi)
 }
-func (o *oclBackend) sha256MaskMulti(s [][]byte, t []uint32, st uint64, c uint32, ff []uint32, fi []uint64) error {
+func (o *oclBackend) SHA256MaskMulti(s [][]byte, t []uint32, st uint64, c uint32, ff []uint32, fi []uint64) error {
 	return o.sweep(5, 8, s, t, st, uint64(c), c, ff, fi)
 }
-func (o *oclBackend) sha1MaskMulti(s [][]byte, t []uint32, st uint64, c uint32, ff []uint32, fi []uint64) error {
+func (o *oclBackend) SHA1MaskMulti(s [][]byte, t []uint32, st uint64, c uint32, ff []uint32, fi []uint64) error {
 	return o.sweep(7, 5, s, t, st, uint64(c), c, ff, fi)
 }
-func (o *oclBackend) maskSweepMulti(algo int, sets [][]byte, targetWords int, targets []uint32, start, span uint64, chunk uint32, ff []uint32, fi []uint64) error {
+func (o *oclBackend) MaskSweepMulti(algo int, sets [][]byte, targetWords int, targets []uint32, start, span uint64, chunk uint32, ff []uint32, fi []uint64) error {
 	kid := algo*2 + 1
 	if algo == 4 {
 		kid = 9
@@ -173,6 +173,6 @@ func (o *oclBackend) maskSweepMulti(algo int, sets [][]byte, targetWords int, ta
 }
 
 // md5Brute is unused by the drivers (they use the mask path); satisfy interface.
-func (o *oclBackend) md5Brute(charset string, wordLen int, target [16]byte, start uint64, count uint32) (uint64, bool, error) {
+func (o *oclBackend) MD5Brute(charset string, wordLen int, target [16]byte, start uint64, count uint32) (uint64, bool, error) {
 	return 0, false, errors.New("opencl brute uses the mask path")
 }

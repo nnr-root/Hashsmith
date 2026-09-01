@@ -15,7 +15,7 @@ type fakeMD5Batcher struct {
 	seen    int
 }
 
-func (f *fakeMD5Batcher) md5(candidates []string, out [][16]byte) error {
+func (f *fakeMD5Batcher) MD5(candidates []string, out [][16]byte) error {
 	f.batches++
 	f.seen += len(candidates)
 	for i, candidate := range candidates {
