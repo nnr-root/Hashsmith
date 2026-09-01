@@ -495,16 +495,9 @@ func interactiveCrack(reader *bufio.Reader) error {
 	}
 
 	if mode == "dict" {
-		wlChoice, err := chooseOption(reader, "Wordlist", []string{"built-in common.txt (default)", "enter custom path"}, 1)
+		wordlist, err := promptWordlist(reader)
 		if err != nil {
 			return err
-		}
-		wordlist := "" // empty → built-in common.txt (see openWordlist)
-		if strings.Contains(wlChoice, "custom") || strings.Contains(wlChoice, "enter") {
-			wordlist, err = askText(reader, "Wordlist path", "")
-			if err != nil {
-				return err
-			}
 		}
 		useRules, err := askYesNo(reader, "Use mangling rules? (capitalize, leet, append digits…)", true)
 		if err != nil {
@@ -662,17 +655,9 @@ func interactiveCrackKnown(reader *bufio.Reader, hashType, targetHash string) er
 	}
 
 	if mode == "dict" {
-		wlChoice, err := chooseOption(reader,
-			"Wordlist", []string{"built-in common.txt (default)", "enter custom path"}, 1)
+		wordlist, err := promptWordlist(reader)
 		if err != nil {
 			return err
-		}
-		wordlist := "" // empty → built-in common.txt (see openWordlist)
-		if strings.Contains(wlChoice, "custom") || strings.Contains(wlChoice, "enter") {
-			wordlist, err = askText(reader, "Wordlist path", "")
-			if err != nil {
-				return err
-			}
 		}
 		useRules, err := askYesNo(reader, "Use mangling rules? (capitalize, leet, append digits…)", true)
 		if err != nil {
@@ -897,4 +882,48 @@ func askAlgoParams(reader *bufio.Reader, typ string) (shift int, key string, rai
 		}
 	}
 	return
+}
+
+// promptWordlist offers the wordlist that discovery would ACTUALLY use as the
+// default menu entry, and returns the resolved path.
+//
+// The menu used to hard-code "built-in common.txt (default)" in both flows.
+// With auto-detection that label is a lie on any machine with rockyou.txt
+// installed: the operator would pick "default" and unknowingly launch a
+// 14M-word run. The entry now names the file discovery picked, and the
+// resolved path is returned so the run genuinely uses it rather than
+// re-resolving somewhere further down.
+//
+// The custom entry is matched by identity against wordlistCustomOption rather
+// than by substring: a discovered path could easily contain "custom" or
+// "enter" (/home/op/custom-lists/rockyou.txt), and the old substring test
+// would then have treated choosing the default as asking for a custom path.
+func promptWordlist(reader *bufio.Reader) (string, error) {
+	const wordlistCustomOption = "enter custom path"
+
+	choice, err := resolveWordlist("", false)
+	if err != nil {
+		// A broken $HASHSMITH_WORDLIST is the operator's explicit request
+		// failing; say so instead of quietly attacking a different keyspace.
+		return "", err
+	}
+	sel, err := chooseOption(reader, "Wordlist",
+		[]string{choice.menuLabel(), wordlistCustomOption}, 1)
+	if err != nil {
+		return "", err
+	}
+	if sel == wordlistCustomOption {
+		path, terr := askText(reader, "Wordlist path", "")
+		if terr != nil {
+			return "", terr
+		}
+		custom, rerr := resolveWordlist(path, false)
+		if rerr != nil {
+			return "", rerr
+		}
+		announceWordlist(custom)
+		return custom.path, nil
+	}
+	announceWordlist(choice)
+	return choice.path, nil
 }

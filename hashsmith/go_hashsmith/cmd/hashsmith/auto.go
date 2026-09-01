@@ -26,8 +26,9 @@ func runAuto(args []string) error {
 	fs.SetOutput(io.Discard)
 	typ := fs.String("t", "", "hash type (omit or 'auto' to auto-detect)")
 	mode := fs.String("M", "dict", "attack mode: dict|brute")
-	wordlist := fs.String("w", "", "wordlist path (defaults to built-in common.txt)")
+	wordlist := fs.String("w", "", "wordlist path (auto-detects an installed rockyou.txt, else the built-in common.txt — see `hashsmith wordlists`)")
 	wordlistLong := fs.String("wordlist", "", "alias for -w")
+	noAutoWordlist := fs.Bool("no-auto-wordlist", false, "skip wordlist auto-detection and use the built-in common.txt")
 	charset := fs.String("C", "abcdefghijklmnopqrstuvwxyz0123456789", "charset (brute mode)")
 	minLen := fs.Int("n", 1, "min length (brute)")
 	maxLen := fs.Int("x", 4, "max length (brute)")
@@ -69,6 +70,16 @@ func runAuto(args []string) error {
 	if wl == "" {
 		wl = *wordlistLong
 	}
+	// Resolve once, exactly as runCrack does, so the bare-target shortcut and
+	// the explicit `crack` subcommand attack the same keyspace and print the
+	// same source line. runAuto has no --skip/--limit, so no distributed
+	// warning applies here.
+	wlChoice, err := resolveWordlistForMode(*mode, wl, *noAutoWordlist)
+	if err != nil {
+		return err
+	}
+	wl = wlChoice.path
+
 	w := *workers
 	if w < 1 {
 		w = runtime.NumCPU()

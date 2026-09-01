@@ -466,15 +466,14 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 func batchDictAttack(wordlistPath string, verify func(string) bool, workers int,
 	rules *ruleEngine, atomicAttempts *int64) {
 
-	f, label, err := openWordlist(wordlistPath)
+	// The source line ("Wordlist: ...") is announced once per run at the CLI
+	// entry point (resolveWordlistForMode), not once per target here.
+	f, _, err := openWordlist(wordlistPath)
 	if err != nil {
 		clrRed.Fprintf(os.Stderr, "  wordlist error: %v\n", err)
 		return
 	}
 	defer f.Close()
-	if label == defaultWordlistLabel {
-		clrYellow.Fprintf(os.Stderr, "No wordlist supplied — using %s\n", label)
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

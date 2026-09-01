@@ -101,6 +101,10 @@ func main() {
 		if err := runListEncodings(rest); err != nil {
 			fail(err.Error())
 		}
+	case "wordlists", "list-wordlists":
+		if err := runWordlists(rest); err != nil {
+			fail(err.Error())
+		}
 	case "sessions":
 		if err := runSessions(rest); err != nil {
 			fail(err.Error())
@@ -156,7 +160,7 @@ func printHelp() {
 	fmt.Println("  decode        -t <type> [-s shift] [-k key] [-r rails] [-o out] [-c]  INPUT...")
 	fmt.Println("  hash          -t <type> [-s salt] [-S prefix|suffix] [-e encoding] [-o out] [-c]  INPUT...")
 	fmt.Println("  crack         [-t <type|auto>] [-M dict|brute|mask|markov|hybrid|combinator|prince] [-w wordlist] [--wordlist2 list2] [--prince-elems N] [-r | --rules <file>...] [--mask ?l?d..] [-1..-4 set] [--increment] [--mask-first] [--stdout]")
-	fmt.Println("                [--session <name>] [--restore <name>] [--gpu] [--show] [--no-pot] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]  INPUT...")
+	fmt.Println("                [--session <name>] [--restore <name>] [--gpu] [--show] [--no-pot] [--no-auto-wordlist] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]  INPUT...")
 	fmt.Println("  selftest      [-t type] [-v] [-gaps]   verify built-in known-answer vectors")
 	fmt.Println("  types         list every supported -t hash type")
 	fmt.Println("  encodings     list every supported encode/decode -t type (alias: codecs)")
@@ -168,11 +172,16 @@ func printHelp() {
 	fmt.Println("                [--compare [--gpu] --candidates N --repeat N --json report.json] compare with John/Hashcat")
 	fmt.Println("  gpu           show GPU acceleration status (build: -tags opencl any GPU, or -tags gpu Apple Metal)")
 	fmt.Println("  sessions      list | rm <name> | clear   manage saved brute/mask sessions")
+	fmt.Println("  wordlists     [--scan]   show where an omitted -w looks for a wordlist (--scan searches the disk)")
 	fmt.Println("  interactive   guided interactive mode")
 	fmt.Println()
 	fmt.Println("Global flags:")
 	fmt.Println("  -N, --no-banner   suppress the banner")
 	fmt.Println("  -T <theme>        accent colour: cyan green magenta blue yellow red white")
+	fmt.Println()
+	fmt.Println("Wordlists:  with no -w, an installed rockyou.txt is auto-detected (gzip is read directly);")
+	fmt.Println("            $HASHSMITH_WORDLIST pins one, --no-auto-wordlist forces the built-in common.txt,")
+	fmt.Println("            and `hashsmith wordlists` shows exactly which file a run would use.")
 	fmt.Println()
 	fmt.Println("Shortcuts:  -i <hash|file>  →  identify command")
 	fmt.Println()
