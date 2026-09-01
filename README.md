@@ -283,7 +283,7 @@ hashsmith crack -t md5 <hash> -M hybrid -w words.txt --mask '?d?d?d' --mask-firs
 hashsmith crack -t md5 <hash> -M markov -C ?l -n 1 -x 8 -w rockyou.txt              # trained on a wordlist
 
 # PRINCE — concatenate wordlist elements into passphrase-style candidates, shortest first
-hashsmith crack -t md5 <hash> -M prince -w words.txt --prince-elems 3               # love+you+123 -> loveyou123
+hashsmith crack -t md5 <hash> -M prince -w words.txt --prince-elems 3 -n 1 -x 16   # love+you+123 -> loveyou123
 ```
 
 **Markov** ordering trains a first-order statistical model from a wordlist —
@@ -584,11 +584,17 @@ hashsmith crack -t md5 <hash> -M mask --mask '?u?l?l?l?d?d' --gpu
 
 GPU dictionaries use million-candidate streaming batches to amortize buffer and
 command-submission overhead, and CPU-generated rule candidates join those same
-batches. On the development M2, a 10M-candidate end-to-end MD5 comparison
-measured Hashsmith at 8.95 MH/s, John at 6.78 MH/s, and Hashcat at 4.88 MH/s;
-results include startup and therefore should not be treated as universal kernel
-speed rankings. Hashsmith's optimized CPU dictionary path can still win on
-short or I/O-bound jobs, so GPU remains an explicit choice.
+batches. Hashsmith's optimized CPU path can win outright on short or I/O-bound
+jobs, so GPU remains an explicit choice.
+
+> **The GPU speed figures below are stale and are being re-measured.** They were
+> taken before the NEON/AVX2 CPU cores landed, so every "GPU vs CPU" ratio in
+> this section is computed against a CPU baseline several times slower than the
+> one you get today — the ratios are inflated by roughly that factor, and a
+> previously published head-to-head against John and Hashcat did not survive
+> re-measurement either. Treat this whole section as unverified until it is
+> re-benchmarked on an idle machine. `hashsmith gpu` prints live figures for
+> your own hardware; trust those over anything written here.
 
 On a full a–z⁶ keyspace (309M candidates) the GPU finishes in **~3.9 s vs ~24 s on
 the CPU — ~6×**, for both brute and mask.
@@ -603,7 +609,10 @@ hashsmith crack -t md5  dump.txt -M mask --mask '?l?l?l?l?l' --gpu
 hashsmith crack -t ntlm dump.txt -M mask --mask '?l?l?l?l?l' --gpu   # NTLM too
 ```
 
-NTLM (MD4/UTF-16LE) has no CPU hardware acceleration, so its GPU gain is largest:
+NTLM (MD4/UTF-16LE) had no CPU vector core when these figures were taken, which
+is why its measured GPU gain was the largest here; it now has both NEON and AVX2
+MD4 cores (`md4neon_arm64.s`, `md4avx2_amd64.s`), so this particular ratio is the
+most stale of them all:
 a 50-hash NTLM dump ran at **~165 MH/s vs ~6 MH/s on the CPU — ~27×**. SHA-256 —
 even though the CPU has hardware SHA — still runs **~10× faster** on the GPU (~142
 vs ~14 MH/s). The gain grows with keyspace size; for tiny keyspaces the CPU
