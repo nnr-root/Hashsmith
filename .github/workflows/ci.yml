@@ -134,6 +134,22 @@ jobs:
         run: cd hashsmith/go_hashsmith && CGO_ENABLED=1 go build -tags opencl -o /dev/null ./cmd/hashsmith
       - name: Default build must stay pure Go (no cgo)
         run: cd hashsmith/go_hashsmith && CGO_ENABLED=0 go build -o /dev/null ./cmd/hashsmith
+      # The OpenCL kernels are the path for NVIDIA, AMD and Intel, but they have
+      # only ever been RUN against Apple's OpenCL — the one implementation the
+      # developers have. A construct that Apple accepts and another vendor
+      # rejects would surface as a kernel build failure on a user's card, which
+      # is the worst possible place to find out.
+      #
+      # clang compiles OpenCL C against the vendor-neutral spec, so this pins the
+      # kernels to OpenCL 1.2 without needing any GPU. It catches non-portable
+      # syntax and OpenCL 2.x-only builtins; it does NOT prove the kernels
+      # compute correct digests on other vendors, which still rests on the spec
+      # plus the Apple-side self-test.
+      - name: OpenCL kernels must be valid vendor-neutral OpenCL 1.2
+        run: |
+          cd hashsmith/go_hashsmith/internal/gpubackend
+          clang -x cl -cl-std=CL1.2 -Xclang -finclude-default-header \
+            -Werror -fsyntax-only opencl_kernels.cl
 
   bench:
     # Throughput measurement for the vector cores. These run on BOTH
