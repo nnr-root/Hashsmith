@@ -5,6 +5,14 @@ package main
 // the exact order it would be attempted. This lets Hashsmith preview a mask or
 // ruleset, estimate a keyspace, or feed its candidate stream into another tool.
 //
+// skip and limit apply the exact same bound the real attack path applies — for
+// brute/mask/markov/hybrid/combinator that's runLayout's own resumeFrom/limit
+// bound, and for dict it's dictWordBounds, the same word-index bound dictAttack
+// uses — so the candidates printed here are exactly the candidates a real run
+// (sliced the same way) would try. That equivalence is the whole point: --stdout
+// is how an operator previews a distributed slice before launching it, so it
+// must reuse the attack's own bound rather than a second implementation of it.
+//
 // Generation runs single-threaded so the output is ordered and unbuffered
 // interleaving cannot occur; candidate generation is rarely the bottleneck when
 // piping (the consumer usually is).
@@ -18,7 +26,7 @@ import (
 )
 
 func streamCandidates(mode, wordlist, wordlist2, charset string,
-	minLen, maxLen int, mc *maskConfig, rules *ruleEngine) error {
+	minLen, maxLen int, mc *maskConfig, rules *ruleEngine, skip, limit int64) error {
 
 	w := bufio.NewWriterSize(os.Stdout, 1<<20)
 	defer w.Flush()
@@ -27,7 +35,7 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 	emit := func(c string) bool {
 		w.WriteString(c)
 		w.WriteByte('\n')
-		return false // never stop — enumerate the whole keyspace
+		return false // never stop — enumerate the whole keyspace (or bounded slice)
 	}
 
 	switch strings.ToLower(mode) {
@@ -36,7 +44,7 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 			return errors.New("invalid -n/-x range")
 		}
 		_, err := runLayout(context.Background(), bruteLayout(charset, minLen, maxLen),
-			0, 0, 1, &dummy, nil, emit)
+			skip, limit, 1, &dummy, nil, emit)
 		return err
 	case "mask":
 		if mc == nil {
@@ -46,7 +54,7 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 		if err != nil {
 			return err
 		}
-		_, err = runLayout(context.Background(), layout, 0, 0, 1, &dummy, nil, emit)
+		_, err = runLayout(context.Background(), layout, skip, limit, 1, &dummy, nil, emit)
 		return err
 	case "markov":
 		if minLen < 1 || maxLen < minLen {
@@ -56,7 +64,7 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 		if err != nil {
 			return err
 		}
-		_, err = runLayout(context.Background(), markovLayout(model, minLen, maxLen), 0, 0, 1, &dummy, nil, emit)
+		_, err = runLayout(context.Background(), markovLayout(model, minLen, maxLen), skip, limit, 1, &dummy, nil, emit)
 		return err
 	case "hybrid":
 		if mc == nil {
@@ -70,7 +78,7 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 		if err != nil {
 			return err
 		}
-		_, err = runLayout(context.Background(), hybridLayout(words, sets, mc.maskFirst), 0, 0, 1, &dummy, nil, emit)
+		_, err = runLayout(context.Background(), hybridLayout(words, sets, mc.maskFirst), skip, limit, 1, &dummy, nil, emit)
 		return err
 	case "combinator":
 		if wordlist2 == "" {
@@ -84,7 +92,7 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 		if err != nil {
 			return err
 		}
-		_, err = runLayout(context.Background(), combinatorLayout(left, right), 0, 0, 1, &dummy, nil, emit)
+		_, err = runLayout(context.Background(), combinatorLayout(left, right), skip, limit, 1, &dummy, nil, emit)
 		return err
 	default: // dict
 		f, _, err := openWordlist(wordlist)
@@ -92,12 +100,22 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 			return err
 		}
 		defer f.Close()
+		lo, upper := dictWordBounds(skip, limit)
 		sc := bufio.NewScanner(f)
 		sc.Buffer(make([]byte, 1<<20), 1<<20)
+		var idx int64
 		for sc.Scan() {
 			word := strings.TrimSpace(sc.Text())
 			if word == "" {
 				continue
+			}
+			i := idx
+			idx++
+			if i < lo {
+				continue
+			}
+			if upper >= 0 && i >= upper {
+				break
 			}
 			emit(word)
 			if rules != nil {

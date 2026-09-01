@@ -6,7 +6,10 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -146,5 +149,92 @@ func TestNegativeSkipOrLimitRejected(t *testing.T) {
 	}
 	if err := runCrack([]string{"-M", "brute", "-C", "ab", "--limit", "-5", "--keyspace"}); err == nil {
 		t.Error("negative --limit should be rejected, got nil error")
+	}
+}
+
+// ── --stdout / dict-attack candidate equivalence ────────────────────────────
+//
+// --stdout exists so an operator can preview exactly what a distributed
+// --skip/--limit slice will try before launching it. That only holds if
+// --stdout applies the identical bound the real attack applies, so this
+// checks the equivalence directly rather than by proxy: for several
+// skip/limit combinations (with and without rules), the ordered candidate
+// list streamCandidates prints in dict mode must equal the ordered sequence
+// of candidates dictAttack actually attempts for the identical slice.
+
+// collectDictAttempts runs dictAttack for the [skip, skip+limit) word slice
+// with a verifier that never matches, so the whole slice is always attempted,
+// and records every candidate offered to verify, in order. workers is pinned
+// to 1 (as collect() above pins runLayout to 1 worker) so the sequence is
+// deterministic and directly comparable to streamCandidates' single-threaded
+// output.
+func collectDictAttempts(t *testing.T, wordlistPath string, rules *ruleEngine, skip, limit int64) []string {
+	t.Helper()
+	var got []string
+	var attempts int64
+	_, err := dictAttack(context.Background(), wordlistPath, skip, limit, 1, &attempts, rules, func(pw string) bool {
+		got = append(got, pw)
+		return false
+	})
+	if err != nil {
+		t.Fatalf("dictAttack(skip=%d,limit=%d): %v", skip, limit, err)
+	}
+	return got
+}
+
+func TestStdoutDictMatchesAttackSlicing(t *testing.T) {
+	dir := t.TempDir()
+	wordlistPath := filepath.Join(dir, "words.txt")
+	words := []string{"alpha", "beta", "gamma", "delta"}
+	if err := os.WriteFile(wordlistPath, []byte(strings.Join(words, "\n")+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	stacked := stackedEngine(t, []string{"c", "l"}, []string{"$1", "$2"})
+
+	cases := []struct {
+		name        string
+		skip, limit int64
+	}{
+		{"unbounded", 0, 0},
+		{"one word from start", 0, 1},
+		{"middle slice", 1, 2},
+		{"limit past end", 2, 100},
+		{"skip past end", 4, 1},
+		{"whole list explicit", 0, 4},
+		{"single last word", 3, 1},
+	}
+
+	engines := []struct {
+		name string
+		e    *ruleEngine
+	}{
+		{"no rules", nil},
+		{"stacked rules", stacked},
+	}
+
+	for _, eng := range engines {
+		for _, c := range cases {
+			t.Run(eng.name+"/"+c.name, func(t *testing.T) {
+				attempted := collectDictAttempts(t, wordlistPath, eng.e, c.skip, c.limit)
+
+				out := captureStdout(t, func() error {
+					return streamCandidates("dict", wordlistPath, "", "", 0, 0, nil, eng.e, c.skip, c.limit)
+				})
+				var printed []string
+				if out != "" {
+					printed = strings.Split(strings.TrimRight(out, "\n"), "\n")
+				}
+
+				if len(printed) != len(attempted) {
+					t.Fatalf("stdout printed %d candidates, attack attempted %d\nstdout=%v\nattack=%v",
+						len(printed), len(attempted), printed, attempted)
+				}
+				for i := range attempted {
+					if printed[i] != attempted[i] {
+						t.Errorf("candidate %d: stdout=%q attack=%q", i, printed[i], attempted[i])
+					}
+				}
+			})
+		}
 	}
 }

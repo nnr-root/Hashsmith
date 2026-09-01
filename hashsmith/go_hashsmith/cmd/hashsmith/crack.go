@@ -496,9 +496,9 @@ func runCrack(args []string) error {
 	w2 := fs.String("w2", "", "alias for --wordlist2")
 	stdoutMode := fs.Bool("stdout", false, "emit the candidate stream to stdout instead of cracking (no hash needed)")
 	useGPU := fs.Bool("gpu", false, "use GPU dictionary/brute/mask kernels when supported")
-	keyspaceOnly := fs.Bool("keyspace", false, "print the total candidate count to stdout and exit, without attacking")
-	skip := fs.Int64("skip", 0, "distributed cracking: start at candidate index N (whole-layout index, hashcat-style; word index in dict mode)")
-	limit := fs.Int64("limit", 0, "distributed cracking: try at most N candidates from --skip, then stop (0 = unbounded)")
+	keyspaceOnly := fs.Bool("keyspace", false, "print the total candidate count to stdout and exit, without attacking (dict mode: word count, not words×rules — matches --skip/--limit's unit)")
+	skip := fs.Int64("skip", 0, "distributed cracking: start at candidate index N (whole-layout index, hashcat-style; word index in dict mode, where a word's whole rule expansion stays in its slice)")
+	limit := fs.Int64("limit", 0, "distributed cracking: try at most N candidates from --skip, then stop (0 = unbounded; N words in dict mode, each with its full rule expansion)")
 	username := fs.Bool("username", false, "input lines are \"user:hash\" (split on the FIRST colon only); show the username with each result")
 	left := fs.Bool("left", false, "write still-uncracked targets, in their original input form, to -o or stdout — for a second pass")
 	outfileFormat := fs.String("outfile-format", "", "comma-separated -o field selection, hashcat-style: 1=hash, 2=plain, 3=hex_plain (default: unchanged from before this flag existed)")
@@ -556,7 +556,7 @@ func runCrack(args []string) error {
 		if err != nil {
 			return err
 		}
-		return streamCandidates(*mode, wl, wl2, *charset, *minLen, *maxLen, mc, engine)
+		return streamCandidates(*mode, wl, wl2, *charset, *minLen, *maxLen, mc, engine, *skip, *limit)
 	}
 
 	outFmt, err := parseOutfileFormat(*outfileFormat)
@@ -1516,6 +1516,23 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 // Batch size is dictBatchSize to amortise channel overhead without starving
 // workers. Context cancellation propagates through both the reader and workers.
 
+// dictWordBounds computes the [skip, upper) word-index bound that
+// --skip/--limit apply in dict mode: skip clamped to >= 0, and upper is the
+// exclusive end (-1 = unbounded) when a positive limit narrows it. Both the
+// real dictAttack reader and --stdout's dict candidate stream (streamCandidates)
+// must use exactly this bound — a second, hand-rolled copy of this arithmetic
+// is how a preview and the attack it previews drift apart.
+func dictWordBounds(skip, limit int64) (lo, upper int64) {
+	if skip < 0 {
+		skip = 0
+	}
+	upper = -1 // -1 = unbounded
+	if limit > 0 {
+		upper = satAdd(skip, limit)
+	}
+	return skip, upper
+}
+
 // dictAttack streams a wordlist through `workers` verifiers. skip and limit
 // (0 = unbounded) bound it to word indices [skip, skip+limit) of the whole
 // wordlist — --skip/--limit's dictionary-mode semantics — letting a dict
@@ -1531,13 +1548,7 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 	if label == defaultWordlistLabel {
 		clrYellow.Fprintf(os.Stderr, "No wordlist supplied — using %s\n", label)
 	}
-	if skip < 0 {
-		skip = 0
-	}
-	upper := int64(-1) // -1 = unbounded
-	if limit > 0 {
-		upper = satAdd(skip, limit)
-	}
+	skip, upper := dictWordBounds(skip, limit)
 
 	innerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
