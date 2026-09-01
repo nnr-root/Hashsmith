@@ -97,12 +97,17 @@ type crackCtx struct {
 	limit     int64         // --limit: candidate count to try, 0 = unbounded
 
 	// ── pipeline plumbing (--username / --left / --outfile-format) ──────────
-	username bool              // --username: input lines are "user:hash"
-	left     bool              // --left: report still-uncracked targets instead of/after results
-	outFmt   []int             // --outfile-format field list (nil = default per-path format)
-	outW     *outWriter        // shared, append-only -o writer for this run (nil when unused)
-	userOf   map[string]string // input hash -> username (only populated when username is set)
-	rawOf    map[string]string // input hash -> original input line, verbatim (for --left)
+	username bool                // --username: input lines are "user:hash"
+	left     bool                // --left: report still-uncracked targets instead of/after results
+	outFmt   []int               // --outfile-format field list (nil = default per-path format)
+	outW     *outWriter          // shared, append-only -o writer for this run (nil when unused)
+	userOf   map[string]string   // input hash -> username (only populated when username is set)
+	rawOf    map[string]string   // input hash -> original input line, verbatim (for --left)
+	usersOf  map[string][]string // input hash -> EVERY distinct username mapped to it, in first-seen
+	// order. userOf above keeps only the last-parsed username per hash — fine
+	// for display, but --single needs every account that could own a shared
+	// hash (two accounts with the same weak password on an unsalted digest),
+	// not just whichever line happened to be parsed last. See usernamesFor.
 
 	foundMu sync.Mutex
 	found   map[string]bool // input hash -> cracked this run (potfile hit or freshly found)
@@ -216,6 +221,19 @@ func (cc *crackCtx) usernameFor(hash string) string {
 		return ""
 	}
 	return cc.userOf[hash]
+}
+
+// usernamesFor returns EVERY distinct username mapped to hash, in first-seen
+// order — unlike usernameFor, which returns only the last one parsed (fine
+// for a display label, wrong for choosing single-crack candidates). Two
+// accounts sharing one hash — the same weak password on an unsalted digest —
+// means either login could be the real one, so --single seeds from all of
+// them. Empty when --username was never set or hash carries no username.
+func (cc *crackCtx) usernamesFor(hash string) []string {
+	if cc == nil || cc.usersOf == nil {
+		return nil
+	}
+	return cc.usersOf[hash]
 }
 
 // rawFor returns the original, verbatim input line for hash (used by
@@ -484,6 +502,7 @@ func runCrack(args []string) error {
 	left := fs.Bool("left", false, "write still-uncracked targets, in their original input form, to -o or stdout — for a second pass")
 	outfileFormat := fs.String("outfile-format", "", "comma-separated -o field selection, hashcat-style: 1=hash, 2=plain, 3=hex_plain (default: unchanged from before this flag existed)")
 	loopback := fs.Bool("loopback", false, "after the main attack, feed newly cracked plaintexts (plus, if the potfile is enabled, plaintexts already on record there) back as dict-mode candidates against any still-uncracked targets, with --rules/-r applied; repeats until a pass finds nothing new")
+	single := fs.Bool("single", false, "single-crack mode: before the main attack, try candidates derived from each account's own username (via --username), tried only against that account's hash — with --rules/-r applied; requires --username")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -498,6 +517,17 @@ func runCrack(args []string) error {
 	}
 	if *limit < 0 {
 		return fmt.Errorf("--limit must not be negative (got %d)", *limit)
+	}
+
+	// --single derives its candidates from each account's login name — with
+	// no --username there are no usernames to derive them from. Refuse
+	// outright rather than silently running zero single-crack passes and
+	// reporting "not found": that failure mode (a flag that looks honored but
+	// quietly does nothing) is exactly what this project keeps finding bugs
+	// in, so make the missing prerequisite loud instead.
+	if *single && !*username {
+		return fmt.Errorf("--single requires --username (its candidates come from each " +
+			"account's login name, so there must be a username to derive them from)")
 	}
 
 	// Resolve wordlist from either -w or its --wordlist alias. An empty value
@@ -578,10 +608,19 @@ func runCrack(args []string) error {
 	cc.outFmt = outFmt
 	cc.userOf = map[string]string{}
 	cc.rawOf = map[string]string{}
+	cc.usersOf = map[string][]string{}
+	seenUser := map[string]map[string]bool{} // hash -> username -> already recorded
 	for _, l := range lines {
 		cc.rawOf[l.hash] = l.raw
 		if l.username != "" {
 			cc.userOf[l.hash] = l.username
+			if seenUser[l.hash] == nil {
+				seenUser[l.hash] = map[string]bool{}
+			}
+			if !seenUser[l.hash][l.username] {
+				seenUser[l.hash][l.username] = true
+				cc.usersOf[l.hash] = append(cc.usersOf[l.hash], l.username)
+			}
 		}
 	}
 
@@ -605,6 +644,21 @@ func runCrack(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	// --single runs BEFORE the main attack: it is cheap (a handful of
+	// per-account candidates) and high-yield (login-derived passwords are the
+	// common case), so trying it first means the main attack never burns its
+	// full keyspace re-discovering what single-crack already found. Only
+	// targets it doesn't crack are handed to the main attack below — see
+	// runSingleCrack's doc comment for why per-target isolation is structural
+	// there, not a filter applied after the fact.
+	if *single {
+		if err := runSingleCrack(lines, *typ, w, *salt, *saltMode, *outFile, *copyResult, engine, cc); err != nil {
+			return err
+		}
+		targets = remainingTargets(lines, cc)
+	}
+
 	runErr := crackTargets(targets, *typ, *mode, wl, *charset,
 		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, engine, mc, cc)
 	if runErr != nil {
@@ -615,12 +669,15 @@ func runCrack(args []string) error {
 		if err := runLoopback(lines, *typ, w, *salt, *saltMode, *outFile, *copyResult, engine, cc); err != nil {
 			return err
 		}
+	}
+	if *single || *loopback {
 		// crackTargets/runBatch only ever SET exitCode = 1 (once, on their own
-		// call's uncracked count) — never clear it back to 0 — so if the main
-		// attack left targets uncracked and loopback then finished the job,
-		// exitCode would still read "failure" without this. Recompute it from
-		// the final state instead of trusting whichever call happened to run
-		// last.
+		// call's uncracked count) — never clear it back to 0. --single's own
+		// per-target crackTargets calls (in runSingleCrack) can set it for a
+		// target the MAIN attack then goes on to crack, and the same is true
+		// of the main attack relative to --loopback — so whichever ran first
+		// can leave a stale failure behind. Recompute from the final state
+		// instead of trusting whichever call happened to run last.
 		if len(remainingTargets(lines, cc)) == 0 {
 			exitCode = 0
 		} else {
