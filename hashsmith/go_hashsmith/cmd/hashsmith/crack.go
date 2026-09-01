@@ -160,6 +160,18 @@ func runCrack(args []string) error {
 		return err
 	}
 
+	// A negative --skip/--limit has no meaning (both are counts/indices into a
+	// non-negative keyspace); *runLayout already clamps a negative resumeFrom
+	// to 0 and treats a non-positive limit as unbounded, so a typo'd negative
+	// value would silently mean "start from the beginning" / "do everything" —
+	// the opposite of a deliberate distributed slice. Reject it outright.
+	if *skip < 0 {
+		return fmt.Errorf("--skip must not be negative (got %d)", *skip)
+	}
+	if *limit < 0 {
+		return fmt.Errorf("--limit must not be negative (got %d)", *limit)
+	}
+
 	// Resolve wordlist from either -w or its --wordlist alias. An empty value
 	// falls through to the built-in common.txt inside doCrack/dictAttack.
 	wl := *wordlist
@@ -307,51 +319,12 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		return false, err
 	}
 
-	// ── pre-count for progress bar ──────────────────────────────────────────
-	var total int64 = -1
-	m := strings.ToLower(mode)
-	if m == "dict" {
-		// An empty wordlist path counts the embedded common.txt.
-		if n, err := countWordlistLines(wordlist); err == nil {
-			total = n
-			if rules != nil {
-				// Each word generates up to rules.count() extra candidates.
-				total = satMul(total, int64(1+rules.count()))
-			}
-		}
-	} else if m == "brute" || m == "markov" {
-		total = calcBruteTotal(charset, minLen, maxLen)
-		if exact, overflowed := calcBruteTotalExact(charset, minLen, maxLen); overflowed {
-			warnKeyspaceNotExhaustive(exact)
-		}
-	} else if m == "mask" && mc != nil {
-		total = calcMaskTotal(mc)
-		if exact, overflowed := calcMaskTotalExact(mc); overflowed {
-			warnKeyspaceNotExhaustive(exact)
-		}
-	} else if m == "hybrid" && mc != nil {
-		if n, err := countWordlistLines(wordlist); err == nil {
-			if sets, e := parseMask(mc); e == nil {
-				total = satMul(n, maskKeyspace(sets))
-			}
-		}
-	} else if m == "combinator" && cc != nil && cc.wordlist2 != "" {
-		if a, e1 := countWordlistLines(wordlist); e1 == nil {
-			if b, e2 := countWordlistLines(cc.wordlist2); e2 == nil {
-				total = satMul(a, b)
-			}
-		}
-	}
-
-	bar := newCrackBar(total)
-
-	// progress ticker — updates bar from atomic counter every 100 ms
-	tickCtx, tickCancel := context.WithCancel(context.Background())
-	go progressTicker(tickCtx, bar, &atomicAttempts)
-
-	// ── attack ──────────────────────────────────────────────────────────────
+	// ── attack setup: session resume + --skip/--limit ───────────────────────
 	// A named session installs a SIGINT handler so Ctrl-C checkpoints progress
 	// and exits cleanly; without one the run uses a plain background context.
+	// This is resolved before the pre-count below so the progress bar can be
+	// sized to what --limit will actually bound, not the full keyspace.
+	m := strings.ToLower(mode)
 	runCtx := context.Background()
 	var sess *sessionState
 	var resumeFrom int64
@@ -403,6 +376,70 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			resumeFrom = cc.skip
 		}
 	}
+
+	// ── pre-count for progress bar ──────────────────────────────────────────
+	// boundWordIdx narrows a raw count n (counted in the same index space as
+	// resumeFrom/limit — word indices for dict, candidate indices everywhere
+	// else) to what this run will actually attempt: min(n, resumeFrom+limit) -
+	// resumeFrom, clamped to [0, n]. A no-op when unbounded (limit == 0) or n is
+	// the "unknown / not countable" sentinel (-1), so a run without --limit
+	// shows exactly the total it always has.
+	boundWordIdx := func(n int64) int64 {
+		if n < 0 || limit <= 0 {
+			return n
+		}
+		bound := n
+		if b := satAdd(resumeFrom, limit); b < bound {
+			bound = b
+		}
+		remaining := bound - resumeFrom
+		if remaining < 0 {
+			remaining = 0
+		}
+		return remaining
+	}
+
+	var total int64 = -1
+	if m == "dict" {
+		// An empty wordlist path counts the embedded common.txt. Bound the raw
+		// word count BEFORE the rules multiplier: --limit's dict-mode semantics
+		// count base words, not rule-mangled variants.
+		if n, err := countWordlistLines(wordlist); err == nil {
+			total = boundWordIdx(n)
+			if rules != nil {
+				// Each word generates up to rules.count() extra candidates.
+				total = satMul(total, int64(1+rules.count()))
+			}
+		}
+	} else if m == "brute" || m == "markov" {
+		total = boundWordIdx(calcBruteTotal(charset, minLen, maxLen))
+		if exact, overflowed := calcBruteTotalExact(charset, minLen, maxLen); overflowed {
+			warnKeyspaceNotExhaustive(exact)
+		}
+	} else if m == "mask" && mc != nil {
+		total = boundWordIdx(calcMaskTotal(mc))
+		if exact, overflowed := calcMaskTotalExact(mc); overflowed {
+			warnKeyspaceNotExhaustive(exact)
+		}
+	} else if m == "hybrid" && mc != nil {
+		if n, err := countWordlistLines(wordlist); err == nil {
+			if sets, e := parseMask(mc); e == nil {
+				total = boundWordIdx(satMul(n, maskKeyspace(sets)))
+			}
+		}
+	} else if m == "combinator" && cc != nil && cc.wordlist2 != "" {
+		if a, e1 := countWordlistLines(wordlist); e1 == nil {
+			if b, e2 := countWordlistLines(cc.wordlist2); e2 == nil {
+				total = boundWordIdx(satMul(a, b))
+			}
+		}
+	}
+
+	bar := newCrackBar(total)
+
+	// progress ticker — updates bar from atomic counter every 100 ms
+	tickCtx, tickCancel := context.WithCancel(context.Background())
+	go progressTicker(tickCtx, bar, &atomicAttempts)
 
 	verifyFn := func(c string) bool {
 		ok, _ := verifyCandidate(c, targetHash, typ, salt, saltMode)
@@ -575,15 +612,34 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	if found && cc != nil {
 		cc.pot.add(targetHash, result.password)
 	}
-	// Session bookkeeping: keep (and re-save) the checkpoint on interrupt so the
-	// run can be resumed; otherwise the work is done — discard the session file.
+	// Session bookkeeping. Three outcomes:
+	//   - found: the job is done, discard the session file.
+	//   - interrupted (Ctrl-C): keep the checkpoint so the run can be resumed.
+	//   - otherwise, not found: this is only "the whole keyspace was searched
+	//     and it wasn't there" when sess.Checkpoint reached sess.Total (the
+	//     true, unbounded total — see runSessionLayout). A --limit-bounded run
+	//     that exhausts its slice stops with Checkpoint < Total: that is
+	//     "exhausted my slice", not "exhausted the keyspace", and reporting
+	//     "Not found" while deleting the checkpoint would let an operator
+	//     mistake a slice for the whole keyspace having been covered — the
+	//     same failure the tiling property exists to prevent, by a different
+	//     route. So keep the session in that case too.
 	if sess != nil {
-		if interrupted && !found {
+		switch {
+		case found:
+			sess.remove()
+		case interrupted:
 			_ = sess.save()
 			clrYellow.Fprintf(os.Stderr,
 				"Interrupted — session %q saved at index %d/%d (resume: hashsmith crack --restore %s ...)\n",
 				cc.sessName, sess.Checkpoint, sess.Total, cc.sessName)
-		} else {
+		case sess.Checkpoint < sess.Total:
+			_ = sess.save()
+			clrYellow.Fprintf(os.Stderr,
+				"Slice exhausted (not the whole keyspace) — session %q saved at index %d/%d "+
+					"(resume: hashsmith crack --restore %s ...)\n",
+				cc.sessName, sess.Checkpoint, sess.Total, cc.sessName)
+		default:
 			sess.remove()
 		}
 	}
@@ -975,6 +1031,28 @@ func warnKeyspaceNotExhaustive(exact *big.Int) {
 // script into under-covering the space when it divides the printed value to
 // build slices. So this refuses instead: an error here (not a printed number)
 // is what tells such a script its divide-and-slice plan cannot work.
+// exactWordlistCount wraps countWordlistLines for --keyspace, rejecting its
+// -1 "not countable" sentinel (returned for pipes, stdin, /dev/fd/N — see
+// wordlist.go) instead of letting it flow into the arithmetic as a bogus
+// count. Printing a negative or nonsensical number is the same failure mode
+// as printing a saturated one: a script divides it to build --skip/--limit
+// slices, so an unusable count must be a refusal, not a value.
+func exactWordlistCount(path string) (int64, error) {
+	n, err := countWordlistLines(path)
+	if err != nil {
+		return 0, err
+	}
+	if n < 0 {
+		label := path
+		if strings.TrimSpace(label) == "" {
+			label = defaultWordlistLabel
+		}
+		return 0, fmt.Errorf("cannot compute an exact keyspace: %q is not seekable "+
+			"(a pipe, stdin, or /dev/fd/N) so its word count cannot be known in advance", label)
+	}
+	return n, nil
+}
+
 func printKeyspace(mode, wordlist, wordlist2, charset string, minLen, maxLen int, mc *maskConfig) error {
 	m := strings.ToLower(mode)
 	var exact *big.Int
@@ -993,7 +1071,7 @@ func printKeyspace(mode, wordlist, wordlist2, charset string, minLen, maxLen int
 		if mc == nil {
 			return errors.New("hybrid mode requires --mask <mask> and -w <wordlist>")
 		}
-		n, err := countWordlistLines(wordlist)
+		n, err := exactWordlistCount(wordlist)
 		if err != nil {
 			return err
 		}
@@ -1007,17 +1085,17 @@ func printKeyspace(mode, wordlist, wordlist2, charset string, minLen, maxLen int
 		if wordlist2 == "" {
 			return errors.New("combinator mode requires -w <left list> and --wordlist2 <right list>")
 		}
-		a, err := countWordlistLines(wordlist)
+		a, err := exactWordlistCount(wordlist)
 		if err != nil {
 			return err
 		}
-		b, err := countWordlistLines(wordlist2)
+		b, err := exactWordlistCount(wordlist2)
 		if err != nil {
 			return err
 		}
 		exact = new(big.Int).Mul(big.NewInt(a), big.NewInt(b))
 	case "dict":
-		n, err := countWordlistLines(wordlist)
+		n, err := exactWordlistCount(wordlist)
 		if err != nil {
 			return err
 		}

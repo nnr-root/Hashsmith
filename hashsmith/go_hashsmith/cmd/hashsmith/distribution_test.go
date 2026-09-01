@@ -84,3 +84,67 @@ func TestSkipBeyondKeyspace(t *testing.T) {
 		t.Errorf("tried %d candidates past the end of the keyspace, want 0", n)
 	}
 }
+
+// A --limit-bounded run that exhausts its SLICE (not the whole keyspace) must
+// SAVE its session checkpoint, not discard it. Losing the checkpoint would let
+// an operator mistake a slice's "Not found" for the whole keyspace having
+// been searched — the same failure the tiling property exists to prevent,
+// arriving by a different route (session bookkeeping instead of the runner).
+func TestSessionSavedWhenLimitBoundedSliceExhausts(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	l := bruteLayout("abc", 1, 3) // total 39
+	var targetIdx int64 = -1
+	for i := int64(0); i < l.total; i++ {
+		if l.candidate(i) == "cab" {
+			targetIdx = i
+			break
+		}
+	}
+	if targetIdx < 0 {
+		t.Fatal("test setup: \"cab\" not found in the brute layout")
+	}
+
+	const sessName = "distsess-limit-test"
+	cc, err := newCrackCtx("", true, sessName, false, "", false, 0, targetIdx) // --limit targetIdx, slice = [0, targetIdx)
+	if err != nil {
+		t.Fatalf("newCrackCtx: %v", err)
+	}
+
+	found, err := doCrack(md5hex("cab"), "md5", "brute", "", "abc", 1, 3, 2, "", "prefix", "", false, nil, nil, cc)
+	if err != nil {
+		t.Fatalf("doCrack: %v", err)
+	}
+	if found {
+		t.Fatalf("target sits at index %d, outside the bounded [0,%d) slice; must not be found", targetIdx, targetIdx)
+	}
+
+	s, err := loadSession(sessName)
+	if err != nil {
+		t.Fatalf("loadSession: %v", err)
+	}
+	if s == nil {
+		t.Fatal("bounded slice exhausted short of the true keyspace total, but no session file " +
+			"was saved — a --limit 'Not found' must not be silently indistinguishable from " +
+			"'the whole keyspace was searched'")
+	}
+	defer s.remove()
+	if s.Total != l.total {
+		t.Errorf("session Total = %d, want %d (the true, unbounded keyspace)", s.Total, l.total)
+	}
+	if s.Checkpoint != targetIdx {
+		t.Errorf("session Checkpoint = %d, want %d (where the --limit bound stopped it)", s.Checkpoint, targetIdx)
+	}
+}
+
+// A negative --skip or --limit has no sensible meaning and, left uncaught,
+// silently coerces to "unbounded" — the opposite of a deliberately narrowed
+// distributed slice from a typo'd flag. Both must be rejected outright.
+func TestNegativeSkipOrLimitRejected(t *testing.T) {
+	if err := runCrack([]string{"-M", "brute", "-C", "ab", "--skip", "-1", "--keyspace"}); err == nil {
+		t.Error("negative --skip should be rejected, got nil error")
+	}
+	if err := runCrack([]string{"-M", "brute", "-C", "ab", "--limit", "-5", "--keyspace"}); err == nil {
+		t.Error("negative --limit should be rejected, got nil error")
+	}
+}
