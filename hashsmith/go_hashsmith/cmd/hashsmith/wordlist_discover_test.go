@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // useCandidates points discovery at an explicit list for the duration of a
@@ -105,30 +106,195 @@ func TestWordlistResolutionOrderIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestDefaultCandidateListMatchesDocumentedOrder pins the real, shipped list.
-// The list itself is the interface operators script against ("put it in
+// TestDefaultCandidateListIsTheDocumentedCrossProduct pins the real, shipped
+// list. The list itself is the interface operators script against ("put it in
 // /usr/share/wordlists and hashsmith finds it"), so a silent edit to it is a
 // change in behaviour that a test should have to acknowledge.
-func TestDefaultCandidateListMatchesDocumentedOrder(t *testing.T) {
-	want := []string{
-		"/usr/share/wordlists/rockyou.txt",
-		"/usr/share/wordlists/rockyou.txt.gz",
-		"/usr/share/seclists/Passwords/Leaked-Databases/rockyou.txt",
-		"/usr/share/wordlists/seclists/Passwords/Leaked-Databases/rockyou.txt",
-		"/opt/homebrew/share/wordlists/rockyou.txt",
-		"/usr/local/share/wordlists/rockyou.txt",
-		"~/wordlists/rockyou.txt",
-		"~/.local/share/wordlists/rockyou.txt",
-		"./rockyou.txt",
+//
+// It is asserted as the STRUCTURE (dirs x filenames, directory-major) rather
+// than as fifty-six literal strings, because that is the property that has to
+// hold: every directory must be tried for both filenames, and adding a
+// directory must not silently skip the gzip variant.
+func TestDefaultCandidateListIsTheDocumentedCrossProduct(t *testing.T) {
+	if got := len(wordlistCandidatePaths); got != len(wordlistCandidateDirs)*len(wordlistCandidateFilenames) {
+		t.Fatalf("candidate list has %d entries; want %d dirs x %d filenames = %d",
+			got, len(wordlistCandidateDirs), len(wordlistCandidateFilenames),
+			len(wordlistCandidateDirs)*len(wordlistCandidateFilenames))
 	}
-	if len(wordlistCandidatePaths) != len(want) {
-		t.Fatalf("candidate list has %d entries, want %d: %q",
-			len(wordlistCandidatePaths), len(want), wordlistCandidatePaths)
+	if len(wordlistCandidateFilenames) != 2 ||
+		wordlistCandidateFilenames[0] != "rockyou.txt" ||
+		wordlistCandidateFilenames[1] != "rockyou.txt.gz" {
+		t.Fatalf("filenames = %q, want plain text before gzip", wordlistCandidateFilenames)
 	}
-	for i := range want {
-		if wordlistCandidatePaths[i] != want[i] {
-			t.Errorf("candidate %d = %q, want %q", i, wordlistCandidatePaths[i], want[i])
+	// Directory-major: both filenames in one directory before the next.
+	i := 0
+	for _, dir := range wordlistCandidateDirs {
+		for _, name := range wordlistCandidateFilenames {
+			want := joinWordlistCandidate(dir, name)
+			if wordlistCandidatePaths[i] != want {
+				t.Fatalf("candidate %d = %q, want %q (the cross product must be "+
+					"directory-major: the ranking that matters is which install is "+
+					"more trustworthy, not whether it is gzipped)",
+					i, wordlistCandidatePaths[i], want)
+			}
+			i++
 		}
+	}
+	// No duplicates: a repeated directory is a merge accident and would make
+	// the listing lie about how many places were actually checked.
+	seen := map[string]int{}
+	for i, p := range wordlistCandidatePaths {
+		if prev, dup := seen[p]; dup {
+			t.Errorf("candidate %d duplicates candidate %d: %q", i, prev, p)
+		}
+		seen[p] = i
+	}
+	// The stat budget: this list is walked once per run, on the attack path.
+	if len(wordlistCandidatePaths) > 80 {
+		t.Errorf("%d candidates is beyond the \"a few dozen stats\" budget this list "+
+			"is allowed to cost", len(wordlistCandidatePaths))
+	}
+}
+
+// TestCandidateDirectoriesCoverTheKnownInstallLocations: the locations an
+// operator is entitled to expect hashsmith to find on its own.
+func TestCandidateDirectoriesCoverTheKnownInstallLocations(t *testing.T) {
+	must := []string{
+		"/usr/share/wordlists",                                     // Kali, Parrot, BlackArch
+		"/usr/share/seclists/Passwords/Leaked-Databases",           // apt install seclists
+		"/usr/share/SecLists/Passwords/Leaked-Databases",           // capitalisation varies
+		"/usr/share/wordlists/seclists/Passwords/Leaked-Databases", // Kali symlink layout
+		"/opt/SecLists/Passwords/Leaked-Databases",
+		"~/SecLists/Passwords/Leaked-Databases",
+		"/opt/wordlists",
+		"/data/wordlists",
+		"/usr/share/dict",
+		"/usr/share/john",
+		"/usr/share/hashcat",
+		"/opt/homebrew/share/wordlists", // macOS brew
+		"/opt/homebrew/share/seclists/Passwords/Leaked-Databases",
+		"/usr/local/share/wordlists",
+		"/usr/local/share/seclists/Passwords/Leaked-Databases",
+		"~/wordlists",
+		"~/.local/share/wordlists",
+		"~/Downloads",
+		"~/Desktop",
+		".",
+		`C:\wordlists`,
+		`C:\Tools\wordlists`,
+		"/mnt/c/wordlists", // WSL reaching the Windows side
+		"/mnt/c/Tools/wordlists",
+	}
+	have := map[string]bool{}
+	for _, d := range wordlistCandidateDirs {
+		have[d] = true
+	}
+	for _, d := range must {
+		if !have[d] {
+			t.Errorf("candidate directories no longer cover %q", d)
+		}
+	}
+	// No globbing, ever: a glob over /mnt/c/Users/*/Downloads would make the
+	// order non-deterministic (which user's copy wins depends on directory
+	// order) and would reach into other accounts' download folders.
+	for _, d := range wordlistCandidateDirs {
+		if strings.ContainsAny(d, "*?[") {
+			t.Errorf("candidate directory %q contains a glob; the list must be a "+
+				"deterministic stat list", d)
+		}
+	}
+}
+
+// TestCandidateDirectoryOrderPutsSystemInstallsFirst is the ordering contract,
+// and it is a security property rather than a cosmetic one. ~/Downloads and
+// the working directory are where a TRUNCATED or unofficial copy lands — the
+// half-finished browser download, the 5 MiB "rockyou" from a random gist. If
+// one of those outranked /usr/share/wordlists, a machine with both would
+// quietly attack the small one and report "not found" for a keyspace it never
+// searched.
+func TestCandidateDirectoryOrderPutsSystemInstallsFirst(t *testing.T) {
+	idx := map[string]int{}
+	for i, d := range wordlistCandidateDirs {
+		idx[d] = i
+	}
+	system := []string{
+		"/usr/share/wordlists",
+		"/usr/share/seclists/Passwords/Leaked-Databases",
+		"/opt/SecLists/Passwords/Leaked-Databases",
+		"/opt/homebrew/share/wordlists",
+		"/usr/local/share/wordlists",
+		"/opt/wordlists",
+		"/data/wordlists",
+	}
+	user := []string{"~/wordlists", "~/.local/share/wordlists", "~/SecLists/Passwords/Leaked-Databases"}
+	last := []string{"~/Downloads", "~/Desktop", "."}
+
+	for _, s := range system {
+		for _, u := range user {
+			if idx[s] > idx[u] {
+				t.Errorf("%s (system-wide, curated) must be checked before %s (user directory)", s, u)
+			}
+		}
+	}
+	for _, earlier := range append(append([]string{}, system...), user...) {
+		for _, l := range last {
+			if idx[earlier] > idx[l] {
+				t.Errorf("%s must be checked before %s — %s is where a truncated or "+
+					"unofficial copy lands, so it must lose to every deliberate install",
+					earlier, l, l)
+			}
+		}
+	}
+	// And the three "last" entries really are last in the whole list.
+	for _, l := range last {
+		if idx[l] < len(wordlistCandidateDirs)-len(last) {
+			t.Errorf("%s is at position %d of %d; the download/desktop/cwd entries must "+
+				"be the final ones", l, idx[l], len(wordlistCandidateDirs))
+		}
+	}
+	// The one pre-existing ordering promise: Homebrew's prefix before
+	// /usr/local, as the shipped list has always had it.
+	if idx["/opt/homebrew/share/wordlists"] > idx["/usr/local/share/wordlists"] {
+		t.Error("/opt/homebrew/share/wordlists must stay ahead of /usr/local/share/wordlists")
+	}
+}
+
+// TestJoinWordlistCandidateUsesThePlatformShape: filepath.Join would turn
+// `C:\wordlists` into `C:\wordlists/rockyou.txt` on Unix and Clean "." down to
+// a bare filename, losing the "./" that tells a reader of `hashsmith
+// wordlists` the entry means the working directory.
+func TestJoinWordlistCandidateUsesThePlatformShape(t *testing.T) {
+	cases := map[[2]string]string{
+		{"/usr/share/wordlists", "rockyou.txt"}: "/usr/share/wordlists/rockyou.txt",
+		{".", "rockyou.txt"}:                    "./rockyou.txt",
+		{"~/Downloads", "rockyou.txt.gz"}:       "~/Downloads/rockyou.txt.gz",
+		{`C:\wordlists`, "rockyou.txt"}:         `C:\wordlists\rockyou.txt`,
+		{`C:\Tools\wordlists`, "rockyou.txt"}:   `C:\Tools\wordlists\rockyou.txt`,
+		{"/mnt/c/wordlists", "rockyou.txt"}:     "/mnt/c/wordlists/rockyou.txt",
+		{"/opt/wordlists/", "rockyou.txt"}:      "/opt/wordlists/rockyou.txt",
+	}
+	for in, want := range cases {
+		if got := joinWordlistCandidate(in[0], in[1]); got != want {
+			t.Errorf("joinWordlistCandidate(%q, %q) = %q, want %q", in[0], in[1], got, want)
+		}
+	}
+}
+
+// TestCandidateScanStaysCheap: the list is walked once per run, on the attack
+// path, so widening it must not turn startup into a measurable cost. This is a
+// floor-level assertion (it would catch a candidate list that started doing
+// I/O per entry, or a glob), not a benchmark.
+func TestCandidateScanStaysCheap(t *testing.T) {
+	t.Setenv(wordlistEnvVar, "")
+	start := time.Now()
+	const iterations = 50
+	for i := 0; i < iterations; i++ {
+		wordlistCandidateStatus()
+	}
+	per := time.Since(start) / iterations
+	if per > 50*time.Millisecond {
+		t.Errorf("one full candidate scan took %s; %d stat calls should be well under a "+
+			"millisecond and this list is resolved once per run", per, len(wordlistCandidatePaths))
 	}
 }
 
