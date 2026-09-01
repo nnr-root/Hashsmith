@@ -531,11 +531,19 @@ func opSwapBack(r []rune) ([]rune, bool) {
 
 // ── engine ────────────────────────────────────────────────────────────────────
 
-// ruleEngine expands a base word into mangled candidates. It is either the
-// built-in curated rule set (builtin) or a compiled list of file rules.
+// ruleEngine expands a base word into mangled candidates. It is one of:
+//
+//   - the built-in curated rule set (builtin)
+//   - a single compiled rule file (programs) — the original, unstacked shape;
+//     expand/count for this shape are untouched from before rule stacking
+//     existed, so a single `--rules FILE` run is byte-identical to before.
+//   - a stack of 2+ rule files (layers), one slice of programs per file. See
+//     expandStacked for the cross-product semantics.
 type ruleEngine struct {
-	programs []ruleProgram
-	builtin  bool
+	programs     []ruleProgram   // set when built from exactly one rule file
+	layers       [][]ruleProgram // set when built from 2+ stacked rule files
+	stackedCount int             // precomputed, capped product of len(layers[i]); only meaningful when layers != nil
+	builtin      bool
 }
 
 func builtinRuleEngine() *ruleEngine { return &ruleEngine{builtin: true} }
@@ -546,6 +554,9 @@ func (e *ruleEngine) count() int {
 	}
 	if e.builtin {
 		return NumManglingRules
+	}
+	if e.layers != nil {
+		return e.stackedCount
 	}
 	return len(e.programs)
 }
@@ -558,6 +569,9 @@ func (e *ruleEngine) expand(word string) []mangledWord {
 	}
 	if e.builtin {
 		return expandRules(word)
+	}
+	if e.layers != nil {
+		return e.expandStacked(word)
 	}
 	seen := make(map[string]struct{}, len(e.programs)+1)
 	seen[word] = struct{}{}
@@ -576,16 +590,75 @@ func (e *ruleEngine) expand(word string) []mangledWord {
 	return out
 }
 
-// loadRuleFile compiles a rule file, skipping blank lines and '#' comments.
-// Invalid rules are counted and skipped; an error is returned only when no
-// valid rule remains.
-func loadRuleFile(path string) (*ruleEngine, int, error) {
+// expandStacked applies a stack of rule files as their cross product: layer 0
+// (the first --rules file) is the outer loop, the last layer varies fastest,
+// matching hashcat-style "-r a.rule -r b.rule" stacking. Each candidate is
+// produced by threading word through one program from each layer in order —
+// p_last.apply(...p1.apply(p0.apply(word))...) — so a rejection at any layer
+// short-circuits: no program from a later layer ever runs for that branch,
+// and no candidate is produced for it. This is exactly what compiling the
+// single line p0.src+p1.src+...+p_last.src and applying it once would do,
+// EXCEPT that this path round-trips through a Go string between layers while
+// a concatenated line stays in []rune throughout; the two differ only if an
+// intermediate candidate is not valid UTF-8 (see rules_stacking_test.go).
+//
+// The ruleLabel of a stacked candidate is the concatenation of the source
+// rules that produced it (p0.src+p1.src+...), which — per the oracle above —
+// is itself a valid, single-line rule reproducing the same candidate from the
+// original word.
+//
+// Dedup mirrors the single-file case: the base word itself and any duplicate
+// candidate (by string equality) are skipped via a per-word `seen` set.
+func (e *ruleEngine) expandStacked(word string) []mangledWord {
+	seen := make(map[string]struct{}, e.stackedCount+1)
+	seen[word] = struct{}{}
+	out := make([]mangledWord, 0, e.stackedCount)
+	var rec func(layer int, cur, label string)
+	rec = func(layer int, cur, label string) {
+		if layer == len(e.layers) {
+			if _, dup := seen[cur]; dup {
+				return
+			}
+			seen[cur] = struct{}{}
+			out = append(out, mangledWord{password: cur, ruleLabel: label})
+			return
+		}
+		for _, p := range e.layers[layer] {
+			cand, ok := p.apply(cur)
+			if !ok {
+				continue // rejection short-circuits: later layers never run
+			}
+			rec(layer+1, cand, label+p.src)
+		}
+	}
+	rec(0, word, "")
+	return out
+}
+
+// maxStackedCandidates bounds the per-word candidate count of a stacked rule
+// engine — the product of each layer's rule count, checked BEFORE any word is
+// ever expanded. A stacked product can be enormous (three 1000-rule files is
+// 10^9 per word): silently truncating that down to the cap would mean real
+// candidates are never tried while the tool reports "not found", which is the
+// worst possible failure mode for a cracking tool. So instead loadRuleFiles
+// refuses to build the engine at all, naming the files and the product. The
+// cap itself (1,000,000) comfortably covers realistic composable stacks —
+// e.g. best64-sized (64) x a digit-suffix file (64) is 4,096, and even a
+// 1,000-line file x a 1,000-line file lands exactly at the cap — while still
+// catching the pathological multi-file products the design calls out.
+const maxStackedCandidates = 1_000_000
+
+// compileRuleFileLines reads and compiles every rule line in path, skipping
+// blank lines and '#' comments. Invalid rules are counted (bad) and skipped,
+// never causing a hard error by themselves — loadRuleFile and loadRuleFiles
+// decide what an all-invalid file means for their caller.
+func compileRuleFileLines(path string) ([]ruleProgram, int, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer f.Close()
-	e := &ruleEngine{}
+	var programs []ruleProgram
 	bad := 0
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
@@ -599,13 +672,63 @@ func loadRuleFile(path string) (*ruleEngine, int, error) {
 			bad++
 			continue
 		}
-		e.programs = append(e.programs, p)
+		programs = append(programs, p)
 	}
 	if err := sc.Err(); err != nil {
 		return nil, bad, err
 	}
-	if len(e.programs) == 0 {
+	return programs, bad, nil
+}
+
+// loadRuleFile compiles a single rule file, skipping blank lines and '#'
+// comments. Invalid rules are counted and skipped; an error is returned only
+// when no valid rule remains. The returned engine uses the unstacked
+// `programs` shape, so behaviour (including expand's iteration order and
+// dedup) is unchanged from before rule stacking existed.
+func loadRuleFile(path string) (*ruleEngine, int, error) {
+	programs, bad, err := compileRuleFileLines(path)
+	if err != nil {
+		return nil, bad, err
+	}
+	if len(programs) == 0 {
 		return nil, bad, fmt.Errorf("no valid rules in %s", path)
 	}
-	return e, bad, nil
+	return &ruleEngine{programs: programs}, bad, nil
+}
+
+// loadRuleFiles compiles one or more rule files into a ruleEngine. A single
+// path is delegated straight to loadRuleFile (the unstacked shape, byte-
+// identical to before stacking existed). Two or more paths become stacking
+// layers: file i is layer i, applied left-to-right per expandStacked's
+// cross-product semantics. Each file must contain at least one valid rule.
+// The product of per-file rule counts is computed with satMul (so it cannot
+// silently wrap) and checked against maxStackedCandidates before the engine
+// is returned; a stack that would exceed the cap is refused with an error
+// naming every file and the product, rather than built and truncated later.
+func loadRuleFiles(paths []string) (*ruleEngine, int, error) {
+	if len(paths) == 1 {
+		return loadRuleFile(paths[0])
+	}
+	e := &ruleEngine{}
+	totalBad := 0
+	product := int64(1)
+	for _, path := range paths {
+		programs, bad, err := compileRuleFileLines(path)
+		if err != nil {
+			return nil, 0, err
+		}
+		if len(programs) == 0 {
+			return nil, 0, fmt.Errorf("no valid rules in %s", path)
+		}
+		e.layers = append(e.layers, programs)
+		totalBad += bad
+		product = satMul(product, int64(len(programs)))
+	}
+	if product > maxStackedCandidates {
+		return nil, 0, fmt.Errorf(
+			"stacking %s would produce %d candidates per word, exceeding the %d-candidate cap; use fewer or smaller rule files",
+			strings.Join(paths, " + "), product, maxStackedCandidates)
+	}
+	e.stackedCount = int(product)
+	return e, totalBad, nil
 }

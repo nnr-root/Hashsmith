@@ -37,7 +37,8 @@ func runAuto(args []string) error {
 	outFile := fs.String("o", "", "write result to file")
 	copyResult := fs.Bool("c", false, "copy result to clipboard")
 	useRules := fs.Bool("r", false, "enable the built-in mangling rules in dict mode")
-	rulesFile := fs.String("rules", "", "path to a rule file (dict mode; overrides -r)")
+	var rulesFiles stringSliceFlag
+	fs.Var(&rulesFiles, "rules", "path to a rule file (dict mode; overrides -r); repeatable to stack rule files left-to-right, e.g. --rules a.rule --rules b.rule")
 	maskStr := fs.String("mask", "", "mask for -M mask (e.g. ?u?l?l?l?d?d)")
 	cs1 := fs.String("1", "", "custom charset 1 (mask)")
 	cs2 := fs.String("2", "", "custom charset 2 (mask)")
@@ -83,7 +84,7 @@ func runAuto(args []string) error {
 	if err != nil {
 		return err
 	}
-	engine, err := buildRuleEngine(*rulesFile, *useRules)
+	engine, err := buildRuleEngine(rulesFiles.values, *useRules)
 	if err != nil {
 		return err
 	}
