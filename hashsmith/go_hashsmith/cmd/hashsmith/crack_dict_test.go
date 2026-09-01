@@ -31,7 +31,7 @@ func TestDictAttackUsesInjectedVerifier(t *testing.T) {
 	}
 	var attempts int64
 	var verifierCalls atomic.Int64
-	result, err := dictAttack(context.Background(), wordlist, 2, &attempts, nil, func(candidate string) bool {
+	result, err := dictAttack(context.Background(), wordlist, 0, 0, 2, &attempts, nil, func(candidate string) bool {
 		verifierCalls.Add(1)
 		return candidate == "needle"
 	})

@@ -60,19 +60,21 @@ func md5TargetBytes(targetHex string) ([16]byte, bool) {
 // to the existing scalar, session-aware runner. This is the only seam
 // between the two: every other format, salt, and attack mode keeps exactly
 // today's code path, since fastPathEligible returns false for all of them.
+// limit (0 = unbounded) is --limit's candidate-count bound; both the fast
+// and scalar paths honour it identically (see runLayout / runLayoutFast).
 func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *sessionState,
-	resumeFrom int64, workers int, atomicAttempts *int64,
+	resumeFrom, limit int64, workers int, atomicAttempts *int64,
 	typ, salt, targetHash string, verify func(string) bool) (string, bool, error) {
 
 	if sess == nil {
 		if algo, ok := fastPathEligible(typ, salt, layout); ok {
 			if target, ok := md5TargetBytes(targetHash); ok {
-				pw, err := runLayoutFast(ctx, layout, resumeFrom, workers, atomicAttempts, nil, algo, target)
+				pw, err := runLayoutFast(ctx, layout, resumeFrom, limit, workers, atomicAttempts, nil, algo, target)
 				return pw, ctx.Err() != nil, err
 			}
 		}
 	}
-	return runSessionLayout(ctx, layout, sess, resumeFrom, workers, atomicAttempts, verify)
+	return runSessionLayout(ctx, layout, sess, resumeFrom, limit, workers, atomicAttempts, verify)
 }
 
 // crackedResult carries the found password and an optional human-readable label
@@ -91,12 +93,14 @@ type crackCtx struct {
 	showOnly  bool          // --show: print potfile hits only, never attack
 	wordlist2 string        // combinator right-hand list ("" when unused)
 	useGPU    bool          // --gpu: try raw-digest GPU dictionary/brute/mask kernels when available
+	skip      int64         // --skip: candidate index (whole-layout / word index) to start at; 0 = unset
+	limit     int64         // --limit: candidate count to try, 0 = unbounded
 }
 
 // newCrackCtx loads the potfile (unless disabled) and any saved session. A nil
 // return is never produced — a disabled potfile simply yields a nil p.pot.
-func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool, wordlist2 string, useGPU bool) (*crackCtx, error) {
-	cc := &crackCtx{sessName: sessName, showOnly: showOnly, wordlist2: wordlist2, useGPU: useGPU}
+func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool, wordlist2 string, useGPU bool, skip, limit int64) (*crackCtx, error) {
+	cc := &crackCtx{sessName: sessName, showOnly: showOnly, wordlist2: wordlist2, useGPU: useGPU, skip: skip, limit: limit}
 	if !noPot {
 		p, err := loadPotfile(potPath)
 		if err != nil {
@@ -149,8 +153,23 @@ func runCrack(args []string) error {
 	w2 := fs.String("w2", "", "alias for --wordlist2")
 	stdoutMode := fs.Bool("stdout", false, "emit the candidate stream to stdout instead of cracking (no hash needed)")
 	useGPU := fs.Bool("gpu", false, "use GPU dictionary/brute/mask kernels when supported")
+	keyspaceOnly := fs.Bool("keyspace", false, "print the total candidate count to stdout and exit, without attacking")
+	skip := fs.Int64("skip", 0, "distributed cracking: start at candidate index N (whole-layout index, hashcat-style; word index in dict mode)")
+	limit := fs.Int64("limit", 0, "distributed cracking: try at most N candidates from --skip, then stop (0 = unbounded)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
+	}
+
+	// A negative --skip/--limit has no meaning (both are counts/indices into a
+	// non-negative keyspace); *runLayout already clamps a negative resumeFrom
+	// to 0 and treats a non-positive limit as unbounded, so a typo'd negative
+	// value would silently mean "start from the beginning" / "do everything" —
+	// the opposite of a deliberate distributed slice. Reject it outright.
+	if *skip < 0 {
+		return fmt.Errorf("--skip must not be negative (got %d)", *skip)
+	}
+	if *limit < 0 {
+		return fmt.Errorf("--limit must not be negative (got %d)", *limit)
 	}
 
 	// Resolve wordlist from either -w or its --wordlist alias. An empty value
@@ -164,6 +183,13 @@ func runCrack(args []string) error {
 		wl2 = *w2
 	}
 	mc := buildMaskConfig(*maskStr, *cs1, *cs2, *cs3, *cs4, *increment, *minLen, *maskFirst)
+
+	// --keyspace: report the total candidate count and exit — no target or
+	// hashing required, and no attack runs. Handled before --stdout / gatherInputs
+	// so it works with or without a hash argument.
+	if *keyspaceOnly {
+		return printKeyspace(*mode, wl, wl2, *charset, *minLen, *maxLen, mc)
+	}
 
 	// --stdout: generate candidates only, no target or hashing required.
 	if *stdoutMode {
@@ -187,7 +213,7 @@ func runCrack(args []string) error {
 	if sn == "" {
 		sn = *restore
 	}
-	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2, *useGPU)
+	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2, *useGPU, *skip, *limit)
 	if err != nil {
 		return err
 	}
@@ -229,8 +255,12 @@ func crackTargets(targets []string, typ, mode, wordlist, charset string,
 	// Multi-hash acceleration: when several salt-independent raw-digest targets
 	// are given, hash each candidate once and check it against all of them. Only
 	// the targets multi-hash mode cannot handle are returned for per-target work.
+	// --skip/--limit are not (yet) threaded through this shared-candidate path,
+	// so a distributed slice takes the slower but correct per-target path instead
+	// of silently attacking the whole keyspace against every target.
+	skipLimitSet := cc != nil && (cc.skip != 0 || cc.limit != 0)
 	uncracked := 0
-	if len(targets) > 1 && salt == "" {
+	if len(targets) > 1 && salt == "" && !skipLimitSet {
 		var nb int
 		targets, nb = runBatch(targets, typ, mode, wordlist, charset,
 			minLen, maxLen, workers, saltMode, outFile, copyResult, rules, mc, cc)
@@ -289,51 +319,12 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		return false, err
 	}
 
-	// ── pre-count for progress bar ──────────────────────────────────────────
-	var total int64 = -1
-	m := strings.ToLower(mode)
-	if m == "dict" {
-		// An empty wordlist path counts the embedded common.txt.
-		if n, err := countWordlistLines(wordlist); err == nil {
-			total = n
-			if rules != nil {
-				// Each word generates up to rules.count() extra candidates.
-				total = satMul(total, int64(1+rules.count()))
-			}
-		}
-	} else if m == "brute" || m == "markov" {
-		total = calcBruteTotal(charset, minLen, maxLen)
-		if exact, overflowed := calcBruteTotalExact(charset, minLen, maxLen); overflowed {
-			warnKeyspaceNotExhaustive(exact)
-		}
-	} else if m == "mask" && mc != nil {
-		total = calcMaskTotal(mc)
-		if exact, overflowed := calcMaskTotalExact(mc); overflowed {
-			warnKeyspaceNotExhaustive(exact)
-		}
-	} else if m == "hybrid" && mc != nil {
-		if n, err := countWordlistLines(wordlist); err == nil {
-			if sets, e := parseMask(mc); e == nil {
-				total = satMul(n, maskKeyspace(sets))
-			}
-		}
-	} else if m == "combinator" && cc != nil && cc.wordlist2 != "" {
-		if a, e1 := countWordlistLines(wordlist); e1 == nil {
-			if b, e2 := countWordlistLines(cc.wordlist2); e2 == nil {
-				total = satMul(a, b)
-			}
-		}
-	}
-
-	bar := newCrackBar(total)
-
-	// progress ticker — updates bar from atomic counter every 100 ms
-	tickCtx, tickCancel := context.WithCancel(context.Background())
-	go progressTicker(tickCtx, bar, &atomicAttempts)
-
-	// ── attack ──────────────────────────────────────────────────────────────
+	// ── attack setup: session resume + --skip/--limit ───────────────────────
 	// A named session installs a SIGINT handler so Ctrl-C checkpoints progress
 	// and exits cleanly; without one the run uses a plain background context.
+	// This is resolved before the pre-count below so the progress bar can be
+	// sized to what --limit will actually bound, not the full keyspace.
+	m := strings.ToLower(mode)
 	runCtx := context.Background()
 	var sess *sessionState
 	var resumeFrom int64
@@ -368,6 +359,88 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		}
 	}
 
+	// --skip (distributed cracking) vs. a resumed session's saved checkpoint:
+	// an explicit --skip wins. --skip 0 is indistinguishable from "not passed"
+	// (0 is also its unset default), so it only ever narrows/relocates a run —
+	// it can't be used to force a session back to index 0; use
+	// `hashsmith sessions rm <name>` for that.
+	var limit int64
+	if cc != nil {
+		limit = cc.limit
+		if cc.skip != 0 {
+			if resumeFrom != 0 {
+				clrYellow.Fprintf(os.Stderr,
+					"--skip %d overrides session %q's saved checkpoint (%d)\n",
+					cc.skip, cc.sessName, resumeFrom)
+			}
+			resumeFrom = cc.skip
+		}
+	}
+
+	// ── pre-count for progress bar ──────────────────────────────────────────
+	// boundWordIdx narrows a raw count n (counted in the same index space as
+	// resumeFrom/limit — word indices for dict, candidate indices everywhere
+	// else) to what this run will actually attempt: min(n, resumeFrom+limit) -
+	// resumeFrom, clamped to [0, n]. A no-op when unbounded (limit == 0) or n is
+	// the "unknown / not countable" sentinel (-1), so a run without --limit
+	// shows exactly the total it always has.
+	boundWordIdx := func(n int64) int64 {
+		if n < 0 || limit <= 0 {
+			return n
+		}
+		bound := n
+		if b := satAdd(resumeFrom, limit); b < bound {
+			bound = b
+		}
+		remaining := bound - resumeFrom
+		if remaining < 0 {
+			remaining = 0
+		}
+		return remaining
+	}
+
+	var total int64 = -1
+	if m == "dict" {
+		// An empty wordlist path counts the embedded common.txt. Bound the raw
+		// word count BEFORE the rules multiplier: --limit's dict-mode semantics
+		// count base words, not rule-mangled variants.
+		if n, err := countWordlistLines(wordlist); err == nil {
+			total = boundWordIdx(n)
+			if rules != nil {
+				// Each word generates up to rules.count() extra candidates.
+				total = satMul(total, int64(1+rules.count()))
+			}
+		}
+	} else if m == "brute" || m == "markov" {
+		total = boundWordIdx(calcBruteTotal(charset, minLen, maxLen))
+		if exact, overflowed := calcBruteTotalExact(charset, minLen, maxLen); overflowed {
+			warnKeyspaceNotExhaustive(exact)
+		}
+	} else if m == "mask" && mc != nil {
+		total = boundWordIdx(calcMaskTotal(mc))
+		if exact, overflowed := calcMaskTotalExact(mc); overflowed {
+			warnKeyspaceNotExhaustive(exact)
+		}
+	} else if m == "hybrid" && mc != nil {
+		if n, err := countWordlistLines(wordlist); err == nil {
+			if sets, e := parseMask(mc); e == nil {
+				total = boundWordIdx(satMul(n, maskKeyspace(sets)))
+			}
+		}
+	} else if m == "combinator" && cc != nil && cc.wordlist2 != "" {
+		if a, e1 := countWordlistLines(wordlist); e1 == nil {
+			if b, e2 := countWordlistLines(cc.wordlist2); e2 == nil {
+				total = boundWordIdx(satMul(a, b))
+			}
+		}
+	}
+
+	bar := newCrackBar(total)
+
+	// progress ticker — updates bar from atomic counter every 100 ms
+	tickCtx, tickCancel := context.WithCancel(context.Background())
+	go progressTicker(tickCtx, bar, &atomicAttempts)
+
 	verifyFn := func(c string) bool {
 		ok, _ := verifyCandidate(c, targetHash, typ, salt, saltMode)
 		return ok
@@ -386,22 +459,29 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		err         error
 		interrupted bool
 	)
+	// GPU kernels (dict/brute/mask) don't yet accept a resume/limit bound, so a
+	// --skip/--limit run always takes the CPU path, which does.
+	gpuBounded := resumeFrom == 0 && limit == 0
 	switch m {
 	case "dict":
 		// An empty wordlist path uses the built-in common.txt (see openWordlist).
-		if cc != nil && cc.useGPU && salt == "" && typ == "md5" {
+		if cc != nil && cc.useGPU && gpuBounded && salt == "" && typ == "md5" {
 			var usedGPU bool
 			result, err, usedGPU = gpuDictAttack(runCtx, wordlist, targetHash, rules, &atomicAttempts)
 			if !usedGPU {
 				_, reason := activeGPUBackend()
 				clrYellow.Fprintf(os.Stderr, "GPU dictionary unavailable (%s) — using CPU\n", reason)
-				result, err = dictAttack(runCtx, wordlist, workers, &atomicAttempts, rules, verifyFn)
+				result, err = dictAttack(runCtx, wordlist, resumeFrom, limit, workers, &atomicAttempts, rules, verifyFn)
 			}
 		} else {
 			if cc != nil && cc.useGPU {
-				clrYellow.Fprintf(os.Stderr, "GPU dictionary currently supports unsalted MD5; using CPU for %s\n", typ)
+				if !gpuBounded {
+					clrYellow.Fprintf(os.Stderr, "GPU dictionary does not support --skip/--limit yet — using CPU\n")
+				} else {
+					clrYellow.Fprintf(os.Stderr, "GPU dictionary currently supports unsalted MD5; using CPU for %s\n", typ)
+				}
 			}
-			result, err = dictAttack(runCtx, wordlist, workers, &atomicAttempts, rules, verifyFn)
+			result, err = dictAttack(runCtx, wordlist, resumeFrom, limit, workers, &atomicAttempts, rules, verifyFn)
 		}
 		interrupted = runCtx.Err() != nil
 	case "brute":
@@ -410,7 +490,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			return false, errors.New("invalid -n/-x range")
 		}
 		var pw string
-		if cc != nil && cc.useGPU {
+		if cc != nil && cc.useGPU && gpuBounded {
 			if gp, _, usedGPU := gpuBruteHash(targetHash, typ, charset, minLen, maxLen, &atomicAttempts); usedGPU {
 				pw = gp
 			} else {
@@ -418,11 +498,14 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				clrYellow.Fprintf(os.Stderr,
 					"GPU brute unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
 				pw, interrupted, err = runBruteOrMaskLayout(runCtx, bruteLayout(charset, minLen, maxLen),
-					sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
+					sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 			}
 		} else {
+			if cc != nil && cc.useGPU && !gpuBounded {
+				clrYellow.Fprintf(os.Stderr, "GPU brute does not support --skip/--limit yet — using CPU\n")
+			}
 			pw, interrupted, err = runBruteOrMaskLayout(runCtx, bruteLayout(charset, minLen, maxLen),
-				sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
+				sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 		}
 		result = crackedResult{password: pw}
 	case "mask":
@@ -436,7 +519,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			return false, e
 		}
 		var pw string
-		if cc != nil && cc.useGPU {
+		if cc != nil && cc.useGPU && gpuBounded {
 			if gp, _, usedGPU := gpuMaskHash(targetHash, typ, mc, &atomicAttempts); usedGPU {
 				pw = gp
 			} else {
@@ -444,11 +527,14 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				clrYellow.Fprintf(os.Stderr,
 					"GPU mask unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
 				pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
-					sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
+					sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 			}
 		} else {
+			if cc != nil && cc.useGPU && !gpuBounded {
+				clrYellow.Fprintf(os.Stderr, "GPU mask does not support --skip/--limit yet — using CPU\n")
+			}
 			pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
-				sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
+				sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 		}
 		result = crackedResult{password: pw}
 	case "markov":
@@ -463,7 +549,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		}
 		var pw string
 		pw, interrupted, err = runSessionLayout(runCtx, markovLayout(model, minLen, maxLen),
-			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+			sess, resumeFrom, limit, workers, &atomicAttempts, verifyFn)
 		result = crackedResult{password: pw}
 	case "hybrid":
 		if mc == nil {
@@ -482,7 +568,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		}
 		var pw string
 		pw, interrupted, err = runSessionLayout(runCtx, hybridLayout(words, sets, mc.maskFirst),
-			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+			sess, resumeFrom, limit, workers, &atomicAttempts, verifyFn)
 		result = crackedResult{password: pw}
 	case "combinator":
 		if cc == nil || cc.wordlist2 == "" {
@@ -501,7 +587,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		}
 		var pw string
 		pw, interrupted, err = runSessionLayout(runCtx, combinatorLayout(left, right),
-			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+			sess, resumeFrom, limit, workers, &atomicAttempts, verifyFn)
 		result = crackedResult{password: pw}
 	default:
 		tickCancel()
@@ -526,15 +612,34 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	if found && cc != nil {
 		cc.pot.add(targetHash, result.password)
 	}
-	// Session bookkeeping: keep (and re-save) the checkpoint on interrupt so the
-	// run can be resumed; otherwise the work is done — discard the session file.
+	// Session bookkeeping. Three outcomes:
+	//   - found: the job is done, discard the session file.
+	//   - interrupted (Ctrl-C): keep the checkpoint so the run can be resumed.
+	//   - otherwise, not found: this is only "the whole keyspace was searched
+	//     and it wasn't there" when sess.Checkpoint reached sess.Total (the
+	//     true, unbounded total — see runSessionLayout). A --limit-bounded run
+	//     that exhausts its slice stops with Checkpoint < Total: that is
+	//     "exhausted my slice", not "exhausted the keyspace", and reporting
+	//     "Not found" while deleting the checkpoint would let an operator
+	//     mistake a slice for the whole keyspace having been covered — the
+	//     same failure the tiling property exists to prevent, by a different
+	//     route. So keep the session in that case too.
 	if sess != nil {
-		if interrupted && !found {
+		switch {
+		case found:
+			sess.remove()
+		case interrupted:
 			_ = sess.save()
 			clrYellow.Fprintf(os.Stderr,
 				"Interrupted — session %q saved at index %d/%d (resume: hashsmith crack --restore %s ...)\n",
 				cc.sessName, sess.Checkpoint, sess.Total, cc.sessName)
-		} else {
+		case sess.Checkpoint < sess.Total:
+			_ = sess.save()
+			clrYellow.Fprintf(os.Stderr,
+				"Slice exhausted (not the whole keyspace) — session %q saved at index %d/%d "+
+					"(resume: hashsmith crack --restore %s ...)\n",
+				cc.sessName, sess.Checkpoint, sess.Total, cc.sessName)
+		default:
 			sess.remove()
 		}
 	}
@@ -596,7 +701,7 @@ func showPotEntry(p *potfile, target, outFile string, copyResult bool) (bool, er
 func crackReport(targetHash, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
 	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
-	cc, _ := newCrackCtx("", false, "", false, "", false)
+	cc, _ := newCrackCtx("", false, "", false, "", false, 0, 0)
 	var engine *ruleEngine
 	if useRules {
 		engine = builtinRuleEngine()
@@ -694,7 +799,11 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 // Batch size is dictBatchSize to amortise channel overhead without starving
 // workers. Context cancellation propagates through both the reader and workers.
 
-func dictAttack(ctx context.Context, wordlistPath string, workers int, atomicAttempts *int64,
+// dictAttack streams a wordlist through `workers` verifiers. skip and limit
+// (0 = unbounded) bound it to word indices [skip, skip+limit) of the whole
+// wordlist — --skip/--limit's dictionary-mode semantics — letting a dict
+// attack be split across machines the same way brute/mask/hybrid layouts are.
+func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, workers int, atomicAttempts *int64,
 	rules *ruleEngine, verify func(string) bool) (crackedResult, error) {
 
 	f, label, err := openWordlist(wordlistPath)
@@ -704,6 +813,13 @@ func dictAttack(ctx context.Context, wordlistPath string, workers int, atomicAtt
 	defer f.Close()
 	if label == defaultWordlistLabel {
 		clrYellow.Fprintf(os.Stderr, "No wordlist supplied — using %s\n", label)
+	}
+	if skip < 0 {
+		skip = 0
+	}
+	upper := int64(-1) // -1 = unbounded
+	if limit > 0 {
+		upper = satAdd(skip, limit)
 	}
 
 	innerCtx, cancel := context.WithCancel(ctx)
@@ -719,10 +835,19 @@ func dictAttack(ctx context.Context, wordlistPath string, workers int, atomicAtt
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 1<<20), 1<<20) // 1 MiB line buffer
 		cur := make(batch, 0, dictBatchSize)
+		var idx int64
 		for scanner.Scan() {
 			word := strings.TrimSpace(scanner.Text())
 			if word == "" {
 				continue
+			}
+			i := idx
+			idx++
+			if i < skip {
+				continue
+			}
+			if upper >= 0 && i >= upper {
+				break
 			}
 			cur = append(cur, word)
 			if len(cur) >= dictBatchSize {
@@ -890,6 +1015,101 @@ func warnKeyspaceNotExhaustive(exact *big.Int) {
 		"Warning: true keyspace is %s candidates, which exceeds %d (max int64) — "+
 			"this run will only cover the first %d candidates and will NOT be exhaustive\n",
 		exact.String(), int64(math.MaxInt64), int64(math.MaxInt64))
+}
+
+// printKeyspace implements --keyspace: it computes the exact (never-saturated,
+// math/big) candidate count for the requested mode and prints it — nothing
+// else — to stdout, so `$(hashsmith crack ... --keyspace)` works in a shell.
+//
+// --skip and --limit index the WHOLE layout (see runLayout's bound), so this
+// intentionally reports the true, unbounded total rather than anything
+// narrowed by --skip/--limit — a caller divides this number to build its own
+// --skip/--limit slices.
+//
+// When the true count exceeds int64 (the type every candidate index in this
+// engine is), printing a saturated math.MaxInt64 would silently mislead a
+// script into under-covering the space when it divides the printed value to
+// build slices. So this refuses instead: an error here (not a printed number)
+// is what tells such a script its divide-and-slice plan cannot work.
+// exactWordlistCount wraps countWordlistLines for --keyspace, rejecting its
+// -1 "not countable" sentinel (returned for pipes, stdin, /dev/fd/N — see
+// wordlist.go) instead of letting it flow into the arithmetic as a bogus
+// count. Printing a negative or nonsensical number is the same failure mode
+// as printing a saturated one: a script divides it to build --skip/--limit
+// slices, so an unusable count must be a refusal, not a value.
+func exactWordlistCount(path string) (int64, error) {
+	n, err := countWordlistLines(path)
+	if err != nil {
+		return 0, err
+	}
+	if n < 0 {
+		label := path
+		if strings.TrimSpace(label) == "" {
+			label = defaultWordlistLabel
+		}
+		return 0, fmt.Errorf("cannot compute an exact keyspace: %q is not seekable "+
+			"(a pipe, stdin, or /dev/fd/N) so its word count cannot be known in advance", label)
+	}
+	return n, nil
+}
+
+func printKeyspace(mode, wordlist, wordlist2, charset string, minLen, maxLen int, mc *maskConfig) error {
+	m := strings.ToLower(mode)
+	var exact *big.Int
+	switch m {
+	case "brute", "markov":
+		if minLen < 1 || maxLen < minLen {
+			return errors.New("invalid -n/-x range")
+		}
+		exact, _ = calcBruteTotalExact(charset, minLen, maxLen)
+	case "mask":
+		if mc == nil {
+			return errors.New("mask mode requires --mask <mask>")
+		}
+		exact, _ = calcMaskTotalExact(mc)
+	case "hybrid":
+		if mc == nil {
+			return errors.New("hybrid mode requires --mask <mask> and -w <wordlist>")
+		}
+		n, err := exactWordlistCount(wordlist)
+		if err != nil {
+			return err
+		}
+		sets, err := parseMask(mc)
+		if err != nil {
+			return err
+		}
+		maskExact, _ := maskKeyspaceExact(sets)
+		exact = new(big.Int).Mul(big.NewInt(n), maskExact)
+	case "combinator":
+		if wordlist2 == "" {
+			return errors.New("combinator mode requires -w <left list> and --wordlist2 <right list>")
+		}
+		a, err := exactWordlistCount(wordlist)
+		if err != nil {
+			return err
+		}
+		b, err := exactWordlistCount(wordlist2)
+		if err != nil {
+			return err
+		}
+		exact = new(big.Int).Mul(big.NewInt(a), big.NewInt(b))
+	case "dict":
+		n, err := exactWordlistCount(wordlist)
+		if err != nil {
+			return err
+		}
+		exact = big.NewInt(n)
+	default:
+		return errors.New("unknown mode: use dict, brute, mask, markov, hybrid or combinator")
+	}
+	if exact.Cmp(maxInt64Big) > 0 {
+		return fmt.Errorf("true keyspace is %s candidates, which exceeds %d (max int64) — "+
+			"refusing to print a saturated value a script would divide and under-cover",
+			exact.String(), int64(math.MaxInt64))
+	}
+	fmt.Println(exact.String())
+	return nil
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

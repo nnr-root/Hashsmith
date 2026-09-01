@@ -79,7 +79,7 @@ func runAuto(args []string) error {
 	if wl2 == "" {
 		wl2 = *w2
 	}
-	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2, *useGPU)
+	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2, *useGPU, 0, 0)
 	if err != nil {
 		return err
 	}

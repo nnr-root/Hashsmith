@@ -92,20 +92,30 @@ func maskLayout(cfg *maskConfig) (*keyspaceLayout, error) {
 	return newLayout(segs), nil
 }
 
-// runLayout enumerates [resumeFrom, total) across `workers` goroutines using a
-// shared atomic chunk allocator. When `watermark` is non-nil it is continuously
+// runLayout enumerates [resumeFrom, resumeFrom+limit) — or [resumeFrom, total)
+// when limit is 0 (unbounded) — across `workers` goroutines using a shared
+// atomic chunk allocator. When `watermark` is non-nil it is continuously
 // updated to the lowest global index not yet fully processed — a safe restore
 // point (everything below it is guaranteed tested). verify returns true on a
 // match, which cancels the run and yields the winning candidate.
-func runLayout(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
+func runLayout(ctx context.Context, l *keyspaceLayout, resumeFrom, limit int64,
 	workers int, atomicAttempts *int64, watermark *int64,
 	verify func(string) bool) (string, error) {
 
-	if l.total == 0 || resumeFrom >= l.total {
-		return "", nil
-	}
 	if resumeFrom < 0 {
 		resumeFrom = 0
+	}
+	// bound is the exclusive end of this run's slice of the layout: the whole
+	// keyspace, or resumeFrom+limit when a positive limit narrows it — whichever
+	// is smaller. satAdd guards resumeFrom+limit overflowing int64.
+	bound := l.total
+	if limit > 0 {
+		if b := satAdd(resumeFrom, limit); b < bound {
+			bound = b
+		}
+	}
+	if bound == 0 || resumeFrom >= bound {
+		return "", nil
 	}
 	if workers < 1 {
 		workers = 1
@@ -133,14 +143,14 @@ func runLayout(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 			for {
 				c := atomic.AddInt64(&nextChunk, 1) - 1
 				start := c * keyspaceChunk
-				if start >= l.total {
+				if start >= bound {
 					atomic.StoreInt64(&cur[wID], math.MaxInt64)
 					return
 				}
 				atomic.StoreInt64(&cur[wID], c)
 				end := start + keyspaceChunk
-				if end > l.total {
-					end = l.total
+				if end > bound {
+					end = bound
 				}
 				from := start
 				if from < resumeFrom {
@@ -193,7 +203,7 @@ func runLayout(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 				case <-innerCtx.Done():
 					return
 				case <-t.C:
-					updateWatermark(cur, watermark, l.total)
+					updateWatermark(cur, watermark, bound)
 				}
 			}
 		}()
@@ -201,7 +211,7 @@ func runLayout(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 
 	wg.Wait()
 	if watermark != nil {
-		updateWatermark(cur, watermark, l.total)
+		updateWatermark(cur, watermark, bound)
 	}
 	select {
 	case pw := <-resultCh:
@@ -386,15 +396,23 @@ func fastPathEligible(typ, salt string, l *keyspaceLayout) (*fastAlgo, bool) {
 //   - only lanes 0..used-1 of a partial final group are considered for a
 //     hit. Unused lanes hash the empty string and would otherwise falsely
 //     match whenever the target is the algorithm's digest of "".
-func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
+func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom, limit int64,
 	workers int, atomicAttempts *int64, watermark *int64,
 	algo *fastAlgo, target [16]byte) (string, error) {
 
-	if l.total == 0 || resumeFrom >= l.total {
-		return "", nil
-	}
 	if resumeFrom < 0 {
 		resumeFrom = 0
+	}
+	// bound mirrors runLayout's: the whole keyspace, or resumeFrom+limit when a
+	// positive limit narrows it, whichever is smaller (satAdd guards overflow).
+	bound := l.total
+	if limit > 0 {
+		if b := satAdd(resumeFrom, limit); b < bound {
+			bound = b
+		}
+	}
+	if bound == 0 || resumeFrom >= bound {
+		return "", nil
 	}
 	if workers < 1 {
 		workers = 1
@@ -428,14 +446,14 @@ func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 			for {
 				c := atomic.AddInt64(&nextChunk, 1) - 1
 				start := c * keyspaceChunk
-				if start >= l.total {
+				if start >= bound {
 					atomic.StoreInt64(&cur[wID], math.MaxInt64)
 					return
 				}
 				atomic.StoreInt64(&cur[wID], c)
 				end := start + keyspaceChunk
-				if end > l.total {
-					end = l.total
+				if end > bound {
+					end = bound
 				}
 				from := start
 				if from < resumeFrom {
@@ -551,7 +569,7 @@ func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 				case <-innerCtx.Done():
 					return
 				case <-t.C:
-					updateWatermark(cur, watermark, l.total)
+					updateWatermark(cur, watermark, bound)
 				}
 			}
 		}()
@@ -559,7 +577,7 @@ func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 
 	wg.Wait()
 	if watermark != nil {
-		updateWatermark(cur, watermark, l.total)
+		updateWatermark(cur, watermark, bound)
 	}
 	select {
 	case err := <-errCh:

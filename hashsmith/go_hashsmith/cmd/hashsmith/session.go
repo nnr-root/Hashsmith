@@ -103,13 +103,14 @@ func (s *sessionState) remove() {
 // runSessionLayout drives a layout run with session resume + periodic
 // checkpointing. It resolves the resume index from a matching saved session,
 // spins a watermark-flushing goroutine, and returns the result plus whether the
-// run was interrupted (ctx cancelled) rather than completing.
+// run was interrupted (ctx cancelled) rather than completing. limit (0 =
+// unbounded) is --limit's candidate-count bound, applied on top of resumeFrom.
 func runSessionLayout(ctx context.Context, layout *keyspaceLayout, s *sessionState,
-	resumeFrom int64, workers int, atomicAttempts *int64,
+	resumeFrom, limit int64, workers int, atomicAttempts *int64,
 	verify func(string) bool) (string, bool, error) {
 
 	if s == nil {
-		pw, err := runLayout(ctx, layout, resumeFrom, workers, atomicAttempts, nil, verify)
+		pw, err := runLayout(ctx, layout, resumeFrom, limit, workers, atomicAttempts, nil, verify)
 		return pw, ctx.Err() != nil, err
 	}
 
@@ -133,7 +134,7 @@ func runSessionLayout(ctx context.Context, layout *keyspaceLayout, s *sessionSta
 		}
 	}()
 
-	pw, err := runLayout(ctx, layout, resumeFrom, workers, atomicAttempts, &watermark, verify)
+	pw, err := runLayout(ctx, layout, resumeFrom, limit, workers, atomicAttempts, &watermark, verify)
 	stopFlush()
 	s.Checkpoint = atomic.LoadInt64(&watermark)
 	interrupted := ctx.Err() != nil

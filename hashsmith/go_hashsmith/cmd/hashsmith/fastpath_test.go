@@ -26,11 +26,11 @@ func TestFastPathAgreesWithScalar(t *testing.T) {
 		sum := md5.Sum([]byte(plain))
 
 		var a1, a2 int64
-		fast, err := runLayoutFast(context.Background(), l, 0, 4, &a1, nil, algo, sum)
+		fast, err := runLayoutFast(context.Background(), l, 0, 0, 4, &a1, nil, algo, sum)
 		if err != nil {
 			t.Fatalf("%s: fast: %v", plain, err)
 		}
-		scalar, err := runLayout(context.Background(), l, 0, 4, &a2, nil,
+		scalar, err := runLayout(context.Background(), l, 0, 0, 4, &a2, nil,
 			func(c string) bool { return md5.Sum([]byte(c)) == sum })
 		if err != nil {
 			t.Fatalf("%s: scalar: %v", plain, err)
@@ -64,7 +64,7 @@ func TestFastPathExhaustsWithoutSpuriousHit(t *testing.T) {
 	l := bruteLayout("ab", 1, 3) // 2 + 4 + 8 = 14, deliberately not a multiple of 20; excludes ""
 	sum := md5.Sum([]byte(""))
 	var attempts int64
-	got, err := runLayoutFast(context.Background(), l, 0, 2, &attempts, nil, algo, sum)
+	got, err := runLayoutFast(context.Background(), l, 0, 0, 2, &attempts, nil, algo, sum)
 	if err != nil {
 		t.Fatalf("runLayoutFast: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestFastPathHandlesEmptyCandidate(t *testing.T) {
 	}
 	sum := md5.Sum([]byte(""))
 	var attempts int64
-	if _, err := runLayoutFast(context.Background(), l, 0, 1, &attempts, nil, algo, sum); err != nil {
+	if _, err := runLayoutFast(context.Background(), l, 0, 0, 1, &attempts, nil, algo, sum); err != nil {
 		t.Fatalf("runLayoutFast: %v", err)
 	}
 	if attempts >= l.total {
@@ -165,7 +165,7 @@ func TestFastPathAgreesWithScalarPerAlgo(t *testing.T) {
 					t.Fatalf("%s should be eligible on this build", c.typ)
 				}
 				var attempts int64
-				got, err := runLayoutFast(context.Background(), l, 0, 4, &attempts, nil, algo, c.digest(plain))
+				got, err := runLayoutFast(context.Background(), l, 0, 0, 4, &attempts, nil, algo, c.digest(plain))
 				if err != nil {
 					t.Fatalf("%s/%s: %v", c.typ, plain, err)
 				}
