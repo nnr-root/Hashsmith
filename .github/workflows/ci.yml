@@ -21,17 +21,32 @@ jobs:
         run: cd hashsmith/go_hashsmith && CGO_ENABLED=0 go build ./...
       - name: Vet
         run: cd hashsmith/go_hashsmith && go vet ./...
+      # HASHSMITH_REQUIRE_AVX2 makes this job the declared gate for the AVX2
+      # assembly cores (md5avx2_amd64.s, md4avx2_amd64.s). The cores are
+      # selected by BUILD TAG, so an amd64 build always links them and the
+      # differential tests always execute them — but this variable turns that
+      # from an invariant into an assertion: with it set,
+      # TestMD4AVX2CoreWasActuallyExercised FAILS (rather than skips) unless
+      # the assembly was linked, the CPU really reports AVX2, and the live
+      # backend resolves md4/ntlm to the AVX2 MD4 core. Development happens on
+      # an arm64 Mac where hasAVX2() is false, so without this assertion a
+      # wrong AVX2 core could land green everywhere the author can run it.
+      # Do NOT set this on the arm64 lane, where the fallback is correct.
       - name: Test (fast vectors)
+        env:
+          HASHSMITH_REQUIRE_AVX2: "1"
         run: cd hashsmith/go_hashsmith && go test -timeout 5m ./...
 
   test-arm64:
     # ubuntu-24.04-arm is GitHub's hosted arm64 runner. This is the only job
     # in this workflow that actually EXECUTES the NEON assembly: the `test`
-    # job above runs on amd64, where md5Group resolves to the generic
-    # fallback, and the `cross-compile` job below builds the arm64 binary
-    # but discards it without ever running it. Without this lane, the 4000+
-    # lines of arm64 MD5 NEON assembly in md5neon_arm64.s would never be
-    # exercised by CI. Mirrors the `test` job's steps.
+    # job above runs on amd64, where md5Group/md4Group resolve to the generic
+    # fallbacks (and md5GroupAVX2/md4GroupAVX2 resolve to the AVX2 assembly
+    # instead), and the `cross-compile` job below builds the arm64 binary but
+    # discards it without ever running it. Without this lane, the arm64 NEON
+    # assembly in md5neon_arm64.s and md4neon_arm64.s would never be exercised
+    # by CI. Mirrors the `test` job's steps, minus HASHSMITH_REQUIRE_AVX2,
+    # which asserts the opposite architecture's core.
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -66,6 +81,8 @@ jobs:
       # meaningful is the correct trade, applied consistently to both. Races in
       # this file's code are still covered by the other tests in this lane.
       - name: Test (race detector)
+        env:
+          HASHSMITH_REQUIRE_AVX2: "1"   # amd64 runner: see the `test` job's note
         run: |
           cd hashsmith/go_hashsmith
           go test -race -timeout 20m \
@@ -124,7 +141,7 @@ jobs:
       - name: Vector core benchmarks (best-of-5, same invocation)
         run: |
           cd hashsmith/go_hashsmith
-          go test -run '^$' -bench 'BenchmarkMD5AVX2Core|BenchmarkMD5NeonCore|BenchmarkMD5AVX2Group|BenchmarkMD5Group|BenchmarkMD5Scalar|BenchmarkMD4Group|BenchmarkMD4Scalar' \
+          go test -run '^$' -bench 'BenchmarkMD5AVX2Core|BenchmarkMD5NeonCore|BenchmarkMD5AVX2Group|BenchmarkMD5Group|BenchmarkMD5Scalar|BenchmarkMD4AVX2Group|BenchmarkMD4Group|BenchmarkMD4Scalar' \
             -benchtime 2s -count 5 -cpu 1 ./cmd/hashsmith | tee /tmp/bench.out
       - name: End-to-end crack rate (fast path vs forced-scalar, same binary)
         run: |
@@ -149,7 +166,7 @@ jobs:
           run "forced-scalar" --session cibench
           rm -rf ~/.hashsmith/sessions/cibench* 2>/dev/null || true
           echo "=================== SUMMARY (sorted MH/s, best last) ==================="
-          for n in BenchmarkMD5AVX2Core BenchmarkMD5NeonCore BenchmarkMD5AVX2Group BenchmarkMD5Group BenchmarkMD5Scalar BenchmarkMD4Group BenchmarkMD4Scalar; do
+          for n in BenchmarkMD5AVX2Core BenchmarkMD5NeonCore BenchmarkMD5AVX2Group BenchmarkMD5Group BenchmarkMD5Scalar BenchmarkMD4AVX2Group BenchmarkMD4Group BenchmarkMD4Scalar; do
             vals=$(grep "^$n" /tmp/bench.out | grep -oE '[0-9.]+ MH/s' | sort -n | tr '\n' ' ')
             [ -n "$vals" ] && echo "$n: $vals"
           done

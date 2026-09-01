@@ -151,10 +151,10 @@ func TestFastPathAgreesWithScalarPerAlgo(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.typ, func(t *testing.T) {
-			// md4/ntlm have no descriptor on the AVX2 backend (no AVX2 MD4
-			// core exists yet) and correctly stay off the fast path there;
-			// only assert agreement for algorithms the active backend
-			// actually supports.
+			// Both shipped backends now carry MD5 and MD4/NTLM cores, so
+			// this skip should never fire on arm64 or on an AVX2-capable
+			// x86 box; it stays because fastAlgoForBackend's coverage is
+			// per-backend by design and a future backend may be narrower.
 			if _, ok := fastAlgoFor(c.typ); !ok {
 				t.Skipf("%s has no fast-path descriptor on backend %q", c.typ, vectorBackendName())
 			}
@@ -256,35 +256,89 @@ func TestVectorBackendSelection(t *testing.T) {
 	}
 }
 
-// THE THING MOST LIKELY TO GO WRONG: MD4 and NTLM have no AVX2 core. If
-// fastAlgoForBackend ever routed either to md5GroupAVX2 (e.g. a careless
+// THE THING MOST LIKELY TO GO WRONG: MD4 and NTLM now have an AVX2 core
+// (md4avx2_amd64.s), and it sits right beside the MD5 one, sharing a
+// generator lineage, an IV, a message layout and a 16-byte output shape. If
+// fastAlgoForBackend ever routed either to md5GroupAVX2 instead (a careless
 // fallthrough, or "reuse the MD5 case for everything"), every candidate
 // would hash to the wrong digest — MD4 is a different algorithm from MD5,
 // and NTLM is MD4-over-UTF-16LE, not MD5-over-anything — and a real crack
-// would silently come back "not found" with nothing else to signal the
-// bug. This test is deliberately parameterised on the literal backend name
-// rather than gated on vectorBackendName()/hasAVX2(), so it catches the
-// mistake on every machine (including this arm64 dev box), not only one
-// whose live CPU — or an emulated Docker container's CPU — happens to
-// report AVX2 support.
-func TestAVX2BackendExcludesMD4AndNTLM(t *testing.T) {
-	for _, typ := range []string{"md4", "ntlm", "900", "1000"} {
-		if algo, ok := fastAlgoForBackend("avx2", typ); ok {
-			t.Errorf("%s must have no AVX2 fast-path descriptor (no AVX2 MD4 core exists); got %+v", typ, algo)
+// would silently come back "not found" with nothing else to signal the bug.
+//
+// So this test asserts both halves: md4/ntlm (and their hashcat mode
+// numbers) must resolve on the AVX2 backend, with the right encoding, AND
+// the descriptor they resolve to must not be the MD5 one. Function values
+// are not comparable in Go, so the "not MD5" half is checked behaviourally:
+// the resolved group function must produce the MD4 digest, not the MD5
+// digest, for a filled batch.
+//
+// It is deliberately parameterised on the literal backend name rather than
+// gated on vectorBackendName()/hasAVX2(), so it catches the mistake on every
+// machine (including this arm64 dev box, where md4GroupAVX2 resolves to the
+// scalar fallback in md4avx2_generic.go and the routing is still checkable),
+// not only on one whose live CPU reports AVX2 support.
+func TestAVX2BackendRoutesMD4AndNTLM(t *testing.T) {
+	cases := []struct {
+		typ  string
+		want encodeMode
+	}{
+		{"md4", encRaw}, {"900", encRaw},
+		{"ntlm", encUTF16LE}, {"1000", encUTF16LE},
+	}
+	for _, c := range cases {
+		algo, ok := fastAlgoForBackend("avx2", c.typ)
+		if !ok {
+			t.Errorf("%s must have an AVX2 fast-path descriptor (md4avx2_amd64.s exists)", c.typ)
+			continue
+		}
+		if algo.enc != c.want {
+			t.Errorf("%s AVX2 descriptor enc = %v, want %v", c.typ, algo.enc, c.want)
+		}
+		if algo.shape != avx2Shape {
+			t.Errorf("%s AVX2 descriptor shape = %+v, want %+v", c.typ, algo.shape, avx2Shape)
 		}
 	}
-	// Confirm the switch itself works and isn't just an empty case list:
-	// md5 must still resolve to the AVX2 descriptor.
-	algo, ok := fastAlgoForBackend("avx2", "md5")
+	// md5 must still resolve, and must NOT be what md4/ntlm resolved to.
+	md5algo, ok := fastAlgoForBackend("avx2", "md5")
 	if !ok {
 		t.Fatal("md5 should have an AVX2 descriptor")
 	}
-	if algo.shape != avx2Shape {
-		t.Errorf("md5 AVX2 descriptor shape = %+v, want %+v", algo.shape, avx2Shape)
+	if md5algo.shape != avx2Shape {
+		t.Errorf("md5 AVX2 descriptor shape = %+v, want %+v", md5algo.shape, avx2Shape)
+	}
+	// Behavioural "is not the MD5 core" check, since func values are not
+	// comparable: run both descriptors' group functions over one filled
+	// batch and require the md4 one to match MD4 and differ from MD5.
+	md4algo, ok := fastAlgoForBackend("avx2", "md4")
+	if !ok {
+		t.Fatal("md4 should have an AVX2 descriptor")
+	}
+	sets := avx2WideKeyspaceSets(5)
+	tb := newTransposedBatch(avx2Shape)
+	if err := tb.reset(5, encRaw); err != nil {
+		t.Fatal(err)
+	}
+	tb.fillFromSegment(sets, 0, maskKeyspace(sets))
+	gotMD4 := make([][16]byte, avx2Shape.group())
+	gotMD5 := make([][16]byte, avx2Shape.group())
+	md4algo.group(tb, gotMD4)
+	md5algo.group(tb, gotMD5)
+	for i := 0; i < avx2Shape.group(); i++ {
+		msg := tb.candidateAt(i)
+		h := md4.New()
+		h.Write(msg)
+		var want [16]byte
+		copy(want[:], h.Sum(nil))
+		if gotMD4[i] != want {
+			t.Fatalf("lane %d: the avx2 md4 descriptor did not compute MD4 (got %x, want %x)", i, gotMD4[i], want)
+		}
+		if gotMD4[i] == gotMD5[i] {
+			t.Fatalf("lane %d: the avx2 md4 descriptor computed the MD5 digest — it is wired to the wrong core", i)
+		}
 	}
 }
 
-// TestAVX2BackendExcludesMD4AndNTLM drives fastAlgoForBackend with the literal
+// TestAVX2BackendRoutesMD4AndNTLM drives fastAlgoForBackend with the literal
 // string "avx2", which is deliberate — it makes the MD4/NTLM hazard testable on
 // any machine. But it leaves a seam: if vectorBackendName() ever returned a
 // label fastAlgoForBackend does not match (a typo like "AVX2", or a rename
