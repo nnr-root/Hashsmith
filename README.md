@@ -468,14 +468,48 @@ hashsmith benchmark -t sha256       # a single type
 hashsmith crack -t md5 <hash> -M mask --mask '?l?l?l?l?l'   # a real 5-char end-to-end crack
 ```
 
-Measured end-to-end (full 5-char lowercase mask, `Attempts / Elapsed` from the
-crack output above) on an Apple M2 (8-core, 4P+4E): MD5 ran 50-60 MH/s and NTLM
-17-35 MH/s across repeated runs. That machine was under heavy unrelated load
-during measurement (video encoding pinning several cores, load average ~130),
-so these are a noisy lower bound, not a clean best-case figure — `benchmark`'s
-own output swung between 1 and 7 MH/s for the same reason. Run `benchmark` and
-a real crack on quiet hardware for a number you can trust; the AVX2 path has
-not yet been measured on x86-64.
+### Measured against John and Hashcat
+
+Apple M2 (8-core, 4P+4E), idle machine, wall-clock time to exhaust the whole
+keyspace of an MD5 mask — best of three, every tool given the identical job.
+Wall clock is used rather than each tool's self-reported rate because it is the
+only number that includes startup, and startup turns out to decide the result.
+
+**`?l`×6 — 308,915,776 candidates**
+
+| | time | effective |
+|---|---|---|
+| **Hashsmith** (CPU) | **2.39 s** | 129.4 MH/s |
+| Hashsmith (OpenCL) | 3.37 s | 91.8 MH/s |
+| Hashsmith (Metal) | 3.50 s | 88.2 MH/s |
+| Hashcat | 7.50 s | 41.2 MH/s |
+| John the Ripper | 32.22 s | 9.6 MH/s |
+
+**`?l`×7 — 8,031,810,176 candidates (26× larger)**
+
+| | time | effective |
+|---|---|---|
+| **Hashcat** | **23.89 s** | 336.2 MH/s |
+| Hashsmith (CPU) | 94.11 s | 85.3 MH/s |
+
+The order reverses, and the reason is startup. Hashcat reports ~1100 MH/s of
+kernel speed, but solving for both data points gives an effective 471 MH/s
+behind a fixed ~6.8 s of device initialization and kernel compilation. Below
+roughly **1.2 billion candidates** — about `?l`×6.4 — that fixed cost dominates
+and Hashsmith finishes first; above it, Hashcat's kernel wins and keeps
+winning.
+
+So: Hashsmith is the faster tool for the work most runs actually are —
+dictionaries, rules, single-crack, PRINCE, and masks up to six or seven
+characters. Hashcat is the faster tool for very large brute-force sweeps. John
+is slower than both here by a wide margin.
+
+Measure it yourself with `hashsmith benchmark --compare` (below), which runs
+all three on the same deterministic input. Numbers move with hardware, thermal
+state and background load: on a busy machine we saw the same MD5 mask swing
+between 42 and 150 MH/s, so treat any single figure — including these — as
+provisional until you have reproduced it on quiet hardware. The AVX2 path has
+not been measured on x86-64; these figures are arm64/NEON.
 
 For a reproducible end-to-end comparison against John and Hashcat, use the
 same deterministic dictionary and synthetic target for all three tools:
@@ -587,14 +621,23 @@ command-submission overhead, and CPU-generated rule candidates join those same
 batches. Hashsmith's optimized CPU path can win outright on short or I/O-bound
 jobs, so GPU remains an explicit choice.
 
-> **The GPU speed figures below are stale and are being re-measured.** They were
-> taken before the NEON/AVX2 CPU cores landed, so every "GPU vs CPU" ratio in
-> this section is computed against a CPU baseline several times slower than the
-> one you get today — the ratios are inflated by roughly that factor, and a
-> previously published head-to-head against John and Hashcat did not survive
-> re-measurement either. Treat this whole section as unverified until it is
-> re-benchmarked on an idle machine. `hashsmith gpu` prints live figures for
-> your own hardware; trust those over anything written here.
+> **On an Apple M2, the GPU gave no measurable gain, and the ratios below are
+> stale.** Re-measured on an idle machine with runs interleaved to cancel
+> thermal drift, the CPU, Metal and OpenCL paths were statistically
+> indistinguishable on an MD5 mask — medians 93.4, 90.7 and 92.1 MH/s, a spread
+> of about 3% while each individual path varied by 1.5× between runs. End to end
+> the CPU path was the fastest of the three (2.39 s against 3.50 s and 3.37 s
+> for a `?l`×6 sweep).
+>
+> The older ratios in this section (~6×, ~10×, ~27×) date from before the
+> NEON/AVX2 CPU cores existed, so they divide by a CPU baseline several times
+> slower than today's and are inflated by roughly that factor. Read them as
+> history, not as guidance.
+>
+> This is one integrated GPU that also drives the display; a discrete NVIDIA or
+> AMD card may well behave differently, and the kernels were optimized with that
+> case in mind. But we cannot claim it, because we have not measured it. Run
+> `hashsmith gpu` on your own hardware and believe that over anything here.
 
 On a full a–z⁶ keyspace (309M candidates) the GPU finishes in **~3.9 s vs ~24 s on
 the CPU — ~6×**, for both brute and mask.
