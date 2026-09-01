@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
   schedule:
     - cron: "0 3 * * *"   # nightly slow-KDF vectors
 
@@ -15,6 +16,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
       - name: Build
         run: cd hashsmith/go_hashsmith && CGO_ENABLED=0 go build ./...
       - name: Vet
@@ -36,6 +38,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
       - name: Build
         run: cd hashsmith/go_hashsmith && CGO_ENABLED=0 go build ./...
       - name: Vet
@@ -75,6 +78,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
       - name: Cross-compile all targets
         run: |
           cd hashsmith/go_hashsmith
@@ -82,6 +86,72 @@ jobs:
             echo "building $target"
             GOOS=${target%/*} GOARCH=${target#*/} CGO_ENABLED=0 \
               go build -o /dev/null ./cmd/hashsmith
+          done
+
+  bench:
+    # Throughput measurement for the vector cores. These run on BOTH
+    # architectures because the two backends are different code: arm64
+    # exercises the NEON cores, x86 exercises the AVX2 one. Development
+    # happens on an Apple laptop whose Rosetta exposes no AVX at all, and
+    # whose Docker amd64 emulation is QEMU/TCG — which executes vector
+    # instructions lane-by-lane and is therefore biased AGAINST SIMD. So a
+    # trustworthy x86 number can only come from here.
+    #
+    # -cpu 1 and a single invocation per arch keep each vector/scalar pair
+    # same-run, which is what makes the RATIO meaningful even though hosted
+    # runners are shared and their absolute figures drift.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
+      - name: CPU features
+        run: |
+          echo "arch: ${{ matrix.arch }}"
+          grep -m1 -E '^(model name|Model)' /proc/cpuinfo || true
+          grep -o -m1 -E '\b(avx512[a-z]*|avx2|avx|asimd|neon)\b' /proc/cpuinfo | sort -u | tr '\n' ' ' || true
+          echo
+      - name: Vector core benchmarks (best-of-5, same invocation)
+        run: |
+          cd hashsmith/go_hashsmith
+          go test -run '^$' -bench 'BenchmarkMD5AVX2Core|BenchmarkMD5NeonCore|BenchmarkMD5AVX2Group|BenchmarkMD5Group|BenchmarkMD5Scalar|BenchmarkMD4Group|BenchmarkMD4Scalar' \
+            -benchtime 2s -count 5 -cpu 1 ./cmd/hashsmith | tee /tmp/bench.out
+      - name: End-to-end crack rate (fast path vs forced-scalar, same binary)
+        run: |
+          cd hashsmith/go_hashsmith
+          go build -o /tmp/hs ./cmd/hashsmith
+          K=308915776   # 6-char lowercase; hash below is deliberately NOT in it,
+          MISS=00000000000000000000000000000001   # so both sides exhaust the space
+          run() {  # $1=label, $2...=extra flags
+            local label="$1"; shift
+            local best=99999
+            for i in 1 2 3; do
+              local t
+              t=$( { /usr/bin/time -f %e /tmp/hs crack -t md5 -M brute \
+                     -C abcdefghijklmnopqrstuvwxyz -n 6 -x 6 -p "$(nproc)" \
+                     "$MISS" -N --no-pot "$@" >/dev/null; } 2>&1 | tail -1 )
+              best=$(awk -v a="$t" -v b="$best" 'BEGIN{print (a<b)?a:b}')
+            done
+            awk -v k=$K -v t="$best" -v l="$label" \
+              'BEGIN{printf "E2E %-16s best %7.2fs -> %7.2f MH/s\n", l, t, k/t/1e6}'
+          }
+          run "fast-path"
+          run "forced-scalar" --session cibench
+          rm -rf ~/.hashsmith/sessions/cibench* 2>/dev/null || true
+          echo "=================== SUMMARY (sorted MH/s, best last) ==================="
+          for n in BenchmarkMD5AVX2Core BenchmarkMD5NeonCore BenchmarkMD5AVX2Group BenchmarkMD5Group BenchmarkMD5Scalar BenchmarkMD4Group BenchmarkMD4Scalar; do
+            vals=$(grep "^$n" /tmp/bench.out | grep -oE '[0-9.]+ MH/s' | sort -n | tr '\n' ' ')
+            [ -n "$vals" ] && echo "$n: $vals"
           done
 
   slow-vectors:
@@ -92,5 +162,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
       - name: Test (all vectors incl. slow KDFs)
         run: cd hashsmith/go_hashsmith && go test -tags slowtest -timeout 60m ./...

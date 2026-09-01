@@ -61,13 +61,13 @@ func wideKeyspaceSets(length int) [][]byte {
 func TestMD5GroupMatchesCryptoMD5(t *testing.T) {
 	for length := 0; length <= transposedMaxLen; length++ {
 		sets := wideKeyspaceSets(length)
-		tb := newTransposedBatch()
+		tb := newTransposedBatch(neonShape)
 		if err := tb.reset(length, encRaw); err != nil {
 			t.Fatalf("len %d: reset: %v", length, err)
 		}
 		tb.fillFromSegment(sets, 0)
-		var out [neonGroup][16]byte
-		md5Group(tb, &out)
+		out := make([][16]byte, neonShape.group())
+		md5Group(tb, out)
 		for i := 0; i < neonGroup; i++ {
 			want := md5.Sum(tb.candidateAt(i))
 			if out[i] != want {
@@ -83,24 +83,24 @@ func TestMD5GroupMatchesCryptoMD5(t *testing.T) {
 // version must too.
 func TestMD5GroupLanesAreIndependent(t *testing.T) {
 	sets := [][]byte{[]byte("abcde"), []byte("fghij"), []byte("klmno"), []byte("pqrst")}
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(4, encRaw); err != nil {
 		t.Fatal(err)
 	}
 	tb.fillFromSegment(sets, 0)
-	var ref [neonGroup][16]byte
-	md5Group(tb, &ref)
+	ref := make([][16]byte, neonShape.group())
+	md5Group(tb, ref)
 
 	for changed := 0; changed < neonGroup; changed++ {
-		tb2 := newTransposedBatch()
+		tb2 := newTransposedBatch(neonShape)
 		if err := tb2.reset(4, encRaw); err != nil {
 			t.Fatal(err)
 		}
 		tb2.fillFromSegment(sets, 0)
 		// Perturb exactly one lane's first word.
-		tb2.words[wordIndex(changed, 0)] ^= 0x01
-		var out [neonGroup][16]byte
-		md5Group(tb2, &out)
+		tb2.words[tb2.wordIndex(changed, 0)] ^= 0x01
+		out := make([][16]byte, neonShape.group())
+		md5Group(tb2, out)
 		for i := 0; i < neonGroup; i++ {
 			if i == changed {
 				continue
@@ -117,15 +117,15 @@ func BenchmarkMD5Group(b *testing.B) {
 	for i := range sets {
 		sets[i] = []byte("abcdefghijklmnopqrstuvwxyz")
 	}
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		b.Fatal(err)
 	}
-	var out [neonGroup][16]byte
+	out := make([][16]byte, neonShape.group())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		tb.fillFromSegment(sets, int64(i)*neonGroup)
-		md5Group(tb, &out)
+		md5Group(tb, out)
 	}
 	b.ReportMetric(float64(b.N*neonGroup)/b.Elapsed().Seconds()/1e6, "MH/s")
 }

@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"math"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -210,11 +211,18 @@ func runLayout(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 	}
 }
 
-// fastCtxCheckEvery is the group cadence for the fast-path context poll,
-// matched to ctxCheckEvery's candidate cadence (a group is neonGroup
+// fastCtxCheckEvery returns the group cadence for the fast-path context poll,
+// matched to ctxCheckEvery's candidate cadence (a group is shape.group()
 // candidates), so cancellation responsiveness is comparable to the scalar
-// path's per-candidate check.
-const fastCtxCheckEvery = ctxCheckEvery / neonGroup
+// path's per-candidate check. Derived from the shape rather than fixed, since
+// cores differ in how many candidates they hash per call.
+func fastCtxCheckEvery(shape vecShape) int {
+	n := ctxCheckEvery / shape.group()
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
 
 // fastAlgo describes one algorithm the NEON fast path can run: its encoding
 // mode (how candidate bytes become message bytes — see encodeMode) and its
@@ -222,34 +230,91 @@ const fastCtxCheckEvery = ctxCheckEvery / neonGroup
 type fastAlgo struct {
 	name  string
 	enc   encodeMode
-	group func(*transposedBatch, *[neonGroup][16]byte)
+	shape vecShape
+	// group hashes shape.group() candidates per call. out is a slice rather
+	// than a fixed-size array so the group size is data, not part of the
+	// type: a 4-lane NEON core produces 20 digests per call and an 8-lane
+	// AVX2 core produces 24, and one signature has to express both.
+	group func(*transposedBatch, [][16]byte)
 }
 
-// fastAlgoFor returns the fast-path descriptor for a hash type, if one
-// exists. Resolved through canonicalHashType so hashcat mode numbers (e.g.
-// "900" for md4, "1000" for ntlm) and John labels route here too.
+// vectorBackendName reports which vector core, if any, this process can
+// dispatch fast-path candidates to: "neon" on arm64 (the core is always
+// compiled in there — see md5neon_arm64.go / md4neon_arm64.go), "avx2" on
+// amd64 when the running CPU actually reports AVX2 support (hasAVX2()), or
+// ""  otherwise — amd64 without AVX2, or any other architecture, where only
+// the scalar path exists.
 //
-// md4 and ntlm both run through md4Group — NTLM is MD4 over UTF-16LE(pw)
-// rather than a different digest function, so only the encoding mode
-// differs.
+// This replaces the old md5GroupAccelerated() gate. That flag only ever
+// answered "does some vector core exist"; fastAlgoFor needs to know WHICH
+// one, since the NEON and AVX2 backends support different algorithm sets
+// (AVX2 has no MD4 core yet) and different shapes.
+func vectorBackendName() string {
+	switch runtime.GOARCH {
+	case "arm64":
+		return "neon"
+	case "amd64":
+		if hasAVX2() {
+			return "avx2"
+		}
+	}
+	return ""
+}
+
+// fastAlgoFor returns the fast-path descriptor for a hash type under the
+// currently active vector backend (vectorBackendName), if one exists.
 func fastAlgoFor(typ string) (*fastAlgo, bool) {
-	switch canonicalHashType(typ) {
-	case "md5":
-		return &fastAlgo{name: "md5", enc: encRaw, group: md5Group}, true
-	case "md4":
-		return &fastAlgo{name: "md4", enc: encRaw, group: md4Group}, true
-	case "ntlm":
-		return &fastAlgo{name: "ntlm", enc: encUTF16LE, group: md4Group}, true
+	return fastAlgoForBackend(vectorBackendName(), typ)
+}
+
+// fastAlgoForBackend is fastAlgoFor's backend-parameterised core. Splitting
+// it out lets tests exercise the AVX2 (or NEON) selection logic directly —
+// in particular, that MD4 and NTLM get no AVX2 descriptor — without needing
+// a machine (or Docker container) whose CPU actually reports AVX2 support;
+// see TestAVX2BackendExcludesMD4AndNTLM in fastpath_test.go.
+//
+// Resolved through canonicalHashType so hashcat mode numbers (e.g. "900"
+// for md4, "1000" for ntlm) and John labels route here too.
+//
+// On the NEON backend, md4 and ntlm both run through md4Group — NTLM is MD4
+// over UTF-16LE(pw) rather than a different digest function, so only the
+// encoding mode differs.
+//
+// The AVX2 backend has no MD4 core yet, so md4 and ntlm are deliberately
+// absent from its case rather than falling through to md5GroupAVX2: MD4 is
+// a different algorithm from MD5, and NTLM is MD4-over-UTF-16LE, so hashing
+// either through the MD5 core would compute the wrong digest for every
+// candidate — wrong, not merely unaccelerated, and with nothing to signal
+// it beyond every crack silently coming back "not found". Both fall back to
+// the scalar path instead, exactly as if no vector backend existed.
+func fastAlgoForBackend(backend, typ string) (*fastAlgo, bool) {
+	name := canonicalHashType(typ)
+	switch backend {
+	case "neon":
+		switch name {
+		case "md5":
+			return &fastAlgo{name: "md5", enc: encRaw, shape: neonShape, group: md5Group}, true
+		case "md4":
+			return &fastAlgo{name: "md4", enc: encRaw, shape: neonShape, group: md4Group}, true
+		case "ntlm":
+			return &fastAlgo{name: "ntlm", enc: encUTF16LE, shape: neonShape, group: md4Group}, true
+		}
+	case "avx2":
+		switch name {
+		case "md5":
+			return &fastAlgo{name: "md5", enc: encRaw, shape: avx2Shape, group: md5GroupAVX2}, true
+		}
 	}
 	return nil, false
 }
 
-// fastPathEligible reports whether l can be run through the NEON-accelerated
-// runLayoutFast instead of the scalar runLayout, and if so returns the
-// algorithm descriptor to run it with. All of the following must hold:
-//   - this build has the vector core (md5GroupAccelerated());
-//   - the target type has a registered fast algorithm (fastAlgoFor) with no
-//     salt — the only digests the vector core computes;
+// fastPathEligible reports whether l can be run through the vector-
+// accelerated runLayoutFast instead of the scalar runLayout, and if so
+// returns the algorithm descriptor to run it with. All of the following
+// must hold:
+//   - this build has an active vector backend (vectorBackendName() != "");
+//   - the target type has a registered fast algorithm for that backend
+//     (fastAlgoFor) with no salt — the only digests the vector core computes;
 //   - l has no gen override: a Markov (or other) generator's candidates are
 //     not mixed-radix decodable from segments, which fillFromSegment requires;
 //   - every segment's length fits one block under the algorithm's encoding
@@ -265,7 +330,7 @@ func fastAlgoFor(typ string) (*fastAlgo, bool) {
 //     Hashsmith's own scalar path — silently. Declining keeps such masks on
 //     the scalar path instead.
 func fastPathEligible(typ, salt string, l *keyspaceLayout) (*fastAlgo, bool) {
-	if !md5GroupAccelerated() {
+	if vectorBackendName() == "" {
 		return nil, false
 	}
 	algo, ok := fastAlgoFor(typ)
@@ -276,6 +341,11 @@ func fastPathEligible(typ, salt string, l *keyspaceLayout) (*fastAlgo, bool) {
 		return nil, false
 	}
 	if l == nil || l.gen != nil {
+		return nil, false
+	}
+	// A descriptor with no shape would divide by zero deriving the context
+	// cadence, inside a worker goroutine, far from the cause. Refuse here.
+	if algo.shape.group() <= 0 {
 		return nil, false
 	}
 	for _, seg := range l.segments {
@@ -351,9 +421,10 @@ func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 		wg.Add(1)
 		go func(wID int) {
 			defer wg.Done()
-			tb := newTransposedBatch()
+			tb := newTransposedBatch(algo.shape)
+			ctxEvery := fastCtxCheckEvery(algo.shape)
 			curLen := -1 // no length reset yet; forces a reset on first group
-			var out [neonGroup][16]byte
+			out := make([][16]byte, algo.shape.group())
 			for {
 				c := atomic.AddInt64(&nextChunk, 1) - 1
 				start := c * keyspaceChunk
@@ -382,7 +453,7 @@ func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 					seg++
 				}
 				for pos < end {
-					if groups++; groups >= fastCtxCheckEvery {
+					if groups++; groups >= ctxEvery {
 						groups = 0
 						select {
 						case <-innerCtx.Done():
@@ -438,7 +509,7 @@ func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom int64,
 					if remaining := end - pos; int64(used) > remaining {
 						used = int(remaining)
 					}
-					algo.group(tb, &out)
+					algo.group(tb, out)
 					// Only lanes 0..used-1 are real candidates. Lanes beyond
 					// that (including fillFromSegment's own padding of
 					// unused lanes up to n, and anything past used) hash the

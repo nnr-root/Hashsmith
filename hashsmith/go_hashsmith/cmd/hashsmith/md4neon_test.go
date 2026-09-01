@@ -24,7 +24,7 @@ func TestMD4GroupMatchesScalar(t *testing.T) {
 			for i := range sets {
 				sets[i] = []byte("abcdefghijklmnop")
 			}
-			tb := newTransposedBatch()
+			tb := newTransposedBatch(neonShape)
 			if err := tb.reset(length, enc); err != nil {
 				t.Fatalf("enc %v len %d: %v", enc, length, err)
 			}
@@ -41,8 +41,8 @@ func TestMD4GroupMatchesScalar(t *testing.T) {
 			// lanes < n; for the cleaned lanes >= n the true message is
 			// empty, independent of tb.length.
 			n := tb.fillFromSegment(sets, 0)
-			var out [neonGroup][16]byte
-			md4Group(tb, &out)
+			out := make([][16]byte, neonShape.group())
+			md4Group(tb, out)
 			for i := 0; i < neonGroup; i++ {
 				var msg []byte
 				if i < n {
@@ -69,22 +69,22 @@ func TestMD4GroupMatchesScalar(t *testing.T) {
 // shipped MD4 core must too.
 func TestMD4GroupLanesAreIndependent(t *testing.T) {
 	sets := [][]byte{[]byte("abcde"), []byte("fghij"), []byte("klmno"), []byte("pqrst")}
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(4, encRaw); err != nil {
 		t.Fatal(err)
 	}
 	tb.fillFromSegment(sets, 0)
-	var ref [neonGroup][16]byte
-	md4Group(tb, &ref)
+	ref := make([][16]byte, neonShape.group())
+	md4Group(tb, ref)
 	for changed := 0; changed < neonGroup; changed++ {
-		tb2 := newTransposedBatch()
+		tb2 := newTransposedBatch(neonShape)
 		if err := tb2.reset(4, encRaw); err != nil {
 			t.Fatal(err)
 		}
 		tb2.fillFromSegment(sets, 0)
-		tb2.words[wordIndex(changed, 0)] ^= 0x01
-		var out [neonGroup][16]byte
-		md4Group(tb2, &out)
+		tb2.words[tb2.wordIndex(changed, 0)] ^= 0x01
+		out := make([][16]byte, neonShape.group())
+		md4Group(tb2, out)
 		for i := 0; i < neonGroup; i++ {
 			if i != changed && out[i] != ref[i] {
 				t.Fatalf("changing lane %d altered lane %d", changed, i)
@@ -98,15 +98,15 @@ func BenchmarkMD4Group(b *testing.B) {
 	for i := range sets {
 		sets[i] = []byte("abcdefghijklmnopqrstuvwxyz")
 	}
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		b.Fatal(err)
 	}
-	var out [neonGroup][16]byte
+	out := make([][16]byte, neonShape.group())
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		tb.fillFromSegment(sets, int64(i)*neonGroup)
-		md4Group(tb, &out)
+		md4Group(tb, out)
 	}
 	b.ReportMetric(float64(b.N*neonGroup)/b.Elapsed().Seconds()/1e6, "MH/s")
 }

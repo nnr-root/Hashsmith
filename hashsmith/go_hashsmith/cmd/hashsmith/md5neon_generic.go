@@ -17,13 +17,13 @@ import "crypto/md5"
 // function usable as the test oracle md5neon_test.go compares against — a
 // divergence between what this reads and what the NEON assembly reads is a
 // real bug, not a fixture mismatch.
-func md5Group(tb *transposedBatch, out *[neonGroup][16]byte) {
-	for i := 0; i < neonGroup; i++ {
-		bitLen := tb.words[wordIndex(i, 14)]
+func md5Group(tb *transposedBatch, out [][16]byte) {
+	for i := 0; i < tb.shape.group(); i++ {
+		bitLen := tb.words[tb.wordIndex(i, 14)]
 		byteLen := int(bitLen / 8)
 		var buf [56]byte
 		for w := 0; w < 14; w++ {
-			word := tb.words[wordIndex(i, w)]
+			word := tb.words[tb.wordIndex(i, w)]
 			buf[w*4+0] = byte(word)
 			buf[w*4+1] = byte(word >> 8)
 			buf[w*4+2] = byte(word >> 16)
@@ -32,7 +32,3 @@ func md5Group(tb *transposedBatch, out *[neonGroup][16]byte) {
 		out[i] = md5.Sum(buf[:byteLen])
 	}
 }
-
-// md5GroupAccelerated reports whether this build has the vector core, for
-// reporting purposes (e.g. benchmark/throughput output).
-func md5GroupAccelerated() bool { return false }

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"testing"
 )
 
@@ -11,7 +12,7 @@ import (
 // packed words, which is how a hit is reported.
 func TestTransposedRoundTripsCandidates(t *testing.T) {
 	sets := [][]byte{[]byte("abc"), []byte("de"), []byte("fg")} // 3*2*2 = 12
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
@@ -31,7 +32,7 @@ func TestTransposedRoundTripsCandidates(t *testing.T) {
 // little-endian in words 0..13, 0x80 terminator, bit length in word 14.
 func TestTransposedBlockIsValidMD5Padding(t *testing.T) {
 	sets := [][]byte{[]byte("ab"), []byte("cd"), []byte("ef"), []byte("gh"), []byte("ij")}
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(5, encRaw); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
@@ -61,7 +62,7 @@ func TestTransposedBlockIsValidMD5Padding(t *testing.T) {
 // spurious hit.
 func TestTransposedPartialGroupIsClean(t *testing.T) {
 	sets := [][]byte{[]byte("abc")} // 3 candidates, less than one 20-wide group
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(1, encRaw); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestTransposedFillDoesNotAllocate(t *testing.T) {
 	for i := range sets {
 		sets[i] = []byte("abcdefghij")
 	}
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
@@ -101,7 +102,7 @@ func TestTransposedFillDoesNotAllocate(t *testing.T) {
 // never tried.
 func TestTransposedReuseClearsStaleLanes(t *testing.T) {
 	sets := [][]byte{[]byte("abc"), []byte("de"), []byte("fg")} // 12 candidates
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encRaw); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +142,7 @@ func TestTransposedFixedLenOK(t *testing.T) {
 // For ASCII that is byte, 0x00 per character — and the bit length doubles.
 func TestTransposedUTF16LEBlockMatchesScalar(t *testing.T) {
 	sets := [][]byte{[]byte("ab"), []byte("cd"), []byte("ef")}
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encUTF16LE); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
@@ -173,7 +174,7 @@ func TestTransposedUTF16LEBlockMatchesScalar(t *testing.T) {
 func TestTransposedCandidateAtRoundTripsBothModes(t *testing.T) {
 	sets := [][]byte{[]byte("abc"), []byte("de")}
 	for _, enc := range []encodeMode{encRaw, encUTF16LE} {
-		tb := newTransposedBatch()
+		tb := newTransposedBatch(neonShape)
 		if err := tb.reset(len(sets), enc); err != nil {
 			t.Fatalf("enc %v: reset: %v", enc, err)
 		}
@@ -208,7 +209,7 @@ func TestTransposedFixedLenOKPerMode(t *testing.T) {
 // same consequence (a spurious hit on a candidate never tried).
 func TestTransposedReuseClearsStaleLanesUTF16(t *testing.T) {
 	sets := [][]byte{[]byte("abc"), []byte("de"), []byte("fg")}
-	tb := newTransposedBatch()
+	tb := newTransposedBatch(neonShape)
 	if err := tb.reset(len(sets), encUTF16LE); err != nil {
 		t.Fatal(err)
 	}
@@ -226,6 +227,72 @@ func TestTransposedReuseClearsStaleLanesUTF16(t *testing.T) {
 		}
 		if got := tb.words[chain*64+14*4+lane]; got != 0 {
 			t.Errorf("lane %d word14 = %d, want 0", i, got)
+		}
+	}
+}
+
+// The generalised index formula must be a bijection for EVERY shape, not just
+// NEON's 5x4: each (candidate, word) pair maps to a distinct slot, and the
+// slots together cover the whole word array exactly once. A collision would
+// make two candidates share message words — silently corrupting digests — and
+// a gap would leave stale memory inside a message block.
+//
+// This test exists because the l=4 path is covered transitively by the rest of
+// the suite (everything is built from neonShape), so a formula that happened to
+// be right at 4 lanes and wrong at 8 would pass every other test in the package
+// right up until an 8-lane core was wired in.
+func TestTransposedShapeLayout(t *testing.T) {
+	for _, sh := range []vecShape{
+		{chains: 5, lanes: 4}, // NEON
+		{chains: 3, lanes: 8}, // AVX2
+		{chains: 2, lanes: 8},
+		{chains: 1, lanes: 4},
+	} {
+		tb := newTransposedBatch(sh)
+		wantLen := sh.chains * 16 * sh.lanes
+		if len(tb.words) != wantLen {
+			t.Fatalf("shape %+v: words len %d, want %d", sh, len(tb.words), wantLen)
+		}
+		seen := make(map[int]string, wantLen)
+		for i := 0; i < sh.group(); i++ {
+			for w := 0; w < 16; w++ {
+				idx := tb.wordIndex(i, w)
+				if idx < 0 || idx >= wantLen {
+					t.Fatalf("shape %+v: wordIndex(%d,%d) = %d, out of range [0,%d)",
+						sh, i, w, idx, wantLen)
+				}
+				if prev, dup := seen[idx]; dup {
+					t.Fatalf("shape %+v: wordIndex(%d,%d) = %d collides with %s",
+						sh, i, w, idx, prev)
+				}
+				seen[idx] = fmt.Sprintf("(cand %d, word %d)", i, w)
+			}
+		}
+		if len(seen) != wantLen {
+			t.Errorf("shape %+v: covered %d of %d slots — the mapping leaves gaps",
+				sh, len(seen), wantLen)
+		}
+
+		// Bijectivity alone is not enough: a lane-major mapping such as
+		// (i/l)*16*l + (i%l)*16 + w is ALSO a bijection over the same range,
+		// and would pass the checks above while being wrong for the vector
+		// cores, whose assembly reads word-major ("word g at byte offset
+		// g*32" for 8 lanes). Pin the strides so the layout, not merely its
+		// coverage, is what this test proves.
+		for i := 0; i < sh.group(); i++ {
+			for w := 0; w+1 < 16; w++ {
+				if got := tb.wordIndex(i, w+1) - tb.wordIndex(i, w); got != sh.lanes {
+					t.Fatalf("shape %+v: candidate %d word stride = %d, want %d "+
+						"(layout is not word-major)", sh, i, got, sh.lanes)
+				}
+			}
+			// Consecutive candidates inside one chain are adjacent lanes.
+			if (i+1)%sh.lanes != 0 && i+1 < sh.group() {
+				if got := tb.wordIndex(i+1, 0) - tb.wordIndex(i, 0); got != 1 {
+					t.Fatalf("shape %+v: lane stride between candidates %d and %d = %d, want 1",
+						sh, i, i+1, got)
+				}
+			}
 		}
 	}
 }

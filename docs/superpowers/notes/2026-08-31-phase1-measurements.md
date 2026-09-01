@@ -576,3 +576,99 @@ What's worth doing next, in priority order:
   (`/tmp/hs-before-wt` at `92d3d5f`) and removed (`git worktree remove`,
   `git worktree prune`) before finishing this task; `git worktree list`
   shows only the main checkout.
+
+---
+
+# AVX2 on x86 — measured 2026-09-01
+
+The vector fast path now runs on x86-64 as well as arm64. Unsalted,
+fixed-length **MD5** brute and mask attacks use a 24-way AVX2 core (3 chains of
+8 lanes) on amd64 CPUs reporting AVX2, and the existing 20-way NEON core on
+arm64. MD4 and NTLM remain arm64-only — there is no AVX2 MD4 core.
+
+## The headline
+
+End-to-end, the real CLI, one binary, one machine, one run: the fast path
+against the same binary with `--session` forcing the scalar runner. Best of 3
+over a 6-character lowercase keyspace (308,915,776 candidates) with a target
+deliberately absent, so both sides exhaust the space.
+
+| runner | fast path | forced scalar | ratio |
+|---|---|---|---|
+| amd64 — AMD EPYC 7763 | **53.08 MH/s** | 12.79 MH/s | **4.15x** |
+| arm64 — GitHub hosted | **58.29 MH/s** | 14.31 MH/s | **4.07x** |
+
+Two different instruction sets landing within 2% of each other suggests we are
+measuring the pipeline rather than a quirk of one CPU. **x86 users now get
+essentially the same speedup Apple Silicon users do**, which was the point.
+
+## Four numbers, four different questions
+
+A spike measured this core at **12.3x** and that figure was reported upward
+before it was understood. It was a real measurement of a different question.
+All four, on amd64:
+
+| measurement | MH/s | vs scalar | answers |
+|---|---|---|---|
+| spike, core only (EPYC 9V74) | 93.28 | 12.3x | how fast is the assembly, alone |
+| core only, controlled (EPYC 9V45) | 69.42 | 5.54x | same, sibling CPU, same run as the rows below |
+| core + candidate generation | 27.88 | 2.23x | the kernel as production shapes it |
+| **end-to-end vs scalar CLI** | **53.08** | **4.15x** | **what a user actually gets** |
+
+Only the last belongs in a README.
+
+## Why the spike's 12.3x did not survive
+
+**Candidate generation, not CPU generation.** Measured in one invocation on one
+CPU, so the two are separated:
+
+| | amd64 | arm64 |
+|---|---|---|
+| vector core alone | 69.42 MH/s | 38.23 MH/s |
+| core + generation | 27.88 MH/s | 13.29 MH/s |
+| generation cost | 21.5 ns/candidate | 49.1 ns/candidate |
+| share of core throughput consumed | **60%** | **65%** |
+
+Core-only on a Zen 5 9V45 measures 69.42 against the spike's 93.28 on a Zen 5
+9V74 — the same ballpark. The 93 -> 28 collapse is generation cost the
+core-only benchmark never charged, not silicon.
+
+## And why the kernel figure understates the truth
+
+`BenchmarkMD5Scalar` hashes a pre-built buffer and pays no generation at all,
+while the *Group benchmarks pay full generation — unfair to the vector core in
+one direction. But the real scalar path is not that benchmark: it allocates a
+string per candidate via `maskIdxToStr`. Measured against the code users
+actually run, the gain is 4.15x, not 2.23x. The same asymmetry took NEON from
+3.06x at the kernel to 5.6x end to end on an M2.
+
+**Generation is now the bottleneck, not hashing.** At 21-49 ns/candidate it
+costs more than the vector core does. A wider core (AVX-512 — CI runners do
+expose it) would speed up the half that is already cheap while generation stays
+flat, so its end-to-end gain would be well below its core-level gain.
+Optimising `fillFromSegment` is likely worth more than widening the core.
+
+## Hardware dependence, stated plainly
+
+Every headline in this project before today came from an Apple M2, which has
+unusually good NEON throughput. The same NEON code measured **3.06x** at the
+kernel on the M2 and **1.54x** on a hosted arm64 runner. Users on ordinary
+server silicon should expect the lower end of any range quoted here.
+
+## What is accelerated, precisely
+
+Accelerated: unsalted, fixed-length **MD5** brute and mask attacks on arm64
+(NEON, 20-way) and on amd64 with AVX2 (24-way); plus **MD4 and NTLM on arm64
+only**, with NTLM further restricted to ASCII-only charsets.
+
+Not accelerated, and running exactly the code they always did: the other ~460
+formats; every salted target; dictionary attacks; session-resume runs;
+Markov, hybrid and combinator modes; MD4 and NTLM on x86; and any platform
+without NEON or AVX2.
+
+## Open follow-ups
+
+- An AVX2 MD4 core would bring NTLM — the Active Directory case — to x86.
+- `fillFromSegment` is now the dominant cost; see above.
+- End-to-end figures here are single-run best-of-3 on shared CI runners.
+  Absolute MH/s will drift between runs; the ratios are same-run and hold.
