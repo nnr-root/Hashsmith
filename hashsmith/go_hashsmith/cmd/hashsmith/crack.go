@@ -60,19 +60,21 @@ func md5TargetBytes(targetHex string) ([16]byte, bool) {
 // to the existing scalar, session-aware runner. This is the only seam
 // between the two: every other format, salt, and attack mode keeps exactly
 // today's code path, since fastPathEligible returns false for all of them.
+// limit (0 = unbounded) is --limit's candidate-count bound; both the fast
+// and scalar paths honour it identically (see runLayout / runLayoutFast).
 func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *sessionState,
-	resumeFrom int64, workers int, atomicAttempts *int64,
+	resumeFrom, limit int64, workers int, atomicAttempts *int64,
 	typ, salt, targetHash string, verify func(string) bool) (string, bool, error) {
 
 	if sess == nil {
 		if algo, ok := fastPathEligible(typ, salt, layout); ok {
 			if target, ok := md5TargetBytes(targetHash); ok {
-				pw, err := runLayoutFast(ctx, layout, resumeFrom, workers, atomicAttempts, nil, algo, target)
+				pw, err := runLayoutFast(ctx, layout, resumeFrom, limit, workers, atomicAttempts, nil, algo, target)
 				return pw, ctx.Err() != nil, err
 			}
 		}
 	}
-	return runSessionLayout(ctx, layout, sess, resumeFrom, workers, atomicAttempts, verify)
+	return runSessionLayout(ctx, layout, sess, resumeFrom, limit, workers, atomicAttempts, verify)
 }
 
 // crackedResult carries the found password and an optional human-readable label
@@ -91,12 +93,14 @@ type crackCtx struct {
 	showOnly  bool          // --show: print potfile hits only, never attack
 	wordlist2 string        // combinator right-hand list ("" when unused)
 	useGPU    bool          // --gpu: try raw-digest GPU dictionary/brute/mask kernels when available
+	skip      int64         // --skip: candidate index (whole-layout / word index) to start at; 0 = unset
+	limit     int64         // --limit: candidate count to try, 0 = unbounded
 }
 
 // newCrackCtx loads the potfile (unless disabled) and any saved session. A nil
 // return is never produced — a disabled potfile simply yields a nil p.pot.
-func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool, wordlist2 string, useGPU bool) (*crackCtx, error) {
-	cc := &crackCtx{sessName: sessName, showOnly: showOnly, wordlist2: wordlist2, useGPU: useGPU}
+func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool, wordlist2 string, useGPU bool, skip, limit int64) (*crackCtx, error) {
+	cc := &crackCtx{sessName: sessName, showOnly: showOnly, wordlist2: wordlist2, useGPU: useGPU, skip: skip, limit: limit}
 	if !noPot {
 		p, err := loadPotfile(potPath)
 		if err != nil {
@@ -149,6 +153,9 @@ func runCrack(args []string) error {
 	w2 := fs.String("w2", "", "alias for --wordlist2")
 	stdoutMode := fs.Bool("stdout", false, "emit the candidate stream to stdout instead of cracking (no hash needed)")
 	useGPU := fs.Bool("gpu", false, "use GPU dictionary/brute/mask kernels when supported")
+	keyspaceOnly := fs.Bool("keyspace", false, "print the total candidate count to stdout and exit, without attacking")
+	skip := fs.Int64("skip", 0, "distributed cracking: start at candidate index N (whole-layout index, hashcat-style; word index in dict mode)")
+	limit := fs.Int64("limit", 0, "distributed cracking: try at most N candidates from --skip, then stop (0 = unbounded)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -164,6 +171,13 @@ func runCrack(args []string) error {
 		wl2 = *w2
 	}
 	mc := buildMaskConfig(*maskStr, *cs1, *cs2, *cs3, *cs4, *increment, *minLen, *maskFirst)
+
+	// --keyspace: report the total candidate count and exit — no target or
+	// hashing required, and no attack runs. Handled before --stdout / gatherInputs
+	// so it works with or without a hash argument.
+	if *keyspaceOnly {
+		return printKeyspace(*mode, wl, wl2, *charset, *minLen, *maxLen, mc)
+	}
 
 	// --stdout: generate candidates only, no target or hashing required.
 	if *stdoutMode {
@@ -187,7 +201,7 @@ func runCrack(args []string) error {
 	if sn == "" {
 		sn = *restore
 	}
-	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2, *useGPU)
+	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2, *useGPU, *skip, *limit)
 	if err != nil {
 		return err
 	}
@@ -229,8 +243,12 @@ func crackTargets(targets []string, typ, mode, wordlist, charset string,
 	// Multi-hash acceleration: when several salt-independent raw-digest targets
 	// are given, hash each candidate once and check it against all of them. Only
 	// the targets multi-hash mode cannot handle are returned for per-target work.
+	// --skip/--limit are not (yet) threaded through this shared-candidate path,
+	// so a distributed slice takes the slower but correct per-target path instead
+	// of silently attacking the whole keyspace against every target.
+	skipLimitSet := cc != nil && (cc.skip != 0 || cc.limit != 0)
 	uncracked := 0
-	if len(targets) > 1 && salt == "" {
+	if len(targets) > 1 && salt == "" && !skipLimitSet {
 		var nb int
 		targets, nb = runBatch(targets, typ, mode, wordlist, charset,
 			minLen, maxLen, workers, saltMode, outFile, copyResult, rules, mc, cc)
@@ -368,6 +386,24 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		}
 	}
 
+	// --skip (distributed cracking) vs. a resumed session's saved checkpoint:
+	// an explicit --skip wins. --skip 0 is indistinguishable from "not passed"
+	// (0 is also its unset default), so it only ever narrows/relocates a run —
+	// it can't be used to force a session back to index 0; use
+	// `hashsmith sessions rm <name>` for that.
+	var limit int64
+	if cc != nil {
+		limit = cc.limit
+		if cc.skip != 0 {
+			if resumeFrom != 0 {
+				clrYellow.Fprintf(os.Stderr,
+					"--skip %d overrides session %q's saved checkpoint (%d)\n",
+					cc.skip, cc.sessName, resumeFrom)
+			}
+			resumeFrom = cc.skip
+		}
+	}
+
 	verifyFn := func(c string) bool {
 		ok, _ := verifyCandidate(c, targetHash, typ, salt, saltMode)
 		return ok
@@ -386,22 +422,29 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		err         error
 		interrupted bool
 	)
+	// GPU kernels (dict/brute/mask) don't yet accept a resume/limit bound, so a
+	// --skip/--limit run always takes the CPU path, which does.
+	gpuBounded := resumeFrom == 0 && limit == 0
 	switch m {
 	case "dict":
 		// An empty wordlist path uses the built-in common.txt (see openWordlist).
-		if cc != nil && cc.useGPU && salt == "" && typ == "md5" {
+		if cc != nil && cc.useGPU && gpuBounded && salt == "" && typ == "md5" {
 			var usedGPU bool
 			result, err, usedGPU = gpuDictAttack(runCtx, wordlist, targetHash, rules, &atomicAttempts)
 			if !usedGPU {
 				_, reason := activeGPUBackend()
 				clrYellow.Fprintf(os.Stderr, "GPU dictionary unavailable (%s) — using CPU\n", reason)
-				result, err = dictAttack(runCtx, wordlist, workers, &atomicAttempts, rules, verifyFn)
+				result, err = dictAttack(runCtx, wordlist, resumeFrom, limit, workers, &atomicAttempts, rules, verifyFn)
 			}
 		} else {
 			if cc != nil && cc.useGPU {
-				clrYellow.Fprintf(os.Stderr, "GPU dictionary currently supports unsalted MD5; using CPU for %s\n", typ)
+				if !gpuBounded {
+					clrYellow.Fprintf(os.Stderr, "GPU dictionary does not support --skip/--limit yet — using CPU\n")
+				} else {
+					clrYellow.Fprintf(os.Stderr, "GPU dictionary currently supports unsalted MD5; using CPU for %s\n", typ)
+				}
 			}
-			result, err = dictAttack(runCtx, wordlist, workers, &atomicAttempts, rules, verifyFn)
+			result, err = dictAttack(runCtx, wordlist, resumeFrom, limit, workers, &atomicAttempts, rules, verifyFn)
 		}
 		interrupted = runCtx.Err() != nil
 	case "brute":
@@ -410,7 +453,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			return false, errors.New("invalid -n/-x range")
 		}
 		var pw string
-		if cc != nil && cc.useGPU {
+		if cc != nil && cc.useGPU && gpuBounded {
 			if gp, _, usedGPU := gpuBruteHash(targetHash, typ, charset, minLen, maxLen, &atomicAttempts); usedGPU {
 				pw = gp
 			} else {
@@ -418,11 +461,14 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				clrYellow.Fprintf(os.Stderr,
 					"GPU brute unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
 				pw, interrupted, err = runBruteOrMaskLayout(runCtx, bruteLayout(charset, minLen, maxLen),
-					sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
+					sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 			}
 		} else {
+			if cc != nil && cc.useGPU && !gpuBounded {
+				clrYellow.Fprintf(os.Stderr, "GPU brute does not support --skip/--limit yet — using CPU\n")
+			}
 			pw, interrupted, err = runBruteOrMaskLayout(runCtx, bruteLayout(charset, minLen, maxLen),
-				sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
+				sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 		}
 		result = crackedResult{password: pw}
 	case "mask":
@@ -436,7 +482,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			return false, e
 		}
 		var pw string
-		if cc != nil && cc.useGPU {
+		if cc != nil && cc.useGPU && gpuBounded {
 			if gp, _, usedGPU := gpuMaskHash(targetHash, typ, mc, &atomicAttempts); usedGPU {
 				pw = gp
 			} else {
@@ -444,11 +490,14 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				clrYellow.Fprintf(os.Stderr,
 					"GPU mask unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
 				pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
-					sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
+					sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 			}
 		} else {
+			if cc != nil && cc.useGPU && !gpuBounded {
+				clrYellow.Fprintf(os.Stderr, "GPU mask does not support --skip/--limit yet — using CPU\n")
+			}
 			pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
-				sess, resumeFrom, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
+				sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
 		}
 		result = crackedResult{password: pw}
 	case "markov":
@@ -463,7 +512,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		}
 		var pw string
 		pw, interrupted, err = runSessionLayout(runCtx, markovLayout(model, minLen, maxLen),
-			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+			sess, resumeFrom, limit, workers, &atomicAttempts, verifyFn)
 		result = crackedResult{password: pw}
 	case "hybrid":
 		if mc == nil {
@@ -482,7 +531,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		}
 		var pw string
 		pw, interrupted, err = runSessionLayout(runCtx, hybridLayout(words, sets, mc.maskFirst),
-			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+			sess, resumeFrom, limit, workers, &atomicAttempts, verifyFn)
 		result = crackedResult{password: pw}
 	case "combinator":
 		if cc == nil || cc.wordlist2 == "" {
@@ -501,7 +550,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		}
 		var pw string
 		pw, interrupted, err = runSessionLayout(runCtx, combinatorLayout(left, right),
-			sess, resumeFrom, workers, &atomicAttempts, verifyFn)
+			sess, resumeFrom, limit, workers, &atomicAttempts, verifyFn)
 		result = crackedResult{password: pw}
 	default:
 		tickCancel()
@@ -596,7 +645,7 @@ func showPotEntry(p *potfile, target, outFile string, copyResult bool) (bool, er
 func crackReport(targetHash, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
 	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
-	cc, _ := newCrackCtx("", false, "", false, "", false)
+	cc, _ := newCrackCtx("", false, "", false, "", false, 0, 0)
 	var engine *ruleEngine
 	if useRules {
 		engine = builtinRuleEngine()
@@ -694,7 +743,11 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 // Batch size is dictBatchSize to amortise channel overhead without starving
 // workers. Context cancellation propagates through both the reader and workers.
 
-func dictAttack(ctx context.Context, wordlistPath string, workers int, atomicAttempts *int64,
+// dictAttack streams a wordlist through `workers` verifiers. skip and limit
+// (0 = unbounded) bound it to word indices [skip, skip+limit) of the whole
+// wordlist — --skip/--limit's dictionary-mode semantics — letting a dict
+// attack be split across machines the same way brute/mask/hybrid layouts are.
+func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, workers int, atomicAttempts *int64,
 	rules *ruleEngine, verify func(string) bool) (crackedResult, error) {
 
 	f, label, err := openWordlist(wordlistPath)
@@ -704,6 +757,13 @@ func dictAttack(ctx context.Context, wordlistPath string, workers int, atomicAtt
 	defer f.Close()
 	if label == defaultWordlistLabel {
 		clrYellow.Fprintf(os.Stderr, "No wordlist supplied — using %s\n", label)
+	}
+	if skip < 0 {
+		skip = 0
+	}
+	upper := int64(-1) // -1 = unbounded
+	if limit > 0 {
+		upper = satAdd(skip, limit)
 	}
 
 	innerCtx, cancel := context.WithCancel(ctx)
@@ -719,10 +779,19 @@ func dictAttack(ctx context.Context, wordlistPath string, workers int, atomicAtt
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 1<<20), 1<<20) // 1 MiB line buffer
 		cur := make(batch, 0, dictBatchSize)
+		var idx int64
 		for scanner.Scan() {
 			word := strings.TrimSpace(scanner.Text())
 			if word == "" {
 				continue
+			}
+			i := idx
+			idx++
+			if i < skip {
+				continue
+			}
+			if upper >= 0 && i >= upper {
+				break
 			}
 			cur = append(cur, word)
 			if len(cur) >= dictBatchSize {
@@ -890,6 +959,79 @@ func warnKeyspaceNotExhaustive(exact *big.Int) {
 		"Warning: true keyspace is %s candidates, which exceeds %d (max int64) — "+
 			"this run will only cover the first %d candidates and will NOT be exhaustive\n",
 		exact.String(), int64(math.MaxInt64), int64(math.MaxInt64))
+}
+
+// printKeyspace implements --keyspace: it computes the exact (never-saturated,
+// math/big) candidate count for the requested mode and prints it — nothing
+// else — to stdout, so `$(hashsmith crack ... --keyspace)` works in a shell.
+//
+// --skip and --limit index the WHOLE layout (see runLayout's bound), so this
+// intentionally reports the true, unbounded total rather than anything
+// narrowed by --skip/--limit — a caller divides this number to build its own
+// --skip/--limit slices.
+//
+// When the true count exceeds int64 (the type every candidate index in this
+// engine is), printing a saturated math.MaxInt64 would silently mislead a
+// script into under-covering the space when it divides the printed value to
+// build slices. So this refuses instead: an error here (not a printed number)
+// is what tells such a script its divide-and-slice plan cannot work.
+func printKeyspace(mode, wordlist, wordlist2, charset string, minLen, maxLen int, mc *maskConfig) error {
+	m := strings.ToLower(mode)
+	var exact *big.Int
+	switch m {
+	case "brute", "markov":
+		if minLen < 1 || maxLen < minLen {
+			return errors.New("invalid -n/-x range")
+		}
+		exact, _ = calcBruteTotalExact(charset, minLen, maxLen)
+	case "mask":
+		if mc == nil {
+			return errors.New("mask mode requires --mask <mask>")
+		}
+		exact, _ = calcMaskTotalExact(mc)
+	case "hybrid":
+		if mc == nil {
+			return errors.New("hybrid mode requires --mask <mask> and -w <wordlist>")
+		}
+		n, err := countWordlistLines(wordlist)
+		if err != nil {
+			return err
+		}
+		sets, err := parseMask(mc)
+		if err != nil {
+			return err
+		}
+		maskExact, _ := maskKeyspaceExact(sets)
+		exact = new(big.Int).Mul(big.NewInt(n), maskExact)
+	case "combinator":
+		if wordlist2 == "" {
+			return errors.New("combinator mode requires -w <left list> and --wordlist2 <right list>")
+		}
+		a, err := countWordlistLines(wordlist)
+		if err != nil {
+			return err
+		}
+		b, err := countWordlistLines(wordlist2)
+		if err != nil {
+			return err
+		}
+		exact = new(big.Int).Mul(big.NewInt(a), big.NewInt(b))
+	case "dict":
+		n, err := countWordlistLines(wordlist)
+		if err != nil {
+			return err
+		}
+		exact = big.NewInt(n)
+	default:
+		return errors.New("unknown mode: use dict, brute, mask, markov, hybrid or combinator")
+	}
+	if exact.Cmp(maxInt64Big) > 0 {
+		return fmt.Errorf("true keyspace is %s candidates, which exceeds %d (max int64) — "+
+			"refusing to print a saturated value a script would divide and under-cover",
+			exact.String(), int64(math.MaxInt64))
+	}
+	fmt.Println(exact.String())
+	return nil
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

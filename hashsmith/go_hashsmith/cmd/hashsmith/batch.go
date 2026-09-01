@@ -313,30 +313,30 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 	switch m {
 	case "brute":
 		_, _ = runLayout(context.Background(), bruteLayout(charset, minLen, maxLen),
-			0, workers, &atomicAttempts, nil, verify)
+			0, 0, workers, &atomicAttempts, nil, verify)
 	case "mask":
 		if mc != nil {
 			if layout, err := maskLayout(mc); err == nil {
-				_, _ = runLayout(context.Background(), layout, 0, workers, &atomicAttempts, nil, verify)
+				_, _ = runLayout(context.Background(), layout, 0, 0, workers, &atomicAttempts, nil, verify)
 			}
 		}
 	case "hybrid":
 		if mc != nil {
 			if sets, err := parseMask(mc); err == nil {
 				if words, _, e := loadWordlistSlice(wordlist); e == nil {
-					_, _ = runLayout(context.Background(), hybridLayout(words, sets, mc.maskFirst), 0, workers, &atomicAttempts, nil, verify)
+					_, _ = runLayout(context.Background(), hybridLayout(words, sets, mc.maskFirst), 0, 0, workers, &atomicAttempts, nil, verify)
 				}
 			}
 		}
 	case "markov":
 		if model, err := trainMarkov(charset, wordlist); err == nil {
-			_, _ = runLayout(context.Background(), markovLayout(model, minLen, maxLen), 0, workers, &atomicAttempts, nil, verify)
+			_, _ = runLayout(context.Background(), markovLayout(model, minLen, maxLen), 0, 0, workers, &atomicAttempts, nil, verify)
 		}
 	case "combinator":
 		if wordlist2 != "" {
 			if left, _, e1 := loadWordlistSlice(wordlist); e1 == nil {
 				if right, _, e2 := loadWordlistSlice(wordlist2); e2 == nil {
-					_, _ = runLayout(context.Background(), combinatorLayout(left, right), 0, workers, &atomicAttempts, nil, verify)
+					_, _ = runLayout(context.Background(), combinatorLayout(left, right), 0, 0, workers, &atomicAttempts, nil, verify)
 				}
 			}
 		}

@@ -32,7 +32,7 @@ func TestRunLayoutResumeFindsAndSkips(t *testing.T) {
 
 	// Full run from 0 finds it.
 	var n1 int64
-	pw, err := runLayout(context.Background(), l, 0, 4, &n1, nil, verify)
+	pw, err := runLayout(context.Background(), l, 0, 0, 4, &n1, nil, verify)
 	if err != nil || pw != "zy" {
 		t.Fatalf("full run: got %q err %v", pw, err)
 	}
@@ -40,14 +40,14 @@ func TestRunLayoutResumeFindsAndSkips(t *testing.T) {
 	// Resuming past the answer (index 701 > 700) must MISS it, proving resumeFrom
 	// genuinely skips the earlier keyspace.
 	var n2 int64
-	pw, _ = runLayout(context.Background(), l, 701, 4, &n2, nil, verify)
+	pw, _ = runLayout(context.Background(), l, 701, 0, 4, &n2, nil, verify)
 	if pw == "zy" {
 		t.Fatal("resume past the answer should not find it")
 	}
 
 	// Resuming just before the answer still finds it, with far fewer tries.
 	var n3 int64
-	pw, _ = runLayout(context.Background(), l, 699, 4, &n3, nil, verify)
+	pw, _ = runLayout(context.Background(), l, 699, 0, 4, &n3, nil, verify)
 	if pw != "zy" {
 		t.Fatalf("resume before answer: want zy got %q", pw)
 	}

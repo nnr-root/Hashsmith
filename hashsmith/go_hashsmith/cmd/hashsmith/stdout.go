@@ -36,7 +36,7 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 			return errors.New("invalid -n/-x range")
 		}
 		_, err := runLayout(context.Background(), bruteLayout(charset, minLen, maxLen),
-			0, 1, &dummy, nil, emit)
+			0, 0, 1, &dummy, nil, emit)
 		return err
 	case "mask":
 		if mc == nil {
@@ -46,7 +46,7 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 		if err != nil {
 			return err
 		}
-		_, err = runLayout(context.Background(), layout, 0, 1, &dummy, nil, emit)
+		_, err = runLayout(context.Background(), layout, 0, 0, 1, &dummy, nil, emit)
 		return err
 	case "markov":
 		if minLen < 1 || maxLen < minLen {
@@ -56,7 +56,7 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 		if err != nil {
 			return err
 		}
-		_, err = runLayout(context.Background(), markovLayout(model, minLen, maxLen), 0, 1, &dummy, nil, emit)
+		_, err = runLayout(context.Background(), markovLayout(model, minLen, maxLen), 0, 0, 1, &dummy, nil, emit)
 		return err
 	case "hybrid":
 		if mc == nil {
@@ -70,7 +70,7 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 		if err != nil {
 			return err
 		}
-		_, err = runLayout(context.Background(), hybridLayout(words, sets, mc.maskFirst), 0, 1, &dummy, nil, emit)
+		_, err = runLayout(context.Background(), hybridLayout(words, sets, mc.maskFirst), 0, 0, 1, &dummy, nil, emit)
 		return err
 	case "combinator":
 		if wordlist2 == "" {
@@ -84,7 +84,7 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 		if err != nil {
 			return err
 		}
-		_, err = runLayout(context.Background(), combinatorLayout(left, right), 0, 1, &dummy, nil, emit)
+		_, err = runLayout(context.Background(), combinatorLayout(left, right), 0, 0, 1, &dummy, nil, emit)
 		return err
 	default: // dict
 		f, _, err := openWordlist(wordlist)
