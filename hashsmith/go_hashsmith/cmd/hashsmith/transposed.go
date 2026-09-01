@@ -87,12 +87,21 @@ func newTransposedBatch(shape vecShape) *transposedBatch {
 	}
 }
 
+// wordBase returns the slot for message-word 0 of candidate i — the base
+// that every word of that candidate is offset from by w*lanes. Factored out
+// of wordIndex so a caller writing every word of one candidate (the common
+// case, e.g. fillFromSegment) can compute the i/l, i%l division once per
+// candidate instead of once per word.
+func (tb *transposedBatch) wordBase(i int) int {
+	l := tb.shape.lanes
+	return (i/l)*(16*l) + (i % l)
+}
+
 // wordIndex returns the slot for message-word w of candidate i, for this
 // batch's shape: chain i/lanes holds 16 words of `lanes` uint32 each, so a
 // chain strides 16*lanes and a message word strides `lanes`.
 func (tb *transposedBatch) wordIndex(i, w int) int {
-	l := tb.shape.lanes
-	return (i/l)*(16*l) + w*l + (i % l)
+	return tb.wordBase(i) + w*tb.shape.lanes
 }
 
 // reset prepares the batch for candidates of candidateLen bytes encoded under
@@ -119,9 +128,24 @@ func (tb *transposedBatch) reset(candidateLen int, enc encodeMode) error {
 }
 
 // fillFromSegment writes up to neonGroup candidates starting at index `from`
-// of the mixed-radix segment `sets`, returning how many it wrote. It allocates
-// nothing: candidate bytes are decoded into a stack buffer and packed straight
-// into their interleaved slots.
+// of the mixed-radix segment `sets`, whose total keyspace is `total`
+// (== maskKeyspace(sets); the caller hoists this since it is invariant for a
+// segment and would otherwise be recomputed on every group-sized fill).
+// Returns how many candidates it wrote. It allocates nothing: candidate
+// bytes are decoded into a stack buffer and packed straight into their
+// interleaved slots.
+//
+// Candidates for consecutive indices are generated with an odometer rather
+// than a full mixed-radix decode per index: maskIdxInto (mask.go) is a
+// division and modulo per character position, and profiling showed it as
+// the dominant cost of generation. `from` is decoded once, in full, exactly
+// as maskIdxInto would; every subsequent candidate in the group is produced
+// by incrementing the last position's digit and carrying left on overflow —
+// standard odometer arithmetic, mathematically identical to decoding
+// from+1, from+2, … independently, but with no division at all. This must
+// stay byte-identical to maskIdxInto/maskIdxToStr for every index; see
+// TestFillFromSegmentMatchesMaskIdxInto* in transposed_test.go, which
+// enumerate whole segments through both paths and compare.
 //
 // fillFromSegment owns the "unused lanes are harmless" invariant across
 // reuse, not just after reset: on a batch that is reset once and filled
@@ -133,10 +157,8 @@ func (tb *transposedBatch) reset(candidateLen int, enc encodeMode) error {
 // leftover lanes are reset to the empty-message block (all words zero except
 // word 0 = 0x80) before returning. This only runs on the final partial group
 // of a segment; a full group pays nothing extra.
-func (tb *transposedBatch) fillFromSegment(sets [][]byte, from int64) int {
-	total := maskKeyspace(sets)
+func (tb *transposedBatch) fillFromSegment(sets [][]byte, from int64, total int64) int {
 	n := 0
-	var buf [transposedMaxLen]byte
 	var msg [transposedMaxLen]byte // staged message bytes: encoded per tb.enc
 	L := len(sets)
 	msgLen := L
@@ -145,40 +167,72 @@ func (tb *transposedBatch) fillFromSegment(sets [][]byte, from int64) int {
 		msgLen = L * 2
 		bitLen = uint32(L) * 16
 	}
-	for n < tb.shape.group() {
-		idx := from + int64(n)
-		if idx >= total {
-			break
+	group := tb.shape.group()
+
+	if from < total {
+		var buf [transposedMaxLen]byte // buf[i] = sets[i][dig[i]], kept in sync with dig
+		var dig [transposedMaxLen]int  // dig[i] = current digit (index into sets[i])
+
+		// Full decode, once, at `from` — identical arithmetic to maskIdxInto.
+		idx := from
+		for i := L - 1; i >= 0; i-- {
+			base := int64(len(sets[i]))
+			d := int(idx % base)
+			dig[i] = d
+			buf[i] = sets[i][d]
+			idx /= base
 		}
-		maskIdxInto(buf[:L], idx, sets)
-		if tb.enc == encUTF16LE {
-			// Each candidate byte b expands to b, 0x00 — byte-identical to
-			// utf16le(s) for ASCII input (see hash.go's utf16le).
-			for b := 0; b < L; b++ {
-				msg[b*2] = buf[b]
-				msg[b*2+1] = 0
+
+		for {
+			if tb.enc == encUTF16LE {
+				// Each candidate byte b expands to b, 0x00 — byte-identical to
+				// utf16le(s) for ASCII input (see hash.go's utf16le).
+				for b := 0; b < L; b++ {
+					msg[b*2] = buf[b]
+					msg[b*2+1] = 0
+				}
+			} else {
+				copy(msg[:L], buf[:L])
 			}
-		} else {
-			copy(msg[:L], buf[:L])
+			// Pack msgLen bytes plus the 0x80 terminator into words 0..(msgLen/4).
+			full := msgLen / 4
+			base := tb.wordBase(n)
+			lanes := tb.shape.lanes
+			for w := 0; w < full; w++ {
+				tb.words[base+w*lanes] = binary.LittleEndian.Uint32(msg[w*4:])
+			}
+			// The partial final word carries the remaining bytes then 0x80.
+			rem := msgLen % 4
+			var tail uint32
+			for b := 0; b < rem; b++ {
+				tail |= uint32(msg[full*4+b]) << (8 * b)
+			}
+			tail |= 0x80 << (8 * rem)
+			tb.words[base+full*lanes] = tail
+			tb.words[base+14*lanes] = bitLen
+			n++
+
+			if n >= group || from+int64(n) >= total {
+				break
+			}
+			// Advance the odometer by one: increment the last position,
+			// carrying left on overflow. Mathematically the same as
+			// decoding from+n independently, since dig[] together encodes
+			// exactly the value (from+n-1) mod (product of the bases to
+			// its right) at every position.
+			for i := L - 1; i >= 0; i-- {
+				dig[i]++
+				if dig[i] < len(sets[i]) {
+					buf[i] = sets[i][dig[i]]
+					break
+				}
+				dig[i] = 0
+				buf[i] = sets[i][0]
+			}
 		}
-		// Pack msgLen bytes plus the 0x80 terminator into words 0..(msgLen/4).
-		full := msgLen / 4
-		for w := 0; w < full; w++ {
-			tb.words[tb.wordIndex(n, w)] = binary.LittleEndian.Uint32(msg[w*4:])
-		}
-		// The partial final word carries the remaining bytes then 0x80.
-		rem := msgLen % 4
-		var tail uint32
-		for b := 0; b < rem; b++ {
-			tail |= uint32(msg[full*4+b]) << (8 * b)
-		}
-		tail |= 0x80 << (8 * rem)
-		tb.words[tb.wordIndex(n, full)] = tail
-		tb.words[tb.wordIndex(n, 14)] = bitLen
-		n++
 	}
 	// Clean any leftover lanes from a previous, longer fill of this batch.
-	for i := n; i < tb.shape.group(); i++ {
+	for i := n; i < group; i++ {
 		for w := 0; w < 16; w++ {
 			tb.words[tb.wordIndex(i, w)] = 0
 		}
