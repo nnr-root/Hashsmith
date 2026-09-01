@@ -2,10 +2,7 @@ name: CI
 
 on:
   push:
-    # avx2-production is listed temporarily so its benchmark numbers can be
-    # measured on real x86 before merge; drop it from this list when the
-    # branch lands.
-    branches: [main, avx2-production]
+    branches: [main]
   pull_request:
   workflow_dispatch:
   schedule:
