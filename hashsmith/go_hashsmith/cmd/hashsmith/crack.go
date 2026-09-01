@@ -97,10 +97,10 @@ type crackCtx struct {
 	limit     int64         // --limit: candidate count to try, 0 = unbounded
 
 	// ── pipeline plumbing (--username / --left / --outfile-format) ──────────
-	username bool           // --username: input lines are "user:hash"
-	left     bool           // --left: report still-uncracked targets instead of/after results
-	outFmt   []int          // --outfile-format field list (nil = default per-path format)
-	outW     *outWriter     // shared, append-only -o writer for this run (nil when unused)
+	username bool              // --username: input lines are "user:hash"
+	left     bool              // --left: report still-uncracked targets instead of/after results
+	outFmt   []int             // --outfile-format field list (nil = default per-path format)
+	outW     *outWriter        // shared, append-only -o writer for this run (nil when unused)
 	userOf   map[string]string // input hash -> username (only populated when username is set)
 	rawOf    map[string]string // input hash -> original input line, verbatim (for --left)
 
@@ -705,6 +705,18 @@ func runLoopback(lines []inputLine, typ string, workers int, salt, saltMode, out
 
 	pass := 0
 	for len(feed) > 0 {
+		// Defensive backstop, not a limit on legitimate work. Termination is
+		// guaranteed by claimPlain: each plaintext is fed at most once ever, and
+		// the total feedable material is bounded by (targets cracked + potfile
+		// entries), so a correct run stops long before this. But a future
+		// regression in the claim/drain bookkeeping would otherwise surface as a
+		// HANG — caught only by an outer test timeout or, for a user, as an
+		// apparently frozen tool. Failing loudly beats spinning silently.
+		if pass >= maxLoopbackPasses {
+			return fmt.Errorf("loopback exceeded %d passes — refusing to continue; "+
+				"this indicates a bug in the recovered-plaintext bookkeeping, since "+
+				"each plaintext should be fed at most once", maxLoopbackPasses)
+		}
 		remaining := remainingTargets(lines, cc)
 		if len(remaining) == 0 {
 			break
@@ -748,6 +760,10 @@ func runLoopback(lines []inputLine, typ string, workers int, salt, saltMode, out
 	}
 	return nil
 }
+
+// maxLoopbackPasses bounds runLoopback defensively. See the check in the pass
+// loop for why a cap exists even though termination is already guaranteed.
+const maxLoopbackPasses = 256
 
 // remainingTargets returns the hash (not raw-line) form of every input line
 // not yet marked found — --loopback's per-pass target list, and what --left
