@@ -97,15 +97,27 @@ type crackCtx struct {
 	limit     int64         // --limit: candidate count to try, 0 = unbounded
 
 	// ── pipeline plumbing (--username / --left / --outfile-format) ──────────
-	username bool           // --username: input lines are "user:hash"
-	left     bool           // --left: report still-uncracked targets instead of/after results
-	outFmt   []int          // --outfile-format field list (nil = default per-path format)
-	outW     *outWriter     // shared, append-only -o writer for this run (nil when unused)
+	username bool              // --username: input lines are "user:hash"
+	left     bool              // --left: report still-uncracked targets instead of/after results
+	outFmt   []int             // --outfile-format field list (nil = default per-path format)
+	outW     *outWriter        // shared, append-only -o writer for this run (nil when unused)
 	userOf   map[string]string // input hash -> username (only populated when username is set)
 	rawOf    map[string]string // input hash -> original input line, verbatim (for --left)
 
 	foundMu sync.Mutex
 	found   map[string]bool // input hash -> cracked this run (potfile hit or freshly found)
+
+	// ── --loopback plumbing ──────────────────────────────────────────────────
+	// potPlains is a one-time snapshot of every plaintext already on record in
+	// the potfile, taken at load time (newCrackCtx) — before this run cracks
+	// anything of its own. --loopback seeds its first pass with these (when the
+	// potfile is enabled) alongside whatever this run freshly cracks: real
+	// passwords already known from this environment.
+	potPlains []string
+
+	plainsMu   sync.Mutex
+	plainsSeen map[string]bool // every plaintext ever claimed for loopback (potfile seed or a fresh crack) — claimed at most once, for the life of this crackCtx
+	newPlains  []string        // freshly cracked plaintexts (real attacks only, never a potfile hit) queued since the last drainNewPlains
 }
 
 // markFound records that hash was cracked (freshly, or already known via the
@@ -130,6 +142,70 @@ func (cc *crackCtx) wasFound(hash string) bool {
 	cc.foundMu.Lock()
 	defer cc.foundMu.Unlock()
 	return cc.found[hash]
+}
+
+// foundCount reports how many distinct hashes have been marked found so far
+// this run — used by --loopback to measure how many targets a pass recovered
+// (before-count vs. after-count around the pass's crackTargets call).
+func (cc *crackCtx) foundCount() int {
+	if cc == nil {
+		return 0
+	}
+	cc.foundMu.Lock()
+	defer cc.foundMu.Unlock()
+	return len(cc.found)
+}
+
+// claimPlain marks plain as spoken for — either fed to --loopback already, or
+// about to be — and reports whether THIS call is the one that claims it. A
+// plaintext is claimed at most once for the life of a crackCtx, so it is
+// fed to loopback's candidate stream at most once, however many times (or
+// which route) it's recovered. Safe on a nil receiver.
+func (cc *crackCtx) claimPlain(plain string) bool {
+	if cc == nil || plain == "" {
+		return false
+	}
+	cc.plainsMu.Lock()
+	defer cc.plainsMu.Unlock()
+	if cc.plainsSeen == nil {
+		cc.plainsSeen = map[string]bool{}
+	}
+	if cc.plainsSeen[plain] {
+		return false
+	}
+	cc.plainsSeen[plain] = true
+	return true
+}
+
+// recordPlain queues a plaintext recovered by an actual attack (never a
+// potfile hit — see the call sites in doCrack and runBatch) as a candidate
+// for --loopback's next pass, unless this exact plaintext has already been
+// claimed (fed once already, or seeded from the potfile). Safe on a nil
+// receiver; a no-op when --loopback was never requested, since nothing ever
+// drains newPlains in that case.
+func (cc *crackCtx) recordPlain(plain string) {
+	if cc == nil || !cc.claimPlain(plain) {
+		return
+	}
+	cc.plainsMu.Lock()
+	cc.newPlains = append(cc.newPlains, plain)
+	cc.plainsMu.Unlock()
+}
+
+// drainNewPlains returns and clears the plaintexts queued by recordPlain
+// since the last drain — exactly what's NEW since the previous --loopback
+// pass. This is what guarantees the loop terminates: each pass is fed only
+// this, never a running total, so a pass that finds nothing new drains empty
+// and the loop stops. Safe on a nil receiver.
+func (cc *crackCtx) drainNewPlains() []string {
+	if cc == nil {
+		return nil
+	}
+	cc.plainsMu.Lock()
+	defer cc.plainsMu.Unlock()
+	out := cc.newPlains
+	cc.newPlains = nil
+	return out
 }
 
 // usernameFor returns the username --username stripped from hash's input
@@ -180,6 +256,12 @@ func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool, wor
 			return nil, err
 		}
 		cc.pot = p
+		// Snapshot every plaintext already on record BEFORE this run cracks
+		// anything of its own — --loopback's potfile-sourced seed (see
+		// potPlains' doc comment). Taken here, at load time, so it can never
+		// include this run's own fresh cracks (which land in p.seen too, via
+		// potfile.add, as the run progresses).
+		cc.potPlains = p.allPlains()
 	}
 	if sessName != "" {
 		s, err := loadSession(sessName)
@@ -401,6 +483,7 @@ func runCrack(args []string) error {
 	username := fs.Bool("username", false, "input lines are \"user:hash\" (split on the FIRST colon only); show the username with each result")
 	left := fs.Bool("left", false, "write still-uncracked targets, in their original input form, to -o or stdout — for a second pass")
 	outfileFormat := fs.String("outfile-format", "", "comma-separated -o field selection, hashcat-style: 1=hash, 2=plain, 3=hex_plain (default: unchanged from before this flag existed)")
+	loopback := fs.Bool("loopback", false, "after the main attack, feed newly cracked plaintexts (plus, if the potfile is enabled, plaintexts already on record there) back as dict-mode candidates against any still-uncracked targets, with --rules/-r applied; repeats until a pass finds nothing new")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -528,6 +611,23 @@ func runCrack(args []string) error {
 		return runErr
 	}
 
+	if *loopback {
+		if err := runLoopback(lines, *typ, w, *salt, *saltMode, *outFile, *copyResult, engine, cc); err != nil {
+			return err
+		}
+		// crackTargets/runBatch only ever SET exitCode = 1 (once, on their own
+		// call's uncracked count) — never clear it back to 0 — so if the main
+		// attack left targets uncracked and loopback then finished the job,
+		// exitCode would still read "failure" without this. Recompute it from
+		// the final state instead of trusting whichever call happened to run
+		// last.
+		if len(remainingTargets(lines, cc)) == 0 {
+			exitCode = 0
+		} else {
+			exitCode = 1
+		}
+	}
+
 	if cc.left {
 		var leftover []string
 		for _, l := range lines {
@@ -561,6 +661,146 @@ func writeLeftover(leftover []string, outFile string) error {
 	}
 	clrGreen.Fprintf(os.Stderr, "Wrote %d uncracked target(s) to %s\n", len(leftover), outFile)
 	return nil
+}
+
+// ── --loopback: feed cracked plaintexts back as candidates ─────────────────
+//
+// Multi-hash mode (batch.go) already hashes each candidate once and checks it
+// against every salt-independent raw-digest target in ONE pass — "crack one,
+// try it against the rest" is already free there. What --loopback adds is
+// different: it carries a plaintext recovered from one hash INTO A NEW PASS,
+// where --rules can mutate it ("summer2024" -> "Summer2024!") to reach a
+// target the base word alone never would — and it does that for salted /
+// expensive targets too, which run per-target and get none of multi-hash
+// mode's benefit.
+//
+// Termination: every pass is fed ONLY cc.drainNewPlains() — the plaintexts
+// claimed (via cc.recordPlain, itself gated by cc.claimPlain) since the
+// PREVIOUS drain, never a running total. claimPlain also guarantees a given
+// plaintext string is claimed at most once for the whole run, however many
+// times or routes it's recovered by — so the total candidate material
+// available to ever feed a pass is bounded by (targets cracked this run +
+// pre-existing potfile entries), a fixed, finite quantity. A pass that
+// recovers nothing new therefore drains empty, which ends the loop; the
+// bounded pool guarantees that outcome is reached in finitely many passes.
+func runLoopback(lines []inputLine, typ string, workers int, salt, saltMode, outFile string,
+	copyResult bool, rules *ruleEngine, cc *crackCtx) error {
+	// --show never attacks (see crackTargets' showOnly gate) — --loopback must
+	// not either.
+	if cc == nil || cc.showOnly {
+		return nil
+	}
+
+	// Seed pass 1: this run's own fresh cracks (from the main attack, already
+	// queued via recordPlain) plus, if the potfile is enabled, every plaintext
+	// already on record before this run started (potPlains — see crackCtx).
+	// claimPlain dedupes across both sources so nothing is fed twice.
+	var feed []string
+	for _, p := range cc.potPlains {
+		if cc.claimPlain(p) {
+			feed = append(feed, p)
+		}
+	}
+	feed = append(feed, cc.drainNewPlains()...)
+
+	pass := 0
+	for len(feed) > 0 {
+		// Defensive backstop, not a limit on legitimate work. Termination is
+		// guaranteed by claimPlain: each plaintext is fed at most once ever, and
+		// the total feedable material is bounded by (targets cracked + potfile
+		// entries), so a correct run stops long before this. But a future
+		// regression in the claim/drain bookkeeping would otherwise surface as a
+		// HANG — caught only by an outer test timeout or, for a user, as an
+		// apparently frozen tool. Failing loudly beats spinning silently.
+		if pass >= maxLoopbackPasses {
+			return fmt.Errorf("loopback exceeded %d passes — refusing to continue; "+
+				"this indicates a bug in the recovered-plaintext bookkeeping, since "+
+				"each plaintext should be fed at most once", maxLoopbackPasses)
+		}
+		remaining := remainingTargets(lines, cc)
+		if len(remaining) == 0 {
+			break
+		}
+		pass++
+		tmp, err := writeTempWordlist(feed)
+		if err != nil {
+			return fmt.Errorf("--loopback: %w", err)
+		}
+		color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
+			"\n◇ Loopback pass %d: %d candidate plaintext(s) (dict mode) against %d still-uncracked target(s)\n",
+			pass, len(feed), len(remaining))
+
+		// --skip/--limit bound the MAIN attack's keyspace slice for
+		// distributed cracking. A loopback pass draws from a completely
+		// different, self-contained candidate source — the plaintexts just
+		// recovered — not a slice of the original keyspace, so slicing it by
+		// the main attack's indices would be meaningless at best (a small
+		// list, most of it skipped) and silently wrong at worst (dropping
+		// candidates a split run's OTHER machines have no way to try instead,
+		// since each machine only loops back over what it personally
+		// cracked). So every loopback pass runs unbounded, regardless of
+		// --skip/--limit on the main run.
+		savedSkip, savedLimit := cc.skip, cc.limit
+		cc.skip, cc.limit = 0, 0
+		before := cc.foundCount()
+		runErr := crackTargets(remaining, typ, "dict", tmp, "", 0, 0, workers,
+			salt, saltMode, outFile, copyResult, rules, nil, cc)
+		cc.skip, cc.limit = savedSkip, savedLimit
+		os.Remove(tmp)
+		if runErr != nil {
+			return runErr
+		}
+		newly := cc.foundCount() - before
+		clrGreen.Fprintf(os.Stderr, "  loopback pass %d: %d new target(s) cracked\n", pass, newly)
+
+		feed = cc.drainNewPlains()
+	}
+	if pass > 0 {
+		clrGreen.Fprintf(os.Stderr, "Loopback: %d pass(es) run\n", pass)
+	}
+	return nil
+}
+
+// maxLoopbackPasses bounds runLoopback defensively. See the check in the pass
+// loop for why a cap exists even though termination is already guaranteed.
+const maxLoopbackPasses = 256
+
+// remainingTargets returns the hash (not raw-line) form of every input line
+// not yet marked found — --loopback's per-pass target list, and what --left
+// consults too (via cc.wasFound directly) for the final leftover report.
+func remainingTargets(lines []inputLine, cc *crackCtx) []string {
+	var out []string
+	for _, l := range lines {
+		if !cc.wasFound(l.hash) {
+			out = append(out, l.hash)
+		}
+	}
+	return out
+}
+
+// writeTempWordlist writes words, one per line, to a fresh temp file so
+// --loopback can feed them through the existing dict-mode engine, which only
+// ever reads a wordlist from a path. The caller removes the file once the
+// pass finishes.
+func writeTempWordlist(words []string) (string, error) {
+	f, err := os.CreateTemp("", "hashsmith-loopback-*.txt")
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	bw := bufio.NewWriter(f)
+	for _, word := range words {
+		if _, err := bw.WriteString(word); err != nil {
+			return "", err
+		}
+		if err := bw.WriteByte('\n'); err != nil {
+			return "", err
+		}
+	}
+	if err := bw.Flush(); err != nil {
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 // buildRuleEngine selects the mangling-rule source: a compiled rule file when
@@ -954,6 +1194,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	found := result.password != ""
 	if found && cc != nil {
 		cc.pot.add(targetHash, result.password)
+		cc.recordPlain(result.password)
 		cc.markFound(targetHash)
 	}
 	// Session bookkeeping. Three outcomes:

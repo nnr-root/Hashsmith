@@ -67,6 +67,22 @@ func (p *potfile) lookup(hash string) (string, bool) {
 	return v, ok
 }
 
+// allPlains returns every plaintext currently on record, in indeterminate
+// order — used by --loopback to seed its first pass with real passwords
+// already known from this environment. Safe on a nil receiver.
+func (p *potfile) allPlains() []string {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]string, 0, len(p.seen))
+	for _, v := range p.seen {
+		out = append(out, v)
+	}
+	return out
+}
+
 // add records a newly cracked hash, appending it to the file. Duplicate hashes
 // are ignored. Failures to persist are non-fatal (the crack still succeeded).
 func (p *potfile) add(hash, plain string) {
