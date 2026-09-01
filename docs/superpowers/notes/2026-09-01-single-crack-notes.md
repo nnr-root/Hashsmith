@@ -1,3 +1,37 @@
+> **Correction (2026-09-01, `gecos-single` branch):** The "What GECOS
+> support would take" section below is wrong about there being a blocker,
+> and the note is left in place — not silently rewritten — so the mistake
+> and its correction are both on the record.
+>
+> The claim was that GECOS support needed an output-format change to
+> `shadow2smith`'s `user:hash` lines to carry the name field through. It
+> doesn't, and trying to do it that way would in fact be unsafe: `crack.go`'s
+> `splitUsername` is deliberately first-colon-only, because several of the
+> 461 supported formats legitimately contain colons in the hash itself
+> (NetNTLMv2, salted digests, IKE, IPMI, CHAP, CMS, ...). A third
+> colon-delimited field tacked onto `user:hash` can't be parsed back out
+> unambiguously against those formats — the "consumers that parse it" risk
+> the note itself flags in point 2 below is real, and a format change is the
+> wrong way to route around it.
+>
+> The design actually taken: a new `--passwd FILE` flag on `crack` reads an
+> `/etc/passwd`-format file directly and builds a `username -> GECOS` map
+> in-process (`parsePasswdGecos` in `extract_shadow.go`, reusing the line
+> parser `parsePasswdUsers` already had). `--single` (`single.go`) consults
+> that map for name-derived seeds (`gecosSeeds`) alongside its existing
+> username-derived ones (`singleSeeds`), keyed per-account exactly the same
+> way. `shadow2smith`'s output format and `splitUsername` are both
+> completely untouched — there was never a compatibility risk to design
+> around, because the name never needs to travel through the hash-list
+> format at all. Operationally this is also the natural shape: an operator
+> extracting `/etc/shadow` already has `/etc/passwd` sitting right next to
+> it.
+>
+> See `single_test.go` (`TestSingleCrackGecos*`, `TestGecosSeeds*`,
+> `TestSingleCrackPasswd*`) for the resulting behavior and its tests,
+> including the no-cross-contamination property extended to GECOS-derived
+> seeds.
+
 # Single-crack: interactions, and what GECOS would take
 
 Companion to `docs/superpowers/plans/2026-09-01-single-crack.md`, covering its
