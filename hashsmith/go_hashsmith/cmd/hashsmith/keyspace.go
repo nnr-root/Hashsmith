@@ -257,8 +257,9 @@ type fastAlgo struct {
 //
 // This replaces the old md5GroupAccelerated() gate. That flag only ever
 // answered "does some vector core exist"; fastAlgoFor needs to know WHICH
-// one, since the NEON and AVX2 backends support different algorithm sets
-// (AVX2 has no MD4 core yet) and different shapes.
+// one, since the two backends have different shapes (20-way NEON vs 24-way
+// AVX2) and could again diverge in which algorithms they cover — today both
+// carry MD5 and MD4/NTLM cores, but nothing in the design requires that.
 func vectorBackendName() string {
 	switch runtime.GOARCH {
 	case "arm64":
@@ -279,24 +280,26 @@ func fastAlgoFor(typ string) (*fastAlgo, bool) {
 
 // fastAlgoForBackend is fastAlgoFor's backend-parameterised core. Splitting
 // it out lets tests exercise the AVX2 (or NEON) selection logic directly —
-// in particular, that MD4 and NTLM get no AVX2 descriptor — without needing
-// a machine (or Docker container) whose CPU actually reports AVX2 support;
-// see TestAVX2BackendExcludesMD4AndNTLM in fastpath_test.go.
+// in particular, that md4/ntlm route to the MD4 core and never to the MD5
+// one — without needing a machine (or Docker container) whose CPU actually
+// reports AVX2 support; see TestAVX2BackendRoutesMD4AndNTLM in
+// fastpath_test.go.
 //
 // Resolved through canonicalHashType so hashcat mode numbers (e.g. "900"
 // for md4, "1000" for ntlm) and John labels route here too.
 //
-// On the NEON backend, md4 and ntlm both run through md4Group — NTLM is MD4
-// over UTF-16LE(pw) rather than a different digest function, so only the
-// encoding mode differs.
+// On BOTH backends, md4 and ntlm run through that backend's MD4 core
+// (md4Group on NEON, md4GroupAVX2 on AVX2) — NTLM is MD4 over UTF-16LE(pw)
+// rather than a different digest function, so only the encoding mode
+// differs between the two entries.
 //
-// The AVX2 backend has no MD4 core yet, so md4 and ntlm are deliberately
-// absent from its case rather than falling through to md5GroupAVX2: MD4 is
-// a different algorithm from MD5, and NTLM is MD4-over-UTF-16LE, so hashing
-// either through the MD5 core would compute the wrong digest for every
-// candidate — wrong, not merely unaccelerated, and with nothing to signal
-// it beyond every crack silently coming back "not found". Both fall back to
-// the scalar path instead, exactly as if no vector backend existed.
+// What must never happen is md4 or ntlm falling through to an MD5 core:
+// MD4 is a different algorithm from MD5, and NTLM is MD4-over-UTF-16LE, so
+// hashing either through md5Group/md5GroupAVX2 would compute the wrong
+// digest for every candidate — wrong, not merely unaccelerated, and with
+// nothing to signal it beyond every crack silently coming back "not found".
+// Each case names its group function explicitly for that reason; there is
+// no fallthrough here and none should be added.
 func fastAlgoForBackend(backend, typ string) (*fastAlgo, bool) {
 	name := canonicalHashType(typ)
 	switch backend {
@@ -313,6 +316,10 @@ func fastAlgoForBackend(backend, typ string) (*fastAlgo, bool) {
 		switch name {
 		case "md5":
 			return &fastAlgo{name: "md5", enc: encRaw, shape: avx2Shape, group: md5GroupAVX2}, true
+		case "md4":
+			return &fastAlgo{name: "md4", enc: encRaw, shape: avx2Shape, group: md4GroupAVX2}, true
+		case "ntlm":
+			return &fastAlgo{name: "ntlm", enc: encUTF16LE, shape: avx2Shape, group: md4GroupAVX2}, true
 		}
 	}
 	return nil, false
