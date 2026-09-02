@@ -613,8 +613,19 @@ func TestStdPathInterruptedCheckpointNeverExceedsWorkDone(t *testing.T) {
 					"but only %d were attempted — the gap is silently skipped on resume",
 					workers, resumeFrom, ckpt, ckpt-resumeFrom, done)
 			}
-			if ckpt < resumeFrom {
-				t.Errorf("workers=%d: checkpoint %d below resumeFrom %d", workers, ckpt, resumeFrom)
+			// The watermark is min(cur)*keyspaceChunk, so it is chunk-aligned.
+			// When the run is cancelled before any worker finishes a chunk it
+			// floors to the boundary at or below resumeFrom, which is the SAFE
+			// direction: a resumed run re-tests candidates it already tried
+			// rather than skipping any. Demanding ckpt >= resumeFrom asks for a
+			// property the chunk allocator does not provide and correctness does
+			// not need, and it failed about one run in three under load. The
+			// floor still catches a checkpoint that collapsed to zero or went
+			// backwards past a whole chunk.
+			floor := resumeFrom - resumeFrom%keyspaceChunk
+			if ckpt < floor {
+				t.Errorf("workers=%d: checkpoint %d below the chunk floor %d of resumeFrom %d",
+					workers, ckpt, floor, resumeFrom)
 			}
 			if ckpt >= l.total {
 				t.Fatalf("workers=%d: the run finished instead of being interrupted (checkpoint %d of %d)",
