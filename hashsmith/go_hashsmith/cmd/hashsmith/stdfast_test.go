@@ -858,17 +858,19 @@ func TestRunBruteOrMaskLayoutRoutesSha(t *testing.T) {
 func TestRunBruteOrMaskLayoutLeavesSaltedAlone(t *testing.T) {
 	l := bruteLayout("abcdefghijklmnopqrstuvwxyz", 3, 3)
 	// A "target" the fast path could never match; only the closure can.
-	called := false
+	// atomic: the verify closure runs on every worker goroutine at once, so a
+	// plain bool here is a data race the -race build catches.
+	var called atomic.Bool
 	var attempts int64
 	pw, _, err := runBruteOrMaskLayout(context.Background(), l, nil, 0, 0, 2, &attempts,
 		"sha256", "somesalt", sha256hex("irrelevant"), func(c string) bool {
-			called = true
+			called.Store(true)
 			return c == "mnq"
 		})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !called {
+	if !called.Load() {
 		t.Error("the verify closure was never called for a salted target — the fast path took over")
 	}
 	if pw != "mnq" {
