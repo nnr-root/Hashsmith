@@ -1194,6 +1194,15 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		}
 	}
 
+	// bruteLay / maskLay are the actual layout objects for a brute-force /
+	// mask run, built here (once) so the feasibility probe below can dispatch
+	// a small slice of the REAL run through the REAL runBruteOrMaskLayout —
+	// the exact function the attack itself calls further down — instead of
+	// feasibility.go re-deriving which internal path that dispatch would
+	// choose. Built for at most one of the two, matching m; the dispatch
+	// switch below reuses whichever was built instead of rebuilding it.
+	var bruteLay, maskLay *keyspaceLayout
+
 	var total int64 = -1
 	if m == "dict" {
 		// An empty wordlist path counts the embedded common.txt. Bound the raw
@@ -1211,10 +1220,16 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		if exact, overflowed := calcBruteTotalExact(charset, minLen, maxLen); overflowed {
 			warnKeyspaceNotExhaustive(exact)
 		}
+		if m == "brute" {
+			bruteLay = bruteLayout(charset, minLen, maxLen)
+		}
 	} else if m == "mask" && mc != nil {
 		total = boundWordIdx(calcMaskTotal(mc))
 		if exact, overflowed := calcMaskTotalExact(mc); overflowed {
 			warnKeyspaceNotExhaustive(exact)
+		}
+		if lay, e := maskLayout(mc); e == nil {
+			maskLay = lay
 		}
 	} else if m == "hybrid" && mc != nil {
 		if n, err := countWordlistLines(wordlist); err == nil {
@@ -1252,19 +1267,12 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	//     ETA disagree on purpose: --keyspace is about slicing, the ETA is
 	//     about time, and time is words x rules.
 	//
-	// This runs after every setup error above and before the progress bar, so a
-	// refused run has started nothing and has nothing to tear down.
-	if err := checkFeasibility(total, resumeFrom != 0 || limit > 0,
-		typ, targetHash, salt, saltMode, workers, cc != nil && cc.force); err != nil {
-		return false, err
-	}
-
-	bar := newCrackBar(total)
-
-	// progress ticker — updates bar from atomic counter every 100 ms
-	tickCtx, tickCancel := context.WithCancel(context.Background())
-	go progressTicker(tickCtx, bar, &atomicAttempts)
-
+	// verifyFn is built here — before the feasibility check, rather than after
+	// it as before — because the feasibility probe below needs it too: it is
+	// the exact per-candidate closure runBruteOrMaskLayout's own scalar
+	// fallback calls, so probing through that fallback pays the real
+	// verification cost rather than a cheaper stand-in that would silently
+	// under-count a KDF's cost (see feasibilityProbe below).
 	verifyFn := func(c string) bool {
 		ok, _ := verifyCandidate(c, targetHash, typ, salt, saltMode)
 		return ok
@@ -1277,6 +1285,47 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			verifyFn = fv.match
 		}
 	}
+
+	// feasibility probe: for brute/mask, hand the guard a way to time the
+	// REAL dispatch (runBruteOrMaskLayout — the very call this function makes
+	// further down) over a small slice of the SAME layout the real run will
+	// enumerate, rather than have feasibility.go re-derive which internal path
+	// (vector fast, contiguous batch, scalar) that dispatch would choose. nil
+	// for every other mode, and for brute/mask whose layout did not build —
+	// feasibilityRate's fallback to benchTarget is unchanged for those.
+	var probe feasibilityProbe
+	if lay := bruteLay; m == "brute" && lay != nil {
+		probe = func(ctx context.Context, n int64) (int64, bool) {
+			var attempts int64
+			if _, _, err := runBruteOrMaskLayout(ctx, lay, nil, 0, n, workers,
+				&attempts, typ, salt, saltMode, targetHash, verifyFn); err != nil {
+				return 0, false
+			}
+			return attempts, true
+		}
+	} else if lay := maskLay; m == "mask" && lay != nil {
+		probe = func(ctx context.Context, n int64) (int64, bool) {
+			var attempts int64
+			if _, _, err := runBruteOrMaskLayout(ctx, lay, nil, 0, n, workers,
+				&attempts, typ, salt, saltMode, targetHash, verifyFn); err != nil {
+				return 0, false
+			}
+			return attempts, true
+		}
+	}
+
+	// This runs after every setup error above and before the progress bar, so a
+	// refused run has started nothing and has nothing to tear down.
+	if err := checkFeasibility(total, resumeFrom != 0 || limit > 0,
+		typ, targetHash, salt, saltMode, workers, cc != nil && cc.force, probe); err != nil {
+		return false, err
+	}
+
+	bar := newCrackBar(total)
+
+	// progress ticker — updates bar from atomic counter every 100 ms
+	tickCtx, tickCancel := context.WithCancel(context.Background())
+	go progressTicker(tickCtx, bar, &atomicAttempts)
 
 	var (
 		result      crackedResult
@@ -1313,6 +1362,13 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			tickCancel()
 			return false, errors.New("invalid -n/-x range")
 		}
+		// Reuse the layout the feasibility probe already built above (same
+		// charset/minLen/maxLen, so it is identical) rather than paying for a
+		// second allocation of the same segments.
+		layout := bruteLay
+		if layout == nil {
+			layout = bruteLayout(charset, minLen, maxLen)
+		}
 		var pw string
 		if cc != nil && cc.useGPU && gpuBounded {
 			if gp, _, usedGPU := gpuBruteHash(targetHash, typ, charset, minLen, maxLen, &atomicAttempts); usedGPU {
@@ -1321,14 +1377,14 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				_, reason := activeGPUBackend()
 				clrYellow.Fprintf(os.Stderr,
 					"GPU brute unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
-				pw, interrupted, err = runBruteOrMaskLayout(runCtx, bruteLayout(charset, minLen, maxLen),
+				pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
 					sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, saltMode, targetHash, verifyFn)
 			}
 		} else {
 			if cc != nil && cc.useGPU && !gpuBounded {
 				clrYellow.Fprintf(os.Stderr, "GPU brute does not support --skip/--limit yet — using CPU\n")
 			}
-			pw, interrupted, err = runBruteOrMaskLayout(runCtx, bruteLayout(charset, minLen, maxLen),
+			pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
 				sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, saltMode, targetHash, verifyFn)
 		}
 		result = crackedResult{password: pw}
@@ -1337,10 +1393,19 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			tickCancel()
 			return false, errors.New("mask mode requires --mask <mask>")
 		}
-		layout, e := maskLayout(mc)
-		if e != nil {
-			tickCancel()
-			return false, e
+		// Reuse the layout the feasibility probe already built above when it
+		// built successfully; otherwise (probe wasn't run, or maskLayout
+		// failed there for a reason worth surfacing) build it here so a bad
+		// mask still returns its real parse error instead of silently
+		// falling back to something else.
+		layout := maskLay
+		if layout == nil {
+			var e error
+			layout, e = maskLayout(mc)
+			if e != nil {
+				tickCancel()
+				return false, e
+			}
 		}
 		var pw string
 		if cc != nil && cc.useGPU && gpuBounded {

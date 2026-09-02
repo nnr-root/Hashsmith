@@ -124,7 +124,7 @@ func TestForceStartsARefusedRun(t *testing.T) {
 	target := testBcryptTarget(t)
 
 	out, err := captureStderrResult(t, func() error {
-		return checkFeasibility(impossibleMaskKeyspace, false, "bcrypt", target, "", "prefix", 4, true)
+		return checkFeasibility(impossibleMaskKeyspace, false, "bcrypt", target, "", "prefix", 4, true, nil)
 	})
 	if err != nil {
 		t.Fatalf("--force must start the run, got refusal: %v", err)
@@ -230,7 +230,7 @@ func TestFeasibilityNeverRefusesWhatItCannotMeasure(t *testing.T) {
 		out, err := captureStderrResult(t, func() error {
 			// -1 is countWordlistLines' "not countable in advance" sentinel
 			// (a pipe, stdin, /dev/fd/N).
-			return checkFeasibility(-1, false, "bcrypt", target, "", "prefix", 4, false)
+			return checkFeasibility(-1, false, "bcrypt", target, "", "prefix", 4, false, nil)
 		})
 		if err != nil {
 			t.Fatalf("an uncountable keyspace must warn, not refuse: %v", err)
@@ -242,7 +242,7 @@ func TestFeasibilityNeverRefusesWhatItCannotMeasure(t *testing.T) {
 
 	t.Run("saturated keyspace", func(t *testing.T) {
 		out, err := captureStderrResult(t, func() error {
-			return checkFeasibility(math.MaxInt64, false, "bcrypt", target, "", "prefix", 4, false)
+			return checkFeasibility(math.MaxInt64, false, "bcrypt", target, "", "prefix", 4, false, nil)
 		})
 		if err != nil {
 			t.Fatalf("a saturated keyspace is a lower bound, not a measurement — it must "+
@@ -255,7 +255,7 @@ func TestFeasibilityNeverRefusesWhatItCannotMeasure(t *testing.T) {
 
 	t.Run("empty keyspace", func(t *testing.T) {
 		out, err := captureStderrResult(t, func() error {
-			return checkFeasibility(0, false, "bcrypt", target, "", "prefix", 4, false)
+			return checkFeasibility(0, false, "bcrypt", target, "", "prefix", 4, false, nil)
 		})
 		if err != nil {
 			t.Fatalf("nothing to attempt must never be refused: %v", err)
@@ -311,7 +311,7 @@ func TestFeasibilityProbeIsNotAStartupTax(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	rate, ok := feasibilityRate(1_000_000, "md5", target, "", "prefix", 4)
+	rate, ok := feasibilityRate(1_000_000, "md5", target, "", "prefix", 4, nil)
 	elapsed := time.Since(start)
 	if !ok || rate <= 0 {
 		t.Fatalf("md5 rate estimate failed (rate=%v ok=%v)", rate, ok)
