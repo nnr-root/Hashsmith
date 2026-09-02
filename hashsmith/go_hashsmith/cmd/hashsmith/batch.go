@@ -408,14 +408,28 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 	tickCtx, tickCancel := context.WithCancel(context.Background())
 	go progressTicker(tickCtx, bar, &atomicAttempts)
 
+	// Brute and mask are the two layouts the vector fast path can enumerate,
+	// so each first offers its layout to batchFastLayout (multi-target
+	// hash-and-binary-search, the CPU twin of the *maskmulti GPU kernels).
+	// It declines — leaving nothing recorded and nothing counted — whenever
+	// the type, backend or layout is not eligible, and the SAME layout then
+	// runs on the scalar path exactly as it always did. Every other mode
+	// (hybrid, markov, combinator, prince, dict) is scalar-only by design:
+	// their layouts carry a gen override or a non-decodable structure that
+	// fastPathEligible correctly refuses.
 	switch m {
 	case "brute":
-		_, _ = runLayout(context.Background(), bruteLayout(charset, minLen, maxLen),
-			0, 0, workers, &atomicAttempts, nil, verify)
+		layout := bruteLayout(charset, minLen, maxLen)
+		if !batchFastLayout(context.Background(), typ, layout, active, batch, workers, &atomicAttempts, record) {
+			_, _ = runLayout(context.Background(), layout,
+				0, 0, workers, &atomicAttempts, nil, verify)
+		}
 	case "mask":
 		if mc != nil {
 			if layout, err := maskLayout(mc); err == nil {
-				_, _ = runLayout(context.Background(), layout, 0, 0, workers, &atomicAttempts, nil, verify)
+				if !batchFastLayout(context.Background(), typ, layout, active, batch, workers, &atomicAttempts, record) {
+					_, _ = runLayout(context.Background(), layout, 0, 0, workers, &atomicAttempts, nil, verify)
+				}
 			}
 		}
 	case "hybrid":
