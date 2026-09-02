@@ -22,6 +22,7 @@ import (
 	"context"
 	"crypto/md5"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -332,7 +333,7 @@ func TestFastPathResumeFindsPasswordAtTheCheckpoint(t *testing.T) {
 // that the answer came out right.
 func TestSessionBruteRunIsFastPathEligible(t *testing.T) {
 	requireFast(t)
-	if _, ok := fastPathEligible("md5", "", bruteLayout("abc", 1, 4)); !ok {
+	if _, ok := fastPathEligible("md5", "", "", bruteLayout("abc", 1, 4)); !ok {
 		t.Fatal("an unsalted md5 brute layout must be fast-path eligible; a session no longer changes that")
 	}
 }
@@ -450,30 +451,44 @@ func TestSessionSkipLimitComposeOverFastPath(t *testing.T) {
 
 // ── 6. everything not fast-path eligible is untouched ──────────────────────
 
-// The change must be a routing change for unsalted MD5/MD4/NTLM brute and
-// mask ONLY. Every other mode keeps the scalar, session-aware runner it has
-// always had, and the gate that decides is fastPathEligible — so assert on
-// the gate directly, per mode, rather than inferring it from a result.
+// The change must be a routing change for MD5/MD4/NTLM brute and mask ONLY —
+// salted or not, since the cores hash one block whatever is in it. Every other
+// mode keeps the scalar, session-aware runner it has always had, and the gate
+// that decides is fastPathEligible — so assert on the gate directly, per mode,
+// rather than inferring it from a result.
 func TestNonEligibleModesStayOnTheScalarPath(t *testing.T) {
 	if vectorBackendName() == "" {
 		t.Skip("no vector backend; fastPathEligible declines everything here by construction")
 	}
 	brute := bruteLayout("abcdefghij", 4, 4)
 	cases := []struct {
-		name   string
-		typ    string
-		salt   string
-		layout *keyspaceLayout
+		name     string
+		typ      string
+		salt     string
+		saltMode string
+		layout   *keyspaceLayout
 	}{
-		{"salted md5", "md5", "somesalt", brute},
-		{"sha256", "sha256", "", brute},
-		{"bcrypt", "bcrypt", "", brute},
-		{"markov", "md5", "", markovLayout(&markovModel{charset: []byte("abc")}, 2, 3)},
-		{"hybrid", "md5", "", hybridLayout([]string{"aa", "bb"}, [][]byte{[]byte("ab")}, false)},
-		{"combinator", "md5", "", combinatorLayout([]string{"aa"}, []string{"bb"})},
+		// A salt itself is eligible now; a salt that does not leave the
+		// candidate inside one 64-byte block still is not (52 + 4 = 56 > 55).
+		{"over-long salted md5", "md5", strings.Repeat("s", 52), "prefix", brute},
+		{"over-long suffix-salted md5", "md5", strings.Repeat("s", 52), "suffix", brute},
+		// NTLM doubles the candidate AND the salt: 2*(4+20) = 48 fits, but
+		// 2*(4+24) = 56 does not.
+		{"over-long salted ntlm", "ntlm", strings.Repeat("s", 24), "prefix", brute},
+		// A UTF-16LE password against a raw-byte salt is a mixed encoding one
+		// encodeMode cannot express.
+		{"md5-utf16le-pass-salt", "md5-utf16le-pass-salt", "abc", "", brute},
+		// A generic salted type with no salt at all cannot be hashed.
+		{"md5-salt-pass without a salt", "md5-salt-pass", "", "", brute},
+		{"sha256", "sha256", "", "", brute},
+		{"salted sha256", "sha256", "abc", "prefix", brute},
+		{"bcrypt", "bcrypt", "", "", brute},
+		{"markov", "md5", "", "", markovLayout(&markovModel{charset: []byte("abc")}, 2, 3)},
+		{"hybrid", "md5", "", "", hybridLayout([]string{"aa", "bb"}, [][]byte{[]byte("ab")}, false)},
+		{"combinator", "md5", "", "", combinatorLayout([]string{"aa"}, []string{"bb"})},
 	}
 	for _, c := range cases {
-		if _, ok := fastPathEligible(c.typ, c.salt, c.layout); ok {
+		if _, ok := fastPathEligible(c.typ, c.salt, c.saltMode, c.layout); ok {
 			t.Errorf("%s must NOT be routed to the vector runner", c.name)
 		}
 	}
@@ -484,7 +499,7 @@ func TestNonEligibleModesStayOnTheScalarPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("princeLayout: %v", err)
 	}
-	if _, ok := fastPathEligible("md5", "", pl); ok {
+	if _, ok := fastPathEligible("md5", "", "", pl); ok {
 		t.Error("prince must NOT be routed to the vector runner")
 	}
 }
@@ -516,11 +531,11 @@ func TestSaltedSessionRunUnchanged(t *testing.T) {
 func TestNoFastPathEnvForcesScalarWithoutChangingResults(t *testing.T) {
 	requireFast(t)
 	l := bruteLayout("abcdefghij", 4, 4)
-	if _, ok := fastPathEligible("md5", "", l); !ok {
+	if _, ok := fastPathEligible("md5", "", "", l); !ok {
 		t.Fatal("precondition: md5 brute should be eligible here")
 	}
 	t.Setenv("HASHSMITH_NO_FASTPATH", "1")
-	if _, ok := fastPathEligible("md5", "", l); ok {
+	if _, ok := fastPathEligible("md5", "", "", l); ok {
 		t.Fatal("HASHSMITH_NO_FASTPATH must force the scalar path")
 	}
 

@@ -836,8 +836,9 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 	tickCtx, tickCancel := context.WithCancel(context.Background())
 	go progressTicker(tickCtx, bar, &atomicAttempts)
 
-	// Brute and mask are the two layouts the vector fast path can enumerate,
-	// so each first offers its layout to batchFastLayout (multi-target
+	// Brute and mask are the two layouts the vector fast path can enumerate —
+	// salted or not, since the cores hash a block and do not care what is in
+	// it — so each first offers its layout to batchFastLayout (multi-target
 	// hash-and-binary-search, the CPU twin of the *maskmulti GPU kernels).
 	// It declines — leaving nothing recorded and nothing counted — whenever
 	// the type, backend or layout is not eligible, and the SAME layout then
@@ -857,16 +858,18 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 		}
 		_, intr, _ := runSessionRunner(ctx, layout, sess, resumeFrom, func(watermark *int64) (string, error) {
 			if fastEligible {
-				if batchFastLayout(ctx, typ, salt, layout, active, batch,
+				if batchFastLayout(ctx, typ, salt, saltMode, layout, active, batch,
 					resumeFrom, limit, workers, &atomicAttempts, watermark, record) {
 					return "", nil
 				}
-				// The vector path declined (no core for this type, or a salt —
-				// the core hashes the bare candidate). A stdlib raw digest —
-				// sha1, sha256, and md5/sha1/sha256 around a prefix or suffix
-				// salt — still has a contiguous-batch path; see stdfast.go. It
-				// declines in turn, just as safely, for anything it cannot
-				// enumerate.
+				// The vector path declined: no core for this type (sha1,
+				// sha256), or a salted construction it cannot reproduce
+				// exactly, or one whose salt does not leave the candidate
+				// inside a single block. A stdlib raw digest — sha1, sha256,
+				// and md5/sha1/sha256 around a prefix or suffix salt — still
+				// has a contiguous-batch path, with no one-block limit; see
+				// stdfast.go. It declines in turn, just as safely, for
+				// anything it cannot enumerate.
 				if batchStdLayout(ctx, typ, layout, active, batch, salt, saltMode,
 					resumeFrom, limit, workers, &atomicAttempts, watermark, record) {
 					return "", nil

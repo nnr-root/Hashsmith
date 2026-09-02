@@ -57,16 +57,60 @@ const (
 // fit in a single 64-byte block after padding, for the given encoding mode.
 var errTransposedLen = errors.New("candidate length does not fit one block")
 
+// vecSalt is the constant salt the vector path wraps every candidate in: the
+// message hashed becomes pre || enc(candidate) || suf instead of the candidate
+// alone. Exactly one of the two is non-empty for every construction Hashsmith
+// supports here (prefix or suffix), but keeping both fields makes the
+// generator's arithmetic uniform and leaves $salt.$pass.$salt a data change
+// rather than a code change. It is fastmulti/stdfast's stdSalt for the
+// transposed layout, and the empty vecSalt reduces every byte written back to
+// what the unsalted path wrote before this type existed.
+//
+// Both fields are MESSAGE bytes, already encoded for the algorithm's
+// encodeMode — utf16le(salt) for NTLM, the raw salt bytes otherwise. Encoding
+// the salt once, at plan time, is what keeps fillFromSegment's inner loop free
+// of any per-candidate salt work and what lets one field serve both modes.
+type vecSalt struct {
+	pre []byte
+	suf []byte
+}
+
+// width is the number of MESSAGE bytes the salt contributes to every
+// candidate's block — what the one-block ceiling has to account for.
+func (s vecSalt) width() int { return len(s.pre) + len(s.suf) }
+
+// transposedMsgLen is the message length, in bytes, of a candidate of n bytes
+// encoded under enc and wrapped in a salt contributing saltWidth message
+// bytes. UTF-16LE doubles the candidate (and only the candidate: the salt is
+// already encoded — see vecSalt).
+func transposedMsgLen(n int, enc encodeMode, saltWidth int) int {
+	if enc == encUTF16LE {
+		return n*2 + saltWidth
+	}
+	return n + saltWidth
+}
+
 // transposedFixedLenOK reports whether a candidate length fits one block
 // once encoded under enc. UTF-16LE doubles the message, halving the ceiling.
 func transposedFixedLenOK(n int, enc encodeMode) bool {
-	if n < 0 {
+	return transposedSaltedLenOK(n, enc, 0)
+}
+
+// transposedSaltedLenOK is transposedFixedLenOK with a salt around the
+// candidate: the SALTED message — salt bytes included — is what has to fit one
+// 64-byte block after padding, so the ceiling shrinks by exactly the salt's
+// width. A salt that pushes a candidate past one block makes the whole run
+// ineligible (fastPathEligible) rather than producing a two-block message the
+// single-block cores cannot hash; declining is the only safe answer, since the
+// cores would otherwise silently digest a truncated message.
+//
+// With saltWidth == 0 this is the ceiling that shipped before salts: n <= 55
+// raw, and 2n <= 55 (i.e. n <= 27, since 2n is even) for UTF-16LE.
+func transposedSaltedLenOK(n int, enc encodeMode, saltWidth int) bool {
+	if n < 0 || saltWidth < 0 {
 		return false
 	}
-	if enc == encUTF16LE {
-		return n <= transposedMaxLenUTF16LE
-	}
-	return n <= transposedMaxLen
+	return transposedMsgLen(n, enc, saltWidth) <= transposedMaxLen
 }
 
 // transposedBatch holds neonGroup candidates of a FIXED length, already padded
@@ -78,6 +122,12 @@ type transposedBatch struct {
 	length int
 	enc    encodeMode
 	n      int
+	// salt is the constant affix every lane's message carries (the empty
+	// vecSalt for an unsalted run); empty is the padded block for the EMPTY
+	// candidate under that salt — the block a cleaned lane is reset to, which
+	// with no salt is byte for byte the old "all zero except word 0 = 0x80".
+	salt  vecSalt
+	empty [16]uint32
 }
 
 func newTransposedBatch(shape vecShape) *transposedBatch {
@@ -111,22 +161,79 @@ func (tb *transposedBatch) wordIndex(i, w int) int {
 // is fillFromSegment's job to keep unused lanes clean on every partial group
 // — see the comment there. Do not assume the reset-time guarantee persists.
 func (tb *transposedBatch) reset(candidateLen int, enc encodeMode) error {
-	if !transposedFixedLenOK(candidateLen, enc) {
+	return tb.resetSalted(candidateLen, enc, vecSalt{})
+}
+
+// resetSalted is reset for a run carrying a constant salt: every message
+// becomes salt.pre || enc(candidate) || salt.suf, so the SALTED length is what
+// must fit one block (transposedSaltedLenOK) and the empty-candidate block
+// every lane starts as carries the salt bytes too.
+//
+// reset is exactly resetSalted with the empty vecSalt, which writes the same
+// block it always did — 0x80 at byte 0, bit length 0 — so an unsalted batch is
+// byte for byte what it was.
+func (tb *transposedBatch) resetSalted(candidateLen int, enc encodeMode, salt vecSalt) error {
+	if !transposedSaltedLenOK(candidateLen, enc, salt.width()) {
 		return errTransposedLen
 	}
 	tb.length = candidateLen
 	tb.enc = enc
+	tb.salt = salt
 	tb.n = 0
-	for i := range tb.words {
-		tb.words[i] = 0
-	}
-	// Every lane starts as a valid zero-length block: 0x80 at byte 0.
+	tb.empty = emptyCandidateBlock(salt)
+	// Every lane starts as a valid block for the empty candidate — which is
+	// the zero-length message when there is no salt, and the salt bytes alone
+	// when there is. This covers every word of every lane (group lanes x 16
+	// words is exactly len(tb.words)), so there is nothing left to zero.
 	for i := 0; i < tb.shape.group(); i++ {
-		tb.words[tb.wordIndex(i, 0)] = 0x80
+		tb.writeEmptyLane(i)
 	}
 	return nil
 }
 
+// emptyCandidateBlock builds the padded one-block message for the EMPTY
+// candidate under salt: the salt bytes alone (pre || suf), 0x80-terminated,
+// with the combined bit length in word 14. With no salt that is the zero-length
+// message, whose block is word 0 = 0x80 and every other word zero.
+func emptyCandidateBlock(salt vecSalt) [16]uint32 {
+	var msg [transposedMaxLen]byte
+	n := copy(msg[:], salt.pre)
+	n += copy(msg[n:], salt.suf)
+	var b [16]uint32
+	full := n / 4
+	for w := 0; w < full; w++ {
+		b[w] = binary.LittleEndian.Uint32(msg[w*4:])
+	}
+	rem := n % 4
+	var tail uint32
+	for i := 0; i < rem; i++ {
+		tail |= uint32(msg[full*4+i]) << (8 * i)
+	}
+	tail |= 0x80 << (8 * rem)
+	b[full] = tail
+	b[14] = uint32(n) * 8
+	return b
+}
+
+// writeEmptyLane resets lane i to the empty-candidate block computed at reset
+// time. It writes all 16 words, so no word of a previous, longer fill can
+// survive in that lane — the property fillFromSegment's stale-lane cleaning
+// depends on.
+func (tb *transposedBatch) writeEmptyLane(i int) {
+	base := tb.wordBase(i)
+	lanes := tb.shape.lanes
+	for w := 0; w < 16; w++ {
+		tb.words[base+w*lanes] = tb.empty[w]
+	}
+}
+
+// A salted run writes the same lanes, with the salt bytes around the
+// candidate: see vecSalt and resetSalted. The salt is constant across lanes
+// and across calls, so it is staged into the message buffer once per fill and
+// costs nothing per candidate; the only per-candidate difference is that the
+// candidate is written at offset len(salt.pre) and word 14 carries the
+// combined bit length.
+//
 // fillFromSegment writes up to neonGroup candidates starting at index `from`
 // of the mixed-radix segment `sets`, whose total keyspace is `total`
 // (== maskKeyspace(sets); the caller hoists this since it is invariant for a
@@ -161,12 +268,23 @@ func (tb *transposedBatch) fillFromSegment(sets [][]byte, from int64, total int6
 	n := 0
 	var msg [transposedMaxLen]byte // staged message bytes: encoded per tb.enc
 	L := len(sets)
-	msgLen := L
-	bitLen := uint32(L) * 8
+	// The message is salt.pre || enc(candidate) || salt.suf. Only the middle
+	// varies per candidate, so the two affixes are staged ONCE here and never
+	// touched inside the loop; `pre` is also the offset the encoded candidate
+	// starts at. With the empty vecSalt pre is 0, both copies are no-ops and
+	// every byte below is written exactly where it was before salts existed.
+	pre := len(tb.salt.pre)
+	encLen := L
 	if tb.enc == encUTF16LE {
-		msgLen = L * 2
-		bitLen = uint32(L) * 16
+		encLen = L * 2
 	}
+	msgLen := pre + encLen + len(tb.salt.suf)
+	// Word 14 carries the bit length of the WHOLE message, salt included —
+	// the padding the single-block cores assume. Leaving it at the candidate's
+	// own length would hash a different message than hashText does.
+	bitLen := uint32(msgLen) * 8
+	copy(msg[:pre], tb.salt.pre)
+	copy(msg[pre+encLen:msgLen], tb.salt.suf)
 	group := tb.shape.group()
 
 	if from < total {
@@ -188,11 +306,11 @@ func (tb *transposedBatch) fillFromSegment(sets [][]byte, from int64, total int6
 				// Each candidate byte b expands to b, 0x00 — byte-identical to
 				// utf16le(s) for ASCII input (see hash.go's utf16le).
 				for b := 0; b < L; b++ {
-					msg[b*2] = buf[b]
-					msg[b*2+1] = 0
+					msg[pre+b*2] = buf[b]
+					msg[pre+b*2+1] = 0
 				}
 			} else {
-				copy(msg[:L], buf[:L])
+				copy(msg[pre:pre+L], buf[:L])
 			}
 			// Pack msgLen bytes plus the 0x80 terminator into words 0..(msgLen/4).
 			full := msgLen / 4
@@ -232,11 +350,13 @@ func (tb *transposedBatch) fillFromSegment(sets [][]byte, from int64, total int6
 		}
 	}
 	// Clean any leftover lanes from a previous, longer fill of this batch.
+	// The block written is the empty candidate UNDER THIS BATCH'S SALT, so a
+	// cleaned lane hashes salt||"" — the salted shape every other lane holds —
+	// rather than a stale candidate. (Which digest it lands on is immaterial to
+	// a hit: runLayoutFast only ever inspects lanes 0..used-1. What matters is
+	// that no lane keeps a previous candidate's bytes.)
 	for i := n; i < group; i++ {
-		for w := 0; w < 16; w++ {
-			tb.words[tb.wordIndex(i, w)] = 0
-		}
-		tb.words[tb.wordIndex(i, 0)] = 0x80
+		tb.writeEmptyLane(i)
 	}
 	tb.n = n
 	return n
@@ -252,8 +372,12 @@ func (tb *transposedBatch) candidateAt(i int) []byte {
 	if tb.enc == encUTF16LE {
 		step = 2
 	}
+	// The candidate starts after the prefix salt, and only the candidate is
+	// returned: reporting the message instead would file the salt as part of
+	// the recovered plaintext.
+	pre := len(tb.salt.pre)
 	for b := 0; b < tb.length; b++ {
-		msgByte := b * step
+		msgByte := pre + b*step
 		w := tb.words[tb.wordIndex(i, msgByte/4)]
 		out[b] = byte(w >> (8 * (msgByte % 4)))
 	}

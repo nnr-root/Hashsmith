@@ -364,7 +364,7 @@ func TestStdPathHonoursNoFastPathEnv(t *testing.T) {
 	if _, _, ok := stdPathEligible("sha256", "", "prefix", l); ok {
 		t.Error("HASHSMITH_NO_FASTPATH must disable the stdlib fast path")
 	}
-	if _, ok := fastPathEligible("md5", "", l); ok {
+	if _, ok := fastPathEligible("md5", "", "", l); ok {
 		t.Error("HASHSMITH_NO_FASTPATH must still disable the vector fast path")
 	}
 }
