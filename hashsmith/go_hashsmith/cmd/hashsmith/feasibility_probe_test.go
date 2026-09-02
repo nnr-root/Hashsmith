@@ -148,6 +148,12 @@ func measureDispatchETA(t *testing.T, typ, salt, saltMode string, length, worker
 // md5/sha256 all improve — these are exactly the paths that regressed when a
 // batch fast path was added without teaching the guard about it.
 func TestFeasibilityETAMatchesRealDispatch(t *testing.T) {
+	// This test times real cracking runs, so it costs ~6s of wall clock.
+	// CI runs the full suite and still gates on it; -short keeps the local
+	// edit-test loop fast.
+	if testing.Short() {
+		t.Skip("times real runs; run without -short to include it")
+	}
 	const workers = 4
 	cases := []struct {
 		name     string
@@ -523,6 +529,12 @@ func feasibilityPredictedETAFromOutput(t *testing.T, out string) float64 {
 // checkFeasibility call). Only a test that goes through runCrack itself can
 // catch that; this is it.
 func TestFeasibilityETAThroughRunCrack(t *testing.T) {
+	// This test times real cracking runs, so it costs ~24s of wall clock.
+	// CI runs the full suite and still gates on it; -short keeps the local
+	// edit-test loop fast.
+	if testing.Short() {
+		t.Skip("times real runs; run without -short to include it")
+	}
 	preserveExitCode(t)
 	target, err := hashText("feasibility-cli-unreachable-plaintext", "md5", "deadbeef", "prefix")
 	if err != nil {
