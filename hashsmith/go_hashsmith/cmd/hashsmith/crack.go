@@ -56,22 +56,29 @@ func md5TargetBytes(targetHex string) ([16]byte, bool) {
 }
 
 // runBruteOrMaskLayout dispatches a brute-force or mask layout run to the
-// NEON fast path when it is eligible and no session resume is in play, else
-// to the existing scalar, session-aware runner. This is the only seam
-// between the two: every other format, salt, and attack mode keeps exactly
-// today's code path, since fastPathEligible returns false for all of them.
-// limit (0 = unbounded) is --limit's candidate-count bound; both the fast
-// and scalar paths honour it identically (see runLayout / runLayoutFast).
+// vector fast path when it is eligible, else to the scalar runner. This is
+// the only seam between the two: every other format, salt, and attack mode
+// keeps exactly today's code path, since fastPathEligible returns false for
+// all of them. limit (0 = unbounded) is --limit's candidate-count bound; both
+// the fast and scalar paths honour it identically (see runLayout /
+// runLayoutFast).
+//
+// A session no longer forces the scalar path. It used to, and that cost every
+// resumable run roughly 10x throughput for nothing: runLayoutFast already
+// maintains the same watermark, by the same cur[]-of-in-flight-chunks rule as
+// runLayout, so a checkpoint means the identical thing under either runner
+// and resumes correctly across both. Both runners are therefore handed to the
+// SAME checkpointing core (runSessionRunner) — sess == nil simply means it
+// passes a nil watermark, which is what the old fast path did by hand.
 func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *sessionState,
 	resumeFrom, limit int64, workers int, atomicAttempts *int64,
 	typ, salt, targetHash string, verify func(string) bool) (string, bool, error) {
 
-	if sess == nil {
-		if algo, ok := fastPathEligible(typ, salt, layout); ok {
-			if target, ok := md5TargetBytes(targetHash); ok {
-				pw, err := runLayoutFast(ctx, layout, resumeFrom, limit, workers, atomicAttempts, nil, algo, target)
-				return pw, ctx.Err() != nil, err
-			}
+	if algo, ok := fastPathEligible(typ, salt, layout); ok {
+		if target, ok := md5TargetBytes(targetHash); ok {
+			return runSessionRunner(ctx, layout, sess, resumeFrom, func(watermark *int64) (string, error) {
+				return runLayoutFast(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark, algo, target)
+			})
 		}
 	}
 	return runSessionLayout(ctx, layout, sess, resumeFrom, limit, workers, atomicAttempts, verify)
