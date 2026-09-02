@@ -504,6 +504,31 @@ dictionaries, rules, single-crack, PRINCE, and masks up to six or seven
 characters. Hashcat is the faster tool for very large brute-force sweeps. John
 is slower than both here by a wide margin.
 
+### What each option costs
+
+Ratios rather than absolutes, because these were measured back-to-back or as a
+CI A/B on one machine, and a ratio survives hardware and load in a way a single
+number does not. "Free" means the measurement could not separate it from the
+plain single-target run.
+
+| option | cost |
+|---|---|
+| `--session` (resumable) | **free** — 101.95 vs 101.95 MH/s on arm64 CI, 84.40 vs 85.34 on x86-64 |
+| a dump instead of one hash | **free** — a 50-target dump matches a single target, interleaved |
+| a salt, on sha1 / sha256 | **free** — 99% and 94% of unsalted |
+| a salt, on md5 | **~6x** — salted md5 reaches 17% of unsalted md5 |
+
+The md5 row is the one asymmetry, and it has a specific cause: unsalted md5
+runs on the NEON/AVX2 vector core, while a salted run takes the contiguous
+batch path around the standard library. sha1 and sha256 have no vector core
+either way, so for them the batch path closes the whole gap. Teaching the
+vector core to carry a salt would close md5's too; until then, prefer sha1 or
+sha256 benchmarks when comparing salted throughput.
+
+All four used to cost far more. Sessions were 10x, a dump was 48x the work of
+one hash, and a salt was 14x, all for no reason beyond which code path the
+dispatcher happened to choose.
+
 ### The vector cores, both architectures
 
 CI runs the same measurement on every push — identical keyspace, wall clock,
