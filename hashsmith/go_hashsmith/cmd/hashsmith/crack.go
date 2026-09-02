@@ -973,17 +973,22 @@ func crackTargets(targets []string, typ, mode, wordlist, charset string,
 	// Multi-hash acceleration: when several salt-independent raw-digest targets
 	// are given, hash each candidate once and check it against all of them. Only
 	// the targets multi-hash mode cannot handle are returned for per-target work.
-	// --skip/--limit are not (yet) threaded through this shared-candidate path,
-	// so a distributed slice takes the slower but correct per-target path instead
-	// of silently attacking the whole keyspace against every target.
-	skipLimitSet := cc != nil && (cc.skip != 0 || cc.limit != 0)
+	//
+	// --skip/--limit used to divert a multi-target run away from here onto the
+	// per-target path — N separate full-slice sweeps, reported one hash at a
+	// time ("Not found") instead of as a dump, with none of the shared-candidate
+	// work multi-hash mode exists to do. That is exactly the wrong way round for
+	// distributed cracking, whose whole purpose is to split ONE dump's keyspace
+	// across machines. runBatch now carries the slice itself (see batchRunType),
+	// with the same semantics --skip/--limit have for one target, so the gate is
+	// gone.
 	showOnly := cc != nil && cc.showOnly
 	uncracked := 0
 	// --show never attacks (it only reports potfile hits) — the per-target
 	// loop below already honors that via crackWithDetection's showOnly check,
 	// but runBatch does not, so a multi-target --show run must skip the batch
 	// path entirely rather than silently launching a real attack.
-	if len(targets) > 1 && salt == "" && !skipLimitSet && !showOnly {
+	if len(targets) > 1 && salt == "" && !showOnly {
 		var nb int
 		var berr error
 		targets, nb, berr = runBatch(targets, typ, mode, wordlist, charset,

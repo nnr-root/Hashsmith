@@ -211,7 +211,7 @@ func TestFastMultiAttributesEachPlaintextToItsOwnTarget(t *testing.T) {
 		rec := batchRecorder(batch, &remaining)
 		layout := bruteLayout("abcdefghij", 3, 3)
 		if !batchFastLayout(context.Background(), "md5", layout, allIdx(len(batch)), batch,
-			workers, &attempts, rec) {
+			0, 0, workers, &attempts, nil, rec) {
 			t.Fatal("batchFastLayout declined an md5 brute pass on an accelerated build")
 		}
 		assertAttribution(t, batch, want)
@@ -240,7 +240,7 @@ func TestFastMultiFindsEveryHitInsideOneGroup(t *testing.T) {
 	var remaining, attempts int64
 	rec := batchRecorder(batch, &remaining)
 	if !batchFastLayout(context.Background(), "md5", layout, allIdx(len(batch)), batch,
-		1, &attempts, rec) {
+		0, 0, 1, &attempts, nil, rec) {
 		t.Fatal("batchFastLayout declined")
 	}
 	assertAttribution(t, batch, want)
@@ -263,7 +263,7 @@ func TestFastMultiCreditsDuplicateTargets(t *testing.T) {
 	var remaining, attempts int64
 	rec := batchRecorder(batch, &remaining)
 	if !batchFastLayout(context.Background(), "md5", bruteLayout("abcdefghij", 3, 3),
-		allIdx(len(batch)), batch, 4, &attempts, rec) {
+		allIdx(len(batch)), batch, 0, 0, 4, &attempts, nil, rec) {
 		t.Fatal("batchFastLayout declined")
 	}
 	assertAttribution(t, batch, map[string]string{dup: "cab", md5hex("hid"): "hid"})
@@ -285,7 +285,7 @@ func TestFastMultiNeverReportsPaddingLanes(t *testing.T) {
 	var remaining, attempts int64
 	rec := batchRecorder(batch, &remaining)
 	if !batchFastLayout(context.Background(), "md5", layout, allIdx(len(batch)), batch,
-		1, &attempts, rec) {
+		0, 0, 1, &attempts, nil, rec) {
 		t.Fatal("batchFastLayout declined")
 	}
 	assertAttribution(t, batch, map[string]string{real: "ab"})
@@ -305,7 +305,7 @@ func TestFastMultiStopsOnceAllTargetsAreFound(t *testing.T) {
 	var remaining, attempts int64
 	rec := batchRecorder(batch, &remaining)
 	if !batchFastLayout(context.Background(), "md5", layout, allIdx(len(batch)), batch,
-		1, &attempts, rec) {
+		0, 0, 1, &attempts, nil, rec) {
 		t.Fatal("batchFastLayout declined")
 	}
 	if atomic.LoadInt64(&remaining) != 0 {
@@ -365,7 +365,7 @@ func TestFastMultiAgreesWithScalarPass(t *testing.T) {
 
 			var r1, r2, a1, a2 int64
 			if !batchFastLayout(context.Background(), "md5", tc.layout,
-				allIdx(len(fastBatch)), fastBatch, 4, &a1, batchRecorder(fastBatch, &r1)) {
+				allIdx(len(fastBatch)), fastBatch, 0, 0, 4, &a1, nil, batchRecorder(fastBatch, &r1)) {
 				t.Fatal("batchFastLayout declined")
 			}
 			scalarBatchPass(tc.layout, allIdx(len(scalarB)), scalarB, 4, &a2,
@@ -396,26 +396,26 @@ func TestBatchFastLayoutDeclinesIneligiblePasses(t *testing.T) {
 	nop := func(string, []int) bool { return false }
 	var attempts int64
 
-	if batchFastLayout(context.Background(), "sha256", l, allIdx(len(batch)), batch, 1, &attempts, nop) {
+	if batchFastLayout(context.Background(), "sha256", l, allIdx(len(batch)), batch, 0, 0, 1, &attempts, nil, nop) {
 		t.Error("sha256 has no vector core and must decline")
 	}
 	// A generator layout (markov and friends set l.gen) is not mixed-radix
 	// decodable and must stay scalar.
 	gen := bruteLayout("abcdefghij", 3, 3)
 	gen.gen = func(i int64) string { return "x" }
-	if batchFastLayout(context.Background(), "md5", gen, allIdx(len(batch)), batch, 1, &attempts, nop) {
+	if batchFastLayout(context.Background(), "md5", gen, allIdx(len(batch)), batch, 0, 0, 1, &attempts, nil, nop) {
 		t.Error("a gen-override layout must decline")
 	}
-	if batchFastLayout(context.Background(), "md5", nil, allIdx(len(batch)), batch, 1, &attempts, nop) {
+	if batchFastLayout(context.Background(), "md5", nil, allIdx(len(batch)), batch, 0, 0, 1, &attempts, nil, nop) {
 		t.Error("a nil layout must decline")
 	}
-	if batchFastLayout(context.Background(), "md5", l, nil, batch, 1, &attempts, nop) {
+	if batchFastLayout(context.Background(), "md5", l, nil, batch, 0, 0, 1, &attempts, nil, nop) {
 		t.Error("an empty active set must decline")
 	}
 	// A non-md5-sized target in the dump declines the whole pass.
 	mixed := append([]*batchTarget{}, batch...)
 	mixed = append(mixed, &batchTarget{norm: "deadbeef", key: "deadbeef", orig: "deadbeef"})
-	if batchFastLayout(context.Background(), "md5", l, allIdx(len(mixed)), mixed, 1, &attempts, nop) {
+	if batchFastLayout(context.Background(), "md5", l, allIdx(len(mixed)), mixed, 0, 0, 1, &attempts, nil, nop) {
 		t.Error("an undecodable target must decline the whole pass")
 	}
 	if attempts != 0 {
@@ -423,7 +423,7 @@ func TestBatchFastLayoutDeclinesIneligiblePasses(t *testing.T) {
 	}
 	// HASHSMITH_NO_FASTPATH is the clean A/B and must reach here too.
 	t.Setenv("HASHSMITH_NO_FASTPATH", "1")
-	if batchFastLayout(context.Background(), "md5", l, allIdx(len(batch)), batch, 1, &attempts, nop) {
+	if batchFastLayout(context.Background(), "md5", l, allIdx(len(batch)), batch, 0, 0, 1, &attempts, nil, nop) {
 		t.Error("HASHSMITH_NO_FASTPATH must force the scalar path in multi-hash mode")
 	}
 }
