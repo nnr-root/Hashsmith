@@ -636,9 +636,19 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 			return
 		}
 		_, intr, _ := runSessionRunner(ctx, layout, sess, resumeFrom, func(watermark *int64) (string, error) {
-			if fastEligible && batchFastLayout(ctx, typ, layout, active, batch,
-				resumeFrom, limit, workers, &atomicAttempts, watermark, record) {
-				return "", nil
+			if fastEligible {
+				if batchFastLayout(ctx, typ, layout, active, batch,
+					resumeFrom, limit, workers, &atomicAttempts, watermark, record) {
+					return "", nil
+				}
+				// The vector path declined (no core for this type). A stdlib
+				// raw digest — sha1, sha256 — still has a contiguous-batch
+				// path; see stdfast.go. It declines in turn, just as safely,
+				// for anything it cannot enumerate.
+				if batchStdLayout(ctx, typ, layout, active, batch,
+					resumeFrom, limit, workers, &atomicAttempts, watermark, record) {
+					return "", nil
+				}
 			}
 			return runLayout(ctx, layout, resumeFrom, limit, workers, &atomicAttempts, watermark, verify)
 		})

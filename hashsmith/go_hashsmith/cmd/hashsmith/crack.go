@@ -81,6 +81,18 @@ func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *ses
 			})
 		}
 	}
+	// Digests with no vector core but a hardware-accelerated stdlib
+	// implementation (sha1, sha256) take the contiguous-batch path instead —
+	// same keyspace, same watermark contract, no per-candidate string
+	// allocation or verify closure. See stdfast.go. The vector path is offered
+	// first so md5/md4/ntlm keep their core; nothing routes to both.
+	if algo, ok := stdPathEligible(typ, salt, layout); ok {
+		if st, ok := newStdTargets([]string{targetHash}, []int{0}, algo.digLen); ok {
+			return runSessionRunner(ctx, layout, sess, resumeFrom, func(watermark *int64) (string, error) {
+				return runLayoutStdSingle(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark, algo, st)
+			})
+		}
+	}
 	return runSessionLayout(ctx, layout, sess, resumeFrom, limit, workers, atomicAttempts, verify)
 }
 
