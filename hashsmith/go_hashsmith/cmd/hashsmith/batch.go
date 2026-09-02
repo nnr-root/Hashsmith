@@ -822,8 +822,13 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 	// target in this pass is the same type, and multi-hash mode hashes each
 	// candidate ONCE for all of them, so the rate does not scale with the target
 	// count.
+	// probe is nil here: this is the multi-target dispatch (batchFastLayout /
+	// batchStdLayout), a different pair of functions from the single-target
+	// runBruteOrMaskLayout probed below in doCrack. feasibilityRate falls back
+	// to benchTarget exactly as it did before this change — still correct,
+	// just not sped up by this task's fix (out of scope: see feasibility.go).
 	if err := checkFeasibility(total, resumeFrom != 0 || limit > 0,
-		typ, batch[active[0]].norm, salt, saltMode, workers, force); err != nil {
+		typ, batch[active[0]].norm, salt, saltMode, workers, force, nil); err != nil {
 		return false, err
 	}
 
