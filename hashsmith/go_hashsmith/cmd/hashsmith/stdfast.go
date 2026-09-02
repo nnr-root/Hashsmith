@@ -1,7 +1,8 @@
 package main
 
-// Allocation-free batch fast path for the STDLIB raw digests — today SHA-1 and
-// SHA-256.
+// Allocation-free batch fast path for the STDLIB digests — unsalted SHA-1 and
+// SHA-256, and the simple salted concatenations md5/sha1/sha256 of
+// salt||password or password||salt (hashcat 10/20, 110/120, 1410/1420).
 //
 // Why this exists, and why it is not a second vector core:
 //
@@ -23,7 +24,7 @@ package main
 //
 //   - candidates are generated with the same decode-once-then-odometer trick
 //     fillFromSegment uses, so there is no division per character position;
-//   - they land CONTIGUOUSLY in a reused buffer (stride = candidate length),
+//   - they land CONTIGUOUSLY in a reused buffer (stride = message length),
 //     which is the layout a stdlib hash wants, so no transposition and no
 //     per-candidate string allocation;
 //   - digests land in a reused slab, and only a hit ever allocates.
@@ -44,10 +45,30 @@ package main
 //     nothing from. Everything here is parameterised by algo.digLen instead, so
 //     sha224/384/512, blake2 and ripemd160 join by adding one stdAlgo case and
 //     one hashBatch function — no second redesign.
+//
+// Salts, added in the same shape:
+//
+// Hashing salt||password is the same work as hashing password — 13 bytes and 5
+// bytes are both one block — so a salted digest has no business being 14x
+// slower than an unsalted one. It was, because every salted run fell out of
+// both fast paths and paid the per-candidate harness the batch path exists to
+// avoid. The fix is one field on the generator: the message written into the
+// contiguous buffer becomes salt.pre || candidate || salt.suf instead of the
+// candidate alone, and every other property — the odometer, the chunk
+// allocator, the watermark, the sorted-target lookup — is untouched. The empty
+// stdSalt reduces it byte for byte to what it was.
+//
+// What salts DO cost is candidate sharing. One hashed candidate answers for
+// every target only while every target is salted the same; with distinct salts
+// each target needs its own message, so runBatch groups targets by salt and
+// runs one pass per distinct salt (batch.go). That is inherent — it is what
+// salts are for — and this path never pretends otherwise: batchStdLayout
+// refuses a group whose targets do not all carry the salt it was handed.
 
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/binary"
@@ -78,6 +99,15 @@ const (
 	// stdMaxDigestLen bounds the digest slab. 64 covers SHA-512/BLAKE2b, the
 	// widest digests Hashsmith computes, so future algorithms need no change.
 	stdMaxDigestLen = 64
+
+	// stdMaxSaltLen caps the salt this path will materialise around each
+	// candidate. It bounds nothing but the generation buffer — the salt is
+	// copied into every slot, so a pathological salt would blow the per-worker
+	// allocation up without buying any throughput. A longer salt simply falls
+	// back to the scalar path, which has no such buffer. 256 comfortably covers
+	// every real web-application salt (hashcat's own generic salted modes cap
+	// well below this).
+	stdMaxSaltLen = 256
 )
 
 // stdAlgo describes one stdlib digest this path can run.
@@ -111,6 +141,17 @@ func sha256HashBatch(msgs []byte, msgLen, n int, out []byte) {
 	}
 }
 
+// md5HashBatch is the same shape for MD5. It exists ONLY for salted runs: an
+// unsalted MD5 keyspace is enumerated by the NEON/AVX2 core through
+// runLayoutFast, which is several times faster than crypto/md5 and must keep
+// that traffic — see stdSaltedPlanFor, which refuses md5 when there is no salt.
+func md5HashBatch(msgs []byte, msgLen, n int, out []byte) {
+	for i := 0; i < n; i++ {
+		*(*[md5.Size]byte)(out[i*md5.Size : i*md5.Size+md5.Size]) =
+			md5.Sum(msgs[i*msgLen : i*msgLen+msgLen])
+	}
+}
+
 // stdAlgoFor returns the contiguous-batch descriptor for a hash type, resolved
 // through canonicalHashType so Hashcat mode numbers ("100", "1400") and John
 // names ("raw-sha1", "raw-sha256") route here too.
@@ -130,14 +171,117 @@ func stdAlgoFor(typ string) (*stdAlgo, bool) {
 	return nil, false
 }
 
+// ── salted constructions ────────────────────────────────────────────────────
+
+// stdSalt is the concatenation this path materialises around each candidate:
+// the message hashed is pre || candidate || suf. Exactly one of the two is
+// non-empty for every construction Hashsmith supports here (prefix or suffix),
+// but keeping both fields makes the generator's arithmetic uniform and leaves
+// the $salt.$pass.$salt family (hashcat 3800 and friends) a data change rather
+// than a code change, should it ever be wired up.
+//
+// The empty stdSalt is the unsalted case, and reduces the generator to exactly
+// the bytes it wrote before this type existed.
+type stdSalt struct {
+	pre []byte
+	suf []byte
+}
+
+func (s stdSalt) width() int { return len(s.pre) + len(s.suf) }
+
+// stdSaltedBaseFor returns the digest core for a simple salt||pass /
+// pass||salt construction. Only md5, sha1 and sha256 are wired up: they are
+// hashcat modes 10/20, 110/120 and 1410/1420, the salted digests real web
+// applications actually store, and each has a stdlib core whose message is the
+// raw concatenated bytes.
+//
+// Everything else stays on the scalar path on purpose. A UTF-16LE variant
+// (md5-utf16le-pass-salt, …) hashes a re-encoded password, not these bytes;
+// sha224/384/512 would be a one-line addition but would ship untested; and the
+// structured-record formats (bcrypt, sha512crypt, PBKDF2, crack_frameworks.go)
+// are not concatenations at all.
+func stdSaltedBaseFor(name string) (*stdAlgo, bool) {
+	switch name {
+	case "md5":
+		return &stdAlgo{name: "md5", digLen: md5.Size, hashBatch: md5HashBatch}, true
+	case "sha1":
+		return &stdAlgo{name: "sha1", digLen: sha1.Size, hashBatch: sha1HashBatch}, true
+	case "sha256":
+		return &stdAlgo{name: "sha256", digLen: sha256.Size, hashBatch: sha256HashBatch}, true
+	}
+	return nil, false
+}
+
+// stdSaltedPlanFor resolves (type, salt, salt mode) into the digest core and
+// the concatenation to materialise, or false when this path cannot reproduce
+// hashText's digest for that combination EXACTLY. That last word is the whole
+// contract: every rule below is a transcription of hashText/hashCompatSaltedDigest,
+// and TestStdSaltedPlanMatchesHashText enumerates both sides to keep it one.
+//
+// Three shapes reach here:
+//
+//   - a raw digest with -s/-S. hashText prepends or appends the salt to the
+//     candidate text before hashing (only "suffix" appends — every other value
+//     of -S prefixes, which this mirrors byte for byte rather than validating).
+//   - a generic salted compat type (md5-salt-pass, sha1-pass-salt, hashcat
+//     10/20/110/120/1410/1420 …). The type name fixes the order, so -S is
+//     ignored exactly as hashCompatSaltedDigest ignores it; the salt is
+//     required, and comes from -s or from the target's hash:salt field, which
+//     is the caller's job to have resolved (compatSaltedTargetParts).
+//   - no salt at all, which is stdAlgoFor's existing sha1/sha256 case.
+//
+// md5 is deliberately absent from the unsalted case: runLayoutFast's vector
+// core owns unsalted MD5/MD4/NTLM and is several times faster, so routing them
+// here would be a silent regression, not an acceleration.
+func stdSaltedPlanFor(typ, salt, saltMode string) (*stdAlgo, stdSalt, bool) {
+	canon := canonicalHashType(typ)
+	if spec, ok := compatSaltedDigests[canon]; ok {
+		if spec.passwordUTF16 || salt == "" {
+			return nil, stdSalt{}, false
+		}
+		base, _, _ := strings.Cut(canon, "-")
+		algo, ok := stdSaltedBaseFor(base)
+		if !ok {
+			return nil, stdSalt{}, false
+		}
+		if spec.saltFirst {
+			return algo, stdSalt{pre: []byte(salt)}, true
+		}
+		return algo, stdSalt{suf: []byte(salt)}, true
+	}
+	if salt == "" {
+		algo, ok := stdAlgoFor(canon)
+		if !ok {
+			return nil, stdSalt{}, false
+		}
+		return algo, stdSalt{}, true
+	}
+	// A raw digest carrying -s. hashText only applies the generic
+	// concatenation to types that do not consume the salt themselves, so this
+	// must not fire for anything in its saltInAlgorithms set — none of md5,
+	// sha1 and sha256 is in it, and stdSaltedBaseFor admits nothing else.
+	algo, ok := stdSaltedBaseFor(canon)
+	if !ok {
+		return nil, stdSalt{}, false
+	}
+	if saltMode == "suffix" {
+		return algo, stdSalt{suf: []byte(salt)}, true
+	}
+	return algo, stdSalt{pre: []byte(salt)}, true
+}
+
 // stdPathEligible reports whether l can be enumerated by runLayoutStd, and if
-// so returns the algorithm to run it with. It mirrors fastPathEligible's
+// so returns the algorithm to run it with and the salt concatenation the
+// generator must wrap each candidate in. It mirrors fastPathEligible's
 // conditions minus the ones that are specific to a vector core:
 //
 //   - HASHSMITH_NO_FASTPATH disables it, exactly as it disables the vector
 //     path, so the same binary can be timed on the scalar path and the A/B
 //     stays a single switch;
-//   - the type must be a registered stdlib raw digest with no salt;
+//   - (typ, salt, saltMode) must resolve to a construction this path computes
+//     identically to hashText — see stdSaltedPlanFor;
+//   - the salt must fit stdMaxSaltLen, since it is copied into every slot of
+//     the generation buffer;
 //   - l must have no gen override — a Markov (or other) generator's candidates
 //     are not mixed-radix decodable, which the odometer requires;
 //   - every segment must have between 1 and stdMaxCandidateLen positions, each
@@ -145,40 +289,43 @@ func stdAlgoFor(typ string) (*stdAlgo, bool) {
 //
 // There is no vector-backend requirement: this path is pure Go and runs
 // identically on every architecture.
-func stdPathEligible(typ, salt string, l *keyspaceLayout) (*stdAlgo, bool) {
+func stdPathEligible(typ, salt, saltMode string, l *keyspaceLayout) (*stdAlgo, stdSalt, bool) {
 	if os.Getenv("HASHSMITH_NO_FASTPATH") != "" {
-		return nil, false
-	}
-	if salt != "" {
-		return nil, false
+		return nil, stdSalt{}, false
 	}
 	if l == nil || l.gen != nil || len(l.segments) == 0 {
-		return nil, false
+		return nil, stdSalt{}, false
 	}
-	algo, ok := stdAlgoFor(typ)
+	algo, sp, ok := stdSaltedPlanFor(typ, salt, saltMode)
 	if !ok {
-		return nil, false
+		return nil, stdSalt{}, false
+	}
+	if len(sp.pre) > stdMaxSaltLen || len(sp.suf) > stdMaxSaltLen {
+		return nil, stdSalt{}, false
 	}
 	if algo.digLen < 8 || algo.digLen > stdMaxDigestLen {
-		return nil, false
+		return nil, stdSalt{}, false
 	}
 	for _, seg := range l.segments {
 		if len(seg) < 1 || len(seg) > stdMaxCandidateLen {
-			return nil, false
+			return nil, stdSalt{}, false
 		}
 		for _, charset := range seg {
 			if len(charset) == 0 {
-				return nil, false
+				return nil, stdSalt{}, false
 			}
 		}
 	}
-	return algo, true
+	return algo, sp, true
 }
 
 // ── candidate generation ────────────────────────────────────────────────────
 
-// contigBatch generates up to `group` candidates of one fixed length into a
-// single contiguous buffer, and holds the digest slab they hash into.
+// contigBatch generates up to `group` MESSAGES of one fixed length into a
+// single contiguous buffer, and holds the digest slab they hash into. A
+// message is salt.pre || candidate || salt.suf; with the empty stdSalt it is
+// the candidate alone and every byte written is identical to what this
+// generator produced before salts existed.
 //
 // Unlike transposedBatch it has no stale-lane hazard to manage: only lanes
 // 0..n-1 are ever hashed (hashBatch is passed n) and only 0..n-1 are ever
@@ -186,20 +333,30 @@ func stdPathEligible(typ, salt string, l *keyspaceLayout) (*stdAlgo, bool) {
 // That is a property of the contiguous layout, not an accident — the
 // transposed batch has to scrub leftovers precisely because its core hashes
 // the whole fixed-width group unconditionally.
+//
+// The salt costs nothing per candidate beyond the bytes themselves: the
+// odometer already copies the previous slot forward, so widening that copy
+// from the candidate to the whole message carries the salt along for free and
+// there is no separate salt write after slot 0.
 type contigBatch struct {
-	msgs   []byte // group*stdMaxCandidateLen; candidate i at [i*length, (i+1)*length)
+	msgs   []byte // group*maxStride; message i at [i*stride, (i+1)*stride)
 	out    []byte // group*stdMaxDigestLen; digest i at [i*digLen, (i+1)*digLen)
 	group  int
 	digLen int
-	length int // candidate length of the current fill (0 before the first)
+	pre    []byte // salt bytes before the candidate ("" for an unsalted run)
+	suf    []byte // salt bytes after it
+	length int    // candidate length of the current fill (0 before the first)
+	stride int    // len(pre) + length + len(suf); the message length hashBatch is passed
 }
 
-func newContigBatch(group, digLen int) *contigBatch {
+func newContigBatch(group, digLen int, salt stdSalt) *contigBatch {
 	return &contigBatch{
-		msgs:   make([]byte, group*stdMaxCandidateLen),
+		msgs:   make([]byte, group*(stdMaxCandidateLen+salt.width())),
 		out:    make([]byte, group*stdMaxDigestLen),
 		group:  group,
 		digLen: digLen,
+		pre:    salt.pre,
+		suf:    salt.suf,
 	}
 }
 
@@ -240,45 +397,65 @@ func (cb *contigBatch) fillFromSegment(sets [][]byte, from, total int64, want in
 		return 0
 	}
 	cb.length = L
+	pre := len(cb.pre)
+	stride := pre + L + len(cb.suf)
+	cb.stride = stride
 
 	// dig[i] is the current digit at position i (an index into sets[i]);
 	// together with msgs[...] it encodes the candidate being emitted.
 	var dig [stdMaxCandidateLen]int
 
-	// Full decode, once, at `from` — identical arithmetic to maskIdxInto.
+	// Slot 0 is written in full: the salt around it, and a full decode of
+	// `from` — identical arithmetic to maskIdxInto.
+	copy(cb.msgs[0:pre], cb.pre)
 	idx := from
 	for i := L - 1; i >= 0; i-- {
 		base := int64(len(sets[i]))
 		d := int(idx % base)
 		dig[i] = d
-		cb.msgs[i] = sets[i][d]
+		cb.msgs[pre+i] = sets[i][d]
 		idx /= base
 	}
+	copy(cb.msgs[pre+L:stride], cb.suf)
 
 	for n := 1; n < want; n++ {
-		prev := (n - 1) * L
-		cur := n * L
-		copy(cb.msgs[cur:cur+L], cb.msgs[prev:prev+L])
+		prev := (n - 1) * stride
+		cur := n * stride
+		// The whole message, salt included: the previous slot already holds
+		// the salt bytes in the right places, so this is the only write they
+		// ever need. For an unsalted run stride == L and this is byte for byte
+		// the copy that was here before.
+		copy(cb.msgs[cur:cur+stride], cb.msgs[prev:prev+stride])
 		// Advance the odometer by one: increment the last position, carrying
 		// left on overflow. Mathematically identical to decoding from+n
 		// independently, with no division at all.
+		c := cur + pre
 		for i := L - 1; i >= 0; i-- {
 			dig[i]++
 			if dig[i] < len(sets[i]) {
-				cb.msgs[cur+i] = sets[i][dig[i]]
+				cb.msgs[c+i] = sets[i][dig[i]]
 				break
 			}
 			dig[i] = 0
-			cb.msgs[cur+i] = sets[i][0]
+			cb.msgs[c+i] = sets[i][0]
 		}
 	}
 	return want
 }
 
-// candidate returns candidate i's bytes as a subslice of the generation
-// buffer — no copy, valid only until the next fill.
+// candidate returns candidate i's bytes — the PASSWORD, without the salt
+// around it — as a subslice of the generation buffer. No copy, valid only
+// until the next fill. Reporting the message instead would file the salt as
+// part of the recovered plaintext.
 func (cb *contigBatch) candidate(i int) []byte {
-	return cb.msgs[i*cb.length : (i+1)*cb.length]
+	off := i*cb.stride + len(cb.pre)
+	return cb.msgs[off : off+cb.length]
+}
+
+// messages returns the first n messages, packed contiguously at cb.stride —
+// exactly the layout algo.hashBatch is documented to take.
+func (cb *contigBatch) messages(n int) []byte {
+	return cb.msgs[:n*cb.stride]
 }
 
 // digest returns digest i's bytes as a subslice of the digest slab.
@@ -420,8 +597,10 @@ func (st *stdTargets) lookup(d []byte) ([]int, bool) {
 // in the keyspace land in the same batch and stopping at the first would
 // silently lose the second.
 //
-// Callers must have confirmed stdPathEligible(typ, salt, l) and pass the
-// resulting algo; this function does not re-check eligibility.
+// Callers must have confirmed stdPathEligible(typ, salt, saltMode, l) and pass
+// the resulting algo AND salt plan; this function does not re-check
+// eligibility. `salt` is the concatenation wrapped around every candidate, so
+// every target in `targets` must be salted with it — see batchStdLayout.
 //
 // Two correctness requirements, the same two the vector path documents:
 //
@@ -432,7 +611,7 @@ func (st *stdTargets) lookup(d []byte) ([]int, bool) {
 //     bounds and there are no lanes beyond n to mistake for candidates.
 func runLayoutStd(ctx context.Context, l *keyspaceLayout, resumeFrom, limit int64,
 	workers int, atomicAttempts *int64, watermark *int64,
-	algo *stdAlgo, targets *stdTargets, onHit func(string, []int) bool) error {
+	algo *stdAlgo, salt stdSalt, targets *stdTargets, onHit func(string, []int) bool) error {
 
 	if resumeFrom < 0 {
 		resumeFrom = 0
@@ -483,7 +662,7 @@ func runLayoutStd(ctx context.Context, l *keyspaceLayout, resumeFrom, limit int6
 		wg.Add(1)
 		go func(wID int) {
 			defer wg.Done()
-			cb := newContigBatch(stdBatchGroup, algo.digLen)
+			cb := newContigBatch(stdBatchGroup, algo.digLen, salt)
 			lastSeg := -1
 			var segTotal int64
 			for {
@@ -546,8 +725,7 @@ func runLayoutStd(ctx context.Context, l *keyspaceLayout, resumeFrom, limit int6
 						// l.total, but guard rather than spin.
 						break
 					}
-					msgLen := len(sets)
-					algo.hashBatch(cb.msgs[:n*msgLen], msgLen, n, cb.out)
+					algo.hashBatch(cb.messages(n), cb.stride, n, cb.out)
 
 					done := false
 					for i := 0; i < n; i++ {
@@ -608,11 +786,11 @@ func runLayoutStd(ctx context.Context, l *keyspaceLayout, resumeFrom, limit int6
 // every worker has returned, so no extra synchronisation is needed.
 func runLayoutStdSingle(ctx context.Context, l *keyspaceLayout, resumeFrom, limit int64,
 	workers int, atomicAttempts *int64, watermark *int64,
-	algo *stdAlgo, targets *stdTargets) (string, error) {
+	algo *stdAlgo, salt stdSalt, targets *stdTargets) (string, error) {
 
 	var found string
 	err := runLayoutStd(ctx, l, resumeFrom, limit, workers, atomicAttempts, watermark,
-		algo, targets, func(cand string, _ []int) bool {
+		algo, salt, targets, func(cand string, _ []int) bool {
 			if found == "" {
 				found = cand
 			}
@@ -632,32 +810,45 @@ func runLayoutStdSingle(ctx context.Context, l *keyspaceLayout, resumeFrom, limi
 // meaning they carry everywhere else; watermark (nil when nothing is
 // checkpointing) is the session restore point the runner publishes into.
 //
-// It returns false when the pass is not eligible — a non-stdlib type, a salt, a
-// generator layout, an over-long segment, or a target that is not the right
-// number of hex bytes — in which case the caller must run the SAME layout on
-// the scalar path exactly as before. Returning false is always safe: nothing
-// has been recorded and no candidate has been counted.
+// It returns false when the pass is not eligible — a type/salt combination
+// this path does not compute identically, a generator layout, an over-long
+// segment, or a target that is not the right number of hex bytes — in which
+// case the caller must run the SAME layout on the scalar path exactly as
+// before. Returning false is always safe: nothing has been recorded and no
+// candidate has been counted.
+//
+// `salt` is the salt EVERY target in `active` is hashed with. That is a real
+// precondition, not a convenience: one hashed candidate can only be tested
+// against targets sharing a salt, so the caller must have grouped them (see
+// batchSaltGroups in batch.go). Passing a mixed group would file each
+// plaintext against whichever target happened to collide under the first
+// salt — the exact silent mis-attribution the grouping exists to prevent —
+// so the digests are keyed by batchTarget.key, the per-target hash field
+// the grouping fills in.
 func batchStdLayout(ctx context.Context, typ string, layout *keyspaceLayout,
-	active []int, batch []*batchTarget, resumeFrom, limit int64, workers int,
+	active []int, batch []*batchTarget, salt, saltMode string, resumeFrom, limit int64, workers int,
 	atomicAttempts *int64, watermark *int64, record func(string, []int) bool) bool {
 
 	if layout == nil || len(active) == 0 {
 		return false
 	}
-	algo, ok := stdPathEligible(typ, "", layout)
+	algo, sp, ok := stdPathEligible(typ, salt, saltMode, layout)
 	if !ok {
 		return false
 	}
 	hexes := make([]string, len(active))
 	for i, idx := range active {
-		hexes[i] = batch[idx].norm
+		if batch[idx].salt != salt {
+			return false
+		}
+		hexes[i] = batch[idx].key
 	}
 	st, ok := newStdTargets(hexes, active, algo.digLen)
 	if !ok {
 		return false
 	}
 	if err := runLayoutStd(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark,
-		algo, st, record); err != nil {
+		algo, sp, st, record); err != nil {
 		return false
 	}
 	return true

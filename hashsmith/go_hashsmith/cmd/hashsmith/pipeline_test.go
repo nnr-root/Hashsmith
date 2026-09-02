@@ -177,14 +177,17 @@ func TestOutfileDoesNotTruncatePerTargetPath(t *testing.T) {
 	wl := filepath.Join(dir, "wl.txt")
 	mustWrite(t, wl, "password\nadmin\n")
 
-	// A salt forces every target down the slower per-target path in
-	// crackTargets (see the `salt == ""` batch-mode gate), so this exercises
-	// doCrack's own -o write, once per target, on the same file.
-	t1, err := hashCompatSaltedDigest("password", "md5-pass-salt", "saltone")
+	// sha512-pass-salt is a salted construction the multi-hash batch path
+	// declines — it has no contiguous-batch core (see stdSaltedBaseFor) — so
+	// every target here still takes the per-target path in crackTargets, which
+	// is what this test is about: doCrack's own -o write, once per target, on
+	// the same file. (md5-pass-salt used to serve that purpose; it now batches
+	// by salt group, which is covered separately.)
+	t1, err := hashCompatSaltedDigest("password", "sha512-pass-salt", "saltone")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t2, err := hashCompatSaltedDigest("admin", "md5-pass-salt", "salttwo")
+	t2, err := hashCompatSaltedDigest("admin", "sha512-pass-salt", "salttwo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +196,7 @@ func TestOutfileDoesNotTruncatePerTargetPath(t *testing.T) {
 	out := filepath.Join(dir, "out.txt")
 
 	exitCode = 0
-	if err := runCrack([]string{"-t", "md5-pass-salt", "-M", "dict", "-w", wl, "--no-pot",
+	if err := runCrack([]string{"-t", "sha512-pass-salt", "-M", "dict", "-w", wl, "--no-pot",
 		"-o", out, targetsFile}); err != nil {
 		t.Fatalf("runCrack: %v", err)
 	}

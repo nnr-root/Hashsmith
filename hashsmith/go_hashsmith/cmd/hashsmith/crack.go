@@ -72,7 +72,7 @@ func md5TargetBytes(targetHex string) ([16]byte, bool) {
 // passes a nil watermark, which is what the old fast path did by hand.
 func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *sessionState,
 	resumeFrom, limit int64, workers int, atomicAttempts *int64,
-	typ, salt, targetHash string, verify func(string) bool) (string, bool, error) {
+	typ, salt, saltMode, targetHash string, verify func(string) bool) (string, bool, error) {
 
 	if algo, ok := fastPathEligible(typ, salt, layout); ok {
 		if target, ok := md5TargetBytes(targetHash); ok {
@@ -82,14 +82,30 @@ func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *ses
 		}
 	}
 	// Digests with no vector core but a hardware-accelerated stdlib
-	// implementation (sha1, sha256) take the contiguous-batch path instead —
-	// same keyspace, same watermark contract, no per-candidate string
-	// allocation or verify closure. See stdfast.go. The vector path is offered
-	// first so md5/md4/ntlm keep their core; nothing routes to both.
-	if algo, ok := stdPathEligible(typ, salt, layout); ok {
-		if st, ok := newStdTargets([]string{targetHash}, []int{0}, algo.digLen); ok {
+	// implementation (sha1, sha256), and the simple salted concatenations
+	// md5/sha1/sha256 of salt||pass or pass||salt, take the contiguous-batch
+	// path instead — same keyspace, same watermark contract, no per-candidate
+	// string allocation or verify closure. See stdfast.go. The vector path is
+	// offered first so unsalted md5/md4/ntlm keep their core; nothing routes to
+	// both.
+	//
+	// effHash/effSalt is the hash:salt split, resolved through the same helper
+	// the scalar verifier uses (compatSaltedTargetParts), so a generic salted
+	// type carrying its salt in the target — "…:deadbeef", hashcat 10/20 style
+	// — reaches the fast path with the digest and salt the verifier would have
+	// derived, and not a target string with a salt still glued to it.
+	effHash, effSalt := targetHash, salt
+	if _, isCompat := compatSaltedDigests[canonicalHashType(typ)]; isCompat {
+		h, sv, ok := compatSaltedTargetParts(targetHash, salt)
+		if !ok {
+			return runSessionLayout(ctx, layout, sess, resumeFrom, limit, workers, atomicAttempts, verify)
+		}
+		effHash, effSalt = h, sv
+	}
+	if algo, sp, ok := stdPathEligible(typ, effSalt, saltMode, layout); ok {
+		if st, ok := newStdTargets([]string{effHash}, []int{0}, algo.digLen); ok {
 			return runSessionRunner(ctx, layout, sess, resumeFrom, func(watermark *int64) (string, error) {
-				return runLayoutStdSingle(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark, algo, st)
+				return runLayoutStdSingle(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark, algo, sp, st)
 			})
 		}
 	}
@@ -1000,11 +1016,21 @@ func crackTargets(targets []string, typ, mode, wordlist, charset string,
 	// loop below already honors that via crackWithDetection's showOnly check,
 	// but runBatch does not, so a multi-target --show run must skip the batch
 	// path entirely rather than silently launching a real attack.
-	if len(targets) > 1 && salt == "" && !showOnly {
+	// A salt no longer diverts a dump away from here. It used to, and it cost
+	// exactly what multi-hash mode exists to save: N separate full sweeps of
+	// the keyspace for N targets that mostly share a salt. runBatch now groups
+	// targets BY salt and runs one pass per distinct salt (batchSaltGroups), so
+	// a dump behind one -s is a single pass with the full multi-target benefit
+	// and a dump of hash:salt lines costs one pass per distinct salt — which is
+	// inherent to salting, not an artefact of the implementation. Types it
+	// cannot batch (auto-detected salted dumps, structured records, anything
+	// but md5/sha1/sha256 around a prefix or suffix salt) come straight back as
+	// leftovers and take the per-target path below exactly as before.
+	if len(targets) > 1 && !showOnly {
 		var nb int
 		var berr error
 		targets, nb, berr = runBatch(targets, typ, mode, wordlist, charset,
-			minLen, maxLen, workers, saltMode, outFile, copyResult, rules, mc, cc)
+			minLen, maxLen, workers, salt, saltMode, outFile, copyResult, rules, mc, cc)
 		uncracked += nb
 		if berr != nil {
 			if uncracked > 0 {
@@ -1296,14 +1322,14 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				clrYellow.Fprintf(os.Stderr,
 					"GPU brute unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
 				pw, interrupted, err = runBruteOrMaskLayout(runCtx, bruteLayout(charset, minLen, maxLen),
-					sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
+					sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, saltMode, targetHash, verifyFn)
 			}
 		} else {
 			if cc != nil && cc.useGPU && !gpuBounded {
 				clrYellow.Fprintf(os.Stderr, "GPU brute does not support --skip/--limit yet — using CPU\n")
 			}
 			pw, interrupted, err = runBruteOrMaskLayout(runCtx, bruteLayout(charset, minLen, maxLen),
-				sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
+				sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, saltMode, targetHash, verifyFn)
 		}
 		result = crackedResult{password: pw}
 	case "mask":
@@ -1325,14 +1351,14 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				clrYellow.Fprintf(os.Stderr,
 					"GPU mask unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
 				pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
-					sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
+					sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, saltMode, targetHash, verifyFn)
 			}
 		} else {
 			if cc != nil && cc.useGPU && !gpuBounded {
 				clrYellow.Fprintf(os.Stderr, "GPU mask does not support --skip/--limit yet — using CPU\n")
 			}
 			pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
-				sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, targetHash, verifyFn)
+				sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, saltMode, targetHash, verifyFn)
 		}
 		result = crackedResult{password: pw}
 	case "markov":

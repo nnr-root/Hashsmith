@@ -361,28 +361,36 @@ func runLayoutFastMulti(ctx context.Context, l *keyspaceLayout, resumeFrom, limi
 // multi-target checkpoint means precisely what a single-target one does.
 //
 // It returns false when the pass is not eligible — no vector backend, a
-// non-accelerated type, a generator layout, an over-long segment, a target
-// that is not 16 bytes of hex — in which case the caller must run the SAME
-// layout on the scalar path exactly as before. Returning false is always
-// safe: nothing has been recorded and no candidate has been counted.
+// non-accelerated type, a SALT (the vector core hashes the bare candidate and
+// nothing else), a generator layout, an over-long segment, a target that is
+// not 16 bytes of hex — in which case the caller must run the SAME layout on
+// the scalar path, or offer it to the contiguous-batch path, exactly as
+// before. Returning false is always safe: nothing has been recorded and no
+// candidate has been counted.
+//
+// `salt` is passed to fastPathEligible rather than hardcoded to "": this
+// function used to hand it "" unconditionally, which was correct only while
+// every caller was unsalted. Now that runBatch also runs salted passes, a
+// hardcoded "" would let a salted md5 pass through to a core that hashes the
+// candidate alone and report a plaintext that does not match its target.
 //
 // A pass whose targets collapse to a single distinct digest is handed to
 // runLayoutFast, the single-target specialisation, so it pays nothing for
 // multi-target lookup.
-func batchFastLayout(ctx context.Context, typ string, layout *keyspaceLayout,
+func batchFastLayout(ctx context.Context, typ, salt string, layout *keyspaceLayout,
 	active []int, batch []*batchTarget, resumeFrom, limit int64, workers int,
 	atomicAttempts *int64, watermark *int64, record func(string, []int) bool) bool {
 
 	if layout == nil || len(active) == 0 {
 		return false
 	}
-	algo, ok := fastPathEligible(typ, "", layout)
+	algo, ok := fastPathEligible(typ, salt, layout)
 	if !ok {
 		return false
 	}
 	hexes := make([]string, len(active))
 	for i, idx := range active {
-		hexes[i] = batch[idx].norm
+		hexes[i] = batch[idx].key
 	}
 	ft, ok := newFastTargets(hexes, active)
 	if !ok {

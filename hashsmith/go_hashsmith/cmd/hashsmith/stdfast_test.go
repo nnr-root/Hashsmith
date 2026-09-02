@@ -90,7 +90,7 @@ func TestContigFillMatchesMaskIdxToStr(t *testing.T) {
 		{[]byte("ab"), []byte("cd"), []byte("ef"), []byte("gh"),
 			[]byte("ij"), []byte("kl"), []byte("mn")}, // 128 > one batch
 	}
-	cb := newContigBatch(stdBatchGroup, sha256.Size)
+	cb := newContigBatch(stdBatchGroup, sha256.Size, stdSalt{})
 	for si, sets := range segs {
 		total := maskKeyspace(sets)
 		// Start from every offset, so the batch boundary lands at every
@@ -123,7 +123,7 @@ func TestContigFillMatchesMaskIdxToStr(t *testing.T) {
 // length against the wrong offsets.
 func TestContigFillStopsAtSegmentEnd(t *testing.T) {
 	sets := [][]byte{[]byte("abc"), []byte("de")} // total 6
-	cb := newContigBatch(stdBatchGroup, sha1.Size)
+	cb := newContigBatch(stdBatchGroup, sha1.Size, stdSalt{})
 	if n := cb.fillFromSegment(sets, 4, 6, stdBatchGroup); n != 2 {
 		t.Errorf("from=4 of 6: filled %d, want 2", n)
 	}
@@ -277,14 +277,14 @@ func TestStdPathEligibility(t *testing.T) {
 	l := bruteLayout("abc", 3, 3)
 
 	for _, typ := range []string{"sha1", "sha256", "SHA256", "100", "1400", "raw-sha1", "raw-sha256"} {
-		if _, ok := stdPathEligible(typ, "", l); !ok {
+		if _, _, ok := stdPathEligible(typ, "", "prefix", l); !ok {
 			t.Errorf("%q should be eligible for the stdlib fast path", typ)
 		}
 	}
 	// The vector-cored digests must NOT be diverted here: they have a faster
 	// path, and routing them through this one would be a silent regression.
 	for _, typ := range []string{"md5", "md4", "ntlm", "0", "900", "1000"} {
-		if _, ok := stdPathEligible(typ, "", l); ok {
+		if _, _, ok := stdPathEligible(typ, "", "prefix", l); ok {
 			t.Errorf("%q must not take the stdlib path (it has a vector core)", typ)
 		}
 	}
@@ -292,27 +292,65 @@ func TestStdPathEligibility(t *testing.T) {
 	// outright rather than hashed as if it were.
 	for _, typ := range []string{"sha1-utf16le", "sha256-utf16le", "sha512", "sha224",
 		"md5crypt", "bcrypt", "ripemd160", "whirlpool"} {
-		if _, ok := stdPathEligible(typ, "", l); ok {
+		if _, _, ok := stdPathEligible(typ, "", "prefix", l); ok {
 			t.Errorf("%q must not be eligible in this pass", typ)
 		}
 	}
-	if _, ok := stdPathEligible("sha256", "somesalt", l); ok {
-		t.Error("salted sha256 must not be eligible")
+	// Salted md5/sha1/sha256 IS eligible now — that is the point of the salted
+	// pass — in both salt modes and in both spellings.
+	for _, c := range []struct{ typ, salt, saltMode string }{
+		{"md5", "somesalt", "prefix"},
+		{"md5", "somesalt", "suffix"},
+		{"sha1", "somesalt", "prefix"},
+		{"sha256", "somesalt", "prefix"},
+		{"sha256", "somesalt", "suffix"},
+		{"md5-salt-pass", "somesalt", "prefix"},
+		{"md5-pass-salt", "somesalt", "prefix"},
+		{"sha1-salt-pass", "somesalt", "prefix"},
+		{"sha256-pass-salt", "somesalt", "prefix"},
+	} {
+		if _, _, ok := stdPathEligible(c.typ, c.salt, c.saltMode, l); !ok {
+			t.Errorf("salted %s/%s should be eligible", c.typ, c.saltMode)
+		}
 	}
-	if _, ok := stdPathEligible("sha256", "", nil); ok {
+	// …but only for constructions this path actually computes. A UTF-16LE
+	// variant hashes a re-encoded password; sha512 has no core here; a compat
+	// type with no salt at all has nothing to hash with; and an over-long salt
+	// would not fit the generation buffer.
+	for _, c := range []struct{ typ, salt, saltMode string }{
+		{"md5-utf16le-pass-salt", "somesalt", "prefix"},
+		{"sha1-salt-utf16le-pass", "somesalt", "prefix"},
+		{"sha512", "somesalt", "prefix"},
+		{"sha512-pass-salt", "somesalt", "prefix"},
+		{"blake2b-pass-salt", "somesalt", "prefix"},
+		{"md5-salt-pass", "", "prefix"},
+		{"bcrypt", "somesalt", "prefix"},
+		{"md5crypt", "somesalt", "prefix"},
+		{"sha256", strings.Repeat("s", stdMaxSaltLen+1), "prefix"},
+	} {
+		if _, _, ok := stdPathEligible(c.typ, c.salt, c.saltMode, l); ok {
+			t.Errorf("%s with salt %q must not be eligible", c.typ, c.salt)
+		}
+	}
+	// Unsalted md5 still belongs to the vector core, salted or not is the
+	// whole distinction: adding md5HashBatch must not have diverted it.
+	if _, _, ok := stdPathEligible("md5", "", "prefix", l); ok {
+		t.Error("unsalted md5 must stay on the vector path")
+	}
+	if _, _, ok := stdPathEligible("sha256", "", "prefix", nil); ok {
 		t.Error("a nil layout must not be eligible")
 	}
 	gen := bruteLayout("abc", 3, 3)
 	gen.gen = func(i int64) string { return "x" }
-	if _, ok := stdPathEligible("sha256", "", gen); ok {
+	if _, _, ok := stdPathEligible("sha256", "", "prefix", gen); ok {
 		t.Error("a generator layout must not be eligible (its candidates are not mixed-radix decodable)")
 	}
 	long := newLayout([][][]byte{make([][]byte, stdMaxCandidateLen+1)})
-	if _, ok := stdPathEligible("sha256", "", long); ok {
+	if _, _, ok := stdPathEligible("sha256", "", "prefix", long); ok {
 		t.Error("an over-long segment must not be eligible")
 	}
 	empty := newLayout([][][]byte{{[]byte("ab"), {}}})
-	if _, ok := stdPathEligible("sha256", "", empty); ok {
+	if _, _, ok := stdPathEligible("sha256", "", "prefix", empty); ok {
 		t.Error("a segment with an empty character set must not be eligible")
 	}
 }
@@ -323,7 +361,7 @@ func TestStdPathEligibility(t *testing.T) {
 func TestStdPathHonoursNoFastPathEnv(t *testing.T) {
 	t.Setenv("HASHSMITH_NO_FASTPATH", "1")
 	l := bruteLayout("abc", 3, 3)
-	if _, ok := stdPathEligible("sha256", "", l); ok {
+	if _, _, ok := stdPathEligible("sha256", "", "prefix", l); ok {
 		t.Error("HASHSMITH_NO_FASTPATH must disable the stdlib fast path")
 	}
 	if _, ok := fastPathEligible("md5", "", l); ok {
@@ -339,7 +377,7 @@ func stdSingle(t *testing.T, ctx context.Context, typ string, l *keyspaceLayout,
 	t.Helper()
 	algo := stdAlgoOrFail(t, typ)
 	st := stdTargetsOf(t, algo, targetHex)
-	pw, err := runLayoutStdSingle(ctx, l, resumeFrom, limit, workers, attempts, watermark, algo, st)
+	pw, err := runLayoutStdSingle(ctx, l, resumeFrom, limit, workers, attempts, watermark, algo, stdSalt{}, st)
 	if err != nil {
 		t.Fatalf("runLayoutStdSingle: %v", err)
 	}
@@ -466,7 +504,7 @@ func stdRunWithSession(t *testing.T, ctx context.Context, typ string, l *keyspac
 	st := stdTargetsOf(t, algo, targetHex)
 	s := newTestSession(t, "stdwm")
 	pw, _, err := runSessionRunner(ctx, l, s, resumeFrom, func(wm *int64) (string, error) {
-		return runLayoutStdSingle(ctx, l, resumeFrom, limit, workers, attempts, wm, algo, st)
+		return runLayoutStdSingle(ctx, l, resumeFrom, limit, workers, attempts, wm, algo, stdSalt{}, st)
 	})
 	if err != nil {
 		t.Fatalf("runSessionRunner: %v", err)
@@ -644,7 +682,7 @@ func TestStdBatchAttribution(t *testing.T) {
 
 		l := bruteLayout("abcdefghijklmnopqrstuvwxyz", 3, 3)
 		var attempts int64
-		if !batchStdLayout(context.Background(), typ, l, allIdx(len(batch)), batch,
+		if !batchStdLayout(context.Background(), typ, l, allIdx(len(batch)), batch, "", "prefix",
 			0, 0, 4, &attempts, nil, record) {
 			t.Fatalf("%s: batchStdLayout declined an eligible pass", typ)
 		}
@@ -675,7 +713,7 @@ func TestStdBatchFindsAdjacentHitsInOneBatch(t *testing.T) {
 	var remaining int64
 	record := batchRecorder(batch, &remaining)
 	var attempts int64
-	if !batchStdLayout(context.Background(), typ, l, allIdx(len(batch)), batch,
+	if !batchStdLayout(context.Background(), typ, l, allIdx(len(batch)), batch, "", "prefix",
 		0, 0, 4, &attempts, nil, record) {
 		t.Fatal("batchStdLayout declined an eligible pass")
 	}
@@ -699,7 +737,7 @@ func TestStdBatchSharedDigestCreditsEveryOwner(t *testing.T) {
 	record := batchRecorder(batch, &remaining)
 	var attempts int64
 	l := bruteLayout("abcdefghijklmnopqrstuvwxyz", 3, 3)
-	if !batchStdLayout(context.Background(), typ, l, allIdx(len(batch)), batch, 0, 0, 4, &attempts, nil, record) {
+	if !batchStdLayout(context.Background(), typ, l, allIdx(len(batch)), batch, "", "prefix", 0, 0, 4, &attempts, nil, record) {
 		t.Fatal("batchStdLayout declined an eligible pass")
 	}
 	for _, i := range []int{0, 2} {
@@ -731,7 +769,7 @@ func TestStdBatchMatchesScalarPathExactly(t *testing.T) {
 		record := batchRecorder(batch, &remaining)
 		var attempts int64
 		if fast {
-			if !batchStdLayout(context.Background(), typ, l, allIdx(len(batch)), batch,
+			if !batchStdLayout(context.Background(), typ, l, allIdx(len(batch)), batch, "", "prefix",
 				resumeFrom, limit, 4, &attempts, nil, record) {
 				t.Fatal("batchStdLayout declined an eligible pass")
 			}
@@ -812,7 +850,7 @@ func TestBatchStdLayoutDeclinesSafely(t *testing.T) {
 	for _, c := range cases {
 		var attempts int64
 		record := func(string, []int) bool { t.Fatalf("%s: recorded a hit from a declined pass", c.name); return true }
-		if batchStdLayout(context.Background(), c.typ, l, allIdx(len(c.batch)), c.batch,
+		if batchStdLayout(context.Background(), c.typ, l, allIdx(len(c.batch)), c.batch, "", "prefix",
 			0, 0, 2, &attempts, nil, record) {
 			t.Errorf("%s: batchStdLayout accepted a pass it cannot run correctly", c.name)
 		}
@@ -841,7 +879,7 @@ func TestRunBruteOrMaskLayoutRoutesSha(t *testing.T) {
 				target := hexOf(typ, "mnq")
 				var attempts int64
 				pw, _, err := runBruteOrMaskLayout(context.Background(), l, nil, 0, 0, 4, &attempts,
-					typ, "", target, func(c string) bool { return hexOf(typ, c) == target })
+					typ, "", "prefix", target, func(c string) bool { return hexOf(typ, c) == target })
 				if err != nil {
 					t.Fatalf("%v", err)
 				}
@@ -853,9 +891,11 @@ func TestRunBruteOrMaskLayoutRoutesSha(t *testing.T) {
 	}
 }
 
-// A salted sha256 target must keep today's scalar path exactly: the verify
-// closure decides, not the fast path.
-func TestRunBruteOrMaskLayoutLeavesSaltedAlone(t *testing.T) {
+// A construction this path does NOT compute — a salted sha512, whose digest
+// core is not wired up here — must keep today's scalar path exactly: the
+// verify closure decides, not the fast path. This is the assertion that
+// catches a widened eligibility test quietly claiming a format it cannot hash.
+func TestRunBruteOrMaskLayoutLeavesUnsupportedSaltedAlone(t *testing.T) {
 	l := bruteLayout("abcdefghijklmnopqrstuvwxyz", 3, 3)
 	// A "target" the fast path could never match; only the closure can.
 	// atomic: the verify closure runs on every worker goroutine at once, so a
@@ -863,7 +903,7 @@ func TestRunBruteOrMaskLayoutLeavesSaltedAlone(t *testing.T) {
 	var called atomic.Bool
 	var attempts int64
 	pw, _, err := runBruteOrMaskLayout(context.Background(), l, nil, 0, 0, 2, &attempts,
-		"sha256", "somesalt", sha256hex("irrelevant"), func(c string) bool {
+		"sha512", "somesalt", "prefix", strings.Repeat("ab", 64), func(c string) bool {
 			called.Store(true)
 			return c == "mnq"
 		})
@@ -871,10 +911,88 @@ func TestRunBruteOrMaskLayoutLeavesSaltedAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !called.Load() {
-		t.Error("the verify closure was never called for a salted target — the fast path took over")
+		t.Error("the verify closure was never called for an unsupported salted target — the fast path took over")
 	}
 	if pw != "mnq" {
 		t.Errorf("got %q, want %q", pw, "mnq")
+	}
+}
+
+// The salted constructions this path DOES compute must route to it and return
+// the same plaintext the scalar path does, in both salt modes, for both the
+// -s/-S spelling and the hash:salt compat spelling. Asserted against
+// HASHSMITH_NO_FASTPATH=1 on the identical inputs, so the two runners are
+// compared rather than the fast path being compared to a restatement of
+// itself.
+func TestRunBruteOrMaskLayoutRoutesSalted(t *testing.T) {
+	const want = "mnq"
+	cases := []struct{ name, typ, salt, saltMode string }{
+		{"md5 prefix", "md5", "deadbeef", "prefix"},
+		{"md5 suffix", "md5", "deadbeef", "suffix"},
+		{"sha1 prefix", "sha1", "s@lt", "prefix"},
+		{"sha1 suffix", "sha1", "s@lt", "suffix"},
+		{"sha256 prefix", "sha256", "0123456789abcdef", "prefix"},
+		{"sha256 suffix", "sha256", "0123456789abcdef", "suffix"},
+		{"hashcat 20 (md5-salt-pass)", "md5-salt-pass", "abc123", "prefix"},
+		{"hashcat 10 (md5-pass-salt)", "md5-pass-salt", "abc123", "suffix"},
+		{"hashcat 120 (sha1-salt-pass)", "sha1-salt-pass", "abc123", "prefix"},
+		{"hashcat 1410 (sha256-pass-salt)", "sha256-pass-salt", "abc123", "prefix"},
+	}
+	for _, c := range cases {
+		for _, noFast := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/nofast=%v", c.name, noFast), func(t *testing.T) {
+				if noFast {
+					t.Setenv("HASHSMITH_NO_FASTPATH", "1")
+				} else {
+					t.Setenv("HASHSMITH_NO_FASTPATH", "")
+				}
+				target, err := hashText(want, c.typ, c.salt, c.saltMode)
+				if err != nil {
+					t.Fatalf("hashText: %v", err)
+				}
+				l := bruteLayout("abcdefghijklmnopqrstuvwxyz", 3, 3)
+				var attempts int64
+				pw, _, err := runBruteOrMaskLayout(context.Background(), l, nil, 0, 0, 4, &attempts,
+					c.typ, c.salt, c.saltMode, target, func(cand string) bool {
+						ok, _ := verifyCandidate(cand, target, c.typ, c.salt, c.saltMode)
+						return ok
+					})
+				if err != nil {
+					t.Fatalf("%v", err)
+				}
+				if pw != want {
+					t.Errorf("got %q, want %q", pw, want)
+				}
+			})
+		}
+	}
+}
+
+// The same, for a compat target that carries its salt in the target string
+// rather than in -s — the hash:salt spelling a dump actually arrives in.
+func TestRunBruteOrMaskLayoutRoutesHashColonSalt(t *testing.T) {
+	const want = "mnq"
+	for _, typ := range []string{"md5-salt-pass", "md5-pass-salt", "sha1-salt-pass", "sha256-pass-salt"} {
+		t.Run(typ, func(t *testing.T) {
+			digest, err := hashCompatSaltedDigest(want, typ, "pepper")
+			if err != nil {
+				t.Fatalf("hashCompatSaltedDigest: %v", err)
+			}
+			target := digest + ":pepper"
+			l := bruteLayout("abcdefghijklmnopqrstuvwxyz", 3, 3)
+			var attempts int64
+			pw, _, err := runBruteOrMaskLayout(context.Background(), l, nil, 0, 0, 4, &attempts,
+				typ, "", "prefix", target, func(cand string) bool {
+					ok, _ := verifyCandidate(cand, target, typ, "", "prefix")
+					return ok
+				})
+			if err != nil {
+				t.Fatalf("%v", err)
+			}
+			if pw != want {
+				t.Errorf("got %q, want %q", pw, want)
+			}
+		})
 	}
 }
 
