@@ -168,8 +168,12 @@ func (ft *fastTargets) lookup(d *[16]byte) ([]int, bool) {
 // so two targets whose plaintexts are adjacent in the keyspace land in the
 // SAME group, and stopping at the first would silently lose the second.
 //
-// Callers must have confirmed fastPathEligible(typ, "", l) and pass the
-// resulting algo, exactly as for runLayoutFast. The two correctness
+// Callers must have confirmed fastPathEligible(typ, salt, saltMode, l) and
+// pass the resulting algo — which carries the salt every message is wrapped in
+// — exactly as for runLayoutFast. Every target in `targets` must be salted
+// with THAT salt: a candidate is hashed once per group and compared against
+// all of them, so a mixed-salt target set would file plaintexts against hashes
+// they do not match. batchSaltGroups (batch.go) is what guarantees it. The two correctness
 // requirements runLayoutFast documents hold here identically and for the same
 // reasons: a group never straddles a segment boundary, and only lanes
 // 0..used-1 are considered for a hit (unused lanes hash the empty string and
@@ -265,10 +269,10 @@ func runLayoutFastMulti(ctx context.Context, l *keyspaceLayout, resumeFrom, limi
 						lastSeg = seg
 					}
 					if segLen != curLen {
-						if err := tb.reset(segLen, algo.enc); err != nil {
+						if err := tb.resetSalted(segLen, algo.enc, algo.salt); err != nil {
 							// Cannot happen: fastPathEligible already
-							// verified every segment length. Bail rather
-							// than risk hashing the wrong thing.
+							// verified every segment length for THIS salt.
+							// Bail rather than risk hashing the wrong thing.
 							atomic.AddInt64(atomicAttempts, local)
 							select {
 							case errCh <- err:
@@ -361,30 +365,31 @@ func runLayoutFastMulti(ctx context.Context, l *keyspaceLayout, resumeFrom, limi
 // multi-target checkpoint means precisely what a single-target one does.
 //
 // It returns false when the pass is not eligible — no vector backend, a
-// non-accelerated type, a SALT (the vector core hashes the bare candidate and
-// nothing else), a generator layout, an over-long segment, a target that is
-// not 16 bytes of hex — in which case the caller must run the SAME layout on
-// the scalar path, or offer it to the contiguous-batch path, exactly as
-// before. Returning false is always safe: nothing has been recorded and no
-// candidate has been counted.
+// non-accelerated type, a salted construction the cores cannot reproduce
+// exactly (a UTF-16LE password against a raw salt) or one whose salt does not
+// leave the candidate inside a single block, a generator layout, an over-long
+// segment, a target that is not 16 bytes of hex — in which case the caller
+// must run the SAME layout on the scalar path, or offer it to the
+// contiguous-batch path, exactly as before. Returning false is always safe:
+// nothing has been recorded and no candidate has been counted.
 //
-// `salt` is passed to fastPathEligible rather than hardcoded to "": this
-// function used to hand it "" unconditionally, which was correct only while
-// every caller was unsalted. Now that runBatch also runs salted passes, a
-// hardcoded "" would let a salted md5 pass through to a core that hashes the
-// candidate alone and report a plaintext that does not match its target.
+// `salt`/`saltMode` are passed to fastPathEligible, which now RESOLVES them
+// into the concatenation the cores wrap each candidate in rather than refusing
+// the pass outright. They must be the salt this whole pass carries — every
+// target in `active` shares it (batchSaltGroups) — because one candidate is
+// hashed once for all of them.
 //
 // A pass whose targets collapse to a single distinct digest is handed to
 // runLayoutFast, the single-target specialisation, so it pays nothing for
 // multi-target lookup.
-func batchFastLayout(ctx context.Context, typ, salt string, layout *keyspaceLayout,
+func batchFastLayout(ctx context.Context, typ, salt, saltMode string, layout *keyspaceLayout,
 	active []int, batch []*batchTarget, resumeFrom, limit int64, workers int,
 	atomicAttempts *int64, watermark *int64, record func(string, []int) bool) bool {
 
 	if layout == nil || len(active) == 0 {
 		return false
 	}
-	algo, ok := fastPathEligible(typ, salt, layout)
+	algo, ok := fastPathEligible(typ, salt, saltMode, layout)
 	if !ok {
 		return false
 	}

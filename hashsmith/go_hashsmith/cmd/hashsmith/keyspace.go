@@ -18,6 +18,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -242,6 +243,13 @@ type fastAlgo struct {
 	name  string
 	enc   encodeMode
 	shape vecShape
+	// salt is the constant affix this RUN wraps every candidate in — the
+	// empty vecSalt for an unsalted run. It rides on the descriptor rather
+	// than travelling as a separate argument so a resolved plan cannot be
+	// paired with the wrong salt at a call site: whoever holds the algo holds
+	// the salt it was resolved with. fastAlgoFor leaves it empty;
+	// fastAlgoPlanFor fills it in.
+	salt vecSalt
 	// group hashes shape.group() candidates per call. out is a slice rather
 	// than a fixed-size array so the group size is data, not part of the
 	// type: a 4-lane NEON core produces 20 digests per call and an 8-lane
@@ -326,18 +334,124 @@ func fastAlgoForBackend(backend, typ string) (*fastAlgo, bool) {
 	return nil, false
 }
 
+// vecSaltBytes encodes a salt into the MESSAGE bytes it contributes under
+// enc. For encRaw that is the salt verbatim; for encUTF16LE (NTLM) hashText
+// encodes the WHOLE concatenation — utf16le(salt+candidate) — so the salt's
+// message bytes are utf16le(salt), and the split is exact only while the salt
+// is ASCII, for the same reason fastPathEligible requires ASCII charsets:
+// Hashsmith's utf16le is a UTF-8 decode followed by a UTF-16 encode, and a
+// high byte does not survive that as a naive b,0x00 expansion. A non-ASCII
+// salt is therefore declined rather than approximated.
+func vecSaltBytes(salt string, enc encodeMode) ([]byte, bool) {
+	if salt == "" {
+		return nil, true
+	}
+	if enc == encUTF16LE {
+		for i := 0; i < len(salt); i++ {
+			if salt[i] >= 0x80 {
+				return nil, false
+			}
+		}
+		return utf16le(salt), true
+	}
+	return []byte(salt), true
+}
+
+// fastAlgoPlanFor resolves (type, salt, salt mode) into the vector core to run
+// and the concatenation to wrap each candidate in, or false when the vector
+// path cannot reproduce hashText's digest for that combination EXACTLY. It is
+// stdSaltedPlanFor's (stdfast.go) counterpart for the vector cores, and the
+// same word carries the same weight: every rule below is a transcription of
+// hashText/hashCompatSaltedDigest, and TestVecSaltPlanMatchesHashText
+// enumerates both sides to keep it one.
+//
+// Three shapes reach here:
+//
+//   - no salt: exactly fastAlgoFor, unchanged, with the empty vecSalt — the
+//     path that shipped before salts, byte for byte.
+//   - a raw digest (md5/md4/ntlm) with -s/-S. hashText prepends or appends the
+//     salt to the candidate TEXT before hashing (only "suffix" appends; every
+//     other value of -S prefixes, which this mirrors rather than validates).
+//     For NTLM the concatenation happens before the UTF-16LE encode, which is
+//     why vecSaltBytes encodes the salt for the message rather than storing it
+//     raw.
+//   - a generic salted compat type whose base digest has a vector core
+//     (md5-salt-pass, md5-pass-salt, hashcat 10/20). The type name fixes the
+//     order, so -S is ignored exactly as hashCompatSaltedDigest ignores it, and
+//     the salt is required. The passwordUTF16 variants are declined: they hash
+//     a UTF-16LE password against a RAW-byte salt, a mixed encoding this
+//     batch's single encodeMode cannot express.
+func fastAlgoPlanFor(typ, salt, saltMode string) (*fastAlgo, bool) {
+	return fastAlgoPlanForBackend(vectorBackendName(), typ, salt, saltMode)
+}
+
+// fastAlgoPlanForBackend is fastAlgoPlanFor's backend-parameterised core,
+// split out for the same reason fastAlgoForBackend is: it lets the tests hold
+// BOTH cores' salted output to hashText on one machine, rather than only
+// whichever backend the test host happens to have. See
+// TestVecSaltPlanMatchesHashText.
+func fastAlgoPlanForBackend(backend, typ, salt, saltMode string) (*fastAlgo, bool) {
+	canon := canonicalHashType(typ)
+	if spec, ok := compatSaltedDigests[canon]; ok {
+		if spec.passwordUTF16 || salt == "" {
+			return nil, false
+		}
+		base, _, _ := strings.Cut(canon, "-")
+		algo, ok := fastAlgoForBackend(backend, base)
+		if !ok {
+			return nil, false
+		}
+		sb, ok := vecSaltBytes(salt, algo.enc)
+		if !ok {
+			return nil, false
+		}
+		if spec.saltFirst {
+			algo.salt = vecSalt{pre: sb}
+		} else {
+			algo.salt = vecSalt{suf: sb}
+		}
+		return algo, true
+	}
+	algo, ok := fastAlgoForBackend(backend, canon)
+	if !ok {
+		return nil, false
+	}
+	if salt == "" {
+		return algo, true
+	}
+	// A raw digest carrying -s. hashText applies the generic concatenation
+	// only to types that do not consume the salt themselves; none of md5, md4
+	// and ntlm is in its saltInAlgorithms set, and fastAlgoFor admits nothing
+	// else here.
+	sb, ok := vecSaltBytes(salt, algo.enc)
+	if !ok {
+		return nil, false
+	}
+	if saltMode == "suffix" {
+		algo.salt = vecSalt{suf: sb}
+	} else {
+		algo.salt = vecSalt{pre: sb}
+	}
+	return algo, true
+}
+
 // fastPathEligible reports whether l can be run through the vector-
 // accelerated runLayoutFast instead of the scalar runLayout, and if so
 // returns the algorithm descriptor to run it with. All of the following
 // must hold:
 //   - this build has an active vector backend (vectorBackendName() != "");
-//   - the target type has a registered fast algorithm for that backend
-//     (fastAlgoFor) with no salt — the only digests the vector core computes;
+//   - (typ, salt, saltMode) resolves to a vector core and a concatenation this
+//     path computes identically to hashText — see fastAlgoPlanFor. A salt is
+//     no longer a refusal: the core hashes one 64-byte block and does not care
+//     whether the salt bytes are in it, so salt||candidate and candidate||salt
+//     are the same work as the bare candidate;
 //   - l has no gen override: a Markov (or other) generator's candidates are
 //     not mixed-radix decodable from segments, which fillFromSegment requires;
-//   - every segment's length fits one block under the algorithm's encoding
-//     mode (transposedFixedLenOK), since transposedBatch is fixed-length per
-//     reset;
+//   - every segment's SALTED length fits one block under the algorithm's
+//     encoding mode (transposedSaltedLenOK), since transposedBatch is
+//     fixed-length per reset and the cores hash exactly one block. A salt long
+//     enough to push a candidate past 55 message bytes declines the whole run
+//     to the existing path rather than hashing a truncated message;
 //   - for encUTF16LE (NTLM), every byte of every charset in every segment is
 //     ASCII (< 0x80). Hashsmith's utf16le (hash.go) is a UTF-8 decode
 //     followed by a UTF-16 encode, not a naive b,0x00 byte expansion: for a
@@ -359,18 +473,15 @@ func fastAlgoForBackend(backend, typ string) (*fastAlgo, bool) {
 // different speeds. Deliberately an env var and not a flag: no documented
 // flag changes meaning, and nothing in the CLI surface grows a knob whose
 // only honest use is benchmarking.
-func fastPathEligible(typ, salt string, l *keyspaceLayout) (*fastAlgo, bool) {
+func fastPathEligible(typ, salt, saltMode string, l *keyspaceLayout) (*fastAlgo, bool) {
 	if os.Getenv("HASHSMITH_NO_FASTPATH") != "" {
 		return nil, false
 	}
 	if vectorBackendName() == "" {
 		return nil, false
 	}
-	algo, ok := fastAlgoFor(typ)
+	algo, ok := fastAlgoPlanFor(typ, salt, saltMode)
 	if !ok {
-		return nil, false
-	}
-	if salt != "" {
 		return nil, false
 	}
 	if l == nil || l.gen != nil {
@@ -382,7 +493,7 @@ func fastPathEligible(typ, salt string, l *keyspaceLayout) (*fastAlgo, bool) {
 		return nil, false
 	}
 	for _, seg := range l.segments {
-		if !transposedFixedLenOK(len(seg), algo.enc) {
+		if !transposedSaltedLenOK(len(seg), algo.enc, algo.salt.width()) {
 			return nil, false
 		}
 	}
@@ -401,15 +512,20 @@ func fastPathEligible(typ, salt string, l *keyspaceLayout) (*fastAlgo, bool) {
 }
 
 // runLayoutFast is runLayout's NEON-accelerated twin for a fast-path
-// algorithm (see fastAlgo) over a fixed-length, unsalted keyspace. It mirrors
+// algorithm (see fastAlgo) over a fixed-length keyspace, salted or not — the
+// salt is algo.salt, resolved by fastPathEligible and carried into every
+// message by the batch's resetSalted. It mirrors
 // runLayout's chunk allocator, watermark, attempt accounting and cancellation
 // exactly, so a checkpoint written by one runner resumes correctly under the
 // other — but each worker owns a transposedBatch and hashes neonGroup
 // candidates per algo.group call instead of verifying one candidate at a
 // time.
 //
-// Callers must have already confirmed fastPathEligible(typ, salt, l), and
-// pass the resulting algo; this function does not re-check eligibility.
+// Callers must have already confirmed fastPathEligible(typ, salt, saltMode, l)
+// and pass the resulting algo — which carries the salt the digests were
+// planned with; this function does not re-check eligibility. `target` must be
+// the digest of salt||candidate||salt for that same salt, i.e. the target hash
+// with any hash:salt field already split off.
 //
 // Two correctness requirements this function upholds:
 //   - a group never straddles a segment boundary: fillFromSegment already
@@ -526,11 +642,12 @@ func runLayoutFast(ctx context.Context, l *keyspaceLayout, resumeFrom, limit int
 						// segments can have different candidate lengths, and
 						// the batch is fixed-length for its whole life
 						// between resets. Reset whenever the length changes.
-						if err := tb.reset(segLen, algo.enc); err != nil {
+						if err := tb.resetSalted(segLen, algo.enc, algo.salt); err != nil {
 							// Cannot happen: fastPathEligible already
 							// verified every segment length satisfies
-							// transposedFixedLenOK. Bail rather than risk
-							// hashing the wrong thing if it somehow did.
+							// transposedSaltedLenOK for THIS salt. Bail
+							// rather than risk hashing the wrong thing if
+							// it somehow did.
 							atomic.AddInt64(atomicAttempts, local)
 							select {
 							case errCh <- err:

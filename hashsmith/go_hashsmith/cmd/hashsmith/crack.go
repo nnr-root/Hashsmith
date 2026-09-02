@@ -56,10 +56,10 @@ func md5TargetBytes(targetHex string) ([16]byte, bool) {
 }
 
 // runBruteOrMaskLayout dispatches a brute-force or mask layout run to the
-// vector fast path when it is eligible, else to the scalar runner. This is
-// the only seam between the two: every other format, salt, and attack mode
-// keeps exactly today's code path, since fastPathEligible returns false for
-// all of them. limit (0 = unbounded) is --limit's candidate-count bound; both
+// vector fast path when it is eligible, else to the contiguous-batch path,
+// else to the scalar runner. This is the only seam between them: every other
+// format and attack mode keeps exactly today's code path, since
+// fastPathEligible and stdPathEligible return false for all of them. limit (0 = unbounded) is --limit's candidate-count bound; both
 // the fast and scalar paths honour it identically (see runLayout /
 // runLayoutFast).
 //
@@ -74,26 +74,15 @@ func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *ses
 	resumeFrom, limit int64, workers int, atomicAttempts *int64,
 	typ, salt, saltMode, targetHash string, verify func(string) bool) (string, bool, error) {
 
-	if algo, ok := fastPathEligible(typ, salt, layout); ok {
-		if target, ok := md5TargetBytes(targetHash); ok {
-			return runSessionRunner(ctx, layout, sess, resumeFrom, func(watermark *int64) (string, error) {
-				return runLayoutFast(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark, algo, target)
-			})
-		}
-	}
-	// Digests with no vector core but a hardware-accelerated stdlib
-	// implementation (sha1, sha256), and the simple salted concatenations
-	// md5/sha1/sha256 of salt||pass or pass||salt, take the contiguous-batch
-	// path instead — same keyspace, same watermark contract, no per-candidate
-	// string allocation or verify closure. See stdfast.go. The vector path is
-	// offered first so unsalted md5/md4/ntlm keep their core; nothing routes to
-	// both.
-	//
 	// effHash/effSalt is the hash:salt split, resolved through the same helper
 	// the scalar verifier uses (compatSaltedTargetParts), so a generic salted
 	// type carrying its salt in the target — "…:deadbeef", hashcat 10/20 style
-	// — reaches the fast path with the digest and salt the verifier would have
-	// derived, and not a target string with a salt still glued to it.
+	// — reaches EITHER fast path with the digest and salt the verifier would
+	// have derived, and not a target string with a salt still glued to it. It
+	// is resolved before the vector path is offered the run (it used to sit
+	// between the two) because the vector cores now take a salt as well, so
+	// md5-salt-pass and md5-pass-salt reach them too; for every other type
+	// this is a no-op that leaves targetHash and salt exactly as they came in.
 	effHash, effSalt := targetHash, salt
 	if _, isCompat := compatSaltedDigests[canonicalHashType(typ)]; isCompat {
 		h, sv, ok := compatSaltedTargetParts(targetHash, salt)
@@ -102,6 +91,20 @@ func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *ses
 		}
 		effHash, effSalt = h, sv
 	}
+	if algo, ok := fastPathEligible(typ, effSalt, saltMode, layout); ok {
+		if target, ok := md5TargetBytes(effHash); ok {
+			return runSessionRunner(ctx, layout, sess, resumeFrom, func(watermark *int64) (string, error) {
+				return runLayoutFast(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark, algo, target)
+			})
+		}
+	}
+	// Digests with no vector core but a hardware-accelerated stdlib
+	// implementation (sha1, sha256), and the salted concatenations of
+	// sha1/sha256 — and of md5 when the salt pushes the message past the one
+	// block the vector cores hash — take the contiguous-batch path instead:
+	// same keyspace, same watermark contract, no per-candidate string
+	// allocation or verify closure. See stdfast.go. The vector path is offered
+	// first so md5/md4/ntlm keep their core; nothing routes to both.
 	if algo, sp, ok := stdPathEligible(typ, effSalt, saltMode, layout); ok {
 		if st, ok := newStdTargets([]string{effHash}, []int{0}, algo.digLen); ok {
 			return runSessionRunner(ctx, layout, sess, resumeFrom, func(watermark *int64) (string, error) {

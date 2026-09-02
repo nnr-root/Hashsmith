@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/md4"
@@ -112,13 +113,23 @@ func TestFastPathHandlesEmptyCandidate(t *testing.T) {
 
 func TestFastPathEligibility(t *testing.T) {
 	l := bruteLayout("abc", 3, 3)
-	if _, ok := fastPathEligible("md5", "", l); !ok && vectorBackendName() != "" {
+	if _, ok := fastPathEligible("md5", "", "", l); !ok && vectorBackendName() != "" {
 		t.Error("plain md5 fixed-length brute should be eligible on an accelerated build")
 	}
-	if _, ok := fastPathEligible("md5", "somesalt", l); ok {
-		t.Error("salted md5 must not be eligible")
+	// A salt is no longer a refusal: the cores hash one block and do not care
+	// whether the salt bytes are in it. Both placements must be admitted.
+	if _, ok := fastPathEligible("md5", "somesalt", "prefix", l); !ok && vectorBackendName() != "" {
+		t.Error("prefix-salted md5 should be eligible on an accelerated build")
 	}
-	if _, ok := fastPathEligible("sha256", "", l); ok {
+	if _, ok := fastPathEligible("md5", "somesalt", "suffix", l); !ok && vectorBackendName() != "" {
+		t.Error("suffix-salted md5 should be eligible on an accelerated build")
+	}
+	// …but only while the salted message still fits the single block the
+	// cores hash. 53 salt bytes + 3 candidate bytes is 56 > 55.
+	if _, ok := fastPathEligible("md5", strings.Repeat("s", 53), "prefix", l); ok {
+		t.Error("a salt that pushes the candidate past one block must decline")
+	}
+	if _, ok := fastPathEligible("sha256", "", "", l); ok {
 		t.Error("sha256 must not be eligible — there is no sha256 vector core")
 	}
 }
@@ -160,7 +171,7 @@ func TestFastPathAgreesWithScalarPerAlgo(t *testing.T) {
 			}
 			for _, plain := range []string{"a", "zz", "cat", "wxyz"} {
 				l := bruteLayout("abcdefghijklmnopqrstuvwxyz", 1, 4)
-				algo, ok := fastPathEligible(c.typ, "", l)
+				algo, ok := fastPathEligible(c.typ, "", "", l)
 				if !ok {
 					t.Fatalf("%s should be eligible on this build", c.typ)
 				}
@@ -186,15 +197,15 @@ func TestNTLMFastPathRejectsNonASCIICharsets(t *testing.T) {
 		t.Skipf("ntlm has no fast-path descriptor on backend %q", vectorBackendName())
 	}
 	ascii := bruteLayout("abc", 2, 2)
-	if _, ok := fastPathEligible("ntlm", "", ascii); !ok {
+	if _, ok := fastPathEligible("ntlm", "", "", ascii); !ok {
 		t.Error("ntlm over an ASCII charset should be eligible")
 	}
 	high := bruteLayout(string([]byte{'a', 0xC3, 0xFF}), 2, 2)
-	if _, ok := fastPathEligible("ntlm", "", high); ok {
+	if _, ok := fastPathEligible("ntlm", "", "", high); ok {
 		t.Error("ntlm over a charset with bytes >= 0x80 must NOT be eligible")
 	}
 	// md4 takes raw bytes, so the same charset is fine for it.
-	if _, ok := fastPathEligible("md4", "", high); !ok {
+	if _, ok := fastPathEligible("md4", "", "", high); !ok {
 		t.Error("md4 over a high-byte charset should still be eligible")
 	}
 }
@@ -215,10 +226,10 @@ func TestNTLMFastPathLengthCeiling(t *testing.T) {
 	if _, ok := fastAlgoFor("ntlm"); !ok {
 		t.Skipf("ntlm has no fast-path descriptor on backend %q", vectorBackendName())
 	}
-	if _, ok := fastPathEligible("ntlm", "", bruteLayout("ab", 27, 27)); !ok {
+	if _, ok := fastPathEligible("ntlm", "", "", bruteLayout("ab", 27, 27)); !ok {
 		t.Error("ntlm at length 27 should be eligible")
 	}
-	if _, ok := fastPathEligible("ntlm", "", bruteLayout("ab", 28, 28)); ok {
+	if _, ok := fastPathEligible("ntlm", "", "", bruteLayout("ab", 28, 28)); ok {
 		t.Error("ntlm at length 28 must not be eligible (2*28 > 55)")
 	}
 }
@@ -232,7 +243,7 @@ func TestVectorBackendSelection(t *testing.T) {
 		t.Fatalf("unexpected backend %q", b)
 	}
 	l := bruteLayout("abc", 3, 3)
-	algo, ok := fastPathEligible("md5", "", l)
+	algo, ok := fastPathEligible("md5", "", "", l)
 	if b == "" && ok {
 		t.Error("no backend, yet md5 was eligible")
 	}
