@@ -504,12 +504,27 @@ dictionaries, rules, single-crack, PRINCE, and masks up to six or seven
 characters. Hashcat is the faster tool for very large brute-force sweeps. John
 is slower than both here by a wide margin.
 
+### The vector cores, both architectures
+
+CI runs the same measurement on every push — identical keyspace, wall clock,
+best of three — comparing the vector fast path against the same binary forced
+onto the scalar path, on the same runner:
+
+| runner | vector path | scalar path | gain |
+|---|---|---|---|
+| `ubuntu-latest` x86-64 (AVX2) | 4.02 s — 76.8 MH/s | 24.25 s — 12.7 MH/s | **6.0×** |
+| `ubuntu-24.04-arm` arm64 (NEON) | 3.00 s — 103.0 MH/s | 21.00 s — 14.7 MH/s | **7.0×** |
+
+Absolute numbers on shared CI runners are noisy and lower than dedicated
+hardware — the same job takes 2.39 s on an idle M2. The ratio is the reliable
+part: it is an A/B between two runs of one binary on one machine, so it
+measures the cores rather than the runner.
+
 Measure it yourself with `hashsmith benchmark --compare` (below), which runs
-all three on the same deterministic input. Numbers move with hardware, thermal
-state and background load: on a busy machine we saw the same MD5 mask swing
-between 42 and 150 MH/s, so treat any single figure — including these — as
-provisional until you have reproduced it on quiet hardware. The AVX2 path has
-not been measured on x86-64; these figures are arm64/NEON.
+all three tools on the same deterministic input. Numbers move with hardware,
+thermal state and background load: on a busy machine we saw the same MD5 mask
+swing between 42 and 150 MH/s, so treat any single figure — including these —
+as provisional until you have reproduced it on quiet hardware.
 
 For a reproducible end-to-end comparison against John and Hashcat, use the
 same deterministic dictionary and synthetic target for all three tools:
