@@ -106,17 +106,35 @@ func (s *sessionState) remove() {
 	}
 }
 
-// runSessionLayout drives a layout run with session resume + periodic
-// checkpointing. It resolves the resume index from a matching saved session,
-// spins a watermark-flushing goroutine, and returns the result plus whether the
-// run was interrupted (ctx cancelled) rather than completing. limit (0 =
-// unbounded) is --limit's candidate-count bound, applied on top of resumeFrom.
-func runSessionLayout(ctx context.Context, layout *keyspaceLayout, s *sessionState,
-	resumeFrom, limit int64, workers int, atomicAttempts *int64,
-	verify func(string) bool) (string, bool, error) {
+// layoutRunner enumerates one bounded slice of a keyspace to completion,
+// publishing its safe-restore watermark through the pointer it is handed
+// (nil when nothing is checkpointing). runLayout and runLayoutFast both
+// satisfy it once their fixed arguments are bound; see runSessionRunner.
+//
+// The watermark contract every runner must honour is runLayout's: the value
+// stored is the lowest global index not yet KNOWN-tested, so everything below
+// it has genuinely been through verify. A runner that publishes an index
+// ahead of the candidates it actually tried would make a resumed run skip the
+// gap in silence — see TestSessionFastPathResume* in session_fastpath_test.go,
+// which pin that property for both runners.
+type layoutRunner func(watermark *int64) (string, error)
+
+// runSessionRunner is the single place session checkpointing lives. It sets
+// the session's keyspace total, spins the watermark-flushing goroutine, hands
+// the runner the watermark to publish into, and stores the final value when
+// the run ends — for whichever runner it is given. Keeping this
+// runner-agnostic is deliberate: a second copy of the flush loop, one per
+// runner, is exactly how the scalar and vector paths would drift apart on the
+// one property (a checkpoint never running ahead of tested candidates) that
+// must hold identically for both.
+//
+// Returns the result plus whether the run was interrupted (ctx cancelled)
+// rather than completing.
+func runSessionRunner(ctx context.Context, layout *keyspaceLayout, s *sessionState,
+	resumeFrom int64, run layoutRunner) (string, bool, error) {
 
 	if s == nil {
-		pw, err := runLayout(ctx, layout, resumeFrom, limit, workers, atomicAttempts, nil, verify)
+		pw, err := run(nil)
 		return pw, ctx.Err() != nil, err
 	}
 
@@ -140,9 +158,27 @@ func runSessionLayout(ctx context.Context, layout *keyspaceLayout, s *sessionSta
 		}
 	}()
 
-	pw, err := runLayout(ctx, layout, resumeFrom, limit, workers, atomicAttempts, &watermark, verify)
+	pw, err := run(&watermark)
 	stopFlush()
 	s.Checkpoint = atomic.LoadInt64(&watermark)
 	interrupted := ctx.Err() != nil
 	return pw, interrupted, err
+}
+
+// runSessionLayout drives a SCALAR layout run with session resume + periodic
+// checkpointing. It resolves the resume index from a matching saved session,
+// spins a watermark-flushing goroutine, and returns the result plus whether the
+// run was interrupted (ctx cancelled) rather than completing. limit (0 =
+// unbounded) is --limit's candidate-count bound, applied on top of resumeFrom.
+//
+// Vector-eligible brute/mask runs go through runSessionRunner directly with
+// runLayoutFast bound instead (see runBruteOrMaskLayout); everything else —
+// dictionary, markov, hybrid, combinator, prince, salted digests — lands here.
+func runSessionLayout(ctx context.Context, layout *keyspaceLayout, s *sessionState,
+	resumeFrom, limit int64, workers int, atomicAttempts *int64,
+	verify func(string) bool) (string, bool, error) {
+
+	return runSessionRunner(ctx, layout, s, resumeFrom, func(watermark *int64) (string, error) {
+		return runLayout(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark, verify)
+	})
 }

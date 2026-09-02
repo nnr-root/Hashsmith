@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"math"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -346,7 +347,22 @@ func fastAlgoForBackend(backend, typ string) (*fastAlgo, bool) {
 //     high byte would make the fast path compute a different digest than
 //     Hashsmith's own scalar path — silently. Declining keeps such masks on
 //     the scalar path instead.
+//
+// One escape hatch, and it is a measurement tool rather than a feature:
+// setting HASHSMITH_NO_FASTPATH to a non-empty value makes this decline
+// unconditionally, so the very same binary can be timed on the scalar path.
+// CI's fast-vs-scalar A/B needs that (it used to force the scalar path with
+// --session, which no longer does so — see runBruteOrMaskLayout). It is
+// checked here, at the single dispatch gate, so it can only ever change
+// WHICH runner enumerates the keyspace, never which candidates are tried or
+// what a session checkpoint means; both runners produce the same result at
+// different speeds. Deliberately an env var and not a flag: no documented
+// flag changes meaning, and nothing in the CLI surface grows a knob whose
+// only honest use is benchmarking.
 func fastPathEligible(typ, salt string, l *keyspaceLayout) (*fastAlgo, bool) {
+	if os.Getenv("HASHSMITH_NO_FASTPATH") != "" {
+		return nil, false
+	}
 	if vectorBackendName() == "" {
 		return nil, false
 	}
