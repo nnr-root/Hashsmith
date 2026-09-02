@@ -353,6 +353,13 @@ func runLayoutFastMulti(ctx context.Context, l *keyspaceLayout, resumeFrom, limi
 // vector fast path, reporting hits through `record` (batchRunType's
 // CAS-guarded recorder, which returns true once every target is found).
 //
+// resumeFrom/limit are --skip/--limit's slice of the layout, with exactly the
+// meaning they carry for a single target (see runLayout): candidate indices
+// into the WHOLE layout, and limit a count rather than an end index. watermark
+// (nil when nothing is checkpointing) is the session restore point the runner
+// publishes into — the same pointer contract runLayoutFast documents, so a
+// multi-target checkpoint means precisely what a single-target one does.
+//
 // It returns false when the pass is not eligible — no vector backend, a
 // non-accelerated type, a generator layout, an over-long segment, a target
 // that is not 16 bytes of hex — in which case the caller must run the SAME
@@ -363,8 +370,8 @@ func runLayoutFastMulti(ctx context.Context, l *keyspaceLayout, resumeFrom, limi
 // runLayoutFast, the single-target specialisation, so it pays nothing for
 // multi-target lookup.
 func batchFastLayout(ctx context.Context, typ string, layout *keyspaceLayout,
-	active []int, batch []*batchTarget, workers int, atomicAttempts *int64,
-	record func(string, []int) bool) bool {
+	active []int, batch []*batchTarget, resumeFrom, limit int64, workers int,
+	atomicAttempts *int64, watermark *int64, record func(string, []int) bool) bool {
 
 	if layout == nil || len(active) == 0 {
 		return false
@@ -383,7 +390,7 @@ func batchFastLayout(ctx context.Context, typ string, layout *keyspaceLayout,
 	}
 
 	if len(ft.keys) == 1 {
-		pw, err := runLayoutFast(ctx, layout, 0, 0, workers, atomicAttempts, nil,
+		pw, err := runLayoutFast(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark,
 			algo, ft.keys[0].bytes())
 		if err != nil {
 			return false
@@ -393,7 +400,7 @@ func batchFastLayout(ctx context.Context, typ string, layout *keyspaceLayout,
 		}
 		return true
 	}
-	if err := runLayoutFastMulti(ctx, layout, 0, 0, workers, atomicAttempts, nil,
+	if err := runLayoutFastMulti(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark,
 		algo, ft, record); err != nil {
 		return false
 	}

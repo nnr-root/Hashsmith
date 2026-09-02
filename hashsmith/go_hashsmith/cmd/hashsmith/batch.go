@@ -14,9 +14,12 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/signal"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -157,8 +160,46 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 		clrYellow.Fprintf(os.Stderr, "  candidate types: %s\n", strings.Join(typeOrder, ", "))
 	}
 
+	// ── distributed slice (--skip/--limit) and session resume ───────────────
+	// Both carry EXACTLY their single-target meaning here (see doCrack): skip
+	// and limit are candidate indices into the whole layout — word indices in
+	// dict mode — and limit is a count, not an end index. They used to divert a
+	// multi-target run away from this path entirely; see crackTargets.
+	var skip, limit int64
+	if cc != nil {
+		skip, limit = cc.skip, cc.limit
+	}
+	runCtx := context.Background()
+	sess, resumeFrom, sessStop := batchSession(&runCtx, targets, typeOrder, mode,
+		charset, minLen, maxLen, saltMode, wordlist, mc, cc)
+	if sessStop != nil {
+		defer sessStop()
+	}
+	// --skip (distributed cracking) vs. a resumed session's saved checkpoint:
+	// an explicit --skip wins, exactly as it does for a single target — and for
+	// the same reason: --skip 0 is indistinguishable from "not passed", so it
+	// can only ever relocate a run, never force a session back to index 0.
+	if skip != 0 {
+		if resumeFrom != 0 {
+			clrYellow.Fprintf(os.Stderr,
+				"--skip %d overrides session %q's saved checkpoint (%d)\n",
+				skip, cc.sessName, resumeFrom)
+		}
+		resumeFrom = skip
+	}
+
+	// The GPU kernels take no resume/limit bound (see doCrack's identical
+	// guard), so a sliced or resumed run stays on the CPU. Said once, before
+	// the passes, rather than once per candidate type.
+	gpuUnbounded := resumeFrom == 0 && limit == 0 && sess == nil
+	if cc != nil && cc.useGPU && !gpuUnbounded {
+		clrYellow.Fprintln(os.Stderr,
+			"GPU multi-hash does not support --skip/--limit or --session yet — using CPU")
+	}
+
 	remaining := int64(len(batch))
 	var refusal error
+	var interrupted bool
 	for _, t := range typeOrder {
 		if atomic.LoadInt64(&remaining) == 0 {
 			break
@@ -188,8 +229,11 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 		}
 		// Multi-target on the GPU: hash-and-match every candidate against all
 		// still-unfound md5 targets in one dispatch. Falls through to the CPU
-		// batch engine when ineligible or no GPU is present.
-		if cc != nil && cc.useGPU && (t == "md5" || t == "md4" || t == "ntlm" || t == "sha256" || t == "sha1") && (mode == "brute" || mode == "mask") {
+		// batch engine when ineligible, when no GPU is present, or when the run
+		// is sliced or resumed (gpuUnbounded) — the kernels take no
+		// resume/limit bound, exactly as in doCrack, so those runs stay on the
+		// CPU, which does.
+		if cc != nil && cc.useGPU && gpuUnbounded && (t == "md5" || t == "md4" || t == "ntlm" || t == "sha256" || t == "sha1") && (mode == "brute" || mode == "mask") {
 			entries := make([]*batchTarget, len(active))
 			for i, idx := range active {
 				entries[i] = batch[idx]
@@ -203,13 +247,48 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 				continue
 			}
 		}
-		if err := batchRunType(t, mode, active, batch, &remaining,
+		intr, err := batchRunType(runCtx, t, mode, active, batch, &remaining,
 			wordlist, wl2, charset, minLen, maxLen, princeElemsFor(cc), workers, rules, mc,
-			cc != nil && cc.force); err != nil {
+			cc != nil && cc.force, sess, resumeFrom, limit)
+		if intr {
+			interrupted = true
+		}
+		if err != nil {
 			// Stop, but fall through to the reporting loop below so anything an
 			// earlier pass cracked is still reported and recorded.
 			refusal = err
 			break
+		}
+		if interrupted {
+			// Ctrl-C ends the whole run, not just this type's pass — the next
+			// pass would start on an already-cancelled context and sweep
+			// nothing while claiming to have run.
+			break
+		}
+	}
+
+	// Session bookkeeping — the same three outcomes doCrack resolves, read
+	// against the whole target set rather than one hash: everything found ends
+	// the job; an interrupt keeps the checkpoint; and a --limit-bounded run
+	// that merely exhausted its SLICE (Checkpoint < Total) keeps it too, so a
+	// slice is never mistaken for the whole keyspace having been covered.
+	if sess != nil {
+		switch {
+		case atomic.LoadInt64(&remaining) == 0:
+			sess.remove()
+		case interrupted:
+			_ = sess.save()
+			clrYellow.Fprintf(os.Stderr,
+				"Interrupted — session %q saved at index %d/%d (resume: hashsmith crack --restore %s ...)\n",
+				cc.sessName, sess.Checkpoint, sess.Total, cc.sessName)
+		case sess.Checkpoint < sess.Total:
+			_ = sess.save()
+			clrYellow.Fprintf(os.Stderr,
+				"Slice exhausted (not the whole keyspace) — session %q saved at index %d/%d "+
+					"(resume: hashsmith crack --restore %s ...)\n",
+				cc.sessName, sess.Checkpoint, sess.Total, cc.sessName)
+		default:
+			sess.remove()
 		}
 	}
 
@@ -268,11 +347,117 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 	return leftover, uncracked, refusal
 }
 
+// batchSessionModes are the modes --session checkpoints, for one target or a
+// whole dump. Identical to doCrack's list on purpose: a session's meaning is a
+// property of the candidate STREAM (a global keyspace index), not of how many
+// targets are being compared against it, so the two must never disagree about
+// which modes are resumable.
+var batchSessionModes = map[string]bool{
+	"brute": true, "mask": true, "markov": true,
+	"hybrid": true, "combinator": true, "prince": true,
+}
+
+// batchSessionTarget derives the session identity of a multi-target run: the
+// SHA-256 of every input target, trimmed, sorted and newline-joined, tagged so
+// it can never collide with a real hash in sessionState.Target.
+//
+// It is computed from the run's INPUT list, not from the still-unfound subset,
+// and that is load-bearing. An interrupted run records what it already cracked
+// into the potfile, so the next run's batch excludes those targets — keying
+// the session on the surviving set would make it fail to match its own
+// checkpoint and silently restart from index 0, re-doing work the operator was
+// told had been done.
+func batchSessionTarget(targets []string) string {
+	norm := make([]string, 0, len(targets))
+	for _, t := range targets {
+		if v := strings.TrimSpace(t); v != "" {
+			norm = append(norm, v)
+		}
+	}
+	sort.Strings(norm)
+	sum := sha256.Sum256([]byte(strings.Join(norm, "\n")))
+	return "multi:" + hex.EncodeToString(sum[:])
+}
+
+// batchSession resolves --session for a multi-hash run: it returns the session
+// to checkpoint into (nil when none applies), the index to resume from, and a
+// stop function for the SIGINT handler it installs (nil when it installed
+// none). *ctx is replaced with a cancellable context when a session is active,
+// so Ctrl-C checkpoints and exits cleanly exactly as it does for one target.
+//
+// Sessions are refused — loudly, never silently — for a run whose checkpoint
+// could not be read back unambiguously: a mode that has no stable global index
+// (dict), or an ambiguous dump where several candidate TYPES are swept in turn
+// and one index would have to stand for all of them.
+func batchSession(ctx *context.Context, targets []string, typeOrder []string, mode,
+	charset string, minLen, maxLen int, saltMode, wordlist string,
+	mc *maskConfig, cc *crackCtx) (*sessionState, int64, func()) {
+
+	if cc == nil || cc.sessName == "" {
+		return nil, 0, nil
+	}
+	m := strings.ToLower(mode)
+	if !batchSessionModes[m] {
+		clrYellow.Fprintf(os.Stderr,
+			"--session is not checkpointed for -M %s in multi-hash mode; running without a checkpoint\n", m)
+		return nil, 0, nil
+	}
+	if len(typeOrder) != 1 {
+		clrYellow.Fprintln(os.Stderr,
+			"--session is not checkpointed for an ambiguous multi-hash dump (several candidate "+
+				"types are swept in turn, and one checkpoint cannot mean all of them); "+
+				"running without a checkpoint — specify -t to make it resumable")
+		return nil, 0, nil
+	}
+
+	runCtx, cancel := context.WithCancel(*ctx)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt)
+	go func() { <-sigCh; cancel() }()
+	*ctx = runCtx
+	stop := func() { signal.Stop(sigCh); cancel() }
+
+	maskStr, custom, inc := "", [4]string{}, false
+	if mc != nil {
+		maskStr, custom, inc = mc.mask, mc.custom, mc.increment
+	}
+	key := batchSessionTarget(targets)
+	pe := princeElemsFor(cc)
+	if cc.session.matches(m, typeOrder[0], key, charset, minLen, maxLen, maskStr, custom, inc,
+		"", saltMode, wordlist, cc.wordlist2, pe) {
+		sess := cc.session
+		if sess.Checkpoint > 0 {
+			clrYellow.Fprintf(os.Stderr, "Resuming session %q from index %d of %d\n",
+				cc.sessName, sess.Checkpoint, sess.Total)
+		}
+		return sess, sess.Checkpoint, stop
+	}
+	return &sessionState{
+		Name: cc.sessName, Mode: m, Type: typeOrder[0], Target: key,
+		Charset: charset, MinLen: minLen, MaxLen: maxLen,
+		Mask: maskStr, Custom: custom, Increment: inc,
+		Salt: "", SaltMode: saltMode, Wordlist: wordlist, Wordlist2: cc.wordlist2,
+		PrinceElems: pe,
+		path:        sessionPath(cc.sessName),
+	}, 0, stop
+}
+
 // batchRunType runs one attack pass for a single type against all unfound
 // targets in digestToIdx, wrapping the shared engines with a progress bar.
-func batchRunType(typ, mode string, active []int, batch []*batchTarget,
+// ctx carries the session's Ctrl-C cancellation (context.Background() when no
+// session is active). sess (may be nil) is checkpointed through the SAME
+// runner-agnostic core the single-target path uses, runSessionRunner —
+// deliberately not a second copy of the flush loop, since a second copy is
+// exactly how the two paths would drift apart on the one property that makes a
+// checkpoint trustworthy: it must never record progress that did not happen.
+// resumeFrom/limit are --skip/--limit's slice, with their single-target
+// meaning (see runLayout).
+//
+// It returns whether the pass was interrupted (Ctrl-C) rather than finishing.
+func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*batchTarget,
 	remaining *int64, wordlist, wordlist2, charset string, minLen, maxLen, princeElems, workers int,
-	rules *ruleEngine, mc *maskConfig, force bool) error {
+	rules *ruleEngine, mc *maskConfig, force bool,
+	sess *sessionState, resumeFrom, limit int64) (bool, error) {
 
 	start := time.Now()
 	var atomicAttempts int64
@@ -351,24 +536,45 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 		}
 	}
 
-	// progress bar total
+	// progress bar total. boundWordIdx narrows a raw count to what THIS pass
+	// will actually attempt — min(n, resumeFrom+limit) - resumeFrom — exactly
+	// as doCrack's identically-named closure does for one target, so a sliced
+	// dump's bar and ETA describe the slice rather than the whole keyspace. A
+	// no-op when the run is unsliced and unresumed, which is what keeps every
+	// existing multi-hash run's output unchanged.
+	boundWordIdx := func(n int64) int64 {
+		if n < 0 || (limit <= 0 && resumeFrom <= 0) {
+			return n
+		}
+		bound := n
+		if limit > 0 {
+			if b := satAdd(resumeFrom, limit); b < bound {
+				bound = b
+			}
+		}
+		rem := bound - resumeFrom
+		if rem < 0 {
+			rem = 0
+		}
+		return rem
+	}
 	var total int64 = -1
 	switch m {
 	case "dict":
 		if n, err := countWordlistLines(wordlist); err == nil {
-			total = n
+			total = boundWordIdx(n)
 			if rules != nil {
 				total = satMul(total, int64(1+rules.count()))
 			}
 		}
 	case "brute", "markov":
-		total = calcBruteTotal(charset, minLen, maxLen)
+		total = boundWordIdx(calcBruteTotal(charset, minLen, maxLen))
 		if exact, overflowed := calcBruteTotalExact(charset, minLen, maxLen); overflowed {
 			warnKeyspaceNotExhaustive(exact)
 		}
 	case "mask":
 		if mc != nil {
-			total = calcMaskTotal(mc)
+			total = boundWordIdx(calcMaskTotal(mc))
 			if exact, overflowed := calcMaskTotalExact(mc); overflowed {
 				warnKeyspaceNotExhaustive(exact)
 			}
@@ -377,31 +583,33 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 		if mc != nil {
 			if n, err := countWordlistLines(wordlist); err == nil {
 				if sets, e := parseMask(mc); e == nil {
-					total = satMul(n, maskKeyspace(sets))
+					total = boundWordIdx(satMul(n, maskKeyspace(sets)))
 				}
 			}
 		}
 	case "combinator":
 		if a, e1 := countWordlistLines(wordlist); e1 == nil {
 			if b, e2 := countWordlistLines(wordlist2); e2 == nil {
-				total = satMul(a, b)
+				total = boundWordIdx(satMul(a, b))
 			}
 		}
 	case "prince":
 		if princeLay != nil {
-			total = princeLay.total
+			total = boundWordIdx(princeLay.total)
 		}
 	}
 	// Run feasibility guard — same estimate the per-hash path makes in doCrack,
-	// over the same number that sizes the progress bar. Multi-hash mode is only
-	// ever entered with no --skip/--limit (crackTargets sends a bounded run
-	// down the per-target path instead), so this run is never a slice: bounded
-	// is false. The probe times the first still-unfound target of this type,
-	// which is representative — every target in this pass is the same type, and
-	// multi-hash mode hashes each candidate ONCE for all of them, so the rate
-	// does not scale with the target count.
-	if err := checkFeasibility(total, false, typ, batch[active[0]].norm, "", "prefix", workers, force); err != nil {
-		return err
+	// over the same number that sizes the progress bar. `bounded` says whether
+	// this run is a distributed slice or a resumed one: a slice of an enormous
+	// keyspace is perfectly feasible on its own, so estimating it as if it were
+	// the whole keyspace would refuse every distributed run. The probe times the
+	// first still-unfound target of this type, which is representative — every
+	// target in this pass is the same type, and multi-hash mode hashes each
+	// candidate ONCE for all of them, so the rate does not scale with the target
+	// count.
+	if err := checkFeasibility(total, resumeFrom != 0 || limit > 0,
+		typ, batch[active[0]].norm, "", "prefix", workers, force); err != nil {
+		return false, err
 	}
 
 	bar := newCrackBar(total)
@@ -417,47 +625,60 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 	// (hybrid, markov, combinator, prince, dict) is scalar-only by design:
 	// their layouts carry a gen override or a non-decodable structure that
 	// fastPathEligible correctly refuses.
+	// runPass drives one layout through runSessionRunner — the single place
+	// session checkpointing lives, shared verbatim with the single-target path.
+	// The layout's runner is chosen inside the closure: the multi-target vector
+	// runner when the pass is eligible, otherwise the identical layout on the
+	// scalar path, exactly as before.
+	var interrupted bool
+	runPass := func(layout *keyspaceLayout, fastEligible bool) {
+		if layout == nil {
+			return
+		}
+		_, intr, _ := runSessionRunner(ctx, layout, sess, resumeFrom, func(watermark *int64) (string, error) {
+			if fastEligible && batchFastLayout(ctx, typ, layout, active, batch,
+				resumeFrom, limit, workers, &atomicAttempts, watermark, record) {
+				return "", nil
+			}
+			return runLayout(ctx, layout, resumeFrom, limit, workers, &atomicAttempts, watermark, verify)
+		})
+		interrupted = interrupted || intr
+	}
+
 	switch m {
 	case "brute":
-		layout := bruteLayout(charset, minLen, maxLen)
-		if !batchFastLayout(context.Background(), typ, layout, active, batch, workers, &atomicAttempts, record) {
-			_, _ = runLayout(context.Background(), layout,
-				0, 0, workers, &atomicAttempts, nil, verify)
-		}
+		runPass(bruteLayout(charset, minLen, maxLen), true)
 	case "mask":
 		if mc != nil {
 			if layout, err := maskLayout(mc); err == nil {
-				if !batchFastLayout(context.Background(), typ, layout, active, batch, workers, &atomicAttempts, record) {
-					_, _ = runLayout(context.Background(), layout, 0, 0, workers, &atomicAttempts, nil, verify)
-				}
+				runPass(layout, true)
 			}
 		}
 	case "hybrid":
 		if mc != nil {
 			if sets, err := parseMask(mc); err == nil {
 				if words, _, e := loadWordlistSlice(wordlist); e == nil {
-					_, _ = runLayout(context.Background(), hybridLayout(words, sets, mc.maskFirst), 0, 0, workers, &atomicAttempts, nil, verify)
+					runPass(hybridLayout(words, sets, mc.maskFirst), false)
 				}
 			}
 		}
 	case "markov":
 		if model, err := trainMarkov(charset, wordlist); err == nil {
-			_, _ = runLayout(context.Background(), markovLayout(model, minLen, maxLen), 0, 0, workers, &atomicAttempts, nil, verify)
+			runPass(markovLayout(model, minLen, maxLen), false)
 		}
 	case "combinator":
 		if wordlist2 != "" {
 			if left, _, e1 := loadWordlistSlice(wordlist); e1 == nil {
 				if right, _, e2 := loadWordlistSlice(wordlist2); e2 == nil {
-					_, _ = runLayout(context.Background(), combinatorLayout(left, right), 0, 0, workers, &atomicAttempts, nil, verify)
+					runPass(combinatorLayout(left, right), false)
 				}
 			}
 		}
 	case "prince":
-		if princeLay != nil {
-			_, _ = runLayout(context.Background(), princeLay, 0, 0, workers, &atomicAttempts, nil, verify)
-		}
+		runPass(princeLay, false)
 	default: // dict
-		batchDictAttack(wordlist, verify, workers, rules, &atomicAttempts)
+		batchDictAttack(ctx, wordlist, resumeFrom, limit, verify, workers, rules, &atomicAttempts)
+		interrupted = ctx.Err() != nil
 	}
 
 	tickCancel()
@@ -471,14 +692,19 @@ func batchRunType(typ, mode string, active []int, batch []*batchTarget,
 	}
 	color.New(themeAttr).Fprintf(os.Stderr,
 		"Attempts: %d | Elapsed: %.2fs | Rate: %s\n", attempts, elapsed, formatRate(rate))
-	return nil
+	return interrupted, nil
 }
 
 // batchDictAttack is the dictionary engine for multi-hash mode: it never stops
 // on the first match, running until verify signals all targets found or the
 // wordlist is exhausted.
-func batchDictAttack(wordlistPath string, verify func(string) bool, workers int,
-	rules *ruleEngine, atomicAttempts *int64) {
+//
+// skip and limit (0 = unbounded) bound it to word indices [skip, skip+limit)
+// of the whole wordlist, through the SAME dictWordBounds arithmetic dictAttack
+// and --stdout use — so a dump sliced across machines moves whole words, each
+// carrying its full rule expansion, exactly as a single-target dict slice does.
+func batchDictAttack(parent context.Context, wordlistPath string, skip, limit int64,
+	verify func(string) bool, workers int, rules *ruleEngine, atomicAttempts *int64) {
 
 	// The source line ("Wordlist: ...") is announced once per run at the CLI
 	// entry point (resolveWordlistForMode), not once per target here.
@@ -488,8 +714,9 @@ func batchDictAttack(wordlistPath string, verify func(string) bool, workers int,
 		return
 	}
 	defer f.Close()
+	skip, upper := dictWordBounds(skip, limit)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
 	batchCh := make(chan []string, workers*4)
@@ -498,10 +725,19 @@ func batchDictAttack(wordlistPath string, verify func(string) bool, workers int,
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 1<<20), 1<<20)
 		cur := make([]string, 0, dictBatchSize)
+		var idx int64
 		for scanner.Scan() {
 			word := strings.TrimSpace(scanner.Text())
 			if word == "" {
 				continue
+			}
+			i := idx
+			idx++
+			if i < skip {
+				continue
+			}
+			if upper >= 0 && i >= upper {
+				break
 			}
 			cur = append(cur, word)
 			if len(cur) >= dictBatchSize {

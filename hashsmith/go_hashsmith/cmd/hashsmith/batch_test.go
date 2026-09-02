@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -62,7 +63,7 @@ func TestBatchDictAttackFindsAll(t *testing.T) {
 		return false
 	}
 	var n int64
-	batchDictAttack(wl, verify, 4, nil, &n)
+	batchDictAttack(context.Background(), wl, 0, 0, verify, 4, nil, &n)
 
 	if atomic.LoadInt64(&remaining) != 0 {
 		t.Fatalf("not all found, remaining=%d", remaining)
