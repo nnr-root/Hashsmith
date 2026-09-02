@@ -215,6 +215,13 @@ func TestFeasibilityETAMatchesRealDispatch(t *testing.T) {
 // runLayout directly (scalar) instead of runBruteOrMaskLayout (the real
 // dispatch), this test fails.
 func TestFeasibilityProbeBeatsScalarPath(t *testing.T) {
+	// Rate comparisons are meaningless under binary translation: Rosetta
+	// slows both sides of the pairing and not by the same factor, so this
+	// can fail for reasons unrelated to the code. CI runs amd64 natively
+	// and still gates on it.
+	if runningTranslated() {
+		t.Skip("rate comparison is not meaningful under binary translation")
+	}
 	const workers = 4
 	cases := []struct {
 		name     string
@@ -278,6 +285,13 @@ func TestFeasibilityProbeBeatsScalarPath(t *testing.T) {
 // dynamically from measured rates rather than a hardcoded constant, so the
 // test adapts to whatever throughput this machine actually has.
 func TestFeasibilityNoFalseRefusalForFastPath(t *testing.T) {
+	// Rate comparisons are meaningless under binary translation: Rosetta
+	// slows both sides of the pairing and not by the same factor, so this
+	// can fail for reasons unrelated to the code. CI runs amd64 natively
+	// and still gates on it.
+	if runningTranslated() {
+		t.Skip("rate comparison is not meaningful under binary translation")
+	}
 	preserveExitCode(t)
 	const workers = 4
 	typ, salt, saltMode := "md5", "deadbeef", "prefix"
