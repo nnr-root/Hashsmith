@@ -6,10 +6,24 @@ package main
 // For N targets this turns O(N · keyspace) work into O(keyspace), the standard
 // "crack a whole dump at once" acceleration.
 //
-// Only salt-independent raw digests qualify (the digest is a pure function of
-// the candidate). Salted / expensive types (crypt, bcrypt, PBKDF2, containers,
-// network captures …) still run per target, where per-target salts make shared
-// work impossible.
+// Two families qualify.
+//
+// Salt-independent raw digests (the digest is a pure function of the
+// candidate): one hashed candidate is testable against every target, so a dump
+// is one pass.
+//
+// Simple salted concatenations — md5/sha1/sha256 of salt||pass or pass||salt,
+// hashcat 10/20, 110/120, 1410/1420 — are shareable only among targets that
+// share a salt, because the message hashed is different for each distinct
+// salt. Those targets are therefore GROUPED by salt (batchSaltGroups) and each
+// group is one pass: a dump behind one -s is a single pass with the full
+// multi-target benefit, and a dump of hash:salt lines with N distinct salts is
+// N passes. N passes is inherent to salting — it is what salts are for — and
+// the grouping is what keeps it linear in N rather than in the target count.
+//
+// Expensive or structured types (crypt, bcrypt, PBKDF2, containers, network
+// captures …) still run per target: their salt is embedded in a record and the
+// digest is not a concatenation at all.
 
 import (
 	"bufio"
@@ -68,12 +82,75 @@ func rawDigest(typ string) func(string) string {
 
 // batchTarget is one hash in a multi-hash run.
 type batchTarget struct {
-	norm       string   // normalized target (potfile key / display)
-	key        string   // lower(norm) — the digest-map key
+	norm string // normalized target (potfile key / display)
+	// key is the bare hex digest a hashed candidate is compared against,
+	// lowercased — the digest-map key, and the digest every fast path decodes.
+	// It is lower(norm) for an unsalted target; for a hash:salt input it is the
+	// HASH HALF alone, since norm keeps the whole input line (that is the
+	// potfile key and what the operator sees).
+	key        string
 	orig       string   // pre-normalization input key — matches cc's --username/--left bookkeeping
 	candidates []string // batchable candidate types for this target
-	flag       int32    // 0 = unfound, 1 = found (CAS-guarded)
-	password   string   // set once by the CAS winner
+	// salt is the salt THIS target is hashed with — "" for an unsalted target,
+	// the -s value when one salt covers the run, or the target's own :salt
+	// field. It is what batchSaltGroups partitions on, and every target in a
+	// pass shares it.
+	salt     string
+	flag     int32  // 0 = unfound, 1 = found (CAS-guarded)
+	password string // set once by the CAS winner
+}
+
+// saltedBatchType reports the single candidate type a SALTED multi-hash run
+// sweeps, or "" when this run is not one.
+//
+// It deliberately requires an explicit -t. Auto-detection over a salted dump
+// is ambiguous by construction — a 32-hex digest with a salt is any of
+// hashcat 10, 20, 30, 40 — and sweeping all of them would multiply the passes
+// by the candidate types on top of the distinct salts. An operator who names
+// the format gets the acceleration; one who does not keeps today's per-target
+// path, which is what resolves that ambiguity one hash at a time.
+//
+// The type must additionally be one the contiguous batch path computes
+// identically to hashText (stdSaltedPlanFor: md5/sha1/sha256 around a
+// prefix or suffix salt). Anything else — sha512-pass-salt, the UTF-16LE
+// variants, every structured record — is left exactly where it is today.
+// A probe salt is used only to ask "is this shape supported"; the real salt
+// is resolved per target below.
+func saltedBatchType(typ, salt, saltMode string) string {
+	if typ == "" || strings.EqualFold(typ, "auto") {
+		return ""
+	}
+	canon := canonicalHashType(typ)
+	_, isCompat := compatSaltedDigests[canon]
+	if salt == "" && !isCompat {
+		return "" // an unsalted run: the existing raw-digest path owns it
+	}
+	probe := salt
+	if probe == "" {
+		probe = "hashsmith-probe-salt"
+	}
+	if _, _, ok := stdSaltedPlanFor(canon, probe, saltMode); !ok {
+		return ""
+	}
+	return canon
+}
+
+// saltedBatchTarget resolves one input line of a salted run into the digest to
+// match and the salt to hash with, through compatSaltedTargetParts — the SAME
+// split verifyCompatSaltedDigest uses, so a target the batch path accepts is
+// hashed with exactly the salt the scalar verifier would have used. It refuses
+// (rather than guesses) anything whose digest half is not the right number of
+// hex characters, leaving that target to the per-target path.
+func saltedBatchTarget(target, salt string, digLen int) (digest, effSalt string, ok bool) {
+	digest, effSalt, ok = compatSaltedTargetParts(target, salt)
+	if !ok {
+		return "", "", false
+	}
+	digest = strings.TrimSpace(digest)
+	if len(digest) != digLen*2 || !isHex(digest) {
+		return "", "", false
+	}
+	return digest, effSalt, true
 }
 
 // allBatchable reports the batchable candidate types for a target, and whether
@@ -105,13 +182,26 @@ func allBatchable(typ, target string) ([]string, bool) {
 // remaining passes but still reports whatever earlier passes already cracked,
 // so nothing found is thrown away on the way out.
 func runBatch(targets []string, typ, mode, wordlist, charset string,
-	minLen, maxLen, workers int, saltMode, outFile string, copyResult bool,
+	minLen, maxLen, workers int, salt, saltMode, outFile string, copyResult bool,
 	rules *ruleEngine, mc *maskConfig, cc *crackCtx) ([]string, int, error) {
 
 	var batch []*batchTarget
 	var leftover []string
 	typeOrder := []string{}
 	seenType := map[string]bool{}
+
+	// A salted run sweeps exactly one named type; "" means this is the
+	// unsalted raw-digest path, unchanged in every respect.
+	saltedTyp := saltedBatchType(typ, salt, saltMode)
+	saltedDigLen := 0
+	if saltedTyp != "" {
+		probe := salt
+		if probe == "" {
+			probe = "hashsmith-probe-salt"
+		}
+		algo, _, _ := stdSaltedPlanFor(saltedTyp, probe, saltMode)
+		saltedDigLen = algo.digLen
+	}
 
 	for _, raw := range targets {
 		target := strings.TrimSpace(raw)
@@ -136,12 +226,34 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 				continue
 			}
 		}
+		if saltedTyp != "" {
+			digest, tsalt, ok := saltedBatchTarget(target, salt, saltedDigLen)
+			if !ok {
+				// No usable salt (no -s and no :salt field), or a digest half
+				// that is not this type's width. The per-target path reports
+				// that as the error it is, one hash at a time.
+				leftover = append(leftover, raw)
+				continue
+			}
+			batch = append(batch, &batchTarget{
+				norm: target, key: strings.ToLower(digest), orig: origKey,
+				candidates: []string{saltedTyp}, salt: tsalt,
+			})
+			if !seenType[saltedTyp] {
+				seenType[saltedTyp] = true
+				typeOrder = append(typeOrder, saltedTyp)
+			}
+			continue
+		}
 		cands, ok := allBatchable(typ, target)
 		if !ok {
 			leftover = append(leftover, raw)
 			continue
 		}
-		batch = append(batch, &batchTarget{norm: target, key: strings.ToLower(target), orig: origKey, candidates: cands})
+		batch = append(batch, &batchTarget{
+			norm: target, key: strings.ToLower(target), orig: origKey,
+			candidates: cands,
+		})
 		for _, c := range cands {
 			if lc := strings.ToLower(c); !seenType[lc] {
 				seenType[lc] = true
@@ -169,8 +281,15 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 	if cc != nil {
 		skip, limit = cc.skip, cc.limit
 	}
+	// The distinct salts this dump needs, in first-seen order. Exactly one
+	// entry — "" for an unsalted dump, or the shared salt — means candidates
+	// are shareable across every target and the run is a single pass per type,
+	// as it always was. Several entries is the per-target-salt case: one pass
+	// each, since a candidate hashed with salt A says nothing about a target
+	// salted with B.
+	runSalts := batchSaltGroups(batch)
 	runCtx := context.Background()
-	sess, resumeFrom, sessStop := batchSession(&runCtx, targets, typeOrder, mode,
+	sess, resumeFrom, sessStop := batchSession(&runCtx, targets, typeOrder, runSalts, mode,
 		charset, minLen, maxLen, saltMode, wordlist, mc, cc)
 	if sessStop != nil {
 		defer sessStop()
@@ -204,65 +323,105 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 		if atomic.LoadInt64(&remaining) == 0 {
 			break
 		}
-		// Collect still-unfound targets that list type t.
-		var active []int
-		for i, e := range batch {
+		// The type banner is printed only when this type actually has work
+		// left, exactly as it was before the salt grouping went in: the
+		// per-salt loop below cannot make that decision, since it would print
+		// once per group.
+		typeHasWork := false
+		for _, e := range batch {
 			if atomic.LoadInt32(&e.flag) == 1 {
 				continue
 			}
 			for _, c := range e.candidates {
 				if strings.EqualFold(c, t) {
-					active = append(active, i)
+					typeHasWork = true
 					break
 				}
 			}
+			if typeHasWork {
+				break
+			}
 		}
-		if len(active) == 0 {
+		if !typeHasWork {
 			continue
 		}
 		if len(typeOrder) > 1 {
 			color.New(themeAttr, color.Bold).Fprintf(os.Stderr, "\n→ Testing as %s\n", t)
 		}
-		wl2 := ""
-		if cc != nil {
-			wl2 = cc.wordlist2
-		}
-		// Multi-target on the GPU: hash-and-match every candidate against all
-		// still-unfound md5 targets in one dispatch. Falls through to the CPU
-		// batch engine when ineligible, when no GPU is present, or when the run
-		// is sliced or resumed (gpuUnbounded) — the kernels take no
-		// resume/limit bound, exactly as in doCrack, so those runs stay on the
-		// CPU, which does.
-		if cc != nil && cc.useGPU && gpuUnbounded && (t == "md5" || t == "md4" || t == "ntlm" || t == "sha256" || t == "sha1") && (mode == "brute" || mode == "mask") {
-			entries := make([]*batchTarget, len(active))
-			for i, idx := range active {
-				entries[i] = batch[idx]
+		for _, gsalt := range runSalts {
+			if atomic.LoadInt64(&remaining) == 0 || interrupted || refusal != nil {
+				break
 			}
-			if gpuBatchMaskHash(t, mode, mc, charset, minLen, maxLen, entries) {
-				for _, e := range entries {
-					if atomic.LoadInt32(&e.flag) == 1 {
-						atomic.AddInt64(&remaining, -1)
+			// Collect still-unfound targets that list type t AND carry this
+			// pass's salt. The salt filter is what makes one hashed candidate
+			// a valid answer for every target in `active`.
+			var active []int
+			for i, e := range batch {
+				if atomic.LoadInt32(&e.flag) == 1 || e.salt != gsalt {
+					continue
+				}
+				for _, c := range e.candidates {
+					if strings.EqualFold(c, t) {
+						active = append(active, i)
+						break
 					}
 				}
+			}
+			if len(active) == 0 {
 				continue
 			}
+			if len(runSalts) > 1 {
+				color.New(themeAttr, color.Bold).Fprintf(os.Stderr,
+					"\n→ salt %q (%d target(s))\n", gsalt, len(active))
+			}
+			wl2 := ""
+			if cc != nil {
+				wl2 = cc.wordlist2
+			}
+			// Multi-target on the GPU: hash-and-match every candidate against
+			// all still-unfound md5 targets in one dispatch. Falls through to
+			// the CPU batch engine when ineligible, when no GPU is present, or
+			// when the run is sliced or resumed (gpuUnbounded) — the kernels
+			// take no resume/limit bound, exactly as in doCrack, so those runs
+			// stay on the CPU, which does. The kernels hash the raw candidate,
+			// so a salted pass is never offered to them.
+			if cc != nil && cc.useGPU && gpuUnbounded && gsalt == "" &&
+				(t == "md5" || t == "md4" || t == "ntlm" || t == "sha256" || t == "sha1") &&
+				(mode == "brute" || mode == "mask") {
+				entries := make([]*batchTarget, len(active))
+				for i, idx := range active {
+					entries[i] = batch[idx]
+				}
+				if gpuBatchMaskHash(t, mode, mc, charset, minLen, maxLen, entries) {
+					for _, e := range entries {
+						if atomic.LoadInt32(&e.flag) == 1 {
+							atomic.AddInt64(&remaining, -1)
+						}
+					}
+					continue
+				}
+			}
+			intr, err := batchRunType(runCtx, t, mode, active, batch, &remaining,
+				wordlist, wl2, charset, minLen, maxLen, princeElemsFor(cc), workers, rules, mc,
+				gsalt, saltMode, cc != nil && cc.force, sess, resumeFrom, limit)
+			if intr {
+				interrupted = true
+			}
+			if err != nil {
+				// Stop, but fall through to the reporting loop below so
+				// anything an earlier pass cracked is still reported and
+				// recorded.
+				refusal = err
+				break
+			}
+			if interrupted {
+				// Ctrl-C ends the whole run, not just this pass — the next
+				// would start on an already-cancelled context and sweep
+				// nothing while claiming to have run.
+				break
+			}
 		}
-		intr, err := batchRunType(runCtx, t, mode, active, batch, &remaining,
-			wordlist, wl2, charset, minLen, maxLen, princeElemsFor(cc), workers, rules, mc,
-			cc != nil && cc.force, sess, resumeFrom, limit)
-		if intr {
-			interrupted = true
-		}
-		if err != nil {
-			// Stop, but fall through to the reporting loop below so anything an
-			// earlier pass cracked is still reported and recorded.
-			refusal = err
-			break
-		}
-		if interrupted {
-			// Ctrl-C ends the whole run, not just this type's pass — the next
-			// pass would start on an already-cancelled context and sweep
-			// nothing while claiming to have run.
+		if interrupted || refusal != nil {
 			break
 		}
 	}
@@ -347,6 +506,26 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 	return leftover, uncracked, refusal
 }
 
+// batchSaltGroups returns the distinct salts across a batch, in first-seen
+// order, and never returns an empty slice for a non-empty batch.
+//
+// The order is first-seen rather than sorted so a dump's passes run in the
+// order its lines were given — the same order runBatch reports results in, and
+// the order a reader of the output would predict. For an unsalted dump every
+// target's salt is "" and this returns exactly [""], which collapses the
+// grouping to the single pass that has always run.
+func batchSaltGroups(batch []*batchTarget) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, e := range batch {
+		if !seen[e.salt] {
+			seen[e.salt] = true
+			out = append(out, e.salt)
+		}
+	}
+	return out
+}
+
 // batchSessionModes are the modes --session checkpoints, for one target or a
 // whole dump. Identical to doCrack's list on purpose: a session's meaning is a
 // property of the candidate STREAM (a global keyspace index), not of how many
@@ -389,7 +568,7 @@ func batchSessionTarget(targets []string) string {
 // could not be read back unambiguously: a mode that has no stable global index
 // (dict), or an ambiguous dump where several candidate TYPES are swept in turn
 // and one index would have to stand for all of them.
-func batchSession(ctx *context.Context, targets []string, typeOrder []string, mode,
+func batchSession(ctx *context.Context, targets []string, typeOrder, runSalts []string, mode,
 	charset string, minLen, maxLen int, saltMode, wordlist string,
 	mc *maskConfig, cc *crackCtx) (*sessionState, int64, func()) {
 
@@ -409,6 +588,18 @@ func batchSession(ctx *context.Context, targets []string, typeOrder []string, mo
 				"running without a checkpoint — specify -t to make it resumable")
 		return nil, 0, nil
 	}
+	// The same objection, for the same reason, when the dump carries several
+	// distinct salts: each salt is its own sweep of the keyspace, so one index
+	// cannot say how far the run got. A dump behind ONE salt is a single sweep
+	// and checkpoints exactly as an unsalted one does.
+	if len(runSalts) != 1 {
+		clrYellow.Fprintln(os.Stderr,
+			"--session is not checkpointed for a multi-hash dump with several distinct salts "+
+				"(each salt is its own sweep, and one checkpoint cannot mean all of them); "+
+				"running without a checkpoint")
+		return nil, 0, nil
+	}
+	runSalt := runSalts[0]
 
 	runCtx, cancel := context.WithCancel(*ctx)
 	sigCh := make(chan os.Signal, 1)
@@ -424,7 +615,7 @@ func batchSession(ctx *context.Context, targets []string, typeOrder []string, mo
 	key := batchSessionTarget(targets)
 	pe := princeElemsFor(cc)
 	if cc.session.matches(m, typeOrder[0], key, charset, minLen, maxLen, maskStr, custom, inc,
-		"", saltMode, wordlist, cc.wordlist2, pe) {
+		runSalt, saltMode, wordlist, cc.wordlist2, pe) {
 		sess := cc.session
 		if sess.Checkpoint > 0 {
 			clrYellow.Fprintf(os.Stderr, "Resuming session %q from index %d of %d\n",
@@ -436,7 +627,7 @@ func batchSession(ctx *context.Context, targets []string, typeOrder []string, mo
 		Name: cc.sessName, Mode: m, Type: typeOrder[0], Target: key,
 		Charset: charset, MinLen: minLen, MaxLen: maxLen,
 		Mask: maskStr, Custom: custom, Increment: inc,
-		Salt: "", SaltMode: saltMode, Wordlist: wordlist, Wordlist2: cc.wordlist2,
+		Salt: runSalt, SaltMode: saltMode, Wordlist: wordlist, Wordlist2: cc.wordlist2,
 		PrinceElems: pe,
 		path:        sessionPath(cc.sessName),
 	}, 0, stop
@@ -453,10 +644,16 @@ func batchSession(ctx *context.Context, targets []string, typeOrder []string, mo
 // resumeFrom/limit are --skip/--limit's slice, with their single-target
 // meaning (see runLayout).
 //
+// salt is the salt EVERY target in `active` carries ("" for an unsalted pass);
+// saltMode is -S, used only by the raw-digest constructions where the type
+// name does not already fix the order. Callers must have grouped by salt — see
+// batchSaltGroups — because a single candidate is hashed ONCE per pass and
+// compared against all of `active`.
+//
 // It returns whether the pass was interrupted (Ctrl-C) rather than finishing.
 func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*batchTarget,
 	remaining *int64, wordlist, wordlist2, charset string, minLen, maxLen, princeElems, workers int,
-	rules *ruleEngine, mc *maskConfig, force bool,
+	rules *ruleEngine, mc *maskConfig, salt, saltMode string, force bool,
 	sess *sessionState, resumeFrom, limit int64) (bool, error) {
 
 	start := time.Now()
@@ -476,14 +673,32 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 		return false
 	}
 
+	// hashName and pre/suf resolve this pass's construction once, outside the
+	// candidate loop: for a salted pass the message is pre||candidate||suf and
+	// the digest is a plain raw hash of it, which is precisely what
+	// stdSaltedPlanFor asserts is identical to hashText. An unsalted pass
+	// leaves both affixes empty and hashName == typ, so the closures below are
+	// byte for byte what they were.
+	hashName, pre, suf := typ, "", ""
+	if salt != "" {
+		algo, sp, ok := stdSaltedPlanFor(typ, salt, saltMode)
+		if !ok {
+			// runBatch only admits salted targets whose plan resolves, so this
+			// is unreachable; refusing the pass rather than silently hashing
+			// the bare candidate is the safe way to be wrong.
+			return false, fmt.Errorf("%s: unsupported salted construction for multi-hash mode", typ)
+		}
+		hashName, pre, suf = algo.name, string(sp.pre), string(sp.suf)
+	}
+
 	// Prefer the zero-allocation raw-byte path: hash into a stack buffer and key
 	// the target map by fixed [64]byte digests (no hex encode, no map-key alloc).
 	// Types without a fast hasher fall back to the hex-string digest.
 	var verify func(string) bool
-	if h, ok := rawHasher(typ); ok {
+	if h, ok := rawHasher(hashName); ok {
 		m := make(map[[64]byte][]int, len(active))
 		for _, idx := range active {
-			tb, err := hex.DecodeString(strings.TrimSpace(batch[idx].norm))
+			tb, err := hex.DecodeString(strings.TrimSpace(batch[idx].key))
 			if err != nil || len(tb) > 64 {
 				continue
 			}
@@ -493,7 +708,7 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 		}
 		verify = func(candidate string) bool {
 			var buf [64]byte
-			h(buf[:], candidate)
+			h(buf[:], pre+candidate+suf)
 			idxs, ok := m[buf]
 			if !ok {
 				return false
@@ -501,13 +716,13 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 			return record(candidate, idxs)
 		}
 	} else {
-		digestFn := rawDigest(typ)
+		digestFn := rawDigest(hashName)
 		m := make(map[string][]int, len(active))
 		for _, idx := range active {
 			m[batch[idx].key] = append(m[batch[idx].key], idx)
 		}
 		verify = func(candidate string) bool {
-			idxs, ok := m[digestFn(candidate)]
+			idxs, ok := m[digestFn(pre+candidate+suf)]
 			if !ok {
 				return false
 			}
@@ -608,7 +823,7 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 	// candidate ONCE for all of them, so the rate does not scale with the target
 	// count.
 	if err := checkFeasibility(total, resumeFrom != 0 || limit > 0,
-		typ, batch[active[0]].norm, "", "prefix", workers, force); err != nil {
+		typ, batch[active[0]].norm, salt, saltMode, workers, force); err != nil {
 		return false, err
 	}
 
@@ -637,15 +852,17 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 		}
 		_, intr, _ := runSessionRunner(ctx, layout, sess, resumeFrom, func(watermark *int64) (string, error) {
 			if fastEligible {
-				if batchFastLayout(ctx, typ, layout, active, batch,
+				if batchFastLayout(ctx, typ, salt, layout, active, batch,
 					resumeFrom, limit, workers, &atomicAttempts, watermark, record) {
 					return "", nil
 				}
-				// The vector path declined (no core for this type). A stdlib
-				// raw digest — sha1, sha256 — still has a contiguous-batch
-				// path; see stdfast.go. It declines in turn, just as safely,
-				// for anything it cannot enumerate.
-				if batchStdLayout(ctx, typ, layout, active, batch,
+				// The vector path declined (no core for this type, or a salt —
+				// the core hashes the bare candidate). A stdlib raw digest —
+				// sha1, sha256, and md5/sha1/sha256 around a prefix or suffix
+				// salt — still has a contiguous-batch path; see stdfast.go. It
+				// declines in turn, just as safely, for anything it cannot
+				// enumerate.
+				if batchStdLayout(ctx, typ, layout, active, batch, salt, saltMode,
 					resumeFrom, limit, workers, &atomicAttempts, watermark, record) {
 					return "", nil
 				}

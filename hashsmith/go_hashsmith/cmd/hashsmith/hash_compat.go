@@ -81,18 +81,36 @@ func hashCompatSaltedDigest(text, algorithm, salt string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// compatSaltedTargetParts resolves a generic salted target into the digest to
+// compare against and the salt to hash with, accepting the hash:salt input
+// syntax used by Hashcat and John while retaining -s for callers that keep the
+// fields separate. An explicit salt always wins; only when none is given is the
+// salt taken from the target's trailing :field.
+//
+// It is the single definition of that split. verifyCompatSaltedDigest is the
+// per-candidate verifier and stdSaltedPlanFor (stdfast.go) is the batch fast
+// path's planner; both must decide "which digest, which salt" identically, and
+// a second copy of these four lines is exactly how a batch pass would end up
+// filing a plaintext against a hash it does not actually match.
+func compatSaltedTargetParts(target, salt string) (digest, effSalt string, ok bool) {
+	digest, effSalt = target, salt
+	if effSalt == "" {
+		i := strings.LastIndexByte(target, ':')
+		if i < 1 || i == len(target)-1 {
+			return "", "", false
+		}
+		digest, effSalt = target[:i], target[i+1:]
+	}
+	return strings.TrimPrefix(digest, "$BLAKE2$"), effSalt, true
+}
+
 // verifyCompatSaltedDigest accepts the hash:salt input syntax used by Hashcat
 // and John, while retaining -s for callers that keep the fields separate.
 func verifyCompatSaltedDigest(candidate, target, algorithm, salt string) (bool, error) {
-	effectiveTarget, effectiveSalt := target, salt
-	if effectiveSalt == "" {
-		i := strings.LastIndexByte(target, ':')
-		if i < 1 || i == len(target)-1 {
-			return false, errors.New(algorithm + " requires a hash:salt target or -s")
-		}
-		effectiveTarget, effectiveSalt = target[:i], target[i+1:]
+	effectiveTarget, effectiveSalt, ok := compatSaltedTargetParts(target, salt)
+	if !ok {
+		return false, errors.New(algorithm + " requires a hash:salt target or -s")
 	}
-	effectiveTarget = strings.TrimPrefix(effectiveTarget, "$BLAKE2$")
 	got, err := hashCompatSaltedDigest(candidate, algorithm, effectiveSalt)
 	return err == nil && strings.EqualFold(got, effectiveTarget), err
 }
