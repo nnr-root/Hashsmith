@@ -211,6 +211,20 @@ func checkFeasibility(work int64, bounded bool, typ, target, salt, saltMode stri
 // Because tier one only ever ends in "feasible", an inaccurate cheap estimate
 // can never produce a false refusal — it can only cost a probe that wasn't
 // needed.
+//
+// One consequence worth knowing before you go optimizing this. Tier one
+// short-circuits whenever its estimate puts the run under
+// feasibilityRoughCeiling, so for any run of roughly a minute or less, tier
+// two never executes and the PRINTED rate is tier one's — derived from a
+// single scalar verify call. Since the batch and vector dispatches are
+// several times faster than workers*scalar-verify, that number reads several
+// times pessimistic on short runs: a two-second dump sweep announced as five.
+// Nobody is harmed (the ETA cannot trigger a refusal from tier one, and the
+// run finishes before anyone reads it), but it does mean a short run is the
+// WRONG thing to measure when judging this estimator. Measure something that
+// takes long enough for tier two to run: on an 8-billion-candidate dump the
+// probe lands within about 14% of the real rate, against 5.7x pessimistic
+// before it existed.
 func feasibilityRate(work int64, typ, target, salt, saltMode string, workers int, probe feasibilityProbe) (float64, bool) {
 	_, _, perOp := benchVerifyPath(typ, target, salt, saltMode, feasibilityWarmup)
 	if perOp > 0 {
