@@ -736,6 +736,17 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 	// the same way the other modes' setup errors are handled in this function.
 	m := strings.ToLower(mode)
 	var princeLay *keyspaceLayout
+	// bruteLay / maskLay are the actual layout objects for a brute-force /
+	// mask pass, built here (once, below, alongside `total`) so the
+	// feasibility probe further down can dispatch a small slice of the REAL
+	// pass through the REAL batchFastLayout/batchStdLayout/runLayout chain —
+	// the exact dispatch runPass calls further down — instead of
+	// feasibility.go re-deriving which internal path that dispatch would
+	// choose. Mirrors doCrack's identically-named locals for the
+	// single-target path. Built for at most one of the two, matching m; the
+	// dispatch switch below reuses whichever was built instead of rebuilding
+	// it.
+	var bruteLay, maskLay *keyspaceLayout
 	if m == "prince" {
 		if elems, _, err := loadWordlistSlice(wordlist); err == nil {
 			if lay, ex, e := princeLayout(elems, minLen, maxLen, princeElems); e == nil {
@@ -787,11 +798,17 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 		if exact, overflowed := calcBruteTotalExact(charset, minLen, maxLen); overflowed {
 			warnKeyspaceNotExhaustive(exact)
 		}
+		if m == "brute" {
+			bruteLay = bruteLayout(charset, minLen, maxLen)
+		}
 	case "mask":
 		if mc != nil {
 			total = boundWordIdx(calcMaskTotal(mc))
 			if exact, overflowed := calcMaskTotalExact(mc); overflowed {
 				warnKeyspaceNotExhaustive(exact)
+			}
+			if lay, e := maskLayout(mc); e == nil {
+				maskLay = lay
 			}
 		}
 	case "hybrid":
@@ -813,22 +830,73 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 			total = boundWordIdx(princeLay.total)
 		}
 	}
+	// feasibility probe: for brute/mask, hand the guard a way to time the REAL
+	// batch dispatch — batchFastLayout / batchStdLayout / the scalar runLayout
+	// fallback, exactly the chain runPass drives further down — over a small
+	// slice of the SAME layout this pass will enumerate, rather than have
+	// feasibility.go re-derive which internal path that dispatch would choose.
+	// Mirrors doCrack's probe for the single-target path (see crack.go); nil
+	// for every other mode, and for brute/mask whose layout did not build —
+	// feasibilityRate's fallback to benchTarget is unchanged for those.
+	//
+	// active/batch/record are this pass's own group: the targets that share
+	// both this type AND this salt (see the gsalt loop in runBatch). The probe
+	// therefore measures exactly the group this call is about to run, which is
+	// the right thing to measure — multi-hash mode hashes each candidate ONCE
+	// against every target in the group, so throughput does not scale with the
+	// group's size and one representative measurement of THIS group is exactly
+	// this pass's real rate, not an approximation of it.
+	//
+	// A K-salt dump calls batchRunType once per distinct salt (runBatch's
+	// gsalt loop), each call reaching this same point with its own total, its
+	// own active/batch group and — with this change — its own independently
+	// measured probe rate. So a K-salt dump already prints and checks K
+	// separate ETAs, one per pass; there is no single aggregate ETA this probe
+	// could make K times too small by measuring only one group; measuring
+	// "one representative group" is simply what each call has always done,
+	// now done with an accurate rate instead of the scalar fallback's.
+	var probe feasibilityProbe
+	if lay := bruteLay; m == "brute" && lay != nil {
+		probe = func(pctx context.Context, n int64) (int64, bool) {
+			var attempts int64
+			if batchFastLayout(pctx, typ, salt, saltMode, lay, active, batch,
+				0, n, workers, &attempts, nil, record) {
+				return attempts, true
+			}
+			if batchStdLayout(pctx, typ, lay, active, batch, salt, saltMode,
+				0, n, workers, &attempts, nil, record) {
+				return attempts, true
+			}
+			if _, err := runLayout(pctx, lay, 0, n, workers, &attempts, nil, verify); err != nil {
+				return 0, false
+			}
+			return attempts, true
+		}
+	} else if lay := maskLay; m == "mask" && lay != nil {
+		probe = func(pctx context.Context, n int64) (int64, bool) {
+			var attempts int64
+			if batchFastLayout(pctx, typ, salt, saltMode, lay, active, batch,
+				0, n, workers, &attempts, nil, record) {
+				return attempts, true
+			}
+			if batchStdLayout(pctx, typ, lay, active, batch, salt, saltMode,
+				0, n, workers, &attempts, nil, record) {
+				return attempts, true
+			}
+			if _, err := runLayout(pctx, lay, 0, n, workers, &attempts, nil, verify); err != nil {
+				return 0, false
+			}
+			return attempts, true
+		}
+	}
+
 	// Run feasibility guard — same estimate the per-hash path makes in doCrack,
 	// over the same number that sizes the progress bar. `bounded` says whether
 	// this run is a distributed slice or a resumed one: a slice of an enormous
 	// keyspace is perfectly feasible on its own, so estimating it as if it were
-	// the whole keyspace would refuse every distributed run. The probe times the
-	// first still-unfound target of this type, which is representative — every
-	// target in this pass is the same type, and multi-hash mode hashes each
-	// candidate ONCE for all of them, so the rate does not scale with the target
-	// count.
-	// probe is nil here: this is the multi-target dispatch (batchFastLayout /
-	// batchStdLayout), a different pair of functions from the single-target
-	// runBruteOrMaskLayout probed below in doCrack. feasibilityRate falls back
-	// to benchTarget exactly as it did before this change — still correct,
-	// just not sped up by this task's fix (out of scope: see feasibility.go).
+	// the whole keyspace would refuse every distributed run.
 	if err := checkFeasibility(total, resumeFrom != 0 || limit > 0,
-		typ, batch[active[0]].norm, salt, saltMode, workers, force, nil); err != nil {
+		typ, batch[active[0]].norm, salt, saltMode, workers, force, probe); err != nil {
 		return false, err
 	}
 
@@ -882,10 +950,25 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 
 	switch m {
 	case "brute":
-		runPass(bruteLayout(charset, minLen, maxLen), true)
+		// Reuse the layout the feasibility probe already built above (same
+		// charset/minLen/maxLen, so it is identical) rather than paying for a
+		// second allocation of the same segments.
+		layout := bruteLay
+		if layout == nil {
+			layout = bruteLayout(charset, minLen, maxLen)
+		}
+		runPass(layout, true)
 	case "mask":
 		if mc != nil {
-			if layout, err := maskLayout(mc); err == nil {
+			// Reuse the layout the feasibility probe already built above when
+			// it built successfully; otherwise (probe wasn't run, or
+			// maskLayout failed there for a reason worth surfacing) build it
+			// here so a bad mask still behaves exactly as before.
+			layout := maskLay
+			if layout == nil {
+				layout, _ = maskLayout(mc)
+			}
+			if layout != nil {
 				runPass(layout, true)
 			}
 		}
