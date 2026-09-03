@@ -516,18 +516,19 @@ plain single-target run.
 | `--session` (resumable) | **free** — 101.95 vs 101.95 MH/s on arm64 CI, 84.40 vs 85.34 on x86-64 |
 | a dump instead of one hash | **free** — a 50-target dump matches a single target, interleaved |
 | a salt, on sha1 / sha256 | **free** — 99% and 94% of unsalted |
-| a salt, on md5 | **~6x** — salted md5 reaches 17% of unsalted md5 |
-
-The md5 row is the one asymmetry, and it has a specific cause: unsalted md5
-runs on the NEON/AVX2 vector core, while a salted run takes the contiguous
-batch path around the standard library. sha1 and sha256 have no vector core
-either way, so for them the batch path closes the whole gap. Teaching the
-vector core to carry a salt would close md5's too; until then, prefer sha1 or
-sha256 benchmarks when comparing salted throughput.
+| a salt, on md5 / md4 / ntlm | **free** — 98% of unsalted, interleaved |
 
 All four used to cost far more. Sessions were 10x, a dump was 48x the work of
 one hash, and a salt was 14x, all for no reason beyond which code path the
 dispatcher happened to choose.
+
+The md5 row was the last to fall and was the most awkward: sha1 and sha256
+reached parity as soon as the contiguous batch path existed, because neither
+has a vector core to miss, whereas unsalted md5 runs on the NEON/AVX2 core and
+a salted run could not. It now can — the cores hash a message block and do not
+care whether a salt is in it — so salted md5 went from 34% of unsalted to 98%.
+A salt that would push a candidate past the one-block limit still declines to
+the batch path rather than digesting a truncated message.
 
 ### The vector cores, both architectures
 
