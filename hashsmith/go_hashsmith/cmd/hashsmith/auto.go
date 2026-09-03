@@ -60,6 +60,12 @@ func runAuto(args []string) error {
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
+	if err := checkSaltMode(*saltMode); err != nil {
+		return err
+	}
+	if err := checkBruteCharset(*mode, *charset); err != nil {
+		return err
+	}
 
 	targets, err := gatherInputs(fs.Args())
 	if err != nil {

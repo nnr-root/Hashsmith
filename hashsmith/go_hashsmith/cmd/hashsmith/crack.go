@@ -571,6 +571,12 @@ func runCrack(args []string) error {
 	// to 0 and treats a non-positive limit as unbounded, so a typo'd negative
 	// value would silently mean "start from the beginning" / "do everything" —
 	// the opposite of a deliberate distributed slice. Reject it outright.
+	if err := checkSaltMode(*saltMode); err != nil {
+		return err
+	}
+	if err := checkBruteCharset(*mode, *charset); err != nil {
+		return err
+	}
 	if *skip < 0 {
 		return fmt.Errorf("--skip must not be negative (got %d)", *skip)
 	}

@@ -43,6 +43,9 @@ func runHash(args []string) error {
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
+	if err := checkSaltMode(*saltMode); err != nil {
+		return err
+	}
 	inputs, err := gatherInputs(fs.Args())
 	if err != nil {
 		return err
