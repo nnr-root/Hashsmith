@@ -396,3 +396,225 @@ func batchDPrototypes() []hashid.Prototype {
 			"KeePass is one of the most widely used cross-platform password managers, so its KDBX database file recurs routinely in password-manager cracking casework", "keepass"),
 	}
 }
+
+// batchEPrototypes ports the wallet, wireless and web-framework branches of
+// the legacy cascade: WPA*01*/WPA*02*/isLegacyPMKID through sha1-cx (original
+// lines 1470-1554), the first half of that range; a second batch (F) picks up
+// at isMySQL8.
+//
+// This half ports 27 single-type branches plus two nested ones ($ethereum$
+// and $blockchain$, each split into two prototypes with the more specific
+// form listed first), for 28 total: detectWPAPMKIDRecord (original lines
+// 1473-1475) is a genuine, currently-unported branch inside this range that
+// has no entry in the golden-inputs convenience file, which otherwise lists
+// exactly 27 branches for this half — see the task report for the full
+// explanation of that discrepancy. Confirmed against
+// testdata/detect_golden.txt lines 239-240 (wpa-pmk, wpa-pmkid).
+func batchEPrototypes() []hashid.Prototype {
+	return []hashid.Prototype{
+		// The legacy branch ORs three conditions for one type: two literal
+		// prefixes (WPA*01*, WPA*02*, the modern hc22000 form) plus
+		// isLegacyPMKID, which has no fixed prefix at all — it only checks
+		// that the record splits into 4 asterisk-delimited fields of length
+		// 32/12/12/nonempty, all hex. Because a match can come from either
+		// path, and one path carries no literal marker, the whole prototype
+		// is TierStructural rather than TierSignature: reporting the
+		// isLegacyPMKID path as an unrivalled "certain" match would overstate
+		// its evidence.
+		{
+			Types: []string{"wpa"}, Display: "WPA/WPA2 PMKID and EAPOL (hc22000)",
+			Tier: hashid.TierStructural, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if strings.HasPrefix(in.Normalized, "WPA*01*") || strings.HasPrefix(in.Normalized, "WPA*02*") || isLegacyPMKID(in.Normalized) {
+					return "record prefix WPA*01* or WPA*02*, or (isLegacyPMKID) a bare asterisk-delimited pmkid*ap*sta*essid record with fields of length 32/12/12/nonempty, all hex", true
+				}
+				return "", false
+			},
+			Prevalence: 30, Rationale: "the WPA*01*/WPA*02* hc22000 format is the current default output of hcxpcapngtool and other modern WiFi-capture conversion tools, making it the most common wireless-handshake record encountered; isLegacyPMKID covers the older bare PMKID line those same tools superseded",
+		},
+		// detectWPAPMKIDRecord has no fixed prefix: it only checks that the
+		// record splits into 3 or 4 colon-delimited fields of length
+		// 32/12/12/(hex, even, <=64), all hex, so TierStructural. Its Types
+		// depend on the input (3 fields -> wpa-pmk, 4 fields -> wpa-pmkid),
+		// so it is expressed with Compute rather than Types, mirroring the
+		// legacy cascade's `if typ := detectWPAPMKIDRecord(t); typ != ""`.
+		{
+			Display: "WPA PMKID/EAPOL colon-delimited record (raw PMK candidate)",
+			Tier:    hashid.TierStructural, Exclusive: true,
+			Compute: func(in hashid.Input) ([]string, bool) {
+				if typ := detectWPAPMKIDRecord(in.Normalized); typ != "" {
+					return []string{typ}, true
+				}
+				return nil, false
+			},
+			Prevalence: 8, Rationale: "these colon-delimited PMKID/EAPOL-MIC records require a raw PMK or PSK candidate rather than a full 4-way handshake capture, a narrower verification path than the primary WPA*01*/WPA*02* hc22000 format above",
+		},
+		// $ethereum$ is nested in the legacy cascade: a record additionally
+		// prefixed "$ethereum$w*" is the pre-sale variant; any other
+		// "$ethereum$" record is the standard keystore. Neither sub-branch
+		// decodes anything beyond the prefix in the cascade itself (the
+		// field-level parse happens only in the verifier), so both are plain
+		// hasPrefixProto entries; the more specific "$ethereum$w*" form is
+		// listed first so table order reproduces the nested precedence, as
+		// with $vbox$ in batchB.
+		hasPrefixProto("$ethereum$w*", "Ethereum pre-sale wallet", 4,
+			"the 2014 Ethereum pre-sale wallet format was retired once the mainnet went live, so it now appears only in very old pre-sale wallet backups", "ethereum-presale"),
+		hasPrefixProto("$ethereum$", "Ethereum wallet (Web3 keystore v3)", 15,
+			"the standard $ethereum$p* Web3 keystore v3 record is the current default export format for Ethereum wallets across MetaMask, geth and most other clients, making it the more commonly encountered of the two Ethereum record shapes here", "ethereum"),
+		hasPrefixProto("$aescrypt$1*", "AES Crypt v1 password record", 12,
+			"AES Crypt is a long-standing, actively maintained cross-platform file-encryption tool with a simple documented file format, giving it broader real-world exposure than most of the single-vendor wallet formats in this batch", "aescrypt"),
+		hasPrefixProto("$multibit$1*", "MultiBit Classic / bitcoinj encrypted key", 5,
+			"MultiBit was discontinued in 2017, so its encrypted-key format now only surfaces in legacy Bitcoin wallet backups rather than active wallets", "multibit-key"),
+		// isTerraWallet has no fixed prefix — it only checks an exact total
+		// length (172), hex composition of the first 64 chars, and that the
+		// remainder base64-decodes to exactly 80 bytes — so TierStructural,
+		// not TierSignature.
+		predicateProto(isTerraWallet, "Terra Station wallet", hashid.TierStructural,
+			"172-char record: the first 64 chars hex, the remaining chars base64-decoding to exactly 80 bytes",
+			5, "Terra Station's user base contracted sharply after the LUNA/UST collapse in 2022, so its wallet keystore format is now a narrower cryptocurrency-wallet target than Bitcoin or Ethereum", "terra-wallet"),
+		hasPrefixProto("$bitcoin$", "Bitcoin/Litecoin wallet.dat", 25,
+			"Bitcoin Core's wallet.dat encryption remains the reference implementation for the largest cryptocurrency by market capitalization, making $bitcoin$ the most frequently encountered wallet record in this batch", "bitcoin"),
+		hasPrefixProto("$dmg$", "Apple encrypted DMG v1/v2", 18,
+			"encrypted Apple Disk Images are a routine artifact in macOS forensic examinations, recurring wherever a suspect volume or backup image is DMG-password-protected", "dmg"),
+		hasPrefixProto("$monero$0*", "Monero .keys wallet", 12,
+			"Monero is consistently a top-10 cryptocurrency by market capitalization, so its wallet-file KDF record recurs in cryptocurrency casework, though its privacy-coin niche gives it a smaller install base than Bitcoin", "monero"),
+		hasPrefixProto("$bitwarden$", "Bitwarden vault master password", 20,
+			"Bitwarden is among the most widely adopted cross-platform password managers, making its exported vault a common target in password-manager cracking casework", "bitwarden"),
+		hasPrefixProto("$itunes_backup$", "iTunes backup (PBKDF2 + AES key-unwrap)", 18,
+			"encrypted iTunes/Finder local device backups are a standard artifact recovered in iOS device forensic examinations", "itunes"),
+		hasPrefixProto("$ansible$", "Ansible Vault", 12,
+			"Ansible Vault only appears when a project has opted into encrypting its playbook secrets, a common but non-default DevOps practice, so it recurs less often than formats that are on by default", "ansible"),
+		// $blockchain$ is nested in the legacy cascade: parseBlockchainLegacy
+		// succeeding (full parse: prefix, a $-delimited byte-length field,
+		// and a hex data field whose decoded length equals it and is >=32)
+		// selects the legacy variant; otherwise any other "$blockchain$"
+		// record is the current v2 format. The legacy check fully parses
+		// fields, so TierSignature; the more specific entry is listed first
+		// so table order reproduces the nested precedence.
+		{
+			Types: []string{"blockchain-legacy"}, Display: "Blockchain My Wallet legacy AES-OFB wallet",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if _, _, err := parseBlockchainLegacy(in.Normalized); err == nil {
+					return "record prefix $blockchain$ followed by a $-delimited byte-length field and a hex data field whose decoded length equals it (at least 32 bytes)", true
+				}
+				return "", false
+			},
+			Prevalence: 4, Rationale: "Blockchain.info replaced this single-iteration AES-OFB wallet format with the PBKDF2-hardened v2 format below years ago, so the legacy form now only appears in very old wallet.aes.json backups",
+		},
+		hasPrefixProto("$blockchain$", "Blockchain.info My Wallet v2", 10,
+			"the current PBKDF2-hardened Blockchain.info My Wallet v2 format is that service's present-day default, giving it more real-world exposure than the legacy single-iteration variant above", "blockchain"),
+		hasPrefixProto("$rc4$", "RC4 DropN known-plaintext verifier", 4,
+			"the RC4-DropN known-plaintext verifier (Hashcat modes 33500-33502) requires a captured known-plaintext/ciphertext pair for a deprecated stream cipher, a scenario encountered far less often than an on-disk credential dump", "rc4-dropn"),
+		// isShiro1 fully parses the $shiro1$SHA-512$* record (6 $-delimited
+		// fields, literal "shiro1" and "SHA-512" markers, iterations, and
+		// salt/digest both valid base64 with the digest exactly 64 bytes), so
+		// TierSignature.
+		predicateProto(isShiro1, "Apache Shiro 1 SHA-512", hashid.TierSignature,
+			"$shiro1$SHA-512$<iterations>$<base64 salt>$<base64 digest>: 6 $-delimited fields with literal shiro1/SHA-512 markers, and salt/digest that both decode as base64 with the digest exactly 64 bytes",
+			10, "Apache Shiro is a widely used Java security framework, but iterated salted SHA-512 (Hashcat mode 12150) is only one of several credential-storage schemes a Shiro-based application may be configured to use", "shiro1-sha512"),
+		// isSSPR is a literal prefix check ("$sspr$"), nothing more, so
+		// TierSignature.
+		predicateProto(isSSPR, "NetIQ SSPR / Adobe AEM record", hashid.TierSignature,
+			"record prefix $sspr$",
+			6, "the NetIQ SSPR / Adobe AEM self-service password reset answer store is confined to those two specific enterprise identity products, a narrow slice of enterprise-software casework", "sspr"),
+		// isNetIQPBKDF2 is an OR of two literal prefixes, nothing more, so
+		// TierSignature.
+		predicateProto(isNetIQPBKDF2, "NetIQ PBKDF2-HMAC record", hashid.TierSignature,
+			"record prefix $pbkdf2-hmac-sha1$ or $pbkdf2-hmac-sha512$",
+			6, "NetIQ's PBKDF2-HMAC-SHA1/SHA512 record is specific to NetIQ identity-management deployments, a narrower installed base than general-purpose PBKDF2 usage", "netiq-pbkdf2"),
+		// isAS400SSHA1 is a literal prefix check ("$as400$ssha1$*"), nothing
+		// more, so TierSignature.
+		predicateProto(isAS400SSHA1, "IBM AS/400 salted SHA-1", hashid.TierSignature,
+			"record prefix $as400$ssha1$*",
+			4, "IBM AS/400 (iSeries) salted SHA-1 credentials are confined to a shrinking installed base of legacy IBM midrange systems", "as400-ssha1"),
+		// isAuthMeSHA256 is a literal prefix check ("$SHA$"), nothing more,
+		// so TierSignature.
+		predicateProto(isAuthMeSHA256, "AuthMe SHA-256", hashid.TierSignature,
+			"record prefix $SHA$",
+			8, "AuthMe is one of several competing Minecraft server authentication plugins (alongside LoginSecurity and others), limiting its share of Minecraft-server credential dumps", "authme-sha256"),
+		// isPHPS is a literal prefix check ("$PHPS$"), nothing more, so
+		// TierSignature.
+		predicateProto(isPHPS, "PHPS md5(md5($pass).$salt)", hashid.TierSignature,
+			"record prefix $PHPS$",
+			5, "the $PHPS$ md5(md5($pass).$salt) scheme predates PHP's password_hash() API introduced in PHP 5.5 and is rarely chosen by currently maintained PHP applications", "phps"),
+		// The legacy branch requires both a literal prefix ("pbkdf2(") and a
+		// literal substring (",sha512)$"); both are literal text markers, so
+		// TierSignature.
+		{
+			Types: []string{"web2py-pbkdf2"}, Display: "web2py PBKDF2-HMAC-SHA512",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if strings.HasPrefix(in.Normalized, "pbkdf2(") && strings.Contains(in.Normalized, ",sha512)$") {
+					return "record prefix pbkdf2( together with the substring ,sha512)$", true
+				}
+				return "", false
+			},
+			Prevalence: 5, Rationale: "web2py has a substantially smaller install base than Django or Flask among Python web frameworks, giving its PBKDF2-HMAC-SHA512 password record a narrower real-world footprint",
+		},
+		hasPrefixProto("$wp$2", "WordPress bcrypt(HMAC-SHA384($pass))", 20,
+			"WordPress moved to bcrypt(HMAC-SHA384(password)) hashing starting with WordPress 6.8, and WordPress powers a large share of the web, so this record is common on any recently updated WordPress site", "wordpress-bcrypt"),
+		// The legacy branch tests two literal prefixes ("$krb5db$17$" and
+		// "$krb5db$18$", etype 17/18) in one `if` for the same Kerberos KDB
+		// principal-key type; kept as one prototype here so the
+		// coverage-case count tracks the single cascade branch it replaces.
+		{
+			Types: []string{"krb5db"}, Display: "Kerberos 5 database key (etype 17/18)",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if strings.HasPrefix(in.Normalized, "$krb5db$17$") || strings.HasPrefix(in.Normalized, "$krb5db$18$") {
+					return "record prefix $krb5db$17$ or $krb5db$18$", true
+				}
+				return "", false
+			},
+			Prevalence: 15, Rationale: "MIT Kerberos/Active Directory KDC database dumps (etype 17/18, AES-128/256) are the modern default principal-key encoding, recurring wherever a domain controller's Kerberos database is extracted",
+		},
+		// No fixed prefix: only a dot-delimited field count (3) and an exact
+		// length (27) on the third field. TierStructural.
+		{
+			Types: []string{"flask-session"}, Display: "Flask session cookie (HMAC-SHA1)",
+			Tier: hashid.TierStructural, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				fields := strings.Split(in.Normalized, ".")
+				if len(fields) == 3 && len(fields[2]) == 27 {
+					return "dot-delimited record with exactly 3 fields, the third exactly 27 chars", true
+				}
+				return "", false
+			},
+			Prevalence: 12, Rationale: "Flask's signed client-side session cookie is that framework's built-in default session mechanism, so it recurs wherever a Flask application's session cookie is captured, though Flask itself is one of several popular Python web frameworks",
+		},
+		// No fixed prefix: only a colon-delimited field count (2), an exact
+		// length (40) and hex-ness on the first field, and a minimum length
+		// (>=128) and hex-ness on the second. TierStructural. This branch is
+		// checked before sha1-cx below (same field-0 shape, distinguished
+		// only by field-1 length), reproducing the cascade's own order.
+		{
+			Types: []string{"peoplesoft-token"}, Display: "PeopleSoft PS_TOKEN salted SHA-1",
+			Tier: hashid.TierStructural, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				fields := strings.Split(in.Normalized, ":")
+				if len(fields) == 2 && len(fields[0]) == 40 && isHex(fields[0]) &&
+					len(fields[1]) >= 128 && isHex(fields[1]) {
+					return "colon-delimited record with exactly 2 fields: the first exactly 40 hex chars, the second at least 128 hex chars", true
+				}
+				return "", false
+			},
+			Prevalence: 5, Rationale: "PeopleSoft's PS_TOKEN salted SHA-1 format is specific to Oracle PeopleSoft HCM/Campus Solutions deployments, a narrow enterprise-software niche",
+		},
+		// No fixed prefix: only a colon-delimited field count (2), an exact
+		// length (40) and hex-ness on the first field, and an exact length
+		// (20, no hex requirement) on the second. TierStructural.
+		{
+			Types: []string{"sha1-cx"}, Display: "Iterated SHA-1 CX construction",
+			Tier: hashid.TierStructural, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				fields := strings.Split(in.Normalized, ":")
+				if len(fields) == 2 && len(fields[0]) == 40 && isHex(fields[0]) && len(fields[1]) == 20 {
+					return "colon-delimited record with exactly 2 fields: the first exactly 40 hex chars, the second exactly 20 chars", true
+				}
+				return "", false
+			},
+			Prevalence: 3, Rationale: "Hashcat mode 14400's iterated SHA-1 CX construction is a narrowly-scoped legacy verifier without a well-known single source application, so it recurs far less often than mainstream crypt(3) or KDF formats",
+		},
+	}
+}

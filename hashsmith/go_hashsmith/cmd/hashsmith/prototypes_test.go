@@ -141,3 +141,50 @@ func TestTableCoverageBatchD(t *testing.T) {
 		{"keepass", `$keepass$*4*d*14*67108864*2*19*7264517c7aa1a76af9eaaf503768d2a51e5844430388731829035994b06a7618*a449a3fb4f23e8ffe80051c585e348a78be1dee3801bd6b93dd919d43ae8bc66*03d9a29a67fb4bb500000400021000000031c1f`, []string{"keepass"}},
 	})
 }
+
+func TestTableCoverageBatchE(t *testing.T) {
+	runTableCoverage(t, []tableCoverageCase{
+		{"wpa", `WPA*01*5ce7ebe97a1bbfeb2822ae627b726d5b*27462da350ac*accd10fb464e*686173686361742d6573736964***`, []string{"wpa"}},
+		// detectWPAPMKIDRecord sits between the wpa branch and $ethereum$ in
+		// the legacy cascade (original lines 1473-1475) but has no entry in
+		// the golden-inputs convenience file, which otherwise lists exactly
+		// 27 branches for this half. It is a genuine, currently-unported
+		// branch inside this task's stated range ("from WPA*01*/WPA*02*/
+		// isLegacyPMKID down to and including sha1-cx"), confirmed against
+		// testdata/detect_golden.txt lines 239-240 (wpa-pmk, wpa-pmkid). See
+		// the task report for the full explanation.
+		{"wpa-pmkid", `2582a8281bf9d4308d6f5731d0e61c61:4604ba734d4e:89acf0e761f4:ed487162465a774bfba60eb603a39f3a`, []string{"wpa-pmkid"}},
+		{"ethereum-presale", `$ethereum$w*e94a8e49deac2d62206bf9bfb7d2aaea7eb06c1a378cfc1ac056cc599a569793c0ecc40e6a0c242dee2812f06b644d70f43331b1fa2ce4bd6cbb9f62dd25b443235bdb4c1ffb222084c9ded8c719624b338f17e0fd827b34d79801298ac75f74ed97ae16f72fccec`, []string{"ethereum-presale"}},
+		{"ethereum", `$ethereum$p*1024*38353131353831333338313138363430*a8b4dfe92687dbc0afeb5dae7863f18964241e96b264f09959903c8c924583fc*0a9252861d1e235994ce33dbca91c98231764d8ecb4950015a8ae20d6415b986`, []string{"ethereum"}},
+		{"aescrypt", `$aescrypt$1*efc648908ca7ec727f37f3316dfd885c*eff5c87a35545406a57b56de57bd0554*3a66401271aec08cbd10cf2070332214093a33f36bd0dced4a4bb09fab817184*6a3c49fea0cafb19190dc4bdadb787e73b1df244c51780beef912598bd3bdf7e`, []string{"aescrypt"}},
+		{"multibit-key", `$multibit$1*e5912fe5c84af3d5*5f0391c219e8ef62c06505b1f6232858f5bcaa739c2b471d45dd0bd8345334de`, []string{"multibit-key"}},
+		{"terra-wallet", `67445496c838e96c1424a8dae4b146f0fc247c8c34ef33feffeb1e4412018512wZGtBMeN84XZE2LoOKwTGvA4Ee4m7PR1lDGIdWUV6OSUZKRiKFx9tlrnZLt8r8OfOzbwUS2a2Uo+nrrP6F85fh4eHstwPJw0KwzHWB8br58=`, []string{"terra-wallet"}},
+		{"bitcoin", `$bitcoin$96$d011a1b6a8d675b7a36d0cd2efaca32a9f8dc1d57d6d01a58399ea04e703e8bbb44899039326f7a00f171a7bbc854a54$16$1563277210780230$158555$96$628835426818227243334570448571536352510740823233055715845322741625407685873076027233865346542174$66$625882875480513751851333441623702852811440775888122046360561760525`, []string{"bitcoin"}},
+		{"dmg", `$dmg$1*20*f615ec6c463799eccc6a2dfbedf12c6bdc422a2a*56*a595f4a81a490e7aa6378034661da57a424f922c971d3db3f856f8d54b0784bcc5d7182905c4237153c5d250b8aee1d26410b1dca7b1cb73*48*74a060efbaf2c79d5523219d8162c425befbb2094fb46e7ffaedc7cd4f192e6f0c47d8aa91e0a3201346725d3ddadfff`, []string{"dmg"}},
+		{"monero", `$monero$0*982cc13dd90ed2e2970294b2a67480826acaf8eeedec74acccc5929c33d6b7cf01609f0ddb72817579c4375bd1d8f4d47c36c67d83bd3a817d1242211c6824720e430757c24238189875fbb7fe5e643b4273ac3912c7f4f6998ed1086634cebcce035a4af0122c2a6e601ff160bcfa0cfce06d8b3dd38915aa4f6067a732f954da2029ccca5664bbf5df2b2ce046918eec9b71224ec75418686eb437678ebfba50ed3e07ce0bba39f45610775b9958f44b3a53bf3294d7c55f2c455e2ada17f4426969fbc57cc659793892e558b163dd4826889c865b685ea49c54744ecbfcce9d9d39d16e8874a35ec767ab5b69e498f0989f7dd22becb2d50797e7c2867536bc6a1e9b0ecc0d864204c5114fef9ed86d962fced5cac90dbb33a72d16753075bf`, []string{"monero"}},
+		{"bitwarden", `$bitwarden$0*5000*lulu@mailinator.com*20d9c3c9daaed076026b6cb5887d3273*3bbcb4c7cec45d71c7238291573eb8a8a0f71e6191fb708b07f2cb43b26a56b533ba35a5906abdc08600baedb18fbc042a3b50f4549890210a254129b0ae749394c3c39b33ca183c605ee97b167329d3`, []string{"bitwarden"}},
+		{"itunes", `$itunes_backup$*9*b8e3f3a970239b22ac199b622293fe4237b9d16e74bad2c3c3568cd1bd3c471615a6c4f867265642*10000*4542263740587424862267232255853830404566**`, []string{"itunes"}},
+		{"ansible", `$ansible$0*0*00112233445566778899aabbccddeeff*f7c3cc30dd11c057fc913c1a39c062fbda11319016b329897480ea4be6fc03ab*aabbccddeeff00112233445566778899`, []string{"ansible"}},
+		// The golden-inputs.md copy of this line was truncated (it stops
+		// partway through the hex data field). blockchain-legacy's Match
+		// calls parseBlockchainLegacy, which decodes the hex data field and
+		// requires its length to equal the declared $269$ byte count, so a
+		// truncated copy fails to parse. Substituted the full line from
+		// testdata/detect_golden.txt:51 (verified: 538 hex chars = 269 bytes).
+		{"blockchain-legacy", `$blockchain$269$0349575305940509451603791869345994679e29d1618f26ed65ee15ad65d1af046f51ffcfbfa82dcccea07bb0f0fff725af53b96910646440b361453addc5caeb2a09479dc6cce3a1ebf138e2649689ab286ba2db6bd5edef310cac8f9386f002a534e9346cdc61bd0e21ca738eb2418a8158c83a43517981c43d8792cad6f290cbf40d5a3c1bb20283fcb44c59cae2dc90c898dbc4e960ca666653a08d90471610a8b9bf590752e8d8bee27e7aa58d015324dae83c87a46384ed8f947e37e65d4572018b5bfd8fd8ea70df777c8b692bc613ccb528356d1844490ac2b3be2dd8927fbf1aabf9b6cedec39742ed92a03220f4468bd32c1eed5d5c3c3aa0be459e06466c94991df97f335bd661`, []string{"blockchain-legacy"}},
+		{"blockchain", `$blockchain$v2$5000$288$06063152445005516247820607861028813ccf6dcc5793dc0c7a82dcd604c5c3e8d91bea9531e628c2027c56328380c87356f86ae88968f179c366da9f0f11b09492cea4f4d591493a06b2ba9647faee437c2f2c0caaec9ec795026af51bfa68fc71`, []string{"blockchain"}},
+		{"rc4-dropn", `$rc4$40$0$e9a41693b759cf88929ca31203694f$0$48656c6c6f`, []string{"rc4-dropn"}},
+		{"shiro1-sha512", `$shiro1$SHA-512$1024$WobJGSjbUhsMdaILomMOdw==$9uptGJ24vzZCqZI55F77N7xjUxGlVrK5aCmAwIrV1vwDmFM4akE6Hmd23Aj8ANLSUdIEkHLZ6SnoitZbOsoQNQ==`, []string{"shiro1-sha512"}},
+		{"sspr", `$sspr$0$100000$NONE$2c8586ef492e3c3dd3795395507dc14f`, []string{"sspr"}},
+		{"netiq-pbkdf2", `$pbkdf2-hmac-sha1$100000$7134180503252384106490944216249411431665011151428170747164626720$990e0c5f62b1384d48cbe3660329b9741c4a8473`, []string{"netiq-pbkdf2"}},
+		{"as400-ssha1", `$as400$ssha1$*QTEST1*7ED7D3694D0A2E40A720D41031B456C09124966E`, []string{"as400-ssha1"}},
+		{"authme-sha256", `$SHA$7218532375810603$bfede293ecf6539211a7305ea218b9f3f608953130405cda9eaba6fb6250f824`, []string{"authme-sha256"}},
+		{"phps", `$PHPS$34323438373734$5b07e065b9d78d69603e71201c6cf29f`, []string{"phps"}},
+		{"web2py-pbkdf2", `pbkdf2(1000,20,sha512)$744943$c5f8cdef76e3327c908d8d96d4abdb3d8caba14c`, []string{"web2py-pbkdf2"}},
+		{"wordpress-bcrypt", `$wp$2y$10$lzlQrRRhLSjz486bA9CKHuZRPoKz4uviT251Sq/r5OzKUBbrXwnQW`, []string{"wordpress-bcrypt"}},
+		{"krb5db", `$krb5db$17$test$TEST.LOCAL$1c41586d6c060071e08186ee214e725e`, []string{"krb5db"}},
+		{"flask-session", `eyJ1c2VybmFtZSI6ImFkbWluIn0.YjdgRQ.1OTlf1PD0H9wXsu_qS0aywAJVD8`, []string{"flask-session"}},
+		{"peoplesoft-token", `24eea51b53d02b4c5ff99bcb05a6847fdb2d9308:4f10a0de76e242040c28e9d3dd15c903343489c79765f9118c098c266b9ff505c95bd75bbe406ff3404849eea73930ad17937c0ba6fc3e7bb6d37362941318938b8af96d1292a310b3fd29a67e411ecb10d30247c99183a1695`, []string{"peoplesoft-token"}},
+		{"sha1-cx", `fd9149fb3ae37085dc6ed1314449f449fbf77aba:87740665218240877702`, []string{"sha1-cx"}},
+	})
+}
