@@ -1174,7 +1174,7 @@ func batchHPrototypes() []hashid.Prototype {
 				}
 				return generic, true
 			},
-			Prevalence: 35, Rationale: "generic salted constructions are common but individually indistinguishable",
+			Prevalence: 35, Rationale: "a bare hash:salt pair of a qualifying digest length is the generic shape several concrete apps build on (Redmine, vBulletin); with no app-specific marker present there is no basis for attributing it to one of those apps instead of a plain construction, and no corpus data distinguishes the base rate of an unmarked pair from a marked one",
 		},
 		// krb5asrep is nested: a record additionally prefixed "$23$" (RC4)
 		// selects the etype-23 candidate pair; any other "$krb5asrep$" record
@@ -1265,7 +1265,7 @@ func batchHPrototypes() []hashid.Prototype {
 				}
 				return "", false
 			},
-			Prevalence: 10, Rationale: "SQL Server 2012+ moved SQL-authenticated logins to a SHA-512-based hash; that format is common wherever a modern MSSQL sysxlogins-style dump occurs, but this particular branch can never actually match — see the code comment",
+			Prevalence: 10, Rationale: "no basis for a better estimate; revisit with corpus data",
 		},
 		// The general mssql2005 branch is just reMSSQLNew.MatchString(t) &&
 		// NOT the (unreachable) 0x0200 check, i.e. equivalent to
