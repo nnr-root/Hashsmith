@@ -34,6 +34,7 @@ func prototypeTable() []hashid.Prototype {
 		prototypeTableVal = append(prototypeTableVal, batchEPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, batchFPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, batchGPrototypes()...)
+		prototypeTableVal = append(prototypeTableVal, batchHPrototypes()...)
 	})
 	return prototypeTableVal
 }

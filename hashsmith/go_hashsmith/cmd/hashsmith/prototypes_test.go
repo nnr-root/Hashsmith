@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -299,5 +300,91 @@ func TestTableCoverageBatchG(t *testing.T) {
 		// isCiscoASA Compute entry above always wins first and already
 		// appends oracle-h when applicable. Kept anyway for cascade
 		// fidelity; see its Rationale.
+	})
+}
+
+// TestTableCoverageBatchH ports the generic salted-construction, Kerberos and
+// regex-single branches of the legacy cascade: detectCompatSaltedTypes
+// through the 50-char arubaos branch (original lines 1978-2054). 18 `return`
+// statements in that range, one prototype per return (the nested $23$/general
+// pairs for krb5asrep, krb5tgs and reMSSQLNew each count as two), for 18
+// prototypes.
+//
+// Case count is 22, not 18: the detectCompatSaltedTypes Compute entry is one
+// prototype but reaches 6 distinct output shapes (no prepend; redmine;
+// vbulletin alone; vbulletin+aes128-ecb-nokdf group; symfony-legacy alone;
+// symfony-legacy+netwitness-sha256), each given its own case per the
+// batchF/batchG precedent on covering every Compute output — that is 16
+// single-output branches + 6 shapes = 22.
+//
+// mssql2012 gets no case: reMSSQLNew is anchored `(?i)^0x0100[0-9a-fA-F]{48}$`,
+// so any string it matches is already guaranteed to start with the literal
+// digits "0100" (case-folding only affects a-f, not the digits 0/1). The
+// nested check for a "0x0200" prefix therefore can never see the record it
+// is looking for, on ANY input — this is dead code inherited verbatim from
+// the legacy cascade, not a table-position artifact. Ported anyway for
+// cascade fidelity; see its Rationale and the comment on the prototype.
+//
+// The Compute entry's own isHexPair(t, 16, 16) prepend (des-plaintext,
+// 3des-plaintext) is similarly dead code, but it is not a separate table
+// entry — it is one branch inside the Compute closure — so it does not
+// change the prototype or case count above; see the comment beside it in
+// batchHPrototypes for the proof.
+func TestTableCoverageBatchH(t *testing.T) {
+	runTableCoverage(t, []tableCoverageCase{
+		// detectCompatSaltedTypes Compute entry: 6 reachable output shapes.
+		{"salted-digest generic only (56-byte digest, no app-specific prepend matches)",
+			strings.Repeat("a", 56) + ":12345678",
+			[]string{"sha224-pass-salt", "sha224-salt-pass"}},
+		{"salted-digest + redmine (40-hex digest, 32-hex salt)",
+			strings.Repeat("a", 40) + ":" + strings.Repeat("b", 32),
+			[]string{"redmine", "sha1-pass-salt", "sha1-salt-pass", "sha1-utf16le-pass-salt", "sha1-salt-utf16le-pass", "sha1-md5pass-salt", "sha1-md5passsalt", "sha1-salt-md5pass", "sha1-salt-pass-salt", "sha1-salt-sha1pass", "sha1-salt-sha1passsalt", "sha1-salt-sha1saltsha1pass", "sha1-sha1-sha1pass", "sha1-sha1binpass", "sha1-sha1pass-salt", "sha1-sha1saltpasssalt"}},
+		{"salted-digest + vbulletin/dcc alone (32-hex digest, non-hex salt)",
+			strings.Repeat("a", 32) + ":notahexvalue1",
+			[]string{"vbulletin", "dcc", "md5-pass-salt", "md5-salt-pass", "md5-utf16le-pass-salt", "md5-salt-utf16le-pass", "md5-md5-md5pass-salt", "md5-md5binpass", "md5-md5pass-md5salt", "md5-md5pass-pass", "md5-md5pass-salt", "md5-md5passsalt", "md5-md5salt-md5-md5pass", "md5-md5salt-md5pass", "md5-md5salt-pass", "md5-pass-md5pass", "md5-pass-pass", "md5-salt-md5pass", "md5-salt-md5pass-salt", "md5-salt-md5passsalt", "md5-salt-md5saltpass", "md5-salt-pass-md5pass", "md5-salt-pass-salt", "md5-salt-sha1saltpass", "md5-sha1-md5pass", "md5-sha1pass-md5pass-sha1pass", "md5-sha1pass-salt", "md5-sha1passsalt", "md5-sha1salt-md5pass", "md5-sha1saltpass"}},
+		{"salted-digest + aes128-ecb-nokdf group + vbulletin/dcc (32-hex digest, 32-hex salt)",
+			strings.Repeat("a", 32) + ":" + strings.Repeat("b", 32),
+			[]string{"aes128-ecb-nokdf", "aes192-ecb-nokdf", "aes256-ecb-nokdf", "vbulletin", "dcc", "md5-pass-salt", "md5-salt-pass", "md5-utf16le-pass-salt", "md5-salt-utf16le-pass", "md5-md5-md5pass-salt", "md5-md5binpass", "md5-md5pass-md5salt", "md5-md5pass-pass", "md5-md5pass-salt", "md5-md5passsalt", "md5-md5salt-md5-md5pass", "md5-md5salt-md5pass", "md5-md5salt-pass", "md5-pass-md5pass", "md5-pass-pass", "md5-salt-md5pass", "md5-salt-md5pass-salt", "md5-salt-md5passsalt", "md5-salt-md5saltpass", "md5-salt-pass-md5pass", "md5-salt-pass-salt", "md5-salt-sha1saltpass", "md5-sha1-md5pass", "md5-sha1pass-md5pass-sha1pass", "md5-sha1pass-salt", "md5-sha1passsalt", "md5-sha1salt-md5pass", "md5-sha1saltpass"}},
+		{"salted-digest + symfony-legacy alone (64-hex digest, salt that is not valid base64)",
+			strings.Repeat("a", 64) + ":!!!!",
+			[]string{"symfony-legacy", "sha256-pass-salt", "sha256-salt-pass", "sha256-utf16le-pass-salt", "sha256-salt-utf16le-pass", "sha256-md5pass", "sha256-salt-pass-salt", "sha256-salt-sha256binpass", "sha256-salt-sha256pass", "sha256-salt-uppersha1pass", "sha256-salt-utf16lepass", "sha256-sha256binpass", "sha256-sha256pass-salt", "sha256-sha256passsalt"}},
+		{"salted-digest + symfony-legacy + netwitness-sha256 (64-hex digest, base64 salt)",
+			strings.Repeat("a", 64) + ":abcd",
+			[]string{"symfony-legacy", "netwitness-sha256", "sha256-pass-salt", "sha256-salt-pass", "sha256-utf16le-pass-salt", "sha256-salt-utf16le-pass", "sha256-md5pass", "sha256-salt-pass-salt", "sha256-salt-sha256binpass", "sha256-salt-sha256pass", "sha256-salt-uppersha1pass", "sha256-salt-utf16lepass", "sha256-sha256binpass", "sha256-sha256pass-salt", "sha256-sha256passsalt"}},
+
+		// krb5asrep: nested, $23$ first.
+		{"krb5asrep,krb5asrep-nt ($23$)", `$krb5asrep$23$user@domain.com:3e156ada591263b8aab0965f5aebd837$007497cb51b6c8116d6407a782ea0e1c5402b17db7afa6b05a6d30ed164a9933c754d720e279c6c573679bd27128fe77e5fea1f72334c1193c8ff0b370fadc6368bf2d49bbfdba4c5dccab95e8c8ebfdc75f438a0797dbfb2f8a1a5f4c423f9bfc1fea483342a11bd56a216f4d5158ccc4b224b52894fadfba3957dfe4b6b8f5f9f9fe422811a314768673e0c924340b8ccb84775ce9defaa3baa0910b676ad0036d13032b0dd94e3b13903cc738a7b6d00b0b3c210d1f972a6c7cae9bd3c959acf7565be528fc179118f28c679f6deeee1456f0781eb8154e18e49cb27b64bf74cd7112a0ebae2102ac`, []string{"krb5asrep", "krb5asrep-nt"}},
+		// No golden line for the general (non-$23$) krb5asrep form; built a
+		// minimal record satisfying only the branch's own literal prefix
+		// condition ($krb5asrep$ without a following $23$), which is all the
+		// legacy branch itself checks beyond the prefix.
+		{"krb5asrep (general, non-$23$)", `$krb5asrep$18$user@domain.com:aaaa$bbbb`, []string{"krb5asrep"}},
+
+		// krb5tgs: nested, $23$ first.
+		{"krb5tgs,krb5tgs-nt ($23$)", `$krb5tgs$23$*user$realm$test/spn*$b548e10f5694ae018d7ad63c257af7dc$35e8e45658860bc31a859b41a08989265f4ef8afd75652ab4d7a30ef151bf6350d879ae189a8cb769e01fa573c6315232b37e4bcad9105520640a781e5fd85c09615e78267e494f433f067cc6958200a82f70627ce0eebc2ac445729c2a8a0255dc3ede2c4973d2d93ac8c1a56b26444df300cb93045d05ff2326affaa3ae97f5cd866c14b78a459f0933a550e0b6507bf8af27c2391ef69fbdd649dd059a4b9ae2440edd96c82479645ccdb06bae0eead3b7f639178a90cf24d9a`, []string{"krb5tgs", "krb5tgs-nt"}},
+		{"krb5tgs (general, non-$23$)", `$krb5tgs$17$user$realm$ae8434177efd09be5bc2eff8$90b4ce5b266821adc26c64f71958a475cf9348fce65096190be04f8430c4e0d554c86dd7ad29c275f9e8f15d2dab4565a3d6e21e449dc2f88e52ea0402c7170ba74f4af037c5d7f8db6d53018a564ab590fc23aa1134788bcc4a55f69ec13c0a083291a96b41bffb978f5a160b7edc828382d11aacd89b5a1bfa710b0e591b190bff9062eace4d26187777db358e70efd26df9c9312dbeef20b1ee0d823d4e71b8f1d00d91ea017459c27c32dc20e451ea6278be63cdd512ce656357c942b95438228e`, []string{"krb5tgs"}},
+
+		{"krb5pa", `$krb5pa$17$hashcat$HASHCATDOMAIN.COM$a17776abe5383236c58582f515843e029ecbff43706d177651b7b6cdb2713b17597ddb35b1c9c470c281589fd1d51cca125414d19e40e333`, []string{"krb5pa"}},
+
+		{"netntlmv2,netntlmv1", `0UL5G37JOI0SX::6VB1IS0KA74:ebe1afa18b7fbfa6:aab8bf8675658dd2a939458a1077ba08:010100000000000031c8aa092510945398b9f7b7dde1a9fb00000000f7876f2b04b700`, []string{"netntlmv2", "netntlmv1"}},
+
+		{"bcrypt", `$2a$05$/VT2Xs2dMd8GJKfrXhjYP.DkTjOVrY12yDN7/6I8ZV0q/1lEohLru`, []string{"bcrypt"}},
+		{"argon2", `$argon2id$v=19$m=102400,t=2,p=8$ASNFZ4mrze8$yIAnV4Et+Xm1JEUGQXyTKomcQaV1AmA2RumwR4wxWy8`, []string{"argon2"}},
+		{"scrypt", `SCRYPT:1024:1:1:MDIwMzMwNTQwNDQyNQ==:5FW+zWivLxgCWj7qLiQbeC8zaNQ+qdO0NUinvqyFcfo=`, []string{"scrypt"}},
+		{"postgres", `md51798e3a2215a571e6f8d2b4bf2db9db5`, []string{"postgres"}},
+		// No golden line for mysql41; built one satisfying reMySQL41 exactly
+		// (a literal leading "*" then 40 hex chars).
+		{"mysql41", `*` + strings.Repeat("a", 40), []string{"mysql41"}},
+
+		// reMSSQLNew: nested, 0x0200 first. See the func comment above and
+		// the prototype's own comment for why mssql2012 has no case: it is
+		// unreachable, not merely untested.
+
+		{"mssql2005", `0x010045083578bf13a6e30ca29c40e540813772754d54a5ffd325`, []string{"mssql2005"}},
+
+		{"descrypt", `abJnggxhB/yWI`, []string{"descrypt"}},
+		{"cisco-pix", `dRRVnUmUHXOTt9nk`, []string{"cisco-pix"}},
+		{"dahua-auth-md5,besder-auth-md5", `024d0127`, []string{"dahua-auth-md5", "besder-auth-md5"}},
+		{"arubaos", `5387280701327dc2162bdeb451d5a465af6d13eff9276efeba`, []string{"arubaos"}},
 	})
 }

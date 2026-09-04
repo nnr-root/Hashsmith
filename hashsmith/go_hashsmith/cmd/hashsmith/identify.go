@@ -1467,84 +1467,18 @@ func legacyDetectHashTypes(text string) []string {
 	if _, _, _, err := parseBlockchainSecond(t); err == nil {
 		return []string{"blockchain-second"}
 	}
-	if generic := detectCompatSaltedTypes(t); len(generic) > 0 {
-		// App-specific formats share the same outer hash:salt structure. Keep
-		// their established precedence, then try generic Hashcat constructions.
-		if isRedmine(t) {
-			generic = append([]string{"redmine"}, generic...)
-		}
-		if isVBulletin(t) {
-			generic = append([]string{"vbulletin", "dcc"}, generic...)
-		}
-		if isNetWitnessSHA256Record(t) {
-			generic = append([]string{"netwitness-sha256"}, generic...)
-		}
-		if fields := strings.SplitN(t, ":", 2); len(fields) == 2 && len(fields[0]) == 64 && isHex(fields[0]) {
-			generic = append([]string{"symfony-legacy"}, generic...)
-		}
-		if isHexPair(t, 32, 32) {
-			generic = append([]string{"aes128-ecb-nokdf", "aes192-ecb-nokdf", "aes256-ecb-nokdf"}, generic...)
-		}
-		if isHexPair(t, 16, 16) {
-			generic = append([]string{"des-plaintext", "3des-plaintext"}, generic...)
-		}
-		return generic
-	}
-	if strings.HasPrefix(t, "$krb5asrep$") {
-		if strings.HasPrefix(t, "$krb5asrep$23$") {
-			return []string{"krb5asrep", "krb5asrep-nt"}
-		}
-		return []string{"krb5asrep"}
-	}
-	if strings.HasPrefix(t, "$krb5tgs$") {
-		if strings.HasPrefix(t, "$krb5tgs$23$") {
-			return []string{"krb5tgs", "krb5tgs-nt"}
-		}
-		return []string{"krb5tgs"}
-	}
-	if strings.HasPrefix(t, "$krb5pa$") {
-		return []string{"krb5pa"}
-	}
-	if isNetNTLMLine(t) {
-		// v1 and v2 share the user::domain:… shape; try both.
-		return []string{"netntlmv2", "netntlmv1"}
-	}
-	if reBcrypt.MatchString(t) {
-		return []string{"bcrypt"}
-	}
-	if reArgon2.MatchString(t) {
-		return []string{"argon2"}
-	}
-	if reScrypt.MatchString(t) {
-		return []string{"scrypt"}
-	}
-	if rePostgres.MatchString(t) {
-		return []string{"postgres"}
-	}
-	if reMySQL41.MatchString(t) {
-		return []string{"mysql41"}
-	}
-	if reMSSQLNew.MatchString(t) {
-		if strings.HasPrefix(strings.ToLower(t), "0x0200") {
-			return []string{"mssql2012"}
-		}
-		return []string{"mssql2005"}
-	}
-	if looksLikeDescrypt(t) {
-		return []string{"descrypt"}
-	}
-	// A 16-char crypt-base64 token with non-hex characters is a Cisco-PIX hash.
-	if len(t) == 16 && isPixToken(t) && !isHex(t) {
-		return []string{"cisco-pix"}
-	}
-	if isDahuaAuthToken(t) {
-		return []string{"dahua-auth-md5", "besder-auth-md5"}
-	}
+	// The detectCompatSaltedTypes/krb5asrep/krb5tgs/krb5pa/isNetNTLMLine/
+	// reBcrypt/reArgon2/reScrypt/rePostgres/reMySQL41/reMSSQLNew/
+	// looksLikeDescrypt/cisco-pix/isDahuaAuthToken/arubaos branches that used
+	// to run here are now table entries in batchHPrototypes
+	// (prototypes_records.go). The `!isHex(t) { return nil }` guard below is
+	// kept here, immediately ahead of the switch, because the switch (the
+	// next task's shape fallback) still depends on it: every case in that
+	// switch assumes a hex string, and that assumption used to be enforced by
+	// this guard running before arubaos's now-removed branch, not by the
+	// switch itself.
 	if !isHex(t) {
 		return nil
-	}
-	if len(t) == 50 && strings.EqualFold(t[8:10], "01") {
-		return []string{"arubaos"}
 	}
 	switch len(t) {
 	case 16:
