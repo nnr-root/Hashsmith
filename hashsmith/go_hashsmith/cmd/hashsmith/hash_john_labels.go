@@ -11,6 +11,33 @@ package main
 //
 // Coverage is intentionally incremental: a format absent from this table prints
 // "-" in identify's john column, and `identify --coverage` counts the gap.
+//
+// A format whose ciphertexts map to MORE THAN ONE John format gets no entry
+// here, rather than an arbitrary or "best guess" one. Two worked examples that
+// were tried and reverted:
+//
+//   - "ldap" is an umbrella over ten RFC 2307 schemes ({SSHA}/{SMD5}/{SHA}/
+//     {MD5}/... plus a {CRYPT} wrapper that dispatches to any crypt(3)
+//     format, crack_ldap.go:33-68) — John has no single format for it, and
+//     the format's own self-test vector is a {CRYPT}$1$... md5crypt payload,
+//     not an SSHA one.
+//   - "krb5pa" covers etype 23 (RC4) and etypes 17/18 (AES) under one
+//     canonical name (types.go), but John splits these into krb5pa-md5 and
+//     krb5pa-sha1 — the alias seed already treats them as separate spellings
+//     collapsing to this one canonical (hash_extra.go), which is exactly why
+//     a single label here would be a guess.
+//
+// Do not re-add either: reporting one of several true labels is worse than
+// reporting none, because it tells a user to run `john --format=X` against
+// ciphertexts John's own format detection would reject.
+//
+// TestJohnLabelSeedNamesRealFormats only proves every KEY here names a format
+// that exists in universalHashRegistry. It cannot and does not prove a VALUE
+// is the correct label for that format — that is a claim about John's
+// interface, not this registry, and has to be checked by hand against John's
+// own format list and Hashsmith's crack/self-test code for that format. The
+// test's guarantee is narrower than it looks; do not read a passing run as
+// confirmation that a value is right.
 func johnLabelSeed() map[string]string {
 	return map[string]string{
 		// Raw digests
@@ -38,7 +65,7 @@ func johnLabelSeed() map[string]string {
 		"postgres": "postgres", "sybase": "sybasease",
 
 		// Kerberos
-		"krb5tgs": "krb5tgs", "krb5asrep": "krb5asrep", "krb5pa": "krb5pa-sha1",
+		"krb5tgs": "krb5tgs", "krb5asrep": "krb5asrep",
 
 		// Containers and archives
 		"7z": "7z", "rar4": "rar", "rar5": "rar5",
@@ -51,10 +78,10 @@ func johnLabelSeed() map[string]string {
 		// Applications
 		"phpass": "phpass", "drupal7": "Drupal7", "django": "django",
 		"mediawiki": "mediawiki",
-		"vbulletin": "vbulletin", "ldap": "ssha",
+		"vbulletin": "vbulletin",
 		"sap-b": "sapb", "sap-fg": "sapg",
 		"cisco-pix": "pix-md5", "cisco-asa": "asa-md5",
-		"juniper": "md5crypt", "grub2": "grub",
+		"grub2": "grub",
 		"bitcoin": "bitcoin", "ethereum": "ethereum-opencl",
 		"wpa": "wpapsk", "vnc": "VNC", "sip": "SIP",
 	}
