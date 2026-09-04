@@ -16,7 +16,7 @@
 - Go 1.25.0 (`go.mod`). No new third-party dependencies — standard library only.
 - Default build must stay pure Go with `CGO_ENABLED=0`. Nothing here may introduce cgo.
 - `internal/hashid` must never import `cmd/hashsmith` and must never reference a format predicate, a Hashcat mode, or a John label.
-- `testdata/detect_golden.txt` is authoritative. If a change alters it, the change is wrong unless the plan explicitly says otherwise (only Task 15 may extend it, never rewrite it).
+- `testdata/detect_golden.txt` is authoritative. A golden line may go from EMPTY to non-empty — that is a detection gain and the file may be regenerated for it, with the diff shown in the task report. A line whose non-empty value changes to a different non-empty value is a REGRESSION: fix the prototype, never the golden file.
 - Full test suite is `go test ./... -count=1`, currently ~23s. Run it before every commit.
 - Every `Prototype` must carry a non-empty `Rationale`. This is enforced by a test, not by review.
 - Existing exit-code contract for `crack` is `0` = all cracked, `1` = some not, `2` = error. `identify`'s new codes must not conflict.
@@ -328,6 +328,38 @@ func TestNoExclusiveMatchReturnsEveryShapeMatch(t *testing.T) {
 	}
 }
 
+// Compute-based prototypes contribute their computed names at their own table
+// position, which is what lets a late cascade branch like detectCompatSaltedTypes
+// keep its precedence.
+func TestComputePrototypeSuppliesTypesAtItsOwnPosition(t *testing.T) {
+	table := []Prototype{
+		{Types: []string{"early"}, Display: "Early", Tier: TierSignature, Exclusive: true,
+			Match: never(), Rationale: "x"},
+		{Display: "Computed", Tier: TierStructural, Exclusive: true,
+			Compute: func(Input) ([]string, bool) { return []string{"c1", "c2"}, true },
+			Rationale: "x"},
+		{Types: []string{"late"}, Display: "Late", Tier: TierSignature, Exclusive: true,
+			Match: always("hit late"), Rationale: "x"},
+	}
+	got := DetectTypes(table, Input{Normalized: "x"})
+	want := []string{"c1", "c2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DetectTypes = %v, want %v (the computed prototype precedes 'late')", got, want)
+	}
+}
+
+func TestComputePrototypeThatDoesNotMatchIsSkipped(t *testing.T) {
+	table := []Prototype{
+		{Display: "Computed", Tier: TierStructural, Exclusive: true,
+			Compute: func(Input) ([]string, bool) { return nil, false }, Rationale: "x"},
+		{Types: []string{"late"}, Display: "Late", Tier: TierSignature, Exclusive: true,
+			Match: always("hit late"), Rationale: "x"},
+	}
+	if got := DetectTypes(table, Input{Normalized: "x"}); !reflect.DeepEqual(got, []string{"late"}) {
+		t.Fatalf("DetectTypes = %v, want [late]", got)
+	}
+}
+
 func TestNoMatchReturnsNil(t *testing.T) {
 	table := []Prototype{
 		{Types: []string{"a"}, Display: "A", Tier: TierSignature, Exclusive: true,
@@ -442,6 +474,17 @@ type Prototype struct {
 	// upper-case". It demotes confidence; it never suppresses a match.
 	Against func(Input) (string, bool)
 
+	// Compute supplies Types dynamically, for the few cascade branches whose
+	// output is calculated rather than fixed — detectBlake2HashcatTypes and
+	// detectCompatSaltedTypes both return a variable list. A prototype sets
+	// EITHER Types or Compute, never both. Compute runs at this prototype's own
+	// table position, which is the whole point: calling those functions from
+	// outside the table would run them ahead of every prototype, and
+	// detectCompatSaltedTypes sits near the END of the cascade.
+	//
+	// When Compute is set, Match is ignored: returning types IS the match.
+	Compute func(Input) ([]string, bool)
+
 	// Prevalence is a curated 0-100 weight used only to order candidates that
 	// carry equally strong evidence. It never promotes past "likely".
 	Prevalence uint8
@@ -456,7 +499,17 @@ type Prototype struct {
 type Match struct {
 	Proto      *Prototype
 	Evidence   Evidence
-	Suppressed bool // ruled out by a higher-precedence exclusive match
+	Computed   []string // set instead of Proto.Types when Proto.Compute matched
+	Suppressed bool     // ruled out by a higher-precedence exclusive match
+}
+
+// Types returns the candidate names this match contributes, from whichever of
+// the two sources the prototype uses.
+func (m Match) Types() []string {
+	if m.Proto.Compute != nil {
+		return m.Computed
+	}
+	return m.Proto.Types
 }
 ```
 
@@ -483,17 +536,25 @@ func Evaluate(table []Prototype, in Input) []Match {
 	winner := -1
 	for i := range table {
 		p := &table[i]
-		if p.Match == nil {
-			continue
+		var (
+			ev       Evidence
+			ok       bool
+			computed []string
+		)
+		switch {
+		case p.Compute != nil:
+			computed, ok = p.Compute(in)
+			ev = Evidence("computed candidate set")
+		case p.Match != nil:
+			ev, ok = p.Match(in)
 		}
-		ev, ok := p.Match(in)
 		if !ok {
 			continue
 		}
 		if winner < 0 && p.Exclusive {
 			winner = len(matches)
 		}
-		matches = append(matches, Match{Proto: p, Evidence: ev})
+		matches = append(matches, Match{Proto: p, Evidence: ev, Computed: computed})
 	}
 	if winner >= 0 {
 		for i := range matches {
@@ -513,7 +574,7 @@ func DetectTypes(table []Prototype, in Input) []string {
 		if m.Suppressed {
 			continue
 		}
-		for _, t := range m.Proto.Types {
+		for _, t := range m.Types() {
 			if _, dup := seen[t]; dup {
 				continue
 			}
@@ -753,7 +814,7 @@ func Identify(table []Prototype, in Input) []Candidate {
 	var out []Candidate
 	for _, m := range matches {
 		p := m.Proto
-		for _, typ := range p.Types {
+		for _, typ := range m.Types() {
 			c := Candidate{
 				Type: typ, Display: p.Display, Tier: p.Tier,
 				Evidence: m.Evidence, Suppressed: m.Suppressed,
@@ -1050,10 +1111,24 @@ func batchAPrototypes() []hashid.Prototype {
 }
 ```
 
-`detectBlake2HashcatTypes` returns a *variable-length list*, so it cannot be a
-prototype: `Prototype.Types` is fixed at construction. Branches like this stay
-functions, called from the adapter at the position their cascade order
-requires. Add the adapter to the same file:
+`detectBlake2HashcatTypes` returns a variable-length list, so it uses
+`Compute` rather than `Types`. Insert it into `batchAPrototypes` **at its
+cascade position** — after the five crypt-prefix entries, before
+`isHMailServer` — so its precedence is preserved by the table itself rather
+than by a special case outside it:
+
+```go
+		{
+			Display: "BLAKE2 family", Tier: hashid.TierSignature, Exclusive: true,
+			Compute: func(in hashid.Input) ([]string, bool) {
+				types := detectBlake2HashcatTypes(in.Normalized)
+				return types, len(types) > 0
+			},
+			Prevalence: 20, Rationale: "BLAKE2 is rare as a password digest outside specific applications",
+		},
+```
+
+Then add the adapter to the same file:
 
 ```go
 // detectTypesFromTable runs the prototype table only. The bool reports whether
@@ -1063,13 +1138,6 @@ requires. Add the adapter to the same file:
 func detectTypesFromTable(text string) ([]string, bool) {
 	in := hashid.Input{Raw: strings.TrimSpace(text)}
 	in.Normalized = stripShadowUsername(in.Raw)
-
-	// detectBlake2HashcatTypes returns a variable-length list, so it cannot be
-	// expressed as a fixed-Types prototype. It keeps its cascade position by
-	// running here, between the crypt prefixes and the vendor predicates.
-	if blake := detectBlake2HashcatTypes(in.Normalized); len(blake) > 0 {
-		return blake, true
-	}
 	types := hashid.DetectTypes(prototypeTable(), in)
 	return types, len(types) > 0
 }
@@ -1263,22 +1331,35 @@ that assembly order is precisely what the golden test protects.
 
 **Files:** Modify `cmd/hashsmith/prototypes_records.go`, `cmd/hashsmith/identify.go` (original lines 1978-2054)
 
-The `detectCompatSaltedTypes` branch cannot be a fixed-`Types` prototype
-because its output is computed. Handle it the way `detectBlake2HashcatTypes`
-was handled in Task 4 — in `detectTypesFromTable`, at the position matching its
-cascade order, keeping its prepend logic verbatim:
+The `detectCompatSaltedTypes` branch computes its output, so it is a `Compute`
+prototype — and it MUST be one rather than a call from the adapter, because it
+sits near the END of the cascade (original line 1978) behind roughly 150
+higher-precedence branches. Running it outside the table would run it first and
+silently steal matches from all of them.
+
+Place it in the batch at its cascade position, keeping the prepend logic
+verbatim:
 
 ```go
-	// detectCompatSaltedTypes composes its result, prepending more specific
-	// candidates to a generic list, so it stays a function rather than a
-	// prototype. Its position here matches its position in the cascade.
-	if generic := detectCompatSaltedTypes(in.Normalized); len(generic) > 0 {
-		if isRedmine(in.Normalized) {
-			generic = append([]string{"redmine"}, generic...)
-		}
-		// ... the remaining prepends, copied verbatim from the cascade ...
-		return generic, true
-	}
+		{
+			Display: "Salted digest construction", Tier: hashid.TierStructural, Exclusive: true,
+			Compute: func(in hashid.Input) ([]string, bool) {
+				t := in.Normalized
+				generic := detectCompatSaltedTypes(t)
+				if len(generic) == 0 {
+					return nil, false
+				}
+				// App-specific formats share the same outer hash:salt structure.
+				// Their established precedence is preserved by prepending, exactly
+				// as the cascade did.
+				if isRedmine(t) {
+					generic = append([]string{"redmine"}, generic...)
+				}
+				// ... the remaining prepends, copied verbatim from the cascade ...
+				return generic, true
+			},
+			Prevalence: 35, Rationale: "generic salted constructions are common but individually indistinguishable",
+		},
 ```
 
 The rest of the batch is ordinary: `$krb5asrep$` (nested `$23$` first),
@@ -1554,8 +1635,11 @@ func TestPrototypeTableIntegrity(t *testing.T) {
 			t.Errorf("prototype %d has an empty Display", i)
 			label = "<unnamed>"
 		}
-		if p.Match == nil {
-			t.Errorf("prototype %q has a nil Match", label)
+		if p.Match == nil && p.Compute == nil {
+			t.Errorf("prototype %q has neither Match nor Compute", label)
+		}
+		if p.Match != nil && p.Compute != nil {
+			t.Errorf("prototype %q sets both Match and Compute; it must set exactly one", label)
 		}
 		if strings.TrimSpace(p.Rationale) == "" {
 			t.Errorf("prototype %q has an empty Rationale; an unexplained prevalence is an unfalsifiable claim", label)
@@ -1563,8 +1647,13 @@ func TestPrototypeTableIntegrity(t *testing.T) {
 		if p.Prevalence > 100 {
 			t.Errorf("prototype %q has Prevalence %d, want 0-100", label, p.Prevalence)
 		}
-		if len(p.Types) == 0 {
-			t.Errorf("prototype %q declares no Types", label)
+		// A Compute prototype supplies its names at match time, so an empty
+		// Types is correct there and only there.
+		if len(p.Types) == 0 && p.Compute == nil {
+			t.Errorf("prototype %q declares no Types and has no Compute", label)
+		}
+		if len(p.Types) > 0 && p.Compute != nil {
+			t.Errorf("prototype %q sets both Types and Compute; it must set exactly one", label)
 		}
 		for _, typ := range p.Types {
 			if typ != canonicalHashType(typ) {
@@ -1949,8 +2038,17 @@ func TestFormatsWithoutForeignNamesPrintADash(t *testing.T) {
 		Confidence: hashid.Certain, Tier: hashid.TierSignature,
 		Evidence: "record prefix",
 	}})
-	if !strings.Contains(out, "-") {
-		t.Errorf("expected a dash for the missing Hashcat mode\n---\n%s", out)
+	// A bare "-" as its own whitespace-delimited column. Checking for "-"
+	// anywhere would pass on "-t hmailserver" and assert nothing.
+	hasDashColumn := false
+	for _, f := range strings.Fields(out) {
+		if f == "-" {
+			hasDashColumn = true
+			break
+		}
+	}
+	if !hasDashColumn {
+		t.Errorf("expected a standalone \"-\" column for the missing Hashcat mode\n---\n%s", out)
 	}
 	if strings.Contains(out, "-m 0") {
 		t.Errorf("invented a Hashcat mode for a format that has none\n---\n%s", out)
