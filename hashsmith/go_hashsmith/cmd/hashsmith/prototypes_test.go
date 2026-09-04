@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"hashsmith-go/internal/hashid"
 )
 
 // tableCoverageCase asserts a branch is served by the PROTOTYPE TABLE, not by
@@ -387,4 +389,65 @@ func TestTableCoverageBatchH(t *testing.T) {
 		{"dahua-auth-md5,besder-auth-md5", `024d0127`, []string{"dahua-auth-md5", "besder-auth-md5"}},
 		{"arubaos", `5387280701327dc2162bdeb451d5a465af6d13eff9276efeba`, []string{"arubaos"}},
 	})
+}
+
+// TestTableCoverageTail covers the three branches that ran ahead of the
+// trailing `switch len(t)` in the legacy cascade — a bitcoin/litecoin
+// address-recovery target, a Mojolicious signed cookie, and a Blockchain.info
+// second-password record — but were never ported to a prototype in Tasks 1-9.
+// The legacy fallback cascade is going away in this task, so if these three
+// aren't also in the table, detection for them silently disappears and
+// testdata/detect_golden.txt (which has entries for all three) breaks.
+func TestTableCoverageTail(t *testing.T) {
+	runTableCoverage(t, []tableCoverageCase{
+		{"bitcoin address (p2pkh)", "12sLRz1TKPZurKCwVqeT5FkW3Y7usipPbZ",
+			[]string{"bitcoin-wif-p2pkh-compressed", "bitcoin-wif-p2pkh-uncompressed", "bitcoin-raw-p2pkh-compressed", "bitcoin-raw-p2pkh-uncompressed"}},
+		{"bitcoin address (bech32 p2wpkh)", "bc1q926ca6n7wz7gm2gfd8xc5p0vu687ngvnknpx74",
+			[]string{"bitcoin-wif-p2wpkh-compressed", "bitcoin-wif-p2wpkh-uncompressed", "bitcoin-raw-p2wpkh-compressed", "bitcoin-raw-p2wpkh-uncompressed"}},
+		{"mojolicious", "mojolicious=abc--85d455b37bc3d8672908fde9e802cc3294d7db7ad0d63768305d105a948fb823",
+			[]string{"mojolicious"}},
+		{"blockchain-second", "YnM6WYERjJfhxwepT7zV6odWoEUz1X4esYQb4bQ3KZ7bbZAyOTc1MDM3OTc1NjMyODA0ECcAAD3vFoc=",
+			[]string{"blockchain-second"}},
+	})
+}
+
+func TestTableCoverageShapeFallback(t *testing.T) {
+	runTableCoverage(t, []tableCoverageCase{
+		{"16 hex", "0123456789abcdef", []string{"mysql323", "cisco-pix", "half-md5"}},
+		{"32 hex", "5f4dcc3b5aa765d61d8327deb882cf99", []string{"md5", "md4", "md2", "ntlm", "lm"}},
+		{"40 hex", "da39a3ee5e6b4b0d3255bfef95601890afd80709", []string{"sha1", "sha0", "ripemd160"}},
+		{"56 hex", "d14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f", []string{"sha224", "sha512_224", "sha3_224", "keccak224"}},
+	})
+}
+
+// The shape group must NOT suppress: it is the one place several candidates
+// legitimately survive together.
+func TestShapePrototypesAreNotExclusive(t *testing.T) {
+	for _, p := range shapePrototypes() {
+		if p.Exclusive {
+			t.Errorf("shape prototype %q is Exclusive; the length fallback must not suppress", p.Display)
+		}
+		if p.Tier != hashid.TierShape {
+			t.Errorf("shape prototype %q has tier %v, want TierShape", p.Display, p.Tier)
+		}
+	}
+}
+
+// LM is the motivating case for negative evidence: LM digests are upper-case,
+// so a lower-case 32-hex input is evidence AGAINST LM, not neutral.
+func TestLMIsDemotedOnLowercaseInput(t *testing.T) {
+	cs := identifyCandidates("5f4dcc3b5aa765d61d8327deb882cf99")
+	for _, c := range cs {
+		if c.Type != "lm" {
+			continue
+		}
+		if c.Confidence != hashid.Unlikely {
+			t.Fatalf("lm confidence = %v, want unlikely", c.Confidence)
+		}
+		if c.Reason == "" {
+			t.Fatal("lm was demoted without a stated reason")
+		}
+		return
+	}
+	t.Fatal("lm was not among the candidates at all")
 }

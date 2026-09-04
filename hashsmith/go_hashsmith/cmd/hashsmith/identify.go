@@ -1442,66 +1442,10 @@ func stripShadowUsername(s string) string {
 }
 
 // detectHashTypes returns the candidate -t names for a target, in the order
-// crack should try them. It consults the unified prototype table first and
-// falls through to the not-yet-ported remainder of the original cascade.
+// crack should try them.
 func detectHashTypes(text string) []string {
-	if types, served := detectTypesFromTable(text); served {
-		return types
-	}
-	return legacyDetectHashTypes(text)
-}
-
-func legacyDetectHashTypes(text string) []string {
-	t := strings.TrimSpace(text)
-	// Unix crypt(3) shadow hashes may still carry a "user:" (or full passwd/
-	// shadow line) prefix — crack the hash field directly.
-	t = stripShadowUsername(t)
-	// Archive/file hash formats produced by the *2smith extractors.
-	if types := bitcoinAddressHashTypes(t); len(types) != 0 {
-		return types
-	}
-	if separator := strings.LastIndex(t, "--"); separator > 0 && separator+66 == len(t) &&
-		strings.Contains(t[:separator], "=") && isHex(t[separator+2:]) {
-		return []string{"mojolicious"}
-	}
-	if _, _, _, err := parseBlockchainSecond(t); err == nil {
-		return []string{"blockchain-second"}
-	}
-	// The detectCompatSaltedTypes/krb5asrep/krb5tgs/krb5pa/isNetNTLMLine/
-	// reBcrypt/reArgon2/reScrypt/rePostgres/reMySQL41/reMSSQLNew/
-	// looksLikeDescrypt/cisco-pix/isDahuaAuthToken/arubaos branches that used
-	// to run here are now table entries in batchHPrototypes
-	// (prototypes_records.go). The `!isHex(t) { return nil }` guard below is
-	// kept here, immediately ahead of the switch, because the switch (the
-	// next task's shape fallback) still depends on it: every case in that
-	// switch assumes a hex string, and that assumption used to be enforced by
-	// this guard running before arubaos's now-removed branch, not by the
-	// switch itself.
-	if !isHex(t) {
-		return nil
-	}
-	switch len(t) {
-	case 16:
-		return []string{"mysql323", "cisco-pix", "half-md5"}
-	case 32:
-		return []string{"md5", "md4", "md2", "ntlm", "lm"}
-	case 40:
-		return []string{"sha1", "sha0", "ripemd160"}
-	case 56:
-		return []string{"sha224", "sha512_224", "sha3_224", "keccak224"}
-	case 60:
-		return []string{"oracle11g"}
-	case 160:
-		return []string{"oracle12c"}
-	case 64:
-		return []string{"sha256", "sha3_256", "sm3", "blake2s", "streebog256", "sha512_256", "keccak256", "shake128-256", "blake2b256"}
-	case 96:
-		return []string{"sha384", "sha3_384", "blake2b384", "keccak384"}
-	case 128:
-		return []string{"sha512", "sha3_512", "blake2b", "whirlpool", "streebog512", "keccak512", "shake256-512", "cisco-ise"}
-	default:
-		return nil
-	}
+	types, _ := detectTypesFromTable(text)
+	return types
 }
 
 func unique(items []string) []string {

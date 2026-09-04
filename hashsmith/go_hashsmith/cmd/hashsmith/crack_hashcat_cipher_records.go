@@ -209,6 +209,23 @@ func verifyMojolicious(target, candidate string) (bool, error) {
 	return hmac.Equal(mac.Sum(nil), want), nil
 }
 
+// isMojoliciousRecord reports whether target has the shape of a Mojolicious
+// signed-cookie record: <data>--<64-char hex SHA-256 HMAC>, with the data
+// portion containing "=" (the cookie's URL-encoded payload). It is the same
+// shape check verifyMojolicious performs ahead of its HMAC comparison, split
+// out so detection doesn't need a candidate secret to run.
+func isMojoliciousRecord(target string) bool {
+	separator := strings.LastIndex(target, "--")
+	if separator < 1 || separator+66 != len(target) {
+		return false
+	}
+	if !strings.Contains(target[:separator], "=") {
+		return false
+	}
+	_, err := hex.DecodeString(target[separator+2:])
+	return err == nil
+}
+
 func parseBlockchainSecond(target string) (digest, salt []byte, iterations int, err error) {
 	decoded, decodeErr := base64.StdEncoding.DecodeString(target)
 	if decodeErr != nil || len(decoded) != 59 || string(decoded[:3]) != "bs:" {
@@ -223,6 +240,15 @@ func parseBlockchainSecond(target string) (digest, salt []byte, iterations int, 
 		return nil, nil, 0, errors.New("invalid Blockchain second-password iteration count")
 	}
 	return decoded[3:35], decoded[35:51], int(iterations64), nil
+}
+
+// isBlockchainSecondRecord reports whether target parses as a Blockchain.info
+// second-password record: base64, 59 decoded bytes, a "bs:" tag and a valid
+// CRC32 trailer. Unlike Mojolicious, this checksum is self-verifying — no
+// candidate password is needed to confirm the record's shape.
+func isBlockchainSecondRecord(target string) bool {
+	_, _, _, err := parseBlockchainSecond(target)
+	return err == nil
 }
 
 func verifyBlockchainSecond(target, candidate string) (bool, error) {

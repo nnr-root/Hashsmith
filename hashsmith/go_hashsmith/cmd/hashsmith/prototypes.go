@@ -35,6 +35,8 @@ func prototypeTable() []hashid.Prototype {
 		prototypeTableVal = append(prototypeTableVal, batchFPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, batchGPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, batchHPrototypes()...)
+		prototypeTableVal = append(prototypeTableVal, tailPrototypes()...)
+		prototypeTableVal = append(prototypeTableVal, shapePrototypes()...)
 	})
 	return prototypeTableVal
 }
@@ -145,6 +147,14 @@ func batchAPrototypes() []hashid.Prototype {
 			Prevalence: 15, Rationale: "checksums, not password hashes",
 		},
 	}
+}
+
+// identifyCandidates is identify's entry point: the same table and the same
+// evaluation crack uses, presented with confidence instead of bare ordering.
+func identifyCandidates(text string) []hashid.Candidate {
+	in := hashid.Input{Raw: strings.TrimSpace(text)}
+	in.Normalized = stripShadowUsername(in.Raw)
+	return hashid.Identify(prototypeTable(), in)
 }
 
 // detectTypesFromTable runs the prototype table only. The bool reports whether
