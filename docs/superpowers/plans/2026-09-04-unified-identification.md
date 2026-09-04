@@ -1219,8 +1219,33 @@ if isShiro1(t) {
 becomes
 
 ```go
-predicateProto(isShiro1, "Apache Shiro 1", 15, "<why this prevalence>", "shiro1"),
+predicateProto(isShiro1, "Apache Shiro 1", hashid.TierSignature,
+    "$shiro1$ record prefix", 15, "<why this prevalence>", "shiro1"),
 ```
+
+**Choosing the Tier is a judgement you must make per predicate, not a default.**
+`predicateProto` takes the tier as an argument precisely because the ~170
+predicates in these batches are not all the same kind of evidence, and the tier
+directly sets the confidence a user is shown: an unrivalled `TierSignature`
+match is reported `certain`, an unrivalled `TierStructural` match only `likely`.
+Read the predicate before choosing:
+
+| What the predicate actually does | Tier |
+|---|---|
+| Verifies a checksum, polymod or MAC over the record | `TierChecksum` |
+| Requires a literal record prefix (`$krb5tgs$`, `{PKCS5S2}`, `SCRAM-SHA-256$`) | `TierSignature` |
+| Fully parses the record and returns success (field count, lengths and encodings all agree) | `TierSignature` |
+| Checks a prefix plus decodes some fields | `TierSignature` |
+| Only checks length and character composition, with no fixed prefix | `TierStructural` |
+| Only checks length and alphabet | `TierShape` |
+
+Getting this wrong does not fail any test — it silently overstates confidence to
+the user, which is the exact dishonesty this whole sub-project exists to remove.
+
+**The evidence string must describe what the predicate actually checks.** It is
+shown to users as the justification for the match, so name the real fields in
+the real order. A predicate that checks `tag:c:d:key` must not describe its
+first field as the key.
 
 Branches with inline structure (a `strings.Split` with field-length checks, a
 length-and-alphabet test, a nested `if` choosing between two types) get a
@@ -1239,7 +1264,7 @@ guess is fine, an unmarked one is not.
 
 **The per-task steps are identical in form:**
 
-- [ ] **Step 1:** Write `TestTableCoverageBatch<X>` in `cmd/hashsmith/prototypes_test.go`, using `runTableCoverage`, with one case per ported branch. Get the representative input for each branch from the branch's own literal prefix (append filler to satisfy any length check) or from the matching self-test vector:
+- [ ] **Step 1:** Write `TestTableCoverageBatch<X>` in `cmd/hashsmith/prototypes_test.go`, using `runTableCoverage`, with **one case for every branch this batch ports — no exceptions**. The count of cases must equal the count of prototypes added. This test is the only thing that distinguishes a working port from one that silently falls through to the legacy cascade; a batch that ports 20 branches and asserts 12 has left 8 holes the golden file cannot see, because the golden file only checks final output and cannot tell which code path produced it. Get the representative input for each branch from the branch's own literal prefix (append filler to satisfy any length check) or from the matching self-test vector:
 
 ```bash
 cd hashsmith/go_hashsmith
