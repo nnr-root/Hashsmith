@@ -105,3 +105,27 @@ func TestSuppressedCandidatesAreUnlikelyAndMarked(t *testing.T) {
 		t.Fatalf("base64 = %+v, want suppressed and Unlikely", c)
 	}
 }
+
+// TestTiedConfidenceOrdersByPrevalence exercises the sort's secondary key on
+// an actual tie: two rivalled shape prototypes both at or above
+// dominantPrevalence land in the SAME confidence bucket (Likely), so only the
+// prevalence tie-break can order them. TestCandidatesAreOrderedByConfidenceThenPrevalence
+// does not cover this — its three prototypes fall in three different
+// confidence buckets, so the primary key alone determines that test's order.
+func TestTiedConfidenceOrdersByPrevalence(t *testing.T) {
+	table := []Prototype{
+		protoShape("a", 85, nil),
+		protoShape("b", 70, nil),
+	}
+	cs := Identify(table, Input{Normalized: "x"})
+	ca, cb := find(cs, "a"), find(cs, "b")
+	if ca == nil || cb == nil || ca.Confidence != Likely || cb.Confidence != Likely {
+		t.Fatalf("got %+v, want both candidates Likely (a tie)", cs)
+	}
+	want := []string{"a", "b"}
+	for i, w := range want {
+		if cs[i].Type != w {
+			t.Fatalf("position %d = %s, want %s (full: %+v)", i, cs[i].Type, w, cs)
+		}
+	}
+}
