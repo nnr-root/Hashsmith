@@ -1457,86 +1457,8 @@ func legacyDetectHashTypes(text string) []string {
 	// shadow line) prefix — crack the hash field directly.
 	t = stripShadowUsername(t)
 	// Archive/file hash formats produced by the *2smith extractors.
-	if strings.HasPrefix(t, "$zipcrypto$") {
-		return []string{"zipcrypto"}
-	}
-	if strings.HasPrefix(t, "$zipaes128$") {
-		return []string{"zipaes128"}
-	}
-	if strings.HasPrefix(t, "$zipaes192$") {
-		return []string{"zipaes192"}
-	}
-	if strings.HasPrefix(t, "$zipaes256$") {
-		return []string{"zipaes256"}
-	}
-	if strings.HasPrefix(t, "$7z$") {
-		return []string{"7z"}
-	}
-	if strings.HasPrefix(t, "$rar3$") || strings.HasPrefix(t, "$RAR3$") {
-		return []string{"rar4"}
-	}
-	if strings.HasPrefix(t, "$rar5$") {
-		return []string{"rar5"}
-	}
-	if isPDFR6(t) {
-		return []string{"pdf-r6"}
-	}
-	if strings.HasPrefix(t, "$pdf$") {
-		return []string{"pdf"}
-	}
-	if strings.HasPrefix(t, "$ssh$") {
-		return []string{"ssh"}
-	}
-	if strings.HasPrefix(t, "$sshng$") {
-		return []string{"ssh"}
-	}
-	if strings.HasPrefix(t, "$pkcs8$") {
-		return []string{"pkcs8"}
-	}
-	if strings.HasPrefix(t, "$PEM$1$") {
-		return []string{"pkcs8-pem-sha1"}
-	}
-	if strings.HasPrefix(t, "$PEM$2$") {
-		return []string{"pkcs8-pem-sha256"}
-	}
-	if strings.HasPrefix(t, "$jksprivk$*") {
-		return []string{"jks-private-key"}
-	}
-	if strings.HasPrefix(t, "$vmx$") {
-		return []string{"vmware-vmx"}
-	}
-	if strings.HasPrefix(t, "$ab$") {
-		return []string{"android-backup"}
-	}
-	if strings.HasPrefix(t, "$encfs$") {
-		return []string{"encfs"}
-	}
-	if strings.HasPrefix(t, "$mozilla$*") {
-		return []string{"mozilla-nss"}
-	}
-	if strings.HasPrefix(t, "$vbox$") {
-		if strings.Contains(t, "$16$") {
-			return []string{"virtualbox-aes256"}
-		}
-		return []string{"virtualbox-aes128"}
-	}
-	if strings.HasPrefix(t, "$metamask-short$") {
-		return []string{"metamask-short"}
-	}
-	if strings.HasPrefix(t, "$metamask$") {
-		return []string{"metamask"}
-	}
-	if strings.HasPrefix(t, "EXODUS:") {
-		return []string{"exodus"}
-	}
 	if types := bitcoinAddressHashTypes(t); len(types) != 0 {
 		return types
-	}
-	if strings.HasPrefix(t, "$gpg$") {
-		return []string{"gpg"}
-	}
-	if strings.HasPrefix(t, "$office$2016$0$") {
-		return []string{"office2016-sheet"}
 	}
 	if strings.HasPrefix(t, "$oldoffice$0*") || strings.HasPrefix(t, "$oldoffice$1*") {
 		return []string{"office-old-md5"}
