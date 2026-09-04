@@ -29,6 +29,7 @@ func prototypeTable() []hashid.Prototype {
 	prototypeTableOnce.Do(func() {
 		prototypeTableVal = append(prototypeTableVal, batchAPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, batchBPrototypes()...)
+		prototypeTableVal = append(prototypeTableVal, batchCPrototypes()...)
 	})
 	return prototypeTableVal
 }

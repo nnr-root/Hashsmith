@@ -79,3 +79,32 @@ func TestTableCoverageBatchB(t *testing.T) {
 		{"office2016-sheet", `$office$2016$0$100000$876MLoKTq42+/DLp415iZQ==$TNDvpvYyvlSUy97UOLKNhXynhUDDA7H8kLql0ISH5SxcP6hbthdjaTo4Z3/MU0dcR2SAd+AduYb3TB5CLZ8+ow==`, []string{"office2016-sheet"}},
 	})
 }
+
+func TestTableCoverageBatchC(t *testing.T) {
+	runTableCoverage(t, []tableCoverageCase{
+		{"office-old-md5", `$oldoffice$0*55045061647456688860411218030058*e7e24d163fbd743992d4b8892bf3f2f7*493410dbc832557d3fe1870ace8397e2`, []string{"office-old-md5"}},
+		{"office-old-sha1", `$oldoffice$3*83328705222323020515404251156288*2855956a165ff6511bc7f4cd77b9e101*941861655e73a09c40f7b1e9dfd0c256ed285acd`, []string{"office-old-sha1"}},
+		{"office", `$office$*2007*20*128*16*18410007331073848057180885845227*944c70a5ee6e5ab2a6a86ff54b5f621a*e6650f1f2630c27fd8fc0f5e56e2e01f99784b9f`, []string{"office"}},
+		{"mysql-cram", `$mysqlna$2576670568531371763643101056213751754328*5e4be686a3149a12847caa9898247dcc05739601`, []string{"mysql-cram"}},
+		{"tacacs-plus", `$tacacs-plus$0$5fde8e68$4e13e8fb33df$c006`, []string{"tacacs-plus"}},
+		{"apple-secure-notes", `$ASN$*1*20000*80771171105233481004850004085037*d04b17af7f6b184346aad3efefe8bec0987ee73418291a41`, []string{"apple-secure-notes"}},
+		{"oracle-otm", `otm_sha256:1000:1234567890:S5Q9Kc0ETY6ZPyQU+JYY60oFjaJuZZaSinggmzU8PC4=`, []string{"oracle-otm"}},
+		{"xmpp-scram", `$xmpp-scram$0$4096$45$353835323736323530353932363531393630313632353634313335323434323038393931323138373138343134$6d5b543b985dc6c0645da3c83d114fce121aa51d`, []string{"xmpp-scram"}},
+		{"postgres-cram", `$postgres$postgres*74402844*4e7fabaaf34d780c4a5822d28ee1c83e`, []string{"postgres-cram"}},
+		{"snmpv3", `$SNMPv3$0$1$000000000000000000000000$80001f88808106d566db57fd6000000000$71fcb2b5a7845084c9cb8a13`, []string{"snmpv3"}},
+		{"qnx-md5", `@m@75f6f129f9c9e77b6b1b78f791ed764a@8741857532330050`, []string{"qnx-md5"}},
+		{"qnx-sha256", `@s@0b365cab7e17ee1e7e1a90078501cc1aa85888d6da34e2f5b04f5c614b882a93@5498317092471604`, []string{"qnx-sha256"}},
+		{"qnx-sha512", `@S@715df9e94c097805dd1e13c6a40f331d02ce589765a2100ec7435e76b978d5efc364ce10870780622cee003c9951bd92ec1020c924b124cfff7e0fa1f73e3672@2257314490293159`, []string{"qnx-sha512"}},
+		{"sap-issha1", `{x-issha, 1024}BnjXMqcNTwa3BzdnUOf1iAu6dw02NzU4MzE2MTA=`, []string{"sap-issha1"}},
+		{"sap-issha256", `{x-isSHA256, 3000}UqMnsr5BYN+uornWC7yhGa/Wj0u5tshX19mDUQSlgih6OTFoZjRpMQ==`, []string{"sap-issha256"}},
+		{"sap-issha384", `{x-isSHA384, 5000}3O/F4YGKNmIYHDu7ZQ7Q+ioCOQi4HRY4yrggKptAU9DtmHigCuGqBiAPVbKbEAfGTzh4YlZLWUM=`, []string{"sap-issha384"}},
+		{"stellar-wallet", `$stellar$YAlIJziURRcBEWUwRSRDWA==$EutMmmcV5Hbf3p1I$rfSAF349RvGKG4R4Z2VCrH9WjNEKjbJa9hpOja9Yn8MwXruuFEMtw47HPn9CYj+JJ5Rb4Z87Wejj1c4fqpbMZHFOnqtQsVAr`, []string{"stellar-wallet"}},
+		{"telegram-passcode", `$telegram$0*518c001aeb3b4ae96c6173be4cebe60a85f67b1e087b045935849e2f815b5e41*25184098058621950709328221838128`, []string{"telegram-passcode"}},
+		{"telegram-desktop", `$telegram$1*4000*e693c27ff92fe83a5a247cce198a8d6a0f3a89ffedc6bcddbc39586bb1bcb50b*d6fb7ebda06a23a9c42fc57c39e2c3128da4ee1ff394f17c2fc4290229e13d1c9e45c42ef1aee64903e5904c28cffd49498358fee96eb01888f225`, []string{"telegram-desktop"}},
+		{"signal", `$signal$1$6024$011d9eedb6367df21532acc22dcbb9b2$c492a9906443732b82ba846a14fad1eb$3f53a1cdff7417f3e576d390986218fc5808ae3a1470ca6c13b1fb0ca18673f7718e7f18cf633cd42841c6305953dd43a243e7fc6bdc2c4483d018d`, []string{"signal"}},
+		{"macos-keychain", `$keychain$*10f7445c8510fa40d9ef6b4e0f8c772a9d37e449*f3d19b2a45cdcccb*8c3c3b1c7d48a24dad4ccbd4fd794ca9b0b3f1386a0a4527f3548bfe6e2f1001804b082076641bbedbc9f3a7c33c084b`, []string{"macos-keychain"}},
+		{"vnc", `$vnc$*7963F9BB7BA6A42A085763808156F570*475B10D05648E4110D77F03916106F98`, []string{"vnc"}},
+		{"sm3crypt", `$sm3$KTTUB40dW4mRyRFd$ul2xLiIY3FJtbo8sv1R93sAYCkxQCH/6rmS1kD5vJYA`, []string{"sm3crypt"}},
+		{"chacha20", `$chacha20$*0400000000000003*16*0200000000000001*5152535455565758*6b05fe554b0bc3b3`, []string{"chacha20"}},
+	})
+}
