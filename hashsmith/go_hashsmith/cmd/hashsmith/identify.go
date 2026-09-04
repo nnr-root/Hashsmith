@@ -1441,60 +1441,21 @@ func stripShadowUsername(s string) string {
 	return s
 }
 
+// detectHashTypes returns the candidate -t names for a target, in the order
+// crack should try them. It consults the unified prototype table first and
+// falls through to the not-yet-ported remainder of the original cascade.
 func detectHashTypes(text string) []string {
-	t := strings.TrimSpace(text)
-	// NSEC3's colon-delimited domain can itself look like a 13-character DES
-	// crypt token, so recognize the complete record before shadow-line peeling.
-	if isNSEC3Record(t) {
-		return []string{"dnssec-nsec3"}
+	if types, served := detectTypesFromTable(text); served {
+		return types
 	}
+	return legacyDetectHashTypes(text)
+}
+
+func legacyDetectHashTypes(text string) []string {
+	t := strings.TrimSpace(text)
 	// Unix crypt(3) shadow hashes may still carry a "user:" (or full passwd/
 	// shadow line) prefix — crack the hash field directly.
 	t = stripShadowUsername(t)
-	// Unix crypt(3) shadow hashes.
-	if strings.HasPrefix(t, "$sha1$") {
-		return []string{"sha1crypt"}
-	}
-	if strings.HasPrefix(t, "$1$") {
-		return []string{"md5crypt"}
-	}
-	if strings.HasPrefix(t, "$apr1$") {
-		return []string{"apr1"}
-	}
-	if strings.HasPrefix(t, "$5$") {
-		return []string{"sha256crypt"}
-	}
-	if strings.HasPrefix(t, "$6$") {
-		return []string{"sha512crypt"}
-	}
-	if blake := detectBlake2HashcatTypes(t); len(blake) > 0 {
-		return blake
-	}
-	// Vendor formats with a distinctive record prefix.
-	if isHMailServer(t) {
-		return []string{"hmailserver"}
-	}
-	if isPwsafe(t) {
-		return []string{"pwsafe"}
-	}
-	if isPKCS12(t) {
-		return []string{"pfx"}
-	}
-	if isEpiserver(t) {
-		return []string{"episerver"}
-	}
-	if isAzureSync(t) {
-		return []string{"azuresync"}
-	}
-	if isSipHash(t) {
-		return []string{"siphash"}
-	}
-	if isHexPair(t, 8, 8) {
-		return []string{"crc32-hashcat", "crc32c-hashcat", "murmurhash", "murmur3-seeded", "skip32"}
-	}
-	if isHexPair(t, 16, 16) {
-		return []string{"murmur64a", "crc64-jones"}
-	}
 	// Archive/file hash formats produced by the *2smith extractors.
 	if strings.HasPrefix(t, "$zipcrypto$") {
 		return []string{"zipcrypto"}
