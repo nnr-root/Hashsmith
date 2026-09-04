@@ -48,9 +48,14 @@ func hasPrefixProto(prefix, display string, prevalence uint8, rationale string, 
 }
 
 // predicateProto wraps an existing boolean predicate as an exclusive signature.
-func predicateProto(fn func(string) bool, display, evidence string, prevalence uint8, rationale string, types ...string) hashid.Prototype {
+// tier must reflect what the predicate actually verifies: a full parse behind
+// a fixed prefix is TierSignature, but a predicate that only checks length and
+// character composition (no fixed prefix) is no stronger than TierStructural —
+// hardcoding TierSignature for every predicate would overstate confidence for
+// the latter kind.
+func predicateProto(fn func(string) bool, display string, tier hashid.Tier, evidence string, prevalence uint8, rationale string, types ...string) hashid.Prototype {
 	return hashid.Prototype{
-		Types: types, Display: display, Tier: hashid.TierSignature, Exclusive: true,
+		Types: types, Display: display, Tier: tier, Exclusive: true,
 		Match: func(in hashid.Input) (hashid.Evidence, bool) {
 			if fn(in.Normalized) {
 				return hashid.Evidence(evidence), true
@@ -91,12 +96,25 @@ func batchAPrototypes() []hashid.Prototype {
 			},
 			Prevalence: 20, Rationale: "BLAKE2 is rare as a password digest outside specific applications",
 		},
-		predicateProto(isHMailServer, "hMailServer", "70-char record with a non-hex 6-char salt followed by a hex digest", 10, "single-product format; rare in the wild", "hmailserver"),
-		predicateProto(isPwsafe, "Password Safe v3", "parses as a Password Safe v3 hash", 20, "desktop password manager; appears in forensic work", "pwsafe"),
-		predicateProto(isPKCS12, "PKCS#12 keystore", "parses as a PKCS#12 keystore hash", 35, "common wherever TLS client certificates are issued", "pfx"),
-		predicateProto(isEpiserver, "EPiServer", "parses as an EPiServer password hash", 10, "single-CMS format", "episerver"),
-		predicateProto(isAzureSync, "Azure AD Connect sync", "parses as an Azure AD Connect sync hash", 15, "narrow to hybrid-AD deployments", "azuresync"),
-		predicateProto(isSipHash, "SipHash", "16-char hex key field and hex tag field, colon-delimited", 15, "a MAC, not a password hash; seldom a cracking target", "siphash"),
+		// isHMailServer has no fixed prefix — it only checks overall length plus
+		// hex/non-hex composition of the two halves — so it is TierStructural,
+		// not the TierSignature a record prefix would earn.
+		predicateProto(isHMailServer, "hMailServer", hashid.TierStructural, "70-char record with a non-hex 6-char salt followed by a hex digest", 10, "single-product format; rare in the wild", "hmailserver"),
+		// isPwsafe fully parses the $pwsafe$* record (prefix, version, salt,
+		// iteration count, digest all validated), so a match is TierSignature.
+		predicateProto(isPwsafe, "Password Safe v3", hashid.TierSignature, "parses as a Password Safe v3 hash", 20, "desktop password manager; appears in forensic work", "pwsafe"),
+		// isPKCS12 fully parses the $pfx$* record (prefix, algorithm, iteration
+		// count, salt, MAC and data all validated), so TierSignature.
+		predicateProto(isPKCS12, "PKCS#12 keystore", hashid.TierSignature, "parses as a PKCS#12 keystore hash", 35, "common wherever TLS client certificates are issued", "pfx"),
+		// isEpiserver fully parses the $episerver$* record (prefix, version,
+		// salt, digest all validated), so TierSignature.
+		predicateProto(isEpiserver, "EPiServer", hashid.TierSignature, "parses as an EPiServer password hash", 10, "single-CMS format", "episerver"),
+		// isAzureSync checks the "v1;PPH1_MD4," prefix plus decodes salt,
+		// iteration count and digest, so TierSignature.
+		predicateProto(isAzureSync, "Azure AD Connect sync", hashid.TierSignature, "parses as an Azure AD Connect sync hash", 15, "narrow to hybrid-AD deployments", "azuresync"),
+		// isSipHash has no fixed prefix — it only checks field count, the
+		// 16-char hex tag length and hex composition — so TierStructural.
+		predicateProto(isSipHash, "SipHash", hashid.TierStructural, "16-char hex tag field and hex key field, colon-delimited", 15, "a MAC, not a password hash; seldom a cracking target", "siphash"),
 		{
 			Types:   []string{"crc32-hashcat", "crc32c-hashcat", "murmurhash", "murmur3-seeded", "skip32"},
 			Display: "32-bit checksum with seed", Tier: hashid.TierStructural, Exclusive: true,
