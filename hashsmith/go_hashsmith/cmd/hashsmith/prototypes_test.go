@@ -241,3 +241,63 @@ func TestTableCoverageBatchF(t *testing.T) {
 		{"jwt", `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzbWl0aCIsImFkbWluIjp0cnVlfQ.FnpR61iqT7rqJqNFIrEz9AkzR8LySOtfK-koWIhz1ZY`, []string{"jwt"}},
 	})
 }
+
+// TestTableCoverageBatchG ports the KDF, directory and enterprise-predicate
+// branches of the legacy cascade: isGenericPBKDF2 through the bare
+// parseOracleH guard (original lines 1470-1548). 25 top-level `if`
+// statements. isCiscoASA is nested (appends oracle-h when parseOracleH also
+// succeeds) and becomes one Compute prototype with two possible outputs, both
+// covered here per the review note from batchE/F on covering every Compute
+// output. The bare parseOracleH guard is a 25th, separately-ported branch
+// that can never win a table evaluation (see its case-less comment below),
+// so it contributes a prototype but no case: 25 branches, 25 prototypes, 25
+// cases (23 single-output branches + 2 outputs for isCiscoASA - 0 for the
+// unreachable bare parseOracleH).
+func TestTableCoverageBatchG(t *testing.T) {
+	runTableCoverage(t, []tableCoverageCase{
+		{"pbkdf2", `sha256:1000:MTc3MTA0MTQwMjQxNzY=:PYjCU215Mi57AYPKva9j7mvF4Rc5bCnt`, []string{"pbkdf2"}},
+		{"passlib-pbkdf2", `$pbkdf2-sha1$1000$c2FsdHk$TX4yNQQZVOCfG5gIIedaYDjifAE`, []string{"passlib-pbkdf2"}},
+		{"werkzeug", `pbkdf2:sha256:1000$salty$f7d97f4feac0e0ce7a184eb5617dc5091632e8cd8933bdde1a4495a9bc208036`, []string{"werkzeug"}},
+		{"aspnet-identity", `AAABAgMEBQYHCAkKCwwNDg+Ky5554+IoJfqS5hXxjS0w0jPNKExk4LZOmo818o/5sg==`, []string{"aspnet-identity"}},
+		{"grub2", `grub.pbkdf2.sha512.1000.73616C74792D67727562.CD16B324E198DBDC0B8332A77D72A034D68EDE011F6DBF59DDB80F15E1C1C39342F25AC32DB910201112C836D9FAA0D5C141C21C39CB9BD010B848E445385213`, []string{"grub2"}},
+		{"1password", `1000:9e55bd14cb90f5e1:99a89704bc67d6921ab393ca46ee7973e0d5227938a6d669cdc920ad7ae857eb4163dcccf6770190f80d3478c62904827c59d5c97f2a0f16ea9f3aee6992d921b0244617e309a8283c91a21c524561923658dee0d4d304465bac5f766ef26b02534e44a7d1506088f95f9610dbfaf1ace6cf4368921a28367415e7d76938faf3d7a27750eaf74c1855a671ad7b2e4fdb30734022c37565ec8e30681db367ad8be49ce3927232ccd8e0d8a4e726acf88fa8dedf32c24ba771a3f5eb2aae13180ca4c29e2b7fccec4bc4e4d32eb01c6b12405a5a2b8d3aea44d7745be76bec9068ec2dd13d227b3bdb4962143dfc74496e00e228465b6f214428243b3fca652c3f8661915fcae0a5db919f87f9e9202ae7e0a4080849dc5003d7618585746ec637dd9d17cb97be9f2eb550fd539d51ae4a6d07c63903c83c780bb8520ba6462bae6f1dec54fee0707e82345b39c46befd3eefe0c33e30adb13cafe7dc4f18b53bee60dccf92c80cfae1671f9e3c6b0cf0ed278bfbdbd69ee910130554d8348287c9372e0f437194018355f71b5236114f03b7a58036b85ac8f089b7eaa72ab8997c9e26c40a095014b64d5c3b9221e59f5b9e7dd1d730420875b73a6ad841f68c2004e5622400905000c977edb625d54c6a42cecfc9009bb4489ebb4d1e339e0d014a972364e378441c761aad8c8929f753917b9a1e1a316831cb9d6ba92354a47202b78ab2f42f2c99284c12d3e212ebf8ea8ec683aeb62c0e5d588cca9cc08aac3ead97831bfa1f698dac9f857e8cdd9ec4b15cffb5900f2f951c657f831689ac6199033b13cecf4b29d84fb06f422acd3db566d7ec6b664325c4331ff35963553c26e94af6eb5b36fe79f14bf3a30f4964ded7991ef5d859ebbb0e98c821b21f9620fca9086f9b3b2a7ad8360c4a635c481f1ef4990f7f0ec4fde37723b4639ee633bdb32be6bf31298a4574381d95831d65b3e8e6352b1207a684401a0f3fcff65e0ed1e6ec714c07526896468daeb056cbe49d82b87092e53ac40cfba049983ce8923bed2de773d15a5e87a88041f72c34d8c0436f95368ec73abfdd1d21897f649e1de9e7198e9db342c93b3b8b0d3af6c4867d63fed394674e5b02c92b7698d5457d2cca773abaad69c4a0a36e468a40d14b8bd73fa1d9074c8881158e10e4243045ab254775bda1e7e89a68005d91bb67044ed407f221d1028d034aedcfea3b527725607bd5c3f880557cfc6c2c0bb3361ae131261b8a5ebf3b53521fdd731ec2413c61bc78a1ab7f78057abd1c5459250fba0e0d57c1f4ebd3e1871ce0f5bfd44d2790d946936eef03e14e81f33f5484eec0a76910c253bf2777232be1a3593678f27225b035999d9ffb675685457b48928db1f1be6c3f206ad2efc764f8ba77a38b439f1e28318a1b077fe0c9e36fa6ed0df0f052d9aadd56b1514b5d01a44161fcea20f6326fab1ee3d7f79`, []string{"1password"}},
+		{"ike", `7a1115b74a1b9d63de62627bdd029aa7a50df83ddbaba88c47d3e51833d21984fb463a2604ba0c82611a11edee7406e1826b2c70410d2797487d1220a4f716d7532fcd73e82b2fd6304f9af5dd1bc0a5dc1eb58bee978f95ffc8b6dc4401d4d2720978f4b0e69ae4dd96e61a1f23a347123aa242f893b33ac74fa234366dc56c:7e599b0168b56608f8a512b68bc7ea47726072ca8e66ecb8792a607f926afc2c3584850773d91644a3186da80414c5c336e07d95b891736f1e88eb05662bf17659781036fa03b869cb554d04689b53b401034e5ea061112066a89dcf8cbe3946e497feb8c5476152c2f8bc0bef4c2a05da51344370682ffb17ec664f8bc07855:419011bd5632fe07:169168a1ac421e4d:00000001000000010000009801010004030000240101000080010005800200028003000180040002800b0001000c000400007080030000240201000080010005800200018003000180040002800b0001000c000400007080030000240301000080010001800200028003000180040002800b0001000c000400007080000000240401000080010001800200018003000180040002800b0001000c000400007080:01110000c0a83965:ee4e517ba0f721798209d04dfcaf965758c4857e:48aada032ae2523815f4ec86758144fa98ad533c:e65f040dad4a628df43f3d1253f821110797a106`, []string{"ike"}},
+		{"dcc2", `$DCC2$10240#6848#e2829c8af2232fa53797e2f0e35e4626`, []string{"dcc2"}},
+		{"scram", `SCRAM-SHA-256$4096:ABEiM0RVZnc=$tXvV/5d2dbq937pl1Urt3L2m8LXy7/llbOPTaIXXgsI=:s5u1rzVInmgZSrQkhL722KLzdU3PzDktG2BMsuT009c=`, []string{"scram"}},
+		{"cram-md5", `$cram_md5$PDEyMzQuNTY3OEBzZXJ2ZXI+$c21pdGggNGVkNDY0NGI2ZmY0OWViYmU1OGE5MjY2MWQzMmE4MTg=`, []string{"cram-md5"}},
+		{"citrix", `1765058016a22f1b4e076dccd1c3df4e8e5c0839ccded98ea`, []string{"citrix"}},
+		// cisco-asa alone: isCiscoASA matches (16-char pix token : nonempty
+		// salt) but the digest is not valid hex, so parseOracleH fails and no
+		// oracle-h is appended. Golden line (detect_golden.txt:190).
+		{"cisco-asa (alone)", `02dMBMYkTdC5Ziyp:36`, []string{"cisco-asa"}},
+		// cisco-asa+oracle-h: the same record also happens to parse as an
+		// Oracle H digest:username pair (16-hex digest, short username), so
+		// oracle-h is appended. Golden line (detect_golden.txt:331). Both
+		// outputs of this Compute prototype get their own case, per the
+		// review note on batchF about covering every Compute output.
+		{"cisco-asa (with oracle-h)", `792FCB0AE31D8489:7284616727`, []string{"cisco-asa", "oracle-h"}},
+		{"ipmi", `b7c2d6f13a43dce2e44ad120a9cd8a13d0ca23f0414275c0bbe1070d2d1299b1c04da0f1a0f1e4e2537300263a2200000000000000000000140768617368636174:472bdabe2d5d4bffd6add7b3ba79a291d104a9ef`, []string{"ipmi"}},
+		{"ipmi-md5", `08b017f3628b9835c748521e412429c9:f3450000df540000cdd981b0b3441be8774a61e69321291891a29a0c5fdac3f06194bd2c29fa5246000000000000000000000000000000001400`, []string{"ipmi-md5"}},
+		{"aix", `{ssha256}06$aJckFGJAB30LTe10$ohUsB7LBPlgclE3hJg9x042DLJvQyxVCX.nZZLEz.g2`, []string{"aix"}},
+		{"ldap-pbkdf2", `{PBKDF2_SHA256}AAAgAKurq6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6teSuIJLfiaaXQ+9Lg6HFwOqIY4E90fson7SzcEGLcNl7Gz7kcDwEqL/erfHZVKBhT63PSPV16tcCzAq9vBsQ/BH47aEHN5rU+SHtRwmGhTZ2P/5SWTR0ggzO1s6w7w23Anojc3ArXHvPk1THbJQnm2g8gozhRtXrHY9GWYPCd3jZJbZGa51exqeIlO1YDEymmKNyXanvTLcTC2WQxTemMI/bZUgh9Cpi9+3DtyaBKmQNCzZY0burrXZlCMFdzZXHEEZTTt6DBSfv0f/QWecTLcjyI2NfRwUEFP6KrlBDZoHfKcSvGczO7foV2+EsohteoHFW2k6Bq6MNZcmMuU/Yl4`, []string{"ldap-pbkdf2"}},
+		{"ldap", `{CRYPT}$1$abcdefgh$t4yIjTehTKVzyLza7AROx.`, []string{"ldap"}},
+		{"sybase", `0xc00778168388631428230545ed2c976790af96768afa0806fe6c0da3b28f3e132137eac56f9bad027ea2`, []string{"sybase"}},
+		{"sap-fg-rfc-read-table", `604020408266$32837BA7B97672BA4E5A00000000000000000000`, []string{"sap-fg-rfc-read-table"}},
+		{"sap-b-rfc-read-table", `027642760180$77EC386300000000`, []string{"sap-b-rfc-read-table"}},
+		{"sap-fg", `USER$ABCAD719B17E7F794DF7E686E563E9E2D24DE1D0`, []string{"sap-fg"}},
+		{"juniper", `a$nMf9FkrCIgHGccRAxsBAwxBtDtPHfn`, []string{"juniper"}},
+		{"sap-b", `USER$C8B48F26B87B7EA7`, []string{"sap-b"}},
+		{"mediawiki", `$B$a1b2c3d4$c98b583edcb1cdccf2a4b855442a6cc6`, []string{"mediawiki"}},
+		// No case for the bare parseOracleH guard: it can never win a table
+		// evaluation. Its O$-prefixed form is always caught first by
+		// batchD's earlier, more specific "oracle-h (O$ form)" entry,
+		// and its colon-delimited digest:username form is always also a
+		// valid isCiscoASA match (a 16-char hex digest is always a valid
+		// crypt-64 pix token, since itoa64 is a superset of the hex
+		// alphabet, and parseOracleH's own non-empty-username requirement
+		// satisfies isCiscoASA's non-empty-salt requirement) — so the
+		// isCiscoASA Compute entry above always wins first and already
+		// appends oracle-h when applicable. Kept anyway for cascade
+		// fidelity; see its Rationale.
+	})
+}
