@@ -255,15 +255,27 @@ func batchDPrototypes() []hashid.Prototype {
 		// stripping, because the colon-delimited Hashcat NSEC3 form can
 		// collide with a "user:13-char-des-crypt" shadow line. This second
 		// occurrence checks the same predicate against the stripped
-		// Normalized form, catching NSEC3 records that only parse once a
-		// leading shadow-style prefix has been removed. Same predicate as
-		// batchA, so the same tier: parseNSEC3 fully validates field count,
-		// field lengths and encodings for both its John and Hashcat forms,
-		// which is TierStructural by definition, not TierSignature — the
-		// Hashcat colon form carries no fixed literal prefix at all.
+		// Normalized form. Same predicate as batchA, so the same tier:
+		// parseNSEC3 fully validates field count, field lengths and
+		// encodings for both its John and Hashcat forms, which is
+		// TierStructural by definition, not TierSignature — the Hashcat
+		// colon form carries no fixed literal prefix at all.
+		//
+		// This entry can never win a table evaluation, and neither could the
+		// branch it mirrors in the original cascade: stripShadowUsername
+		// only strips when the record's second colon-field looks like a
+		// crypt(3) hash, so it never touches a John $NSEC3$ record, and on
+		// the Hashcat 4-field colon form, stripping (when it fires at all)
+		// leaves a single field that cannot reparse as a 4-field NSEC3
+		// record either. So isNSEC3Record(Raw) and isNSEC3Record(Normalized)
+		// always agree, and batchA's earlier, Raw-based entry always wins
+		// first. Kept anyway: the port's job is to reproduce the cascade
+		// exactly, including its dead branches, not to prune them — pruning
+		// an apparently-dead branch is a deliberate decision for a dedicated
+		// review pass, not something that should ride along inside a port.
 		predicateProto(isNSEC3Record, "DNSSEC NSEC3 (post shadow-strip)", hashid.TierStructural,
 			"parses (after shadow-username stripping) as either a John $NSEC3$ record or a Hashcat digest:domain:salt:iterations record",
-			3, "this occurrence only fires for the residual case where a shadow-style prefix hid the record from the Raw-form check in batchA, a narrower slice than that check's own already-narrow DNSSEC use", "dnssec-nsec3"),
+			3, "mirrors a cascade branch that can never fire as a winner: stripShadowUsername cannot turn a non-NSEC3-parsing Raw string into an NSEC3-parsing Normalized one, so batchA's Raw-based entry always matches first; kept for cascade fidelity, not because this occurrence is independently reachable", "dnssec-nsec3"),
 		// The legacy branch requires both: parseOracleH succeeding (the
 		// record fully decodes into a 16-char hex digest and a 1-30 byte
 		// username) AND the record additionally carrying the "O$" prefix.

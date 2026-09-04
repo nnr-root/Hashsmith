@@ -113,7 +113,15 @@ func TestTableCoverageBatchD(t *testing.T) {
 	runTableCoverage(t, []tableCoverageCase{
 		{"dovecot-cram-md5", `{CRAM-MD5}5389b33b9725e5657cb631dc50017ff1535ce4e2a1c414009126506fc4327d0d`, []string{"dovecot-cram-md5"}},
 		{"ms-sntp", `$sntp-ms$cfc7023381cf6bb474cdcbeb0a67bdb3$907733697536811342962140955567108526489624716566696971338784438986103976327367763739445744705380`, []string{"ms-sntp"}},
-		{"dnssec-nsec3 (normalized)", `pi6a89u8tca930h8mvolklmesefc5gmn:.fnmlbsik.net:35537886:1`, []string{"dnssec-nsec3"}},
+		// No case for the second (Normalized-based) dnssec-nsec3 entry: it
+		// can never win a table evaluation. stripShadowUsername only strips
+		// when the second colon-field looks like a crypt(3) hash, so it
+		// never touches a John $NSEC3$ record and, on the Hashcat 4-field
+		// colon form, stripping leaves a single field that can't reparse as
+		// NSEC3 either way — so isNSEC3Record(Raw) and isNSEC3Record(Normalized)
+		// always agree, and batchA's earlier, Raw-based entry always wins
+		// first. The prototype is kept anyway because it faithfully mirrors
+		// an equally dead branch in the original cascade; see its Rationale.
 		{"oracle-h (O$ form)", `O$SYSTEM#9EEDFA0AD26C6D52`, []string{"oracle-h"}},
 		{"radmin3", `$radmin3$75007300650072006e0061006d006500*c63bf695069d564844c4849e7df6d41f1fbc5f3a7d8fe27c5f20545a238398fa*0062fb848c21d606baa0a91d7177daceb69ad2f6d090c2f1b3a654cfb417be66f739ae952f5c7c5170743459daf85`, []string{"radmin3"}},
 		{"citrix-sha512", `2f9282ade42ce148175dc3b4d8b5916dae5211eee49886c3f7cc768f6b9f2eb982a5ac2f2672a0223999bfd15349093278adf12f6276e8b61dacf5572b3f93d0b4fa886ce`, []string{"citrix-sha512"}},
