@@ -2,6 +2,7 @@ package main
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -127,6 +128,51 @@ func (registry *hashRegistry) numericAliases() int {
 	}
 	return total
 }
+
+// hashcatMode reports the Hashcat -m number for a format.
+//
+// A format may carry several numeric aliases — GPG spans 17010/17020/17030/
+// 17040 — so the LOWEST is reported. That choice is arbitrary but it must be
+// deterministic: a lookup that varies between runs would make identify's
+// output unstable and its JSON undiffable.
+func (r *hashRegistry) hashcatMode(name string) (int, bool) {
+	format := r.formats[canonicalHashType(name)]
+	if format == nil {
+		return 0, false
+	}
+	best, found := 0, false
+	for _, alias := range format.aliases {
+		if !isDecimalIdentifier(alias) {
+			continue
+		}
+		n, err := strconv.Atoi(alias)
+		if err != nil {
+			continue
+		}
+		if !found || n < best {
+			best, found = n, true
+		}
+	}
+	return best, found
+}
+
+// johnLabel reports the John the Ripper --format= label for a format.
+//
+// It cannot be derived from the alias map: John's labels live there
+// undifferentiated from spelling variants, so "raw-md5" and "md-5" are
+// indistinguishable to the registry. The mapping is therefore curated
+// explicitly in johnLabelSeed, and a format with no entry reports none rather
+// than guessing.
+func (r *hashRegistry) johnLabel(name string) (string, bool) {
+	canonical := canonicalHashType(name)
+	if _, ok := r.formats[canonical]; !ok {
+		return "", false
+	}
+	label, ok := johnLabels[canonical]
+	return label, ok
+}
+
+var johnLabels = johnLabelSeed()
 
 func isDecimalIdentifier(value string) bool {
 	if value == "" {
