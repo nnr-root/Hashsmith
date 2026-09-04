@@ -106,8 +106,22 @@ though the same binary contains 47 extractors that handle those files.
 
 ### 3.1 Placement: a new `internal/hashid` package
 
-The detection engine and the prototype table move to `internal/hashid`,
-following the existing `internal/gpubackend` and `internal/argon2d` pattern.
+The detection **engine** moves to `internal/hashid`, following the existing
+`internal/gpubackend` and `internal/argon2d` pattern. The **prototype table
+stays in `cmd/hashsmith`** and is handed to the engine at startup.
+
+> **AMENDED 2026-09-04, during planning.** This section originally said the
+> prototype table moved down with the engine. Checking that against the tree
+> showed it cannot: the ~185 predicates the cascade calls (`isNSEC3Record`,
+> `isPwsafe`, `isLDAP`, `isDCC2`, `isSAPCodvnB`, `detectCompatSaltedTypes`, …)
+> live in `crack_pwsafe.go`, `crack_ldap.go`, `crack_mscash.go` and dozens of
+> other per-format files, each beside the cracking code for its own format.
+> That placement is correct — things that change together live together — and
+> dragging them into `internal/hashid` would split every format's code in
+> half, causing more damage than the change repairs. Splitting engine from
+> table costs only part of the "shrink the large package" benefit: the table
+> is added while the 640-line cascade is deleted, so `cmd/hashsmith`'s line
+> count is roughly unchanged rather than reduced.
 
 Rationale, weighed against the two rejected alternatives:
 
@@ -118,15 +132,19 @@ Rationale, weighed against the two rejected alternatives:
   mistyped `-t` name becomes a runtime failure instead of a build failure. The
   project's self-test culture is built on compile-time and known-answer
   guarantees; trading one away for readability is the wrong trade here.
-- **Chosen — `internal/hashid`.** Independently testable, does not grow the
-  large package, and the safety property the data-file approach loses is
-  recovered by an integrity test (§5.2) that walks every prototype and asserts
-  its `-t` names exist in `universalHashRegistry`.
+- **Chosen — engine in `internal/hashid`, table in `cmd/hashsmith`.** The
+  engine is independently testable without any format knowledge, the table
+  keeps its predicates beside the code they belong to, and the safety property
+  the data-file approach loses is recovered by an integrity test (§5.2) that
+  walks every prototype and asserts its `-t` names exist in
+  `universalHashRegistry`.
 
-**Dependency direction is one-way.** `internal/hashid` knows only canonical
-`-t` name strings. It does not know Hashcat modes, John labels, or descriptions.
-`cmd/hashsmith` receives detection results and decorates them from its registry.
-No import cycle; `internal/hashid` is testable standalone.
+**Dependency direction is one-way.** `internal/hashid` defines the `Prototype`
+type, evaluates a table it is given, and applies suppression and confidence. It
+knows only canonical `-t` name *strings* — never Hashcat modes, John labels,
+descriptions, or any format predicate. `cmd/hashsmith` owns the table, supplies
+it, and decorates the results from its registry. No import cycle, and the
+engine's own tests use small synthetic tables rather than the real one.
 
 ### 3.2 The prototype
 
