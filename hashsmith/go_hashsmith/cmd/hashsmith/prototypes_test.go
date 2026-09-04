@@ -454,7 +454,7 @@ func TestLMIsDemotedOnLowercaseInput(t *testing.T) {
 
 // TestPrototypeTableIntegrity is the mechanical check the rejected embedded
 // JSON/TOML approach could not provide: it fails the build if any of the
-// ~240 prototypes has a malformed field. See task-11-brief.md.
+// 225 prototypes has a malformed field. See task-11-brief.md.
 func TestPrototypeTableIntegrity(t *testing.T) {
 	table := prototypeTable()
 	if len(table) < 150 {
@@ -504,4 +504,37 @@ func TestPrototypeTableIntegrity(t *testing.T) {
 		}
 		seenDisplay[p.Display] = i
 	}
+}
+
+// TestEmittedTypesAreRegistered closes the gap TestPrototypeTableIntegrity
+// cannot: six prototypes (the BLAKE2 family; WPA PMKID/EAPOL; Rails RESTful
+// auth; Cisco PIX/ASA + Oracle H; the salted-digest construction; Bitcoin/
+// Litecoin address recovery) compute their Types at match time via Compute
+// rather than declaring them, so the static loop above never runs for them —
+// a typo inside one of those closures would pass silently.
+//
+// Go cannot inspect a closure's returned strings statically, so this check
+// is dynamic instead: it runs the frozen golden corpus through the table and
+// validates every type the table actually emitted.
+//
+// Residual limit: this only covers types the corpus elicits. A Compute
+// branch no corpus input reaches is still unverified — this is strictly
+// better than the zero coverage those six entries had before, not exhaustive
+// coverage of every path through them.
+func TestEmittedTypesAreRegistered(t *testing.T) {
+	seen := make(map[string]struct{})
+	for _, input := range goldenDetectInputs() {
+		got, _ := detectTypesFromTable(input)
+		for _, typ := range got {
+			if typ != canonicalHashType(typ) {
+				t.Errorf("input %q: table emitted %q, which is an alias; want canonical name %q",
+					input, typ, canonicalHashType(typ))
+			}
+			if _, ok := universalHashRegistry.formats[typ]; !ok {
+				t.Errorf("input %q: table emitted unknown type %q", input, typ)
+			}
+			seen[typ] = struct{}{}
+		}
+	}
+	t.Logf("validated %d distinct emitted types across %d corpus inputs", len(seen), len(goldenDetectInputs()))
 }
