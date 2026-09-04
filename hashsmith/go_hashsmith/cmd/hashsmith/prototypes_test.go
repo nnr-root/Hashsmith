@@ -451,3 +451,57 @@ func TestLMIsDemotedOnLowercaseInput(t *testing.T) {
 	}
 	t.Fatal("lm was not among the candidates at all")
 }
+
+// TestPrototypeTableIntegrity is the mechanical check the rejected embedded
+// JSON/TOML approach could not provide: it fails the build if any of the
+// ~240 prototypes has a malformed field. See task-11-brief.md.
+func TestPrototypeTableIntegrity(t *testing.T) {
+	table := prototypeTable()
+	if len(table) < 150 {
+		t.Fatalf("table has %d prototypes; the cascade had ~185 branches — entries are missing", len(table))
+	}
+
+	seenDisplay := make(map[string]int)
+	for i := range table {
+		p := &table[i]
+		label := p.Display
+		if label == "" {
+			t.Errorf("prototype %d has an empty Display", i)
+			label = "<unnamed>"
+		}
+		if p.Match == nil && p.Compute == nil {
+			t.Errorf("prototype %q has neither Match nor Compute", label)
+		}
+		if p.Match != nil && p.Compute != nil {
+			t.Errorf("prototype %q sets both Match and Compute; it must set exactly one", label)
+		}
+		if strings.TrimSpace(p.Rationale) == "" {
+			t.Errorf("prototype %q has an empty Rationale; an unexplained prevalence is an unfalsifiable claim", label)
+		}
+		if p.Prevalence > 100 {
+			t.Errorf("prototype %q has Prevalence %d, want 0-100", label, p.Prevalence)
+		}
+		// A Compute prototype supplies its names at match time, so an empty
+		// Types is correct there and only there.
+		if len(p.Types) == 0 && p.Compute == nil {
+			t.Errorf("prototype %q declares no Types and has no Compute", label)
+		}
+		if len(p.Types) > 0 && p.Compute != nil {
+			t.Errorf("prototype %q sets both Types and Compute; it must set exactly one", label)
+		}
+		for _, typ := range p.Types {
+			if typ != canonicalHashType(typ) {
+				t.Errorf("prototype %q declares %q, which is an alias; use the canonical name %q",
+					label, typ, canonicalHashType(typ))
+			}
+			if _, ok := universalHashRegistry.formats[typ]; !ok {
+				t.Errorf("prototype %q declares unknown type %q", label, typ)
+			}
+		}
+		if prev, dup := seenDisplay[p.Display]; dup {
+			t.Errorf("Display %q is used by prototypes %d and %d; names must be unique so output is unambiguous",
+				p.Display, prev, i)
+		}
+		seenDisplay[p.Display] = i
+	}
+}
