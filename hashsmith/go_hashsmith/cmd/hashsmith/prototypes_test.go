@@ -188,3 +188,56 @@ func TestTableCoverageBatchE(t *testing.T) {
 		{"sha1-cx", `fd9149fb3ae37085dc6ed1314449f449fbf77aba:87740665218240877702`, []string{"sha1-cx"}},
 	})
 }
+
+func TestTableCoverageBatchF(t *testing.T) {
+	runTableCoverage(t, []tableCoverageCase{
+		// The Compute entry can produce two different candidate sets
+		// depending on fields 1 and 2; both outputs get their own case
+		// rather than only the first, per the review note on the preceding
+		// batch (batchE's report) that flagged exactly this omission.
+		{"rails-restful-auth (3 types)", `339b5eaa53f28516008e9ca710857d3a4785b6fc:8ca064ff42fcab5a8f0692544b8dd3d3054bd73fe9afaa08c6b6b310538cc9a7:757365726e616d65`, []string{"rails-restful-auth", "sha1-salt1-pass-salt2", "sha1-salt-user-password"}},
+		{"rails-restful-auth (2 types, field 1 odd length)", `630d2e918ab98e5fad9c61c0e4697654c4c16d73:18463812876898603420835420139870031762867:4449516425193605979760642927684590668549584534278112685644182848763890902699756869283142014018311837025441092624864168514500447147373198033271040848851687108629922695275682773136540885737874252666804716579965812709728589952868736177317883550827482248620334`, []string{"rails-restful-auth", "sha1-salt1-pass-salt2"}},
+		{"mysql8", `$mysql$A$005*06437A150142644D74187A6A2F0D7971094F2575*48667A67485366745A304F6A487A73704250663465337A7530325157687A51364A384D737554424939702E`, []string{"mysql8"}},
+		{"axcrypt-sha1", `$axcrypt_sha1$b89eaac7e61417341b710b727768294d0e6a277b`, []string{"axcrypt-sha1"}},
+		{"mongodb", `$mongodb-scram$0$admin$10000$ABEiM0RVZnc=$LQB5XFSjMV1evSGM1T44f917wkM=`, []string{"mongodb"}},
+		{"solarwinds", `$solarwinds$0$admin$gWiHE/NPgE/YtGzyLmH3kpG51robFZFQ4re8mH6veZYq4AaYoebzopWtF3aEvsig5dQc7Q6IUMfZEdPF+Hu9Ng==`, []string{"solarwinds"}},
+		{"sip", `$sip$*192.168.100.100*192.168.100.121*username*asterisk*REGISTER*sip*192.168.100.121**2b01df0b****MD5*ad0520061ca07c120d7e8ce696a6df2d`, []string{"sip"}},
+		{"django", `md5$salty$37795b0102ce7e2ec07898d88690a638`, []string{"django"}},
+		// The golden-inputs.md copies of the two colon-prefixed branches
+		// ("truecrypt:" and "veracrypt:") both reused the unrelated
+		// $truecrypt$/$veracrypt$ golden lines, which do not carry the
+		// literal colon prefix these two branches actually test, and the
+		// golden file itself has no example of either colon form. Built
+		// minimal inputs satisfying each branch's own literal prefix
+		// instead; see the task report.
+		{"truecrypt (colon prefix)", `truecrypt:1a2b3c4d5e6f7890`, []string{"truecrypt"}},
+		{"veracrypt (colon prefix)", `veracrypt:1a2b3c4d5e6f7890`, []string{"veracrypt"}},
+		{"truecrypt ($truecrypt$ prefix)", `$truecrypt$2b5da9924119fde5270f712ba3c3e4974460416e8465f222149499908c2fca0a4753b581f26625d11c4d3f49bdeb1c95bc3e17629d7e19ffb66175e5feab90a4$fd670194f95d578266f3f54e61b82dc00efc2bb4438e19c3f6d7a92825a7625d88ec6286ab4e1761749edc83dad4340fd167544f09913fd6b03775013ff232fc4dad6f726ef82ad4bd1c5227a7796d7db35a912beeda5b0cdd798bc34d3ac24403c87dc672a983687dd64f920c991840a56105a6311797eed9976014909700366420673f6455242c71151ac75903a353538ec24b4feb967e2b46886395cf3e934e83a6a58ef2c0180273a0c33ba2bd870b1d84afb03d5558dc17bc7fb586404ad9a7e506ed859540110c6ad73f0f1d2be47829bc666e1838ec3f1dc1f610206241ce07fbf2542ecef9348b37aa460815794ca582709697cbf0c90c3dae4cb9dd97b29d3c7d82bd8d0c81d708e74c7007468c6c55a40fd4f803a4f5a75818d7da0d1ef333b8622e7de516fa62a6fa2b8d6d5d23653dfcedffec771456ee204e5c85ee88defbe195462fbe8ce0e2a5a455dab66478b877ec37dfa66f19ab5201c56cd707ba7bee1b10360965d3868c1fdf91dda124b1b0994fee75848083d19369735905bd2864b496c6e35ecf96f6dd4728570a45746bcf8d7d0ec0b9b0b112b28fdc53efcfa7d0558c132cd683a742d62b34304d9f991029c8aedc3d8767da8c`, []string{"truecrypt"}},
+		{"veracrypt ($veracrypt$ prefix)", `$veracrypt$0c9d7444e9e64a833e857163787b2f6349224bdb4bbf788ce25156c870514226674725be3eebc3f2a2c2ee8adbf8bb3ec1405a333e8e091cec0c5aa77fa9b650$48ca01d954912bf3a3b1c38c00297a33ea0e014156ce08d9526150c085e5e2776a1faeb272c6e9539f466f4f93ffe6497c77d3aed54ffcdf1a3e6171cffac7b2ad96bd9e7cc553058894058def68beea05891b0ce734b6a166b8a5f24b4052fc7014b424bd6c33c9d710fb409cdf1a6c7567c1ba6a3010b03f9bda8aa2ef6733542d198a316da0c83106a6c31043f11ac191169db3db994493168ea996737355ccff84f27f6792b3dc87025d3594edb9e759ba3885980df17bc8c751ce3aba0df67aa7997906348729e81c4893cc654dc6b1da3ff7c588a327f45b8acff976d0593cc607dad48a25468d7c3ebc6dd49aa32fc526dd513852cdec4b36f3683b4998800afa25bb968c242d4c66b9b0c77b20d7bd40ffb403e9e087990d59c94ee7d36e9ebfa35a310bab963c253596e6bc89f67d5307823851c526ac789d0628a3eb81f2cdfd7d7612d8be1dade1b17f30aa2bb5d02eb8534caca0c334a269085939a5041c4ad112d325b1bfe3e9851bfdcad80bbc05ecbddc3f2ac09e2ad7182daf6ca5ccc510a100514f5d2dce1ff5046e0c8e7edf0bdc27f8fcdf4e9b3bce786c24bfa28dacee65ee8c913fc18eee5df61b8a43224f3a9c4e1b5de7b600d9e0`, []string{"veracrypt"}},
+		{"fortigate", `AK1FCIhM0IUIQVFJgcDFwLCMi7GppdwtRzMyDpFOFxdpH8=`, []string{"fortigate"}},
+		{"sap-issha512", `{x-isSHA512, 15000}YZH/V2T7zlQMGeWLBarm5Oi3qV9Y8ByXQijD28+bjtLdo7YssXaUBkxMXbS3l4yVlYw97tvYj+vu/L37sg1reDEzODQ4MDY1NzQ1NjQ=`, []string{"sap-issha512"}},
+		{"lastpass", `02eb97e869e0ddc7dc760fc633b4b54d:100100:pmix@trash-mail.com:9b071db7b8e265d4cadd3eb65ac0864a`, []string{"lastpass"}},
+		{"chap", `036a81bc84e01700faf965c3caaa3954:0243402616975530019305541949338903179746132451440267505028190519468680111713847350899833009965414425621884797638402856957040435715380438220464016:0757380776148401126145133134435506200715895167468508855794708942913462135276430452032928239699197100625556660484150983610760766285767453357925167463064045123083116191440783332986105343359475417787249790516137833723344398087127577224833364437305770807742238`, []string{"chap"}},
+		// No golden line for this shape either; built one that satisfies the
+		// 3-field/32-hex/first-field condition while avoiding isChap's
+		// stricter hex-second-and-third-field requirement (chap sits earlier
+		// in table order and would otherwise capture it).
+		{"md5-salt1-pass-salt2 group", `d41d8cd98f00b204e9800998ecf8427e:salt1:salt2`, []string{"md5-salt1-pass-salt2", "md5-salt1-upper-md5-salt2-pass", "md5-triple-dual-salt", "md5-salt1-sha1salt2pass", "md5-triple-passsalt-dual", "empirecms"}},
+		{"bitlocker", `$bitlocker$1$16$6f972989ddc209f1eccf07313a7266a2$1048576$12$3a33a8eaff5e6f81d907b591$60$316b0f6d4cb445fb056f0e3e0633c413526ff4481bbf588917b70a4e8f8075f5ceb45958a800b42cb7ff9b7f5e17c6145bf8561ea86f52d3592059fb`, []string{"bitlocker"}},
+		{"electrum", `$electrum$1*44358283104603165383613672586868*c43a6632d9f59364f74c395a03d8c2ea`, []string{"electrum"}},
+		{"phpass,phpass-md5 ($H$)", `$H$9ZtU3uM7Twc8X53ImNRhaec4b3QHJ91`, []string{"phpass", "phpass-md5"}},
+		{"phpass ($P$)", `$P$984478476IagS59wHZvyQMArzfx58u.`, []string{"phpass"}},
+		{"drupal7", `$S$C33783772bRXEx1aCsvY.dqgaaSu76XmVlKrW9Qu8IQlvxHlmzLf`, []string{"drupal7"}},
+		{"luks", `$luks$1$ripemd160$aes$xts-plain64$32$ef275b8f2fbecbf3400ac5272dc1803e2f4cf055$68617368736d6974682d6c756b732d6d6b65792d73616c742d33326279746573$2$2$68617368736d6974682d6c756b732d736c6f742d73616c742d33326279746573$1$2577e140b6e718b436f95c4175f276c6e60ee8257eeb68dc42ad8ca54d44e73b`, []string{"luks"}},
+		{"cisco8", `$8$TnGX/fE4KGHOVU$pEhnEvxrvaynpi8j4f.EMHr6M.FzU8xnZnBr/tJdFWk`, []string{"cisco8"}},
+		{"cisco9", `$9$2MJBozw/9R3UsU$2lFhcKvpghcyw8deP25GOfyZaagyUOGBymkryvOdfo6`, []string{"cisco9"}},
+		// No golden line for cisco4 either; "2btjjy78REtmYkkW0csHUbJZOstRXoWdX1mGrmmfeHI"
+		// is the project's own self-test vector for cisco4 (selftest_vectors.go),
+		// a 43-char crypt-64-alphabet body as isCiscoType4 requires.
+		{"cisco4", `$4$2btjjy78REtmYkkW0csHUbJZOstRXoWdX1mGrmmfeHI`, []string{"cisco4"}},
+		{"macos", `$ml$1000$00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff$1f3e3cbfd3ff3d4020595957d886af6bfd081bfd7706734736d57780340b88806a9f92b21f7609ca2ace446c80d8db7162cee1e0c772f18e779c37ce3f7d2a7782007fcc031dcac973e14604f3632435d84213dd073a7dca187ac47c289a7b04ffe7003c27e8723cc7dc5c878831296485d5ce6eec3c5b00e23aac1db80ea11d`, []string{"macos"}},
+		{"atlassian", `{PKCS5S2}ABEiM0RVZneImQCqu8zd7veGLWg0t3824DHQ9UQSJl9E1mxWba+TgfXT8+FCY2s7`, []string{"atlassian"}},
+		{"pbkdf1", `PBKDF1:sha1:1000:cGVuZ3VpbmtlZXBlcg==:J4BrIhXDUHNQ9lPPrWKn4V7Of9Y=`, []string{"pbkdf1"}},
+		{"jwt", `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzbWl0aCIsImFkbWluIjp0cnVlfQ.FnpR61iqT7rqJqNFIrEz9AkzR8LySOtfK-koWIhz1ZY`, []string{"jwt"}},
+	})
+}

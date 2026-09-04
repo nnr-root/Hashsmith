@@ -618,3 +618,222 @@ func batchEPrototypes() []hashid.Prototype {
 		},
 	}
 }
+
+// batchFPrototypes ports the remaining wallet, wireless and web-framework
+// branches of the legacy cascade: the three-field colon-split branch that
+// yields rails-restful-auth (the branch immediately before isMySQL8; a scope
+// correction moved it into this half so table order still matches cascade
+// order) through isJWT (original lines 1470-1562). 28 top-level `if`
+// statements, one of which (isPhpassHash) is nested and becomes two
+// prototypes, for 29 total.
+func batchFPrototypes() []hashid.Prototype {
+	return []hashid.Prototype{
+		// The legacy branch's candidate list is conditional: it always
+		// includes rails-restful-auth and sha1-salt1-pass-salt2, and appends
+		// sha1-salt-user-password only when fields 1 and 2 are each at most
+		// 256 chars, of even length, and hex-or-empty. No fixed prefix
+		// distinguishes this 3-field colon record from any other structural
+		// check, so TierStructural; expressed with Compute because the
+		// candidate list depends on the input, mirroring the legacy
+		// cascade's conditional append exactly (returning all three
+		// unconditionally would be a behaviour change the golden file
+		// would catch).
+		{
+			Display: "Rails RESTful auth (3-field colon record)",
+			Tier:    hashid.TierStructural, Exclusive: true,
+			Compute: func(in hashid.Input) ([]string, bool) {
+				fields := strings.Split(in.Normalized, ":")
+				if len(fields) != 3 || len(fields[0]) != 40 || !isHex(fields[0]) {
+					return nil, false
+				}
+				candidates := []string{"rails-restful-auth", "sha1-salt1-pass-salt2"}
+				if len(fields[1]) <= 256 && len(fields[1])%2 == 0 && isHexOrEmpty(fields[1]) &&
+					len(fields[2]) <= 256 && len(fields[2])%2 == 0 && isHexOrEmpty(fields[2]) {
+					candidates = append(candidates, "sha1-salt-user-password")
+				}
+				return candidates, true
+			},
+			Prevalence: 6, Rationale: "Rails' restful_authentication plugin, the source of this three-field salted-SHA1 record, was retired with the Rails 2.x line in favor of has_secure_password/bcrypt, so it now only surfaces in very old Rails codebases",
+		},
+		// isMySQL8 checks the "$mysql$A$" prefix, then decodes a 3-digit
+		// cost, a 20-byte hex salt and a 43-byte crypt-64 digest — a prefix
+		// check plus decoded fields, so TierSignature.
+		predicateProto(isMySQL8, "MySQL 8 caching_sha2_password", hashid.TierSignature,
+			"record prefix $mysql$A$ followed by a 3-digit cost, a 20-byte hex salt, and a 43-byte crypt-64 digest",
+			25, "caching_sha2_password has been MySQL's default authentication plugin since MySQL 8.0 (2018), so this record recurs wherever a current MySQL/MariaDB user table is dumped", "mysql8"),
+		hasPrefixProto("$axcrypt_sha1$", "AxCrypt SHA-1", 8,
+			"AxCrypt is a single-vendor Windows file-encryption tool with a modest user base compared to general-purpose archive/disk encryption tools", "axcrypt-sha1"),
+		hasPrefixProto("$mongodb-scram$", "MongoDB SCRAM-SHA-1", 12,
+			"MongoDB's SCRAM-SHA-1 stored credential record recurs wherever a MongoDB server's own credential database is extracted, though MongoDB is one of several popular document databases", "mongodb"),
+		hasPrefixProto("$solarwinds$", "SolarWinds Orion credential vault", 5,
+			"the SolarWinds Orion credential-vault record is specific to one enterprise network-monitoring product, a narrow slice of casework", "solarwinds"),
+		hasPrefixProto("$sip$*", "SIP digest challenge-response", 10,
+			"the SIP digest challenge-response record (Hashcat mode 11400) requires a captured SIP REGISTER/INVITE exchange, a narrower capture scenario than an on-disk credential dump", "sip"),
+		// isDjangoHash checks that the record's first $-delimited field is a
+		// literal known Django hasher name, then validates envelope-specific
+		// field count and digest encoding (e.g. md5/sha1 require a 32/40-char
+		// hex third field) — a prefix check plus decoded fields, so
+		// TierSignature.
+		predicateProto(isDjangoHash, "Django password hash", hashid.TierSignature,
+			"the record's first $-delimited field is a known Django password-hasher name (pbkdf2_sha256, pbkdf2_sha1, scrypt, argon2, bcrypt_sha256, bcrypt, md5 or sha1) with envelope-appropriate field count and digest encoding",
+			20, "Django is one of the most widely used Python web frameworks and its make_password() output format has changed little since Django 1.4, so its hashers recur routinely in web-application credential dumps", "django"),
+		hasPrefixProto("truecrypt:", "TrueCrypt volume (colon form)", 3,
+			"virtually all TrueCrypt records this project's own extractors and captured casework use are the $truecrypt$ form below, so this alternate colon-prefixed marker is rarely seen in practice", "truecrypt"),
+		hasPrefixProto("veracrypt:", "VeraCrypt volume (colon form)", 3,
+			"virtually all VeraCrypt records this project's own extractors and captured casework use are the $veracrypt$ form below, so this alternate colon-prefixed marker is rarely seen in practice", "veracrypt"),
+		hasPrefixProto("$truecrypt$", "TrueCrypt volume", 15,
+			"TrueCrypt was discontinued in 2014 but its container format lives on via VeraCrypt's compatibility mode, so $truecrypt$ headers still recur in older encrypted-volume forensic casework", "truecrypt"),
+		hasPrefixProto("$veracrypt$", "VeraCrypt volume", 20,
+			"VeraCrypt is the actively maintained successor to TrueCrypt and remains a common choice for full-disk/container encryption, giving it more real-world exposure than the discontinued TrueCrypt format above", "veracrypt"),
+		// Fixed literal 3-char prefix ("AK1") plus an exact total length
+		// (47). The prefix is what makes this a signature, unlike
+		// lastpass/chap/the md5-group below, which have no literal prefix
+		// at all.
+		{
+			Types: []string{"fortigate"}, Display: "FortiGate/FortiOS AK1 local admin hash",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if strings.HasPrefix(in.Normalized, "AK1") && len(in.Normalized) == 47 {
+					return "record prefix AK1 with a fixed 47-char total length", true
+				}
+				return "", false
+			},
+			Prevalence: 10, Rationale: "FortiGate's AK1 local admin-password hash recurs wherever a FortiGate firewall's configuration backup is examined, a narrower target than general-purpose Linux/Windows credential stores",
+		},
+		hasPrefixProto("{x-isSHA512, ", "LDAP {x-isSHA512} (SAP CODVN H)", 5,
+			"the {x-isSHA512, N} SAP CODVN H variant requires a newer directory server version than the {x-issha}/{x-isSHA256}/{x-isSHA384} family in batch C, so it is the least commonly encountered member of that family", "sap-issha512"),
+		// No fixed prefix: only a colon-delimited field count (4), an exact
+		// length (32) and hex-ness on the first field, and an exact length
+		// (32) and hex-ness on the fourth. TierStructural.
+		{
+			Types: []string{"lastpass"}, Display: "LastPass exported vault item",
+			Tier: hashid.TierStructural, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				fields := strings.Split(in.Normalized, ":")
+				if len(fields) == 4 && len(fields[0]) == 32 && isHex(fields[0]) &&
+					len(fields[3]) == 32 && isHex(fields[3]) {
+					return "colon-delimited record with exactly 4 fields: the first exactly 32 hex chars, the fourth exactly 32 hex chars", true
+				}
+				return "", false
+			},
+			Prevalence: 12, Rationale: "LastPass is one of the most widely used cloud password managers, so its exported vault-item hash recurs in password-manager cracking casework, though the structural-only match here (no fixed prefix) means the shape is shared with other 4-field colon records",
+		},
+		// isChap has no fixed prefix — it only checks field count (3), an
+		// exact length (32) and hex-ness on the first field, and non-empty
+		// hex on the second and third — so TierStructural.
+		predicateProto(isChap, "iSCSI CHAP authentication", hashid.TierStructural,
+			"colon-delimited record with exactly 3 fields: the first exactly 32 hex chars, the second and third both non-empty hex",
+			8, "iSCSI CHAP authentication (Hashcat mode 4800) requires a captured CHAP exchange, a narrower target than an offline credential-store dump", "chap"),
+		// No fixed prefix: only a colon-delimited field count (3) and an
+		// exact length (32) and hex-ness on the first field; fields 1 and 2
+		// are unconstrained. This shape is shared by several distinct
+		// salted-MD5 constructions (including EmpireCMS's) with no fixed
+		// prefix distinguishing them, so TierStructural. Checked after
+		// isChap above, reproducing the cascade's own order: isChap's
+		// stricter condition (f1/f2 also hex) wins first when both would
+		// otherwise match.
+		{
+			Types:   []string{"md5-salt1-pass-salt2", "md5-salt1-upper-md5-salt2-pass", "md5-triple-dual-salt", "md5-salt1-sha1salt2pass", "md5-triple-passsalt-dual", "empirecms"},
+			Display: "Salted MD5, 3-field colon record", Tier: hashid.TierStructural, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				fields := strings.Split(in.Normalized, ":")
+				if len(fields) == 3 && len(fields[0]) == 32 && isHex(fields[0]) {
+					return "colon-delimited record with exactly 3 fields, the first exactly 32 hex chars", true
+				}
+				return "", false
+			},
+			Prevalence: 6, Rationale: "this shape covers several distinct salted-MD5 constructions (including EmpireCMS's) that share no fixed prefix, so it is inherently ambiguous, and individually each construction is a narrow niche-CMS or legacy-app target",
+		},
+		hasPrefixProto("$bitlocker$", "Windows BitLocker", 20,
+			"BitLocker is Windows' built-in full-disk encryption, enabled by default on many modern Windows installs, making its recovery-password/password verifier a routine target in Windows disk-forensics casework", "bitlocker"),
+		hasPrefixProto("$electrum$", "Electrum Bitcoin wallet", 10,
+			"Electrum is a long-standing lightweight Bitcoin wallet with a smaller user base than exchange-integrated wallets like MetaMask, so its encrypted wallet file recurs less often in cryptocurrency casework", "electrum"),
+		// isPhpassHash is nested in the legacy cascade: a record additionally
+		// prefixed "$H$" yields {phpass, phpass-md5}; any other
+		// isPhpassHash record (necessarily "$P$", the only other prefix
+		// isPhpassHash accepts) yields {phpass} alone. Both sub-branches
+		// require the same fixed-length (34-char) record behind a literal
+		// prefix, so both are TierSignature; the $H$-specific entry is
+		// listed first so table order reproduces the nested precedence, as
+		// with $vbox$ in batchB.
+		{
+			Types: []string{"phpass", "phpass-md5"}, Display: "phpass portable hash ($H$)",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if isPhpassHash(in.Normalized) && strings.HasPrefix(in.Normalized, "$H$") {
+					return "record prefix $H$ with a fixed 34-char total length", true
+				}
+				return "", false
+			},
+			Prevalence: 15, Rationale: "the $H$ variant is phpass's portable-hash fallback used by WordPress and phpBB3 installs that predate or opt out of bcrypt, so it still recurs on older PHP CMS installs",
+		},
+		predicateProto(isPhpassHash, "phpass portable hash ($P$)", hashid.TierSignature,
+			"a 34-char record beginning $P$ or $H$ (the phpass portable hash format)",
+			6, "the $P$ variant only appears on PHP installs without native bcrypt support, a shrinking population now that PHP has bundled CRYPT_BLOWFISH by default for well over a decade", "phpass"),
+		// isDrupal7Hash checks a fixed 55-char total length behind the
+		// literal "$S$" prefix, so TierSignature.
+		predicateProto(isDrupal7Hash, "Drupal 7 password hash", hashid.TierSignature,
+			"record prefix $S$ with a fixed 55-char total length",
+			15, "Drupal 7 remained in active use and received official security support into 2025, a much longer tail than most CMS major versions get, so its password hash still recurs in Drupal-site credential dumps", "drupal7"),
+		hasPrefixProto("$luks$", "LUKS encrypted volume", 15,
+			"LUKS is the standard Linux full-disk-encryption format, so its header recurs wherever an encrypted Linux volume or disk image is seized", "luks"),
+		// Fixed literal prefix ("$8$") plus an exact total length (61).
+		{
+			Types: []string{"cisco8"}, Display: "Cisco IOS type 8 (PBKDF2-HMAC-SHA256)",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if strings.HasPrefix(in.Normalized, "$8$") && len(in.Normalized) == 61 {
+					return "record prefix $8$ with a fixed 61-char total length", true
+				}
+				return "", false
+			},
+			Prevalence: 12, Rationale: "Cisco type 8 has been the recommended replacement for the reversible/weak type 4-7 IOS password encodings since IOS 15.3, so it recurs on any recently hardened Cisco device configuration",
+		},
+		// Fixed literal prefix ("$9$") plus an exact total length (61).
+		{
+			Types: []string{"cisco9"}, Display: "Cisco IOS type 9 (scrypt)",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if strings.HasPrefix(in.Normalized, "$9$") && len(in.Normalized) == 61 {
+					return "record prefix $9$ with a fixed 61-char total length", true
+				}
+				return "", false
+			},
+			Prevalence: 10, Rationale: "Cisco type 9 (scrypt) is offered alongside type 8 as a stronger secret encoding on current IOS/IOS-XE, but type 8 remains the more commonly deployed of the two in practice",
+		},
+		// isCiscoType4 checks (after trimming the "$4$" prefix) an exact
+		// length (43) and that every remaining char is in the crypt-64
+		// alphabet — combined with the outer "$4$" prefix check, a prefix
+		// plus a decoded/validated field, so TierSignature.
+		{
+			Types: []string{"cisco4"}, Display: "Cisco IOS type 4 (unsalted SHA-256)",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if strings.HasPrefix(in.Normalized, "$4$") && isCiscoType4(in.Normalized) {
+					return "record prefix $4$ with a 43-char crypt-64-alphabet body", true
+				}
+				return "", false
+			},
+			Prevalence: 4, Rationale: "Cisco IOS type 4 was deprecated and pulled from IOS releases after a 2013 disclosure that it was no stronger than the type 5 MD5 it was meant to replace, so it now appears only on very old unpatched device configs",
+		},
+		hasPrefixProto("$ml$", "macOS SALTED-SHA512-PBKDF2 shadow hash", 15,
+			"the $ml$ record covers macOS's SALTED-SHA512-PBKDF2 shadow hash format used since 10.8, recurring wherever a modern macOS user account's local password hash is extracted", "macos"),
+		hasPrefixProto("{PKCS5S2}", "Atlassian PKCS5S2 credential", 15,
+			"{PKCS5S2} is the credential-store format shared across Atlassian's Jira/Confluence/Bitbucket product line, recurring wherever one of those on-prem instances' user database is captured", "atlassian"),
+		// isPBKDF1SHA1 checks two literal field values ("PBKDF1", "sha1"),
+		// then decodes the iteration count and base64 salt/digest fields —
+		// a prefix check plus decoded fields, so TierSignature.
+		predicateProto(isPBKDF1SHA1, "PBKDF1-SHA1", hashid.TierSignature,
+			"record prefix PBKDF1:sha1: followed by an iteration-count field and base64 salt/digest fields (digest at most 20 bytes)",
+			5, "PBKDF1 was deprecated by PKCS#5 v2.0/RFC 2898 in favor of PBKDF2 back in 1999, so applications that still emit this exact record shape are a narrow legacy minority", "pbkdf1"),
+		// isJWT requires the literal "eyJ" prefix (via reJWT), a three-part
+		// dot-delimited base64url shape, and a decoded header naming
+		// HS256/HS384/HS512 — a prefix check plus a decoded field. It does
+		// NOT verify the HMAC itself (that happens only in the separate
+		// verifyJWT), so this is a signature/structural match, not a
+		// checksum one: TierSignature, not TierChecksum.
+		predicateProto(isJWT, "JWT (HMAC-signed)", hashid.TierSignature,
+			"record begins with the base64url-encoded JSON-object prefix eyJ, splits into exactly three dot-delimited base64url segments, and its decoded header names HS256, HS384 or HS512",
+			15, "HS256-signed JWTs are common in web-API authentication, but only the HMAC-signed variant is crackable at all (RS/ES-signed tokens use asymmetric keys), so this narrower slice of JWT usage is what recurs in JWT-cracking casework", "jwt"),
+	}
+}
