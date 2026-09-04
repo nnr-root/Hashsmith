@@ -1320,12 +1320,12 @@ func batchHPrototypes() []hashid.Prototype {
 			6, "Dahua/Besder IP camera 8-char auth tokens are specific to one IoT camera vendor family, a narrow niche compared to general-purpose OS or web-application credential stores", "dahua-auth-md5", "besder-auth-md5"),
 		// Compound: an exact length (50) AND a case-insensitive 2-char
 		// comparison at a fixed offset (t[8:10] == "01"). The legacy branch
-		// only reaches this check after an earlier `if !isHex(t) { return nil
-		// }` guard (kept in legacyDetectHashTypes, immediately before the
-		// switch len(t) shape fallback the next task owns), so an isHex(t)
-		// check is added here to reproduce that precondition faithfully for
-		// this now-standalone table entry. The 2-char literal at a fixed
-		// offset is an embedded marker, but a much shorter and weaker one
+		// only reached this check after an earlier `if !isHex(t) { return nil
+		// }` guard (which sat immediately ahead of the switch len(t) shape
+		// fallback, now shapePrototypes() in prototypes_shape.go), so an
+		// isHex(t) check is added here to reproduce that precondition
+		// faithfully for this now-standalone table entry. The 2-char literal
+		// at a fixed offset is an embedded marker, but a much shorter and weaker one
 		// than batchG's Juniper (6 position-pinned literal chars) or SAP
 		// RFC_READ_TABLE (20-char literal zero-padding) entries, which earned
 		// TierSignature — it is closer in strength to batchF's citrix (a

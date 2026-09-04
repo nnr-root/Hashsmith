@@ -119,14 +119,56 @@ func shapePrototypes() []hashid.Prototype {
 // position in the original cascade: before the shape switch.
 func tailPrototypes() []hashid.Prototype {
 	return []hashid.Prototype{
+		// bitcoinAddressHashTypes has two independent paths with different
+		// evidentiary strength, so each gets its own prototype and its own
+		// honest tier rather than one prototype claiming the stronger of the
+		// two for both:
+		//
+		//   - the bech32 path is a bare "bc1q" prefix check, nothing else. It
+		//     does NOT call bech32Polymod (codecs_checksums.go), the verifier
+		//     isBech32 (identify.go) already uses elsewhere in this codebase.
+		//     Tagging this TierChecksum would let confidenceFor report
+		//     "certain" for any string that merely starts with four fixed
+		//     characters — a claim of proof where nothing was verified.
+		//   - the base58check path calls decodeBase58Check, which genuinely
+		//     verifies a SHA-256d checksum before this prototype matches, so
+		//     TierChecksum is earned there.
+		//
+		// Both remain Exclusive: true, matching their unconditional early
+		// `return` in the legacy cascade. Order preserved from the original
+		// `if bc1q ... else if decodeBase58Check ...`: bech32 first.
 		{
-			Display: "Bitcoin/Litecoin address recovery target", Tier: hashid.TierChecksum, Exclusive: true,
+			Types: []string{
+				"bitcoin-wif-p2wpkh-compressed", "bitcoin-wif-p2wpkh-uncompressed",
+				"bitcoin-raw-p2wpkh-compressed", "bitcoin-raw-p2wpkh-uncompressed",
+			},
+			Display: "Bitcoin/Litecoin address recovery target (bech32 prefix)",
+			Tier:    hashid.TierStructural, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if !strings.HasPrefix(strings.ToLower(in.Normalized), "bc1q") {
+					return "", false
+				}
+				return "bc1q prefix present; the bech32 polymod checksum is not verified here", true
+			},
+			Prevalence: 20,
+			Rationale:  "the bc1q human-readable-part prefix is how a mainnet P2WPKH bech32 address is conventionally spelled, but this prototype checks only that four-character prefix — bech32's own polymod checksum (already implemented in codecs_checksums.go and used by isBech32 elsewhere in this codebase) is not evaluated here, so a match is shape evidence only, not a verified address",
+		},
+		{
+			Display: "Bitcoin/Litecoin address recovery target (base58check)",
+			Tier:    hashid.TierChecksum, Exclusive: true,
 			Compute: func(in hashid.Input) ([]string, bool) {
+				// bitcoinAddressHashTypes also has a bc1q branch, but the
+				// sibling prototype above already claims that input; guard it
+				// out here so this prototype's own checksum-verified evidence
+				// is never used to justify a bech32 match.
+				if strings.HasPrefix(strings.ToLower(in.Normalized), "bc1q") {
+					return nil, false
+				}
 				types := bitcoinAddressHashTypes(in.Normalized)
 				return types, len(types) > 0
 			},
 			Prevalence: 20,
-			Rationale:  "Bitcoin has held the largest market capitalization of any cryptocurrency since its creation, so P2PKH/P2SH-P2WPKH/P2WPKH address-recovery casework (WIF or raw secp256k1 key against a supplied address) concentrates on it far more than on the many altcoins sharing the same address scheme",
+			Rationale:  "Bitcoin has held the largest market capitalization of any cryptocurrency since its creation, so P2PKH/P2SH-P2WPKH address-recovery casework (WIF or raw secp256k1 key against a supplied address) concentrates on it far more than on the many altcoins sharing the same address scheme; unlike the sibling bech32-prefix prototype above, base58check's SHA-256d checksum is verified before this one matches",
 		},
 		predicateProto(isMojoliciousRecord, "Perl Mojolicious signed cookie", hashid.TierStructural,
 			`record shape <data>--<64-char hex HMAC>, with "=" in the data field`,

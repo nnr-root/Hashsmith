@@ -8,9 +8,9 @@ import (
 	"hashsmith-go/internal/hashid"
 )
 
-// tableCoverageCase asserts a branch is served by the PROTOTYPE TABLE, not by
-// the legacy cascade fall-through. Without this, a broken port would silently
-// fall through, the golden test would stay green, and the bug would ship.
+// tableCoverageCase asserts a branch is served by the PROTOTYPE TABLE. Without
+// this, a broken port would silently go unmatched, the golden test would stay
+// green, and the bug would ship.
 type tableCoverageCase struct {
 	name  string
 	input string
@@ -23,7 +23,7 @@ func runTableCoverage(t *testing.T, cases []tableCoverageCase) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, served := detectTypesFromTable(tc.input)
 			if !served {
-				t.Fatalf("%q was not matched by the prototype table (it fell through to the legacy cascade)", tc.input)
+				t.Fatalf("%q was not matched by the prototype table", tc.input)
 			}
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("types = %v, want %v", got, tc.want)
