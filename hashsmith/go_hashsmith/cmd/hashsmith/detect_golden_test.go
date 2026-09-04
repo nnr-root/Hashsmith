@@ -14,10 +14,14 @@ import (
 func goldenDetectInputs() []string {
 	seen := make(map[string]struct{})
 	var out []string
-	add := func(s string) {
-		if s == "" {
-			return
-		}
+	// addDeduped appends s unless it is already in the corpus. The two loops
+	// below deliberately do NOT share one empty-string guard: an empty
+	// vector target is meaningless noise (a self-test vector never has one
+	// on purpose), but goldenExtraInputs includes "" on purpose, to pin how
+	// detectHashTypes handles empty input — an edge Task 4's rewritten entry
+	// path (TrimSpace then shadow-username peeling before consulting the
+	// table) needs pinned too. Do not re-unify these loops behind one guard.
+	addDeduped := func(s string) {
 		if _, ok := seen[s]; ok {
 			return
 		}
@@ -25,10 +29,13 @@ func goldenDetectInputs() []string {
 		out = append(out, s)
 	}
 	for _, v := range universalHashRegistry.vectors {
-		add(v.target)
+		if v.target == "" {
+			continue
+		}
+		addDeduped(v.target)
 	}
 	for _, s := range goldenExtraInputs {
-		add(s)
+		addDeduped(s)
 	}
 	sort.Strings(out)
 	return out
