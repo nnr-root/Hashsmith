@@ -1383,7 +1383,7 @@ verbatim:
 				// ... the remaining prepends, copied verbatim from the cascade ...
 				return generic, true
 			},
-			Prevalence: 35, Rationale: "generic salted constructions are common but individually indistinguishable",
+			Prevalence: 35, Rationale: "a bare hash:salt pair of a qualifying digest length is the generic shape several concrete apps build on (Redmine, vBulletin); with no app-specific marker present there is no basis for attributing it to one, and no corpus data distinguishes the base rate of a bare pair from a marked one",
 		},
 ```
 
