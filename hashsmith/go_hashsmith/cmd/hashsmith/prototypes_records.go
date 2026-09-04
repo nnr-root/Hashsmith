@@ -223,3 +223,164 @@ func batchCPrototypes() []hashid.Prototype {
 			"the ChaCha20 known-plaintext verifier (Hashcat mode 15400) targets a specific project-defined record shape rather than a widely deployed application format, so it is rarely seen outside crafted test cases", "chacha20"),
 	}
 }
+
+// batchDPrototypes ports the remaining office, directory and vendor-record
+// branches of the legacy cascade: {CRAM-MD5} through $keepass$ (original
+// lines 1463-1529). This half holds every compound branch in the range —
+// prefix-plus-length-plus-composition checks, a predicate matched against a
+// different input form than its first occurrence, and several branches with
+// no fixed prefix at all — each reproduced with a hand-written Match rather
+// than simplified into a prefix check.
+func batchDPrototypes() []hashid.Prototype {
+	return []hashid.Prototype{
+		// The legacy branch requires all three: the "{CRAM-MD5}" prefix, an
+		// exact total length (prefix + 64 hex chars), and the remainder being
+		// hex. A prefix check plus a decoded field, so TierSignature.
+		{
+			Types: []string{"dovecot-cram-md5"}, Display: "Dovecot CRAM-MD5",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				const prefix = "{CRAM-MD5}"
+				if strings.HasPrefix(in.Normalized, prefix) && len(in.Normalized) == len(prefix)+64 && isHex(in.Normalized[len(prefix):]) {
+					return "record prefix {CRAM-MD5} followed by exactly 64 hex chars", true
+				}
+				return "", false
+			},
+			Prevalence: 10, Rationale: "Dovecot's CRAM-MD5 chaining-state record (Hashcat mode 16400) is one option among several Dovecot password-scheme choices, not the IMAP server's default",
+		},
+		hasPrefixProto("$sntp-ms$", "Microsoft SNTP", 6,
+			"Microsoft SNTP MD5(NT-hash||packet) (Hashcat mode 31300) only appears where an SNTP exchange with an AD-joined host was captured on the wire, a narrow capture scenario compared to on-disk credential dumps", "ms-sntp"),
+		// This is isNSEC3Record's second occurrence in the cascade. The first
+		// (batchA) is checked against Input.Raw, before shadow-username
+		// stripping, because the colon-delimited Hashcat NSEC3 form can
+		// collide with a "user:13-char-des-crypt" shadow line. This second
+		// occurrence checks the same predicate against the stripped
+		// Normalized form, catching NSEC3 records that only parse once a
+		// leading shadow-style prefix has been removed. Same predicate as
+		// batchA, so the same tier: parseNSEC3 fully validates field count,
+		// field lengths and encodings for both its John and Hashcat forms,
+		// which is TierStructural by definition, not TierSignature — the
+		// Hashcat colon form carries no fixed literal prefix at all.
+		predicateProto(isNSEC3Record, "DNSSEC NSEC3 (post shadow-strip)", hashid.TierStructural,
+			"parses (after shadow-username stripping) as either a John $NSEC3$ record or a Hashcat digest:domain:salt:iterations record",
+			3, "this occurrence only fires for the residual case where a shadow-style prefix hid the record from the Raw-form check in batchA, a narrower slice than that check's own already-narrow DNSSEC use", "dnssec-nsec3"),
+		// The legacy branch requires both: parseOracleH succeeding (the
+		// record fully decodes into a 16-char hex digest and a 1-30 byte
+		// username) AND the record additionally carrying the "O$" prefix.
+		// parseOracleH also accepts a colon-delimited "digest:username" form
+		// with no prefix at all, but this branch only fires for the
+		// John-style O$ form. A prefix check plus decoded fields, so
+		// TierSignature.
+		{
+			Types: []string{"oracle-h"}, Display: "Oracle H-type (O$ form)",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if _, _, ok := parseOracleH(in.Normalized); ok && strings.HasPrefix(in.Normalized, "O$") {
+					return "record prefix O$ followed by a username#digest body that decodes to a 16-char hex DES digest", true
+				}
+				return "", false
+			},
+			Prevalence: 6, Rationale: "Oracle 7-10g H-type DES hashes (Hashcat mode 3100 / John oracle) recur in legacy Oracle DB forensic work, but many captured records use the plain digest:username form without the O$ prefix this branch requires, so this branch only covers the John-style minority",
+		},
+		hasPrefixProto("$radmin3$", "Radmin3 SHA-1/SRP verifier", 8,
+			"Radmin3 (Hashcat mode 29200) is one specific remote-administration product whose market share has shrunk as RDP became the default for Windows remote access", "radmin3"),
+		// No fixed prefix: only an exact total length (137), a literal first
+		// byte ('2'), and hex composition of the rest. TierStructural.
+		{
+			Types: []string{"citrix-sha512"}, Display: "Citrix NetScaler salted SHA-512",
+			Tier: hashid.TierStructural, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if len(in.Normalized) == 137 && in.Normalized[0] == '2' && isHex(in.Normalized[1:]) {
+					return "137-char record starting with '2', the remaining 136 chars hex", true
+				}
+				return "", false
+			},
+			Prevalence: 6, Rationale: "Citrix NetScaler's salted SHA-512 (Hashcat mode 22200) is specific to Citrix ADC/NetScaler deployments, a narrower footprint than the Linux crypt(3) SHA variants it structurally resembles",
+		},
+		// Fixed literal 3-char prefix ("SH2") plus an exact total length
+		// (63). The prefix is what makes this a signature, not merely
+		// structural — unlike the two hex-composition branches above and
+		// below, which have no literal prefix at all.
+		{
+			Types: []string{"fortigate256"}, Display: "FortiGate/FortiOS salted SHA-256",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if len(in.Normalized) == 63 && strings.HasPrefix(in.Normalized, "SH2") {
+					return "record prefix SH2 with a fixed 63-char total length", true
+				}
+				return "", false
+			},
+			Prevalence: 8, Rationale: "FortiGate/FortiOS salted SHA-256 (Hashcat mode 26300) recurs wherever a FortiGate firewall's local admin database is extracted, a narrower target than general-purpose Linux shadow files",
+		},
+		hasPrefixProto("$vbk$*", "Veeam VBK backup password", 6,
+			"Veeam VBK backup password records (Hashcat mode 31200) surface specifically in Veeam backup-infrastructure engagements, a narrow slice of enterprise backup-tool casework", "veeam-vbk"),
+		hasPrefixProto("$MSONLINEACCOUNT$0$", "Microsoft Online Account", 5,
+			"the Microsoft Online Account PBKDF2-SHA256 + AES-256 record (Hashcat mode 33700) is specific to legacy Microsoft/Skype account exports, a shrinking target as Microsoft consolidates local caches on Entra ID auth", "ms-online-account"),
+		hasPrefixProto(`S:"Config Passphrase"=02:`, "SecureCRT MasterPassphrase v2", 6,
+			"the SecureCRT MasterPassphrase v2 record (Hashcat mode 31400) only appears in SecureCRT/SecureFX config-file extraction, one specific terminal-emulator product", "securecrt-v2"),
+		hasPrefixProto("$knx-ip-secure-device-authentication-code$*", "KNX IP Secure device auth code", 4,
+			"the KNX IP Secure device authentication code (Hashcat mode 25900) is confined to KNX building-automation gateway deployments, a small slice of industrial/IoT casework", "knx-ip-secure"),
+		hasPrefixProto("$teamspeak$3$", "TeamSpeak 3 channel hash", 10,
+			"the TeamSpeak 3 channel hash (Hashcat mode 28300) recurs wherever a TeamSpeak 3 server database is seized; TeamSpeak remains a common self-hosted voice server for gaming communities", "teamspeak3"),
+		hasPrefixProto("$bcrypt-sha256$", "Passlib bcrypt-sha256", 10,
+			"Passlib's bcrypt(HMAC-SHA256(password)) wrapper (Hashcat mode 30601) exists specifically to work around bcrypt's 72-byte input truncation, so it appears only in Python/Passlib-backed applications that opted into that wrapper", "passlib-bcrypt-sha256"),
+		// Full parse: three colon-delimited fields, the first equal to the
+		// literal "sha256" (effectively a "sha256:" record prefix), and the
+		// remaining two fields each exactly 64 hex chars. Field count,
+		// lengths and encodings all agree, so TierSignature.
+		{
+			Types: []string{"anope-sha256"}, Display: "Anope IRC Services enc_sha256",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				fields := strings.Split(in.Normalized, ":")
+				if len(fields) == 3 && fields[0] == "sha256" &&
+					len(fields[1]) == 64 && isHex(fields[1]) && len(fields[2]) == 64 && isHex(fields[2]) {
+					return "record prefix sha256: followed by two 64-char hex fields", true
+				}
+				return "", false
+			},
+			Prevalence: 4, Rationale: "Anope IRC Services' enc_sha256 stored-account state (Hashcat mode 30700) is specific to one IRC services package among several competing implementations (Atheme, ircservices)",
+		},
+		// No fixed prefix: only an exact total length (129), a literal first
+		// byte ('5'), and hex composition of the rest. TierStructural.
+		{
+			Types: []string{"citrix-pbkdf2"}, Display: "Citrix NetScaler PBKDF2-SHA256",
+			Tier: hashid.TierStructural, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if len(in.Normalized) == 129 && in.Normalized[0] == '5' && isHex(in.Normalized[1:]) {
+					return "129-char record starting with '5', the remaining 128 chars hex", true
+				}
+				return "", false
+			},
+			Prevalence: 6, Rationale: "Citrix NetScaler's newer PBKDF2-HMAC-SHA256 record (Hashcat mode 33900) is displacing the older salted-SHA512 form above on current NetScaler builds, but the installed base still runs a mix of both",
+		},
+		// isUmbracoHMACSHA1 checks only an exact length (28) and that the
+		// record base64-decodes to exactly a SHA-1-sized (20-byte) digest —
+		// no fixed prefix, so TierStructural rather than TierSignature.
+		predicateProto(isUmbracoHMACSHA1, "Umbraco HMAC-SHA1", hashid.TierStructural,
+			"28-char record that base64-decodes to exactly a 20-byte digest",
+			4, "Umbraco HMAC-SHA1 over a UTF-16LE password (Hashcat mode 24800) is confined to sites built on the Umbraco CMS, a mid-tier .NET CMS with a far smaller install base than WordPress", "umbraco-hmac-sha1"),
+		hasPrefixProto("$AWS-Sig-v4$", "AWS Signature v4", 12,
+			"AWS Signature Version 4 (Hashcat mode 28700) appears wherever an AWS SigV4-signed request has been captured; SigV4 is the default signing scheme across all current AWS SDKs and the CLI", "aws-sig-v4"),
+		// isTOTPRecord checks field count (2-8, even), then for each pair
+		// that the first field is exactly 6 chars and numeric and the second
+		// parses as a uint64 timestamp — field count, field lengths and
+		// encodings (numeric parse) all agree, so TierStructural. No fixed
+		// prefix distinguishes a TOTP code/timestamp pair from any other
+		// colon-delimited digit sequence.
+		predicateProto(isTOTPRecord, "TOTP code/timestamp pairs", hashid.TierStructural,
+			"2-8 colon-delimited fields in alternating (6-digit numeric code, numeric timestamp) pairs",
+			5, "TOTP HMAC-SHA1 code/timestamp verification (Hashcat mode 18100) requires a captured code alongside its Unix timestamp, a narrow forensic scenario compared to a stored password hash", "totp"),
+		// isHCCAPXHex checks an exact hex length (786 chars = 393 bytes) and
+		// that the record begins with the "HCPX" magic plus a literal
+		// version-4 field, encoded as the hex string "4843505804000000" —
+		// effectively an unambiguous record signature, just expressed as hex
+		// text rather than raw bytes, so TierSignature rather than
+		// TierStructural.
+		predicateProto(isHCCAPXHex, "Legacy hccapx WPA-EAPOL container", hashid.TierSignature,
+			"786-char hex record beginning with the HCPX magic and hccapx format version 4 (4843505804000000)",
+			3, "hccapx (Hashcat modes 2500/2501) is Hashcat's retired WPA handshake container, superseded by the pcapng-derived hc22000 format that current capture tooling now emits by default", "wpa-hccapx"),
+		hasPrefixProto("$keepass$", "KeePass database", 20,
+			"KeePass is one of the most widely used cross-platform password managers, so its KDBX database file recurs routinely in password-manager cracking casework", "keepass"),
+	}
+}

@@ -30,6 +30,7 @@ func prototypeTable() []hashid.Prototype {
 		prototypeTableVal = append(prototypeTableVal, batchAPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, batchBPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, batchCPrototypes()...)
+		prototypeTableVal = append(prototypeTableVal, batchDPrototypes()...)
 	})
 	return prototypeTableVal
 }

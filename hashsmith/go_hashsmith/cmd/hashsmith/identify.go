@@ -1460,73 +1460,12 @@ func legacyDetectHashTypes(text string) []string {
 	if types := bitcoinAddressHashTypes(t); len(types) != 0 {
 		return types
 	}
-	if strings.HasPrefix(t, "{CRAM-MD5}") && len(t) == len("{CRAM-MD5}")+64 && isHex(t[len("{CRAM-MD5}"):]) {
-		return []string{"dovecot-cram-md5"}
-	}
 	if separator := strings.LastIndex(t, "--"); separator > 0 && separator+66 == len(t) &&
 		strings.Contains(t[:separator], "=") && isHex(t[separator+2:]) {
 		return []string{"mojolicious"}
 	}
 	if _, _, _, err := parseBlockchainSecond(t); err == nil {
 		return []string{"blockchain-second"}
-	}
-	if strings.HasPrefix(t, "$sntp-ms$") {
-		return []string{"ms-sntp"}
-	}
-	if isNSEC3Record(t) {
-		return []string{"dnssec-nsec3"}
-	}
-	if _, _, ok := parseOracleH(t); ok && strings.HasPrefix(t, "O$") {
-		return []string{"oracle-h"}
-	}
-	if strings.HasPrefix(t, "$radmin3$") {
-		return []string{"radmin3"}
-	}
-	if len(t) == 137 && t[0] == '2' && isHex(t[1:]) {
-		return []string{"citrix-sha512"}
-	}
-	if len(t) == 63 && strings.HasPrefix(t, "SH2") {
-		return []string{"fortigate256"}
-	}
-	if strings.HasPrefix(t, "$vbk$*") {
-		return []string{"veeam-vbk"}
-	}
-	if strings.HasPrefix(t, "$MSONLINEACCOUNT$0$") {
-		return []string{"ms-online-account"}
-	}
-	if strings.HasPrefix(t, "S:\"Config Passphrase\"=02:") {
-		return []string{"securecrt-v2"}
-	}
-	if strings.HasPrefix(t, "$knx-ip-secure-device-authentication-code$*") {
-		return []string{"knx-ip-secure"}
-	}
-	if strings.HasPrefix(t, "$teamspeak$3$") {
-		return []string{"teamspeak3"}
-	}
-	if strings.HasPrefix(t, "$bcrypt-sha256$") {
-		return []string{"passlib-bcrypt-sha256"}
-	}
-	if fields := strings.Split(t, ":"); len(fields) == 3 && fields[0] == "sha256" &&
-		len(fields[1]) == 64 && isHex(fields[1]) && len(fields[2]) == 64 && isHex(fields[2]) {
-		return []string{"anope-sha256"}
-	}
-	if len(t) == 129 && t[0] == '5' && isHex(t[1:]) {
-		return []string{"citrix-pbkdf2"}
-	}
-	if isUmbracoHMACSHA1(t) {
-		return []string{"umbraco-hmac-sha1"}
-	}
-	if strings.HasPrefix(t, "$AWS-Sig-v4$") {
-		return []string{"aws-sig-v4"}
-	}
-	if isTOTPRecord(t) {
-		return []string{"totp"}
-	}
-	if isHCCAPXHex(t) {
-		return []string{"wpa-hccapx"}
-	}
-	if strings.HasPrefix(t, "$keepass$") {
-		return []string{"keepass"}
 	}
 	if strings.HasPrefix(t, "WPA*01*") || strings.HasPrefix(t, "WPA*02*") || isLegacyPMKID(t) {
 		return []string{"wpa"}
