@@ -35,7 +35,14 @@ const batchLineScanBuffer = 4 * 1024 * 1024
 // candidate reaches certain or likely; a line whose best candidate is merely
 // possible counts as unidentified, matching identify's own confidence bar
 // rather than a looser one invented for the summary.
-func scanBatch(r io.Reader) batchStats {
+//
+// The returned error is non-nil only when the scan itself failed — most
+// notably bufio.ErrTooLong when a line exceeds batchLineScanBuffer, at which
+// point Scan() stops for good and everything after that line goes unread.
+// A summary whose denominator can be silently short is worse than no
+// summary, so a truncated scan must be reported rather than rendered as if
+// it were complete.
+func scanBatch(r io.Reader) (batchStats, error) {
 	s := batchStats{
 		ByType:     map[string]int{},
 		Confidence: map[string]string{},
@@ -70,7 +77,10 @@ func scanBatch(r io.Reader) batchStats {
 		s.Confidence[best.Type] = best.Confidence.String()
 		s.Lines[best.Type] = append(s.Lines[best.Type], line)
 	}
-	return s
+	if err := sc.Err(); err != nil {
+		return s, fmt.Errorf("scanning dump after %d line(s): %w", s.Total, err)
+	}
+	return s, nil
 }
 
 // renderBatchSummary is identify --summary's rendering: a scanned/identified/
@@ -115,9 +125,23 @@ func renderBatchSummary(s batchStats) string {
 }
 
 // runIdentifyBatch is --summary's wiring into runIdentify: it resolves the
-// dump's file path, scans it, prints the summary, and honours
+// dump's file path, scans it, renders the summary, and honours
 // --split-by-type / --unmatched when they are given alongside it.
-func runIdentifyBatch(filePath, text string, positional []string, splitDir, unmatchedFile string) error {
+//
+// --json is refused outright rather than silently ignored: batchStats has no
+// schema-versioned JSON rendering (unlike the per-hash identifyReport that
+// --json normally produces), and inventing one as a side effect of a bug fix
+// would be scope creep this task didn't ask for. -o and -c are honoured,
+// same as the ordinary per-line path, since redirecting plain text output is
+// unambiguous and costs nothing to support.
+//
+// The exit code mirrors the per-line path's 0/1 contract (Task 14): 0 when
+// every scanned line was identified, 1 when any line was not.
+func runIdentifyBatch(filePath, text string, positional []string, splitDir, unmatchedFile, outFile string, copyRes, asJSON bool) error {
+	if asJSON {
+		return errors.New("identify --summary --json is not supported: --summary has no JSON rendering (batchStats is not the versioned identifyReport schema); drop --json or drop --summary")
+	}
+
 	path, err := resolveBatchFile(filePath, text, positional)
 	if err != nil {
 		return err
@@ -128,8 +152,17 @@ func runIdentifyBatch(filePath, text string, positional []string, splitDir, unma
 	}
 	defer f.Close()
 
-	stats := scanBatch(f)
-	color.New(themeAttr).Fprint(os.Stdout, renderBatchSummary(stats))
+	stats, err := scanBatch(f)
+	if err != nil {
+		return err
+	}
+	result := strings.TrimRight(renderBatchSummary(stats), "\n")
+
+	if outFile == "" && !copyRes {
+		color.New(themeAttr).Fprintln(os.Stdout, result)
+	} else if err := outputResult(result, outFile, copyRes); err != nil {
+		return err
+	}
 
 	if splitDir != "" {
 		if err := splitByType(stats, splitDir); err != nil {
@@ -140,6 +173,9 @@ func runIdentifyBatch(filePath, text string, positional []string, splitDir, unma
 		if err := writeUnmatched(unmatchedFile, stats.Unmatched); err != nil {
 			return err
 		}
+	}
+	if len(stats.Unmatched) > 0 {
+		return identifyExitError(1)
 	}
 	return nil
 }
