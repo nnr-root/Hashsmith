@@ -81,6 +81,15 @@ func shapePrototypes() []hashid.Prototype {
 		hexShapeProto(64, "SHAKE128-256", 5, "rare XOF output", nil, "shake128-256"),
 		hexShapeProto(64, "BLAKE2b-256", 10, "uncommon truncated BLAKE2b", nil, "blake2b256"),
 
+		// Task 15: this 80-char (40-byte) bucket was simply missing —
+		// ripemd320's own self-test vector is a bare 80-hex digest with no
+		// distinguishing marker, so it fell through every prototype and was
+		// undetectable by auto-detection even though hashing/verification for
+		// it were correct. Length and alphabet only, so TierShape, matching
+		// every other bucket in this function.
+		hexShapeProto(80, "RIPEMD-320", 5,
+			"RIPEMD-320 is a rarely-implemented double-width variant of RIPEMD-160; almost no software emits it as a password digest", nil, "ripemd320"),
+
 		hexShapeProto(96, "SHA-384", 40, "used where SHA-512 is considered oversized", nil, "sha384"),
 		hexShapeProto(96, "SHA3-384", 10, "thin SHA-3 adoption", nil, "sha3_384"),
 		hexShapeProto(96, "BLAKE2b-384", 5, "rare truncated BLAKE2b", nil, "blake2b384"),

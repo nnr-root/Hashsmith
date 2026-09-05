@@ -310,22 +310,25 @@ func TestTableCoverageBatchG(t *testing.T) {
 // through the 50-char arubaos branch (original lines 1978-2054). 18 `return`
 // statements in that range, one prototype per return (the nested $23$/general
 // pairs for krb5asrep, krb5tgs and reMSSQLNew each count as two), for 18
-// prototypes.
+// prototypes — 19 as of Task 15, which gave mssql2012 its own prototype (see
+// below).
 //
-// Case count is 22, not 18: the detectCompatSaltedTypes Compute entry is one
-// prototype but reaches 6 distinct output shapes (no prepend; redmine;
+// Case count is 22, not 18/19: the detectCompatSaltedTypes Compute entry is
+// one prototype but reaches 6 distinct output shapes (no prepend; redmine;
 // vbulletin alone; vbulletin+aes128-ecb-nokdf group; symfony-legacy alone;
 // symfony-legacy+netwitness-sha256), each given its own case per the
 // batchF/batchG precedent on covering every Compute output — that is 16
-// single-output branches + 6 shapes = 22.
+// single-output branches + 6 shapes = 22; mssql2012's new case (below)
+// doesn't change this, since it replaces what was previously an uncovered,
+// unreachable branch rather than adding a Compute shape.
 //
-// mssql2012 gets no case: reMSSQLNew is anchored `(?i)^0x0100[0-9a-fA-F]{48}$`,
-// so any string it matches is already guaranteed to start with the literal
-// digits "0100" (case-folding only affects a-f, not the digits 0/1). The
-// nested check for a "0x0200" prefix therefore can never see the record it
-// is looking for, on ANY input — this is dead code inherited verbatim from
-// the legacy cascade, not a table-position artifact. Ported anyway for
-// cascade fidelity; see its Rationale and the comment on the prototype.
+// mssql2012: the legacy cascade's nested "0x0200" check was dead code under
+// reMSSQLNew (`(?i)^0x0100[0-9a-fA-F]{48}$`, which can only ever match a
+// "0x0100"-prefixed string), so mssql2012 was undetectable by auto-detection
+// despite being a supported -t type with its own self-test vector. Task 15
+// replaced it with a separately anchored reMSSQL2012
+// (`(?i)^0x0200[0-9a-fA-F]{136}$`) matcher; see its comment in
+// batchHPrototypes. It now has its own coverage case below.
 //
 // The Compute entry's own isHexPair(t, 16, 16) prepend (des-plaintext,
 // 3des-plaintext) is similarly dead code, but it is not a separate table
@@ -378,9 +381,10 @@ func TestTableCoverageBatchH(t *testing.T) {
 		// (a literal leading "*" then 40 hex chars).
 		{"mysql41", `*` + strings.Repeat("a", 40), []string{"mysql41"}},
 
-		// reMSSQLNew: nested, 0x0200 first. See the func comment above and
-		// the prototype's own comment for why mssql2012 has no case: it is
-		// unreachable, not merely untested.
+		// mssql2012 (reMSSQL2012) is table-positioned ahead of mssql2005
+		// (reMSSQLNew), matching the legacy cascade's nested-check order; see
+		// the func comment above for why this used to be untestable.
+		{"mssql2012", `0x02003788006711b2e74e7d8cb4be96b1d187c962c5591a02d5a6ae81b3a4a094b26b7877958b26733e45016d929a756ed30d0a5ee65d3ce1970f9b7bf946e705c595f07625b1`, []string{"mssql2012"}},
 
 		{"mssql2005", `0x010045083578bf13a6e30ca29c40e540813772754d54a5ffd325`, []string{"mssql2005"}},
 

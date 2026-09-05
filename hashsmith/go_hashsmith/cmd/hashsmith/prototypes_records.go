@@ -801,16 +801,25 @@ func batchFPrototypes() []hashid.Prototype {
 			},
 			Prevalence: 10, Rationale: "Cisco type 9 (scrypt) is offered alongside type 8 as a stronger secret encoding on current IOS/IOS-XE, but type 8 remains the more commonly deployed of the two in practice",
 		},
-		// isCiscoType4 checks (after trimming the "$4$" prefix) an exact
-		// length (43) and that every remaining char is in the crypt-64
-		// alphabet — combined with the outer "$4$" prefix check, a prefix
-		// plus a decoded/validated field, so TierSignature.
+		// Task 15: the outer "$4$" prefix this Match used to AND against was
+		// wrong — crack_cisco.go's own doc comment and the isCiscoType4
+		// vector itself agree the canonical type 4 value is the BARE 43-char
+		// body (a Cisco `enable secret 4 <hash>` line carries no "$4$" tag;
+		// isCiscoType4 only trims that prefix because it is harmless when
+		// absent, not because it is required). ANDing a prefix the real
+		// format never has made this branch unable to match the one shape it
+		// actually needs to, so cisco4 was undetectable by auto-detection.
+		// Dropping the AND makes the evidence exactly what descrypt's
+		// looksLikeDescrypt is elsewhere in this table — an exact length plus
+		// membership in the crypt-64 alphabet, nothing more — so TierShape,
+		// not TierSignature; keeping TierSignature here would overclaim
+		// exactly the confidence descrypt's own comment argues against.
 		{
 			Types: []string{"cisco4"}, Display: "Cisco IOS type 4 (unsalted SHA-256)",
-			Tier: hashid.TierSignature, Exclusive: true,
+			Tier: hashid.TierShape, Exclusive: true,
 			Match: func(in hashid.Input) (hashid.Evidence, bool) {
-				if strings.HasPrefix(in.Normalized, "$4$") && isCiscoType4(in.Normalized) {
-					return "record prefix $4$ with a 43-char crypt-64-alphabet body", true
+				if isCiscoType4(in.Normalized) {
+					return "43-char crypt-64-alphabet body (optional $4$ tag tolerated, not required)", true
 				}
 				return "", false
 			},
@@ -1242,42 +1251,41 @@ func batchHPrototypes() []hashid.Prototype {
 		predicateProto(reMySQL41.MatchString, "MySQL 4.1+ (mysql_native_password)", hashid.TierStructural,
 			"record prefix * (a single punctuation marker, not a distinctive word) followed by 40 hex chars",
 			10, "the MySQL 4.1+ *SHA1(SHA1(pass)) hash is still what mysql.user stores under the mysql_native_password plugin, which remains widely deployed despite MySQL 8's caching_sha2_password default", "mysql41"),
-		// reMSSQLNew is nested, but unlike the krb5asrep/krb5tgs pairs above,
-		// the nesting is dead code: reMSSQLNew itself
+		// The legacy cascade's nested 0x0200 check was dead code: reMSSQLNew
 		// (`(?i)^0x0100[0-9a-fA-F]{48}$`) anchors on the literal digits
 		// "0x0100" — digits are unaffected by the (?i) case-fold, which only
-		// touches a-f — so ANY string the regexp matches is already
-		// guaranteed to start with "0100", never "0200". The nested
-		// `strings.HasPrefix(strings.ToLower(t), "0x0200")` check therefore
-		// can never see the record it is looking for. This is inherited
-		// verbatim from the legacy cascade, not introduced by porting it, and
-		// is ported anyway for cascade fidelity — hence no coverage case for
-		// mssql2012; see TestTableCoverageBatchH's comment for the same
-		// conclusion from the test side. Kept first in table order to
-		// reproduce the nested precedence, as instructed, even though it can
-		// never fire.
+		// touches a-f — so no string reMSSQLNew matches could ever also start
+		// "0x0200". That left mssql2012 (SQL Server 2012+, a 0x0200-tagged,
+		// 4-byte-salt + 64-byte-SHA512 record, 142 chars total: "0x0200" plus
+		// 136 hex chars) undetectable by auto-detection even though hashing
+		// and verification for it were correct. Task 15 is the one task
+		// allowed to change detection, so this is a real, separately anchored
+		// matcher rather than a repaired version of the old nested check —
+		// reMSSQL2012 (`(?i)^0x0200[0-9a-fA-F]{136}$`) has its own literal
+		// prefix and fixed length, so TierSignature, matching reMSSQLNew's own
+		// reasoning below.
 		{
-			Types: []string{"mssql2012"}, Display: "SQL Server 2012+ password hash (unreachable)",
+			Types: []string{"mssql2012"}, Display: "SQL Server 2012+ password hash",
 			Tier: hashid.TierSignature, Exclusive: true,
 			Match: func(in hashid.Input) (hashid.Evidence, bool) {
-				if reMSSQLNew.MatchString(in.Normalized) && strings.HasPrefix(strings.ToLower(in.Normalized), "0x0200") {
-					return "record prefix 0x0100 (case-insensitive) with a fixed 54-char total length, additionally starting 0x0200 (impossible: see the comment above)", true
+				if reMSSQL2012.MatchString(in.Normalized) {
+					return "record prefix 0x0200 (case-insensitive) with a fixed 142-char total length", true
 				}
 				return "", false
 			},
-			Prevalence: 10, Rationale: "no basis for a better estimate; revisit with corpus data",
+			Prevalence: 15, Rationale: "0x0200-tagged SQL Server 2012+ password hashes are what current SQL Server master..sys.sql_logins dumps and password-audit tooling produce",
 		},
-		// The general mssql2005 branch is just reMSSQLNew.MatchString(t) &&
-		// NOT the (unreachable) 0x0200 check, i.e. equivalent to
-		// reMSSQLNew.MatchString(t) alone in practice. reMSSQLNew anchors on
-		// the literal "0x0100" prefix plus a fixed 54-char total length, so
-		// TierSignature, matching batchG's Sybase ASE ("0xc007" prefix plus
-		// fixed length) reasoning.
+		// reMSSQLNew anchors on the literal "0x0100" prefix plus a fixed
+		// 54-char total length, so TierSignature, matching batchG's Sybase ASE
+		// ("0xc007" prefix plus fixed length) reasoning. It cannot collide
+		// with reMSSQL2012 above (disjoint literal prefixes), so unlike the
+		// legacy cascade this branch no longer needs to exclude "0x0200"
+		// itself.
 		{
 			Types: []string{"mssql2005"}, Display: "SQL Server 2000/2005 password hash",
 			Tier: hashid.TierSignature, Exclusive: true,
 			Match: func(in hashid.Input) (hashid.Evidence, bool) {
-				if reMSSQLNew.MatchString(in.Normalized) && !strings.HasPrefix(strings.ToLower(in.Normalized), "0x0200") {
+				if reMSSQLNew.MatchString(in.Normalized) {
 					return "record prefix 0x0100 (case-insensitive) with a fixed 54-char total length", true
 				}
 				return "", false

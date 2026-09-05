@@ -28,6 +28,7 @@ var (
 	rePostgres  = regexp.MustCompile(`^md5[0-9a-fA-F]{32}$`)
 	reMySQL41   = regexp.MustCompile(`^\*[0-9a-fA-F]{40}$`)
 	reMSSQLNew  = regexp.MustCompile(`(?i)^0x0100[0-9a-fA-F]{48}$`)
+	reMSSQL2012 = regexp.MustCompile(`(?i)^0x0200[0-9a-fA-F]{136}$`)
 	reURLEnc    = regexp.MustCompile(`%[0-9a-fA-F]{2}`)
 	reJSONEsc   = regexp.MustCompile(`\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})`)
 	reHexEsc    = regexp.MustCompile(`(?:\\[xX][0-9a-fA-F]{2})`)
