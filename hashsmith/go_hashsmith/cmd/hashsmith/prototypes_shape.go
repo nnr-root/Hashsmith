@@ -111,7 +111,7 @@ func shapePrototypes() []hashid.Prototype {
 // address-recovery target, a Mojolicious signed cookie, and a Blockchain.info
 // second-password record (bitcoinAddressHashTypes, then the inline "--"
 // separator check, then parseBlockchainSecond, in that order in the original
-// code). None of the eight porting batches (prototypes_records.go) claimed
+// code). None of the eight porting batches (now split across prototypes_records_*.go) claimed
 // these three, and the task-10 brief's own listing of what those batches
 // cover does not mention them either — they are a genuine gap, not something
 // this task's brief says to delete. Deleting the legacy fallback cascade

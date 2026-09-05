@@ -102,6 +102,18 @@ func runIdentify(args []string) error {
 			continue
 		}
 		if d, ev, conf, ok := sniffContainer(arg); ok {
+			// --json has no schema-versioned rendering for a container
+			// sniff result (renderContainerIdentification is human text,
+			// not the hashsmith.identify/1 schema runIdentifyJSON produces
+			// below), so the combination is refused outright — same
+			// precedent as --summary --json in runIdentifyBatch — rather
+			// than letting a JSON consumer receive unparseable text with
+			// no error.
+			if *asJSON {
+				return errors.New("identify --json against a container file is not supported: " +
+					"the container sniff result has no JSON rendering (it is not the versioned " +
+					"identifyReport schema); drop --json or point -i/-f at a hash value instead")
+			}
 			color.New(themeAttr).Fprintln(os.Stdout, renderContainerIdentification(arg, d, ev, conf))
 			return nil
 		}

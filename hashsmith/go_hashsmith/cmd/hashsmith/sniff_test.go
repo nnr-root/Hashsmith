@@ -41,9 +41,19 @@ func TestSniffKeePassKDBX4(t *testing.T) {
 
 func TestSniffZip(t *testing.T) {
 	p := writeTemp(t, "archive.zip", append([]byte("PK\x03\x04"), make([]byte, 64)...))
-	d, _, _, ok := sniffContainer(p)
+	d, _, conf, ok := sniffContainer(p)
 	if !ok || d.name != "zip2smith" {
 		t.Fatalf("zip routed to %v (ok=%v), want zip2smith", d, ok)
+	}
+	// T16/M11: the bare "PK\x03\x04" local-file-header signature is shared
+	// by .docx, .jar, .apk, .odt, .epub and every other ZIP-based container
+	// format, so it is no stronger evidence of "this is specifically an
+	// encrypted ZIP archive" than office2smith's bare OLE2 header is of
+	// "this is specifically an encrypted Office document" — and that one
+	// reports Likely (TestSniffOfficeBareHeaderIsLikelyNotCertain). Asserting
+	// Certain here overstated what a 4-byte magic actually proves.
+	if conf != hashid.Likely {
+		t.Errorf("confidence = %s, want likely (bare PK\\x03\\x04 is shared by many ZIP-based formats)", conf)
 	}
 }
 
@@ -147,6 +157,39 @@ func TestSniffOfficeWithEncryptionInfoStreamIsCertain(t *testing.T) {
 	}
 }
 
+// TestSniffPwsafeBareTagIsLikelyNotCertain is a regression test for T16/M11:
+// pwsafe2smith used to assert Certain for a bare "PWS3" 4-byte tag even
+// though its own evidence string admits "no secondary structural check
+// beyond the signature itself" — a contradiction between the confidence word
+// and the honesty of the evidence text next to it.
+func TestSniffPwsafeBareTagIsLikelyNotCertain(t *testing.T) {
+	p := writeTemp(t, "vault.psafe3", append([]byte("PWS3"), make([]byte, 64)...))
+	d, ev, conf, ok := sniffContainer(p)
+	if !ok || d.name != "pwsafe2smith" {
+		t.Fatalf("routed to %v (ok=%v), want pwsafe2smith", d, ok)
+	}
+	if conf != hashid.Likely {
+		t.Errorf("confidence = %s, want likely (bare 4-byte tag, no secondary check)", conf)
+	}
+	if !strings.Contains(string(ev), "no secondary structural check") {
+		t.Errorf("evidence = %q, want it to keep admitting the lack of a secondary check", ev)
+	}
+}
+
+// TestSniffHccapxBareTagIsLikelyNotCertain is a regression test for T16/M11:
+// hccapx2smith used to assert Certain for a bare "HCPX" 4-byte tag with no
+// structural check of the record that follows it.
+func TestSniffHccapxBareTagIsLikelyNotCertain(t *testing.T) {
+	p := writeTemp(t, "capture.hccapx", append([]byte("HCPX"), make([]byte, 64)...))
+	d, _, conf, ok := sniffContainer(p)
+	if !ok || d.name != "hccapx2smith" {
+		t.Fatalf("routed to %v (ok=%v), want hccapx2smith", d, ok)
+	}
+	if conf != hashid.Likely {
+		t.Errorf("confidence = %s, want likely (bare 4-byte tag, no secondary check)", conf)
+	}
+}
+
 func TestSniffCoverageIsReported(t *testing.T) {
 	with, total := sniffCoverage()
 	if total != len(universalExtractorRegistry) {
@@ -203,5 +246,44 @@ func TestIdentifyDashFRoutesAContainerThroughTheSniffer(t *testing.T) {
 	})
 	if !strings.Contains(out, "zip2smith") {
 		t.Errorf("identify -i <zip> did not route through the sniffer:\n%s", out)
+	}
+}
+
+// TestIdentifyJSONAgainstContainerIsRefused is the regression test for I2:
+// identify.go's container-sniff branch used to return before the --json
+// branch below it, so "identify --json <container>" printed
+// renderContainerIdentification's human text on stdout with no error — a
+// consumer parsing hashsmith.identify/1 got unparseable output and no
+// signal that anything went wrong. The combination is now refused outright,
+// the same precedent runIdentifyBatch already sets for --summary --json.
+func TestIdentifyJSONAgainstContainerIsRefused(t *testing.T) {
+	head := append([]byte("PK\x03\x04"), make([]byte, 64)...)
+	p := writeTemp(t, "archive.zip", head)
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runIdentify([]string{"--json", "-f", p})
+	w.Close()
+	os.Stdout = old
+	var sb strings.Builder
+	buf := make([]byte, 4096)
+	for {
+		n, rerr := r.Read(buf)
+		sb.Write(buf[:n])
+		if rerr != nil {
+			break
+		}
+	}
+	out := sb.String()
+
+	if err == nil {
+		t.Fatalf("identify --json <container> succeeded; want a refusal error. stdout:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "container") || !strings.Contains(err.Error(), "json") && !strings.Contains(err.Error(), "JSON") {
+		t.Errorf("error = %q, want it to name both --json and the container restriction", err.Error())
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Errorf("identify --json <container> wrote to stdout (want nothing, error only): %q", out)
 	}
 }

@@ -44,6 +44,13 @@ type Candidate struct {
 	Evidence   Evidence
 	Reason     string // why it was demoted, when it was
 	Suppressed bool
+	// Prevalence is copied from the prototype that actually produced this
+	// candidate (p.Prevalence in the loop below), not looked up by type
+	// name afterward. Several types (krb5tgs, cisco-pix, phpass, truecrypt,
+	// veracrypt, oracle-h, ssh, dnssec-nsec3, krb5asrep, ...) appear in more
+	// than one prototype with different curated prevalences, so a lookup by
+	// name alone can silently return the wrong prototype's number.
+	Prevalence uint8
 }
 
 // Identify converts an evaluation into ranked candidates.
@@ -70,6 +77,7 @@ func Identify(table []Prototype, in Input) []Candidate {
 			c := Candidate{
 				Type: typ, Display: p.Display, Tier: p.Tier,
 				Evidence: m.Evidence, Suppressed: m.Suppressed,
+				Prevalence: p.Prevalence,
 			}
 			switch {
 			case m.Suppressed:
@@ -96,7 +104,7 @@ func Identify(table []Prototype, in Input) []Candidate {
 		if out[i].Confidence != out[j].Confidence {
 			return out[i].Confidence < out[j].Confidence
 		}
-		return prevalenceOf(table, out[i].Type) > prevalenceOf(table, out[j].Type)
+		return out[i].Prevalence > out[j].Prevalence
 	})
 	return out
 }
@@ -130,15 +138,4 @@ func confidenceFor(p *Prototype, in Input, rivalled bool) Confidence {
 		}
 		return Possible
 	}
-}
-
-func prevalenceOf(table []Prototype, typ string) uint8 {
-	for i := range table {
-		for _, t := range table[i].Types {
-			if t == typ {
-				return table[i].Prevalence
-			}
-		}
-	}
-	return 0
 }

@@ -152,7 +152,9 @@ func installSniffers() {
 		d.sniff = fn
 	}
 	set("keepass2smith", sniffKeePass)
-	set("zip2smith", magicSniff([]byte("PK\x03\x04"), "ZIP local file header", hashid.Certain))
+	set("zip2smith", magicSniff([]byte("PK\x03\x04"), "ZIP local file header; this bare 4-byte "+
+		"signature is shared by .docx/.jar/.apk/.odt/.epub and every other ZIP-based container "+
+		"format, so it is only Likely, not a proof this is specifically an encrypted ZIP archive", hashid.Likely))
 	set("7z2smith", magicSniff([]byte("7z\xBC\xAF\x27\x1C"), "7-Zip signature", hashid.Certain))
 	set("rar2smith", magicSniff([]byte("Rar!\x1A\x07"), "RAR signature (RAR4/RAR5 share this prefix)", hashid.Certain))
 	set("pdf2smith", magicSniff([]byte("%PDF-"), "PDF header", hashid.Certain))
@@ -161,9 +163,10 @@ func installSniffers() {
 	set("ssh2smith", magicSniff([]byte("-----BEGIN OPENSSH PRIVATE KEY"), "OpenSSH private key", hashid.Certain))
 	set("luks2smith", magicSniff([]byte("LUKS\xBA\xBE"), "LUKS1 header", hashid.Certain))
 	set("pwsafe2smith", magicSniff([]byte("PWS3"), "Password Safe v3 header tag; a bare 4-byte format "+
-		"tag with no secondary structural check beyond the signature itself", hashid.Certain))
+		"tag with no secondary structural check beyond the signature itself", hashid.Likely))
 	set("office2smith", sniffOffice)
-	set("hccapx2smith", magicSniff([]byte("HCPX"), "hccapx capture", hashid.Certain))
+	set("hccapx2smith", magicSniff([]byte("HCPX"), "hccapx capture; a bare 4-byte format tag with no "+
+		"secondary structural check beyond the signature itself", hashid.Likely))
 }
 
 func init() { installSniffers() }

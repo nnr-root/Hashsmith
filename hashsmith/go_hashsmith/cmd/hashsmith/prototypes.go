@@ -28,13 +28,13 @@ var (
 func prototypeTable() []hashid.Prototype {
 	prototypeTableOnce.Do(func() {
 		prototypeTableVal = append(prototypeTableVal, batchAPrototypes()...)
-		prototypeTableVal = append(prototypeTableVal, batchBPrototypes()...)
-		prototypeTableVal = append(prototypeTableVal, batchCPrototypes()...)
-		prototypeTableVal = append(prototypeTableVal, batchDPrototypes()...)
-		prototypeTableVal = append(prototypeTableVal, batchEPrototypes()...)
-		prototypeTableVal = append(prototypeTableVal, batchFPrototypes()...)
-		prototypeTableVal = append(prototypeTableVal, batchGPrototypes()...)
-		prototypeTableVal = append(prototypeTableVal, batchHPrototypes()...)
+		prototypeTableVal = append(prototypeTableVal, archivePrototypes()...)
+		prototypeTableVal = append(prototypeTableVal, officePrototypes()...)
+		prototypeTableVal = append(prototypeTableVal, vendorPrototypes()...)
+		prototypeTableVal = append(prototypeTableVal, walletsPrototypes()...)
+		prototypeTableVal = append(prototypeTableVal, webFrameworkPrototypes()...)
+		prototypeTableVal = append(prototypeTableVal, kdfPrototypes()...)
+		prototypeTableVal = append(prototypeTableVal, saltedPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, tailPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, shapePrototypes()...)
 		// Non-hash recognitions (Base64, Morse, Bech32, UUID, ...) go last:
@@ -167,9 +167,24 @@ func identifyCandidates(text string) []hashid.Candidate {
 // the table served the input, which is what the per-batch coverage tests
 // assert; without it a broken port would silently fall through to the legacy
 // cascade and the golden test would still pass.
+//
+// The table also carries non-hash recognitions (Base64, Morse, NATO, ...) so
+// that identify can name them — see nonHashPrototypes in
+// prototypes_nonhash.go. crack has no attack routine for those, so they are
+// filtered out here with universalHashRegistry.crackable before the result
+// reaches detectHashTypes' callers (auto-detection, batch mode, ...). Do not
+// filter inside hashid.DetectTypes itself: identifyCandidates above must keep
+// seeing the full, unfiltered candidate set.
 func detectTypesFromTable(text string) ([]string, bool) {
 	in := hashid.Input{Raw: strings.TrimSpace(text)}
 	in.Normalized = stripShadowUsername(in.Raw)
 	types := hashid.DetectTypes(prototypeTable(), in)
+	kept := types[:0]
+	for _, t := range types {
+		if universalHashRegistry.crackable(t) {
+			kept = append(kept, t)
+		}
+	}
+	types = kept
 	return types, len(types) > 0
 }

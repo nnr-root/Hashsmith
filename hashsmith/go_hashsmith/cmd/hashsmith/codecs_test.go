@@ -94,6 +94,40 @@ func TestCodecReferenceVectors(t *testing.T) {
 	}
 }
 
+// TestZ85AndBase91DecodeReferenceVectors is T13's partial restoration.
+// Commit 3d1409a deleted two assertions from what is now
+// TestExpandedEncodingIdentification — that identifyCandidates("HelloWorld")
+// named Z85 and identifyCandidates(">OwJh>Io0Tv!8PE") named basE91 — because
+// general recognition of either shape produces real false positives outside
+// the golden corpus (see that test's own comment and prototypes_nonhash.go
+// for the full account: basE91's alphabet matches an ordinary scanned log
+// line, and Z85 round-trips a tripcode target and a colon-joined
+// hash:salt record already in testdata/detect_golden.txt). That design
+// decision stands and is out of scope here.
+//
+// What silently went missing alongside it, though, was codec-level test
+// coverage: TestCodecReferenceVectors covers Z85 in both directions
+// (encodeZ85 producing "HelloWorld" and decodeZ85 recovering the original
+// bytes) but only ever covered basE91's ENCODE direction, never asserting
+// decodeBase91(">OwJh>Io0Tv!8PE") recovers "Hello World!". This test
+// restores that missing decode-direction vector — deliberately under its
+// own name, not inside TestExpandedEncodingIdentification or anywhere near
+// TestExtractorTextFormats, so it can never be mistaken for (or reintroduce)
+// an identify-level or extractor-level recognition assertion for either
+// format.
+func TestZ85AndBase91DecodeReferenceVectors(t *testing.T) {
+	z85Input := []byte{0x86, 0x4f, 0xd2, 0x6f, 0xb5, 0x59, 0xf7, 0x5b}
+	if got, err := decodeZ85("HelloWorld"); err != nil || !bytes.Equal(got, z85Input) {
+		t.Errorf("decodeZ85(%q) = %x, err=%v; want %x", "HelloWorld", got, err, z85Input)
+	}
+
+	const base91Plain = "Hello World!"
+	const base91Encoded = ">OwJh>Io0Tv!8PE"
+	if got, err := decodeBase91(base91Encoded); err != nil || string(got) != base91Plain {
+		t.Errorf("decodeBase91(%q) = %q, err=%v; want %q", base91Encoded, got, err, base91Plain)
+	}
+}
+
 func TestFlexibleBaseAndHexDecoding(t *testing.T) {
 	cases := []struct {
 		typ, encoded, want string

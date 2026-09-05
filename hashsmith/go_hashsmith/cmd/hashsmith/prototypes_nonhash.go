@@ -26,7 +26,7 @@ import (
 // Fix round 1: this file's own stated invariant ("every entry here is
 // Exclusive: false") was false for the dozen entries built with
 // predicateProto — that helper hardcodes Exclusive: true, which is correct
-// for the cascade batches it was built for (prototypes_records.go) but wrong
+// for the cascade batches it was built for (now split across prototypes_records_*.go) but wrong
 // here: it made these non-hash prototypes suppress EACH OTHER (Evaluate's
 // "first exclusive match wins, everything else — before or after it — is
 // suppressed" rule applies regardless of which prototype is exclusive), so

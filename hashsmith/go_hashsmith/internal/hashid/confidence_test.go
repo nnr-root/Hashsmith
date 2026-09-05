@@ -113,9 +113,15 @@ func TestSuppressedCandidatesAreUnlikelyAndMarked(t *testing.T) {
 // does not cover this — its three prototypes fall in three different
 // confidence buckets, so the primary key alone determines that test's order.
 func TestTiedConfidenceOrdersByPrevalence(t *testing.T) {
+	// b (70) is listed BEFORE a (85) here, opposite of the asserted output
+	// order below, so only the prevalence comparator — not sort.SliceStable
+	// preserving input order — can produce "a" before "b". With a(85)
+	// listed first (the original ordering), the assertion passed even when
+	// the comparator's tie-break branch always returned false, because
+	// SliceStable is a no-op on an already-sorted-by-input-order slice.
 	table := []Prototype{
-		protoShape("a", 85, nil),
 		protoShape("b", 70, nil),
+		protoShape("a", 85, nil),
 	}
 	cs := Identify(table, Input{Normalized: "x"})
 	ca, cb := find(cs, "a"), find(cs, "b")

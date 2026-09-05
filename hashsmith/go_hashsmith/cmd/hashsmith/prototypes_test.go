@@ -157,6 +157,11 @@ func TestTableCoverageBatchE(t *testing.T) {
 		// testdata/detect_golden.txt lines 239-240 (wpa-pmk, wpa-pmkid). See
 		// the task report for the full explanation.
 		{"wpa-pmkid", `2582a8281bf9d4308d6f5731d0e61c61:4604ba734d4e:89acf0e761f4:ed487162465a774bfba60eb603a39f3a`, []string{"wpa-pmkid"}},
+		// Same colon-delimited record shape as wpa-pmkid above but with the
+		// trailing 4th field dropped: detectWPAPMKIDRecord's Compute entry
+		// has two outputs (3 fields -> wpa-pmk, 4 fields -> wpa-pmkid) and
+		// only wpa-pmkid had a coverage case (T7a).
+		{"wpa-pmk", `2582a8281bf9d4308d6f5731d0e61c61:4604ba734d4e:89acf0e761f4`, []string{"wpa-pmk"}},
 		{"ethereum-presale", `$ethereum$w*e94a8e49deac2d62206bf9bfb7d2aaea7eb06c1a378cfc1ac056cc599a569793c0ecc40e6a0c242dee2812f06b644d70f43331b1fa2ce4bd6cbb9f62dd25b443235bdb4c1ffb222084c9ded8c719624b338f17e0fd827b34d79801298ac75f74ed97ae16f72fccec`, []string{"ethereum-presale"}},
 		{"ethereum", `$ethereum$p*1024*38353131353831333338313138363430*a8b4dfe92687dbc0afeb5dae7863f18964241e96b264f09959903c8c924583fc*0a9252861d1e235994ce33dbca91c98231764d8ecb4950015a8ae20d6415b986`, []string{"ethereum"}},
 		{"aescrypt", `$aescrypt$1*efc648908ca7ec727f37f3316dfd885c*eff5c87a35545406a57b56de57bd0554*3a66401271aec08cbd10cf2070332214093a33f36bd0dced4a4bb09fab817184*6a3c49fea0cafb19190dc4bdadb787e73b1df244c51780beef912598bd3bdf7e`, []string{"aescrypt"}},
@@ -328,13 +333,13 @@ func TestTableCoverageBatchG(t *testing.T) {
 // despite being a supported -t type with its own self-test vector. Task 15
 // replaced it with a separately anchored reMSSQL2012
 // (`(?i)^0x0200[0-9a-fA-F]{136}$`) matcher; see its comment in
-// batchHPrototypes. It now has its own coverage case below.
+// saltedPrototypes. It now has its own coverage case below.
 //
 // The Compute entry's own isHexPair(t, 16, 16) prepend (des-plaintext,
 // 3des-plaintext) is similarly dead code, but it is not a separate table
 // entry — it is one branch inside the Compute closure — so it does not
 // change the prototype or case count above; see the comment beside it in
-// batchHPrototypes for the proof.
+// saltedPrototypes for the proof.
 func TestTableCoverageBatchH(t *testing.T) {
 	runTableCoverage(t, []tableCoverageCase{
 		// detectCompatSaltedTypes Compute entry: 6 reachable output shapes.
@@ -458,10 +463,16 @@ func TestLMIsDemotedOnLowercaseInput(t *testing.T) {
 
 // TestPrototypeTableIntegrity is the mechanical check the rejected embedded
 // JSON/TOML approach could not provide: it fails the build if any of the
-// 225 prototypes has a malformed field. See task-11-brief.md.
+// 253 prototypes has a malformed field. See task-11-brief.md.
+//
+// M8: this count and the floor below drifted from the table's actual size
+// (225 vs the real 253) as prototypes were added post-Task-11, and the old
+// `< 150` floor was loose enough that 103 entries could silently vanish
+// before it fired. Tightened to `< 240` — below the current count but well
+// above a floor that could hide a real regression.
 func TestPrototypeTableIntegrity(t *testing.T) {
 	table := prototypeTable()
-	if len(table) < 150 {
+	if len(table) < 240 {
 		t.Fatalf("table has %d prototypes; the cascade had ~185 branches — entries are missing", len(table))
 	}
 

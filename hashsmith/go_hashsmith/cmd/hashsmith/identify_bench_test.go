@@ -35,3 +35,11 @@ func BenchmarkScanBatch100k(b *testing.B) {
 		_, _ = scanBatch(strings.NewReader(dump))
 	}
 }
+
+func BenchmarkDetectHashTypesBcrypt(b *testing.B) {
+	b.ReportAllocs()
+	const h = "$2y$10$3sBoTsNRXqMqQyvIsIWKPuJTfBjZTUgKBHVYPPYHIWpDXHJcaqTZS"
+	for i := 0; i < b.N; i++ {
+		_ = detectHashTypes(h)
+	}
+}

@@ -125,7 +125,7 @@ func TestGenericSaltedAutoDetection(t *testing.T) {
 		// Pre-Task 13, identifyText's own percentage scorer named this
 		// construction "Generic salted <ALGO>" independently of the
 		// prototype table, which has named the same Compute branch "Salted
-		// digest construction" (prototypes_records.go) since it was ported.
+		// digest construction" (now split across prototypes_records_*.go) since it was ported.
 		// identifyText now renders that same table, so it reports the name
 		// crack's own vocabulary already used.
 		if identified := identifyText(tc.target); !strings.Contains(identified, "Salted digest construction") {
