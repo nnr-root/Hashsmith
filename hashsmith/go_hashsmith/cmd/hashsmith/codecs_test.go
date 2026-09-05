@@ -151,24 +151,37 @@ func TestNewCodecValidation(t *testing.T) {
 	}
 }
 
+// TestExpandedEncodingIdentification pins identify's recognition of the
+// expanded (non-hash) encodings against the prototype table.
+//
+// Z85 and basE91 are deliberately absent from this list even though the
+// deleted percentage-based scorer used to report Z85 for "HelloWorld" and
+// basE91 for ">OwJh>Io0Tv!8PE": both round-trip through their own encoder
+// widely enough to produce real false positives outside the golden corpus —
+// basE91 matches the ordinary scanned log line
+// "password_hash=[<hex digest>]" (caught by TestExtractorTextFormats/scan,
+// which would start vacuuming log lines into extracted hash records), and
+// Z85 round-trips a 2ch tripcode target and a colon-joined hash:salt record
+// already in testdata/detect_golden.txt. Neither has a guard as narrow as
+// Base45's isHex exclusion available, so general recognition for either was
+// not ported (see prototypes_nonhash.go for the full account).
 func TestExpandedEncodingIdentification(t *testing.T) {
 	for _, tc := range []struct {
 		value, want string
 	}{
 		{"%69 VD92EX0", "Base45"},
-		{"HelloWorld", "Z85"},
-		{">OwJh>Io0Tv!8PE", "basE91"},
 		{`line 1\n\"quoted\"`, "JSON String Escapes"},
 	} {
 		found := false
-		for _, candidate := range scoreCandidates(tc.value) {
-			if candidate.name == tc.want {
+		cs := identifyCandidates(tc.value)
+		for _, c := range cs {
+			if c.Display == tc.want {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("identify %q omitted %s: %v", tc.value, tc.want, scoreCandidates(tc.value))
+			t.Errorf("identify %q omitted %s: %+v", tc.value, tc.want, cs)
 		}
 	}
 }

@@ -168,7 +168,17 @@ func TestExpandedRawHashDetection(t *testing.T) {
 			}
 		}
 	}
-	if got := identifyText("deadbeef"); !strings.Contains(got, "CRC-32") {
-		t.Errorf("checksum identification missing: %s", got)
+	// Prior to Task 13, identifyText ran its own percentage-scoring cascade
+	// independently of the prototype table detectHashTypes (and crack) use,
+	// and that cascade guessed "CRC-32" for any bare 8-char hex string. The
+	// prototype table has never recognized bare 8-char hex as a seeded
+	// checksum — it requires two colon-joined 8-char hex fields (see
+	// batchAPrototypes' "32-bit checksum with seed" prototype) — so a
+	// CRC-32 guess here would have been exactly the identify/crack
+	// disagreement Task 13 exists to eliminate. identifyText now renders the
+	// same table detectHashTypes does, so this just confirms "deadbeef"
+	// still surfaces the one 8-char shape prototype the table does have.
+	if got := identifyText("deadbeef"); !strings.Contains(got, "dahua-auth-md5") {
+		t.Errorf("expected the Dahua/Besder 8-char shape candidate: %s", got)
 	}
 }

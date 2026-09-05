@@ -74,7 +74,14 @@ func TestHashcatNestedAndRepresentationVectors(t *testing.T) {
 	if got := detectHashTypes(blake); len(got) != 1 || got[0] != "blake2b" {
 		t.Fatalf("BLAKE2 detection = %v", got)
 	}
-	if got := identifyText(blake); !strings.Contains(got, "BLAKE2b-512") {
+	// Pre-Task 13, identifyText ran its own percentage-scoring cascade with
+	// its own signature branch for this exact 128-hex-digit BLAKE2 record,
+	// labeled "BLAKE2b-512 (Hashcat format)" — a display string the shared
+	// prototype table (detectHashTypes and crack's own vocabulary) never
+	// produced. identifyText now renders the same table detectHashTypes
+	// does (the "BLAKE2 family" Compute prototype in batchAPrototypes), so
+	// this checks for the canonical -t type both paths actually agree on.
+	if got := identifyText(blake); !strings.Contains(got, "-t blake2b") {
 		t.Fatalf("BLAKE2 identification = %q", got)
 	}
 }
@@ -115,7 +122,13 @@ func TestGenericSaltedAutoDetection(t *testing.T) {
 		if !found {
 			t.Errorf("detectHashTypes(%q) = %v, missing %q", tc.target, got, tc.want)
 		}
-		if identified := identifyText(tc.target); !strings.Contains(identified, "Generic salted") {
+		// Pre-Task 13, identifyText's own percentage scorer named this
+		// construction "Generic salted <ALGO>" independently of the
+		// prototype table, which has named the same Compute branch "Salted
+		// digest construction" (prototypes_records.go) since it was ported.
+		// identifyText now renders that same table, so it reports the name
+		// crack's own vocabulary already used.
+		if identified := identifyText(tc.target); !strings.Contains(identified, "Salted digest construction") {
 			t.Errorf("identifyText(%q) = %q", tc.target, identified)
 		}
 	}

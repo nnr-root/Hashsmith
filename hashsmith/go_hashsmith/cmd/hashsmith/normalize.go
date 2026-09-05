@@ -16,6 +16,19 @@ func isBase62Only(s string) bool {
 	return hasBase62OnlyChar(s)
 }
 
+// knownHashLen reports whether l (a hex-character count) matches a raw digest
+// length Hashsmith recognizes. Used by normalizeHashInput below to decide
+// whether a decoded payload is hash-shaped before accepting a re-encoding —
+// still needed here even though the old identify.go scoring cascade that
+// used to call it (scoreHashGroup) is gone.
+func knownHashLen(l int) bool {
+	switch l {
+	case 16, 32, 40, 56, 64, 96, 128:
+		return true
+	}
+	return false
+}
+
 // hashByteLengths maps raw digest byte-length to the algorithm names that
 // produce that output size.  Single source of truth for both speculative
 // identify and automatic crack normalisation.

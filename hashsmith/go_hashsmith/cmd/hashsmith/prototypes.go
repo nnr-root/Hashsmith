@@ -37,6 +37,12 @@ func prototypeTable() []hashid.Prototype {
 		prototypeTableVal = append(prototypeTableVal, batchHPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, tailPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, shapePrototypes()...)
+		// Non-hash recognitions (Base64, Morse, Bech32, UUID, ...) go last:
+		// every entry is Exclusive: false, so table position relative to the
+		// hash prototypes above cannot change which type wins for a hash-
+		// shaped input — it only adds candidates for inputs no hash prototype
+		// already claimed. See prototypes_nonhash.go.
+		prototypeTableVal = append(prototypeTableVal, nonHashPrototypes()...)
 	})
 	return prototypeTableVal
 }

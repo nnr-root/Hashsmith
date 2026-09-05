@@ -103,7 +103,64 @@ func buildHashRegistry() *hashRegistry {
 	for name, slow := range slowSelfTestTypeSeed() {
 		ensureFormat(name, "", "").slow = slow
 	}
+
+	// Non-hash recognitions (Base64, Morse, Bech32, UUID, ...) get a format
+	// entry so hashcatMode/johnLabel/canonicalHashType and the prototype
+	// table's integrity check (Prototype.Types must resolve here) all work.
+	// The group label is metadata on the format only (satisfying
+	// TestUniversalHashRegistryIntegrity's "every format has catalogue
+	// metadata" check) — it is deliberately never appended to
+	// registry.groups itself, which is the crackable `-t` catalogue
+	// `hashsmith types` prints and that TestTypeCatalogueWired asserts is
+	// entirely wired into verifyCandidate. These formats have no cracking
+	// routine — identify recognizes them, crack does not attack them — so
+	// they stay out of that catalogue and out of that promise. See
+	// prototypes_nonhash.go.
+	const nonHashGroupLabel = "Encodings and structural formats identify recognizes (not crackable via -t)"
+	for name, description := range nonHashRecognitionFormatSeed() {
+		ensureFormat(name, description, nonHashGroupLabel)
+	}
 	return registry
+}
+
+// nonHashRecognitionFormatSeed names the encodings and structural formats
+// identify.go's prototypes_nonhash.go recognizes. hashid, Name-That-Hash and
+// haiti only ever look for hash shapes; recognizing that a candidate is
+// Base64, Morse code or a Bech32 address instead of a hash is a real
+// Hashsmith advantage, but these are not password hashes and `crack` has no
+// routine for them, so they are registered here (for hashcatMode/johnLabel/
+// canonicalHashType lookups and Prototype.Types resolution) without being
+// added to the `-t` catalogue in types.go.
+func nonHashRecognitionFormatSeed() map[string]string {
+	return map[string]string{
+		"base64":          "RFC 4648 Base64",
+		"base32":          "RFC 4648 Base32",
+		"base32hex":       "RFC 4648 extended-hex Base32",
+		"base32crockford": "Crockford Base32 (O/I/L typo-tolerant decoding)",
+		"zbase32":         "z-base-32 human-oriented Base32",
+		"base58":          "Bitcoin-alphabet Base58",
+		"base58check":     "Base58Check (Base58 with a verified double-SHA256 checksum)",
+		"base45":          "RFC 9285 Base45",
+		"uu":              "UUencoding",
+		"pem":             "PEM DATA block",
+		"gzip":            "gzip-compressed data (transported as Base64)",
+		"zlib":            "zlib-compressed data (transported as Base64)",
+		"bech32":          "Checksummed Bech32 encoding",
+		"bech32m":         "Checksummed Bech32m encoding",
+		"bubblebabble":    "Pronounceable Bubble Babble binary encoding",
+		"uuid":            "RFC 4122 UUID (8-4-4-4-12 hex groups)",
+		"url":             "RFC 3986 percent encoding",
+		"json":            "JSON string escape sequences",
+		"hex-escape":      `C-style \xNN byte escapes`,
+		"morse":           "International Morse code",
+		"nato":            "NATO phonetic alphabet",
+		"binary":          "space-separated 8-bit binary byte groups",
+		"decimal":         "space-separated decimal byte values 0-255",
+		"octal":           "space-separated octal byte values",
+		"baconian":        "Bacon's cipher",
+		"polybius":        "Polybius square",
+		"brainf*ck":       "Brainfuck source",
+	}
 }
 
 func literalCatalogueType(display string) (string, bool) {
