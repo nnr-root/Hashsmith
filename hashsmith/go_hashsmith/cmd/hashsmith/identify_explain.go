@@ -42,12 +42,24 @@ func explainRecord(input string, c hashid.Candidate) []explainField {
 // explainKerberos decodes a $krb5tgs$ or $krb5asrep$ record. Both carry the
 // account info as free text that itself contains '$' characters — a
 // TGS-REP's realm and SPN are joined by '$' inside the asterisk-bracketed
-// group, and an AS-REP's user@REALM sits ahead of a ':' — so a naive
-// split-on-'$' misparses them (verified against this exact record shape).
-// This instead locates the bracketing punctuation directly, the same way
-// parseKrb5 in crack_kerberos.go already does for the identical formats, and
-// gives up cleanly — returning only what was already extracted, never
-// slicing out of range — the moment the shape does not hold.
+// group (etype 23), or by plain '$' with no bracket at all (etypes 17/18,
+// e.g. $krb5tgs$17$user$realm$<checksum>$<edata>), and an AS-REP's
+// user@REALM sits ahead of a ':' — so a naive split-on-'$' misparses them
+// (verified against this exact record shape). This instead locates the
+// bracketing punctuation directly, the same way parseKrb5 in
+// crack_kerberos.go already does for the identical formats, and gives up
+// cleanly — returning only what was already extracted, never slicing out of
+// range — the moment the shape does not hold.
+//
+// The etype value is read from a fixed, unambiguous position and is printed
+// even when everything after it fails to parse — a long record pasted with
+// its tail cut off should not lose the one field that never depended on the
+// tail. But the etype's Note is a security judgement ("worth attacking"),
+// not a raw fact, and printing it over an unvalidated, possibly-fabricated
+// account structure would assert more than the record actually supports. So
+// the note travels only with commit (reached once user/realm are genuinely
+// extracted); every early return goes through bail, which keeps the etype
+// value but drops the note.
 func explainKerberos(rec string) []explainField {
 	var prefix string
 	switch {
@@ -63,53 +75,62 @@ func explainKerberos(rec string) []explainField {
 	if !ok || etype == "" {
 		return nil
 	}
-	var out []explainField
-	if info, known := krbEtypes[etype]; known {
-		out = append(out, explainField{"etype", etype + " (" + info.name + ")", info.note})
-	} else {
-		out = append(out, explainField{"etype", etype, ""})
+	info, known := krbEtypes[etype]
+	etypeValue := etype
+	if known {
+		etypeValue = etype + " (" + info.name + ")"
+	}
+	bail := func() []explainField {
+		return []explainField{{"etype", etypeValue, ""}}
+	}
+	commit := func(extra ...explainField) []explainField {
+		out := []explainField{{"etype", etypeValue, info.note}}
+		return append(out, extra...)
 	}
 
 	switch prefix {
 	case "$krb5tgs$":
-		// rest = *user$realm$spn*$<checksum>$<edata> — the account group is
-		// everything between the opening '*' and the LAST '*' in the record
-		// (checksum/edata are hex and never contain one).
-		if !strings.HasPrefix(rest, "*") {
-			return out
+		if strings.HasPrefix(rest, "*") {
+			// rest = *user$realm$spn*$<checksum>$<edata> — the account
+			// group is everything between the opening '*' and the LAST '*'
+			// in the record (checksum/edata are hex and never contain one).
+			star := strings.LastIndex(rest, "*")
+			if star <= 0 {
+				return bail()
+			}
+			fields := strings.Split(rest[1:star], "$")
+			if len(fields) < 2 || fields[0] == "" || fields[1] == "" {
+				return bail()
+			}
+			extra := []explainField{{"user", fields[0], ""}, {"realm", fields[1], ""}}
+			if len(fields) > 2 && fields[2] != "" {
+				extra = append(extra, explainField{"SPN", fields[2], ""})
+			}
+			return commit(extra...)
 		}
-		star := strings.LastIndex(rest, "*")
-		if star <= 0 {
-			return out
+		// No asterisk: the etype 17/18 shape, rest = user$realm$<checksum>$<edata>.
+		user, remainder, ok := strings.Cut(rest, "$")
+		if !ok || user == "" {
+			return bail()
 		}
-		fields := strings.Split(rest[1:star], "$")
-		if len(fields) > 0 && fields[0] != "" {
-			out = append(out, explainField{"user", fields[0], ""})
+		realm, _, ok := strings.Cut(remainder, "$")
+		if !ok || realm == "" {
+			return bail()
 		}
-		if len(fields) > 1 && fields[1] != "" {
-			out = append(out, explainField{"realm", fields[1], ""})
-		}
-		if len(fields) > 2 && fields[2] != "" {
-			out = append(out, explainField{"SPN", fields[2], ""})
-		}
+		return commit(explainField{"user", user, ""}, explainField{"realm", realm, ""})
 	case "$krb5asrep$":
 		// rest = user@REALM:<checksum>$<edata>
 		account, _, ok := strings.Cut(rest, ":")
 		if !ok {
-			return out
+			return bail()
 		}
 		user, realm, ok := strings.Cut(account, "@")
-		if !ok {
-			return out
+		if !ok || user == "" || realm == "" {
+			return bail()
 		}
-		if user != "" {
-			out = append(out, explainField{"user", user, ""})
-		}
-		if realm != "" {
-			out = append(out, explainField{"realm", realm, ""})
-		}
+		return commit(explainField{"user", user, ""}, explainField{"realm", realm, ""})
 	}
-	return out
+	return bail()
 }
 
 // explainJWT decodes a JWT's header and, where present, a few
