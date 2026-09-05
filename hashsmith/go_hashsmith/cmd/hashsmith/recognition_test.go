@@ -12,8 +12,9 @@ import (
 // recognitionFloor is a ratchet, not a target. Raise it as coverage improves;
 // never lower it to make a change pass.
 //
-// Measured 2026-09-05 at commit 62e2617 (Task 15's own fixes to mssql2012,
-// cisco4 and ripemd320 detection already applied): 272/502 = 54.18326...%.
+// Measured 2026-09-05 on top of base commit 62e2617 (Task 15's own fixes to
+// mssql2012, cisco4 and ripemd320 detection applied on top of that base,
+// not present at it): 272/502 = 54.18326...%.
 // Set to that rate minus 0.01, computed rather than hand-rounded so the
 // margin is exact. See docs/superpowers/notes/2026-09-05-recognition-baseline.md.
 const recognitionFloor = 272.0/502.0 - 0.01

@@ -20,9 +20,9 @@ is the test's own formatting). Before any fix in this task, the first
 measured run (Step 2, before touching any code) was 271/502 = 53.98...%,
 which `%.1f` printed as 54.0%. `mssql2012` was the only one of this task's
 three fixes that moved this number (`cisco4` and `ripemd320` are recognized
-for cracking now but stay at `TierShape`/"possible" confidence — see below —
-so they do not change the count of certain/likely candidates): fixing it
-alone moved the rate from 271/502 to 272/502.
+for cracking now but their low `Prevalence` demotes them to "unlikely"
+confidence — see below — so they do not change the count of certain/likely
+candidates): fixing it alone moved the rate from 271/502 to 272/502.
 
 `recognitionFloor` is now set to `272.0/502.0 - 0.01` (a computed constant,
 not a hand-rounded literal), so it ratchets against regression from the
@@ -88,13 +88,19 @@ wpa-hccapx-pmk wpa-pmk xxhash32 xxhash64
 Count: 209.
 
 Note that `cisco4` and `ripemd320` remain on this list even after being
-fixed for auto-detection (see below): both are now correctly recognized at
-`TierShape` (length + alphabet only, no distinguishing marker), which by
-design (`internal/hashid/confidence.go`) can reach at best "possible"
-confidence unless it is also both rivalled and dominantly prevalent. Neither
-is, so neither reaches "certain"/"likely". Claiming otherwise for either
-would mean assigning a tier stronger than the actual evidence, which is
-exactly the kind of overclaim this task is measuring honestly against.
+fixed for auto-detection (see below): both are correctly recognized at
+`TierShape` (length + alphabet only, no distinguishing marker), but
+`internal/hashid/confidence.go`'s `confidenceFor` demotes any `TierShape`
+prototype whose `Prevalence` is below `extinctPrevalence` (15) straight to
+"unlikely", before the rivalled/dominant branches are even considered.
+`cisco4` carries `Prevalence: 4` (`prototypes_records.go`) and `ripemd320`
+carries `Prevalence: 5` (`prototypes_shape.go`), so both land on "unlikely",
+not "possible". This is the correct, more conservative outcome for two
+formats that are genuinely rare — their prevalence values are honest and are
+not being changed to read differently — so neither reaches
+"certain"/"likely". Claiming a stronger confidence than the code actually
+produces would be exactly the kind of overclaim this task is measuring
+honestly against.
 
 ## Vectors whose own type is not among `detectHashTypes`' candidates
 
