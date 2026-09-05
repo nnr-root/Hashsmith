@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 
+	"hashsmith-go/internal/hashid"
+
 	"github.com/fatih/color"
 )
 
@@ -46,6 +48,7 @@ func runIdentify(args []string) error {
 	outFile := fs.String("o", "", "output file")
 	copyRes := fs.Bool("c", false, "copy to clipboard")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON (schema hashsmith.identify/1)")
+	explain := fs.Bool("explain", false, "decode the leading candidate's internal fields (Kerberos etype, JWT alg, PEM key type, ...)")
 	coverage := fs.Bool("coverage", false, "report container-sniffer and John-label coverage, then exit")
 	summary := fs.Bool("summary", false, "batch mode: scan a dump and print a per-type summary instead of a per-line report")
 	splitDir := fs.String("split-by-type", "", "batch mode: write one file per detected type into this directory, named for its -t type")
@@ -128,7 +131,33 @@ func runIdentify(args []string) error {
 			fmt.Fprintf(&sb, "── %s\n", in)
 		}
 		cs := identifyCandidates(in)
-		sb.WriteString(renderIdentifyHuman(strings.TrimSpace(in), cs))
+		trimmed := strings.TrimSpace(in)
+		sb.WriteString(renderIdentifyHuman(trimmed, cs))
+		if *explain {
+			// explainRecord dispatches on the record's own shape (a $krb5*$
+			// prefix, "eyJ", "-----BEGIN "), so it still has something to
+			// say even when identify itself found no crackable candidate —
+			// an alg:"none" JWT is exactly this case: not a candidate identify
+			// will name, but a finding --explain must still surface. A zero
+			// Candidate is passed in that case; explainRecord's dispatch
+			// does not need a populated one to work off the record text.
+			var lead hashid.Candidate
+			if len(cs) > 0 {
+				lead = cs[0]
+			}
+			if ef := explainRecord(trimmed, lead); len(ef) > 0 {
+				// renderIdentifyHuman's own trailing newline differs between
+				// the candidate-rows case (already ends in "\n") and the "no
+				// candidate identified" case (does not), so the gap before
+				// the explain block is normalized here rather than assumed.
+				if strings.HasSuffix(sb.String(), "\n") {
+					sb.WriteString("\n")
+				} else {
+					sb.WriteString("\n\n")
+				}
+				sb.WriteString(renderExplain(ef))
+			}
+		}
 		if identifyExitCode(cs) != 0 {
 			confident = false
 		}
