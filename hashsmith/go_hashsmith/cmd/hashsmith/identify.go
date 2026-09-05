@@ -47,6 +47,9 @@ func runIdentify(args []string) error {
 	copyRes := fs.Bool("c", false, "copy to clipboard")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON (schema hashsmith.identify/1)")
 	coverage := fs.Bool("coverage", false, "report container-sniffer and John-label coverage, then exit")
+	summary := fs.Bool("summary", false, "batch mode: scan a dump and print a per-type summary instead of a per-line report")
+	splitDir := fs.String("split-by-type", "", "batch mode: write one file per detected type into this directory, named for its -t type")
+	unmatchedFile := fs.String("unmatched", "", "batch mode: write unidentified lines, one per line, to this file")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -72,6 +75,14 @@ func runIdentify(args []string) error {
 		fmt.Printf("container sniffers: %d/%d extractors\n", withSniff, totalExtractors)
 		fmt.Printf("John labels:        %d/%d formats\n", withJohn, totalCrackable)
 		return nil
+	}
+
+	// Batch mode: --summary reads a whole dump and reports a per-type tally
+	// instead of one block per line. It is opt-in and file-only — a dump is
+	// what makes a summary meaningful — so it runs before the container
+	// sniff and the ordinary per-line path below, neither of which apply here.
+	if *summary {
+		return runIdentifyBatch(*filePath, *text, fs.Args(), *splitDir, *unmatchedFile)
 	}
 
 	// A readable file that a sniffer recognizes is a container, not a hash
