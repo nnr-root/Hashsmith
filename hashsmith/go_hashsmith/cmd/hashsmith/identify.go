@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -43,6 +44,7 @@ func runIdentify(args []string) error {
 	filePath := fs.String("f", "", "file path (optional; -i also accepts a file)")
 	outFile := fs.String("o", "", "output file")
 	copyRes := fs.Bool("c", false, "copy to clipboard")
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON (schema hashsmith.identify/1)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -52,9 +54,17 @@ func runIdentify(args []string) error {
 		return err
 	}
 
+	if *asJSON {
+		return runIdentifyJSON(inputs, *outFile, *copyRes)
+	}
+
 	// Identify every input; when more than one is given (a multi-line file)
-	// each result is prefixed with the hash it describes.
+	// each result is prefixed with the hash it describes. confident tracks
+	// whether every input resolved to at least one unsuppressed certain or
+	// likely candidate — identifyExitError(1) is returned when it does not,
+	// so `identify` can participate in a shell chain the way `crack` does.
 	var sb strings.Builder
+	confident := true
 	for i, in := range inputs {
 		if len(inputs) > 1 {
 			if i > 0 {
@@ -62,7 +72,11 @@ func runIdentify(args []string) error {
 			}
 			fmt.Fprintf(&sb, "── %s\n", in)
 		}
-		sb.WriteString(identifyText(in))
+		cs := identifyCandidates(in)
+		sb.WriteString(renderIdentifyHuman(strings.TrimSpace(in), cs))
+		if identifyExitCode(cs) != 0 {
+			confident = false
+		}
 		if len(inputs) > 1 {
 			sb.WriteString("\n")
 		}
@@ -71,9 +85,62 @@ func runIdentify(args []string) error {
 
 	if *outFile == "" && !*copyRes {
 		color.New(themeAttr).Fprintln(os.Stdout, result)
-		return nil
+	} else if err := outputResult(result, *outFile, *copyRes); err != nil {
+		return err
 	}
-	return outputResult(result, *outFile, *copyRes)
+	if !confident {
+		return identifyExitError(1)
+	}
+	return nil
+}
+
+// runIdentifyJSON is --json's rendering path: one identifyReport object per
+// input, marshalled with json.MarshalIndent and printed uncoloured so the
+// output stays valid JSON for a script to parse. It shares identifyExitError
+// with the human path so `identify --json` and `identify` give a caller the
+// same 0/1 contract regardless of which rendering it asked for.
+func runIdentifyJSON(inputs []string, outFile string, copyRes bool) error {
+	var sb strings.Builder
+	confident := true
+	for i, in := range inputs {
+		cs := identifyCandidates(in)
+		rep := buildIdentifyReport(strings.TrimSpace(in), cs)
+		blob, err := json.MarshalIndent(rep, "", "  ")
+		if err != nil {
+			return err
+		}
+		if i > 0 {
+			sb.WriteString("\n")
+		}
+		sb.Write(blob)
+		sb.WriteString("\n")
+		if identifyExitCode(cs) != 0 {
+			confident = false
+		}
+	}
+	result := strings.TrimRight(sb.String(), "\n")
+
+	if outFile == "" && !copyRes {
+		fmt.Fprintln(os.Stdout, result)
+	} else if err := outputResult(result, outFile, copyRes); err != nil {
+		return err
+	}
+	if !confident {
+		return identifyExitError(1)
+	}
+	return nil
+}
+
+// identifyExitError carries identify's own exit status (0 or 1 — never 2)
+// through the ordinary error-returning path without colliding with a real
+// usage/I-O error, which must still exit 2 via fail(). Only main.go unwraps
+// it (see handleIdentifyErr); it deliberately reuses runCrack's existing
+// mechanism — the package-level exitCode variable read once by the closing
+// os.Exit(exitCode) in main — rather than adding a second exit path.
+type identifyExitError int
+
+func (e identifyExitError) Error() string {
+	return fmt.Sprintf("identify found no certain or likely candidate (exit %d)", int(e))
 }
 
 // collectIdentifyInputs resolves the identify target(s). Precedence:

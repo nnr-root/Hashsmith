@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -61,9 +62,9 @@ func main() {
 		}
 		// Rebuild as `-i <value> [flags]` so runIdentify parses it normally.
 		if err := runIdentify(append([]string{"-i", rest[0]}, rest[1:]...)); err != nil {
-			fail(err.Error())
+			handleIdentifyErr(err)
 		}
-		return
+		os.Exit(exitCode)
 	}
 
 	switch cmd {
@@ -85,7 +86,7 @@ func main() {
 		}
 	case "identify":
 		if err := runIdentify(rest); err != nil {
-			fail(err.Error())
+			handleIdentifyErr(err)
 		}
 	case "extractors", "list-extractors":
 		printExtractorCatalogue()
@@ -195,4 +196,19 @@ func fail(msg string) {
 	clrRed.Fprint(os.Stderr, "Error: ")
 	fmt.Fprintln(os.Stderr, msg)
 	os.Exit(2)
+}
+
+// handleIdentifyErr translates the two kinds of error runIdentify can return.
+// An identifyExitError is not a failure — it's identify's 0/1 answer, carried
+// through the error return so it doesn't need a second exit mechanism — and
+// is unwrapped into the package-level exitCode that main's closing
+// os.Exit(exitCode) (or the -i shortcut's own) reads. Anything else is a
+// genuine usage/I-O error and still exits 2 via fail(), exactly as before.
+func handleIdentifyErr(err error) {
+	var ec identifyExitError
+	if errors.As(err, &ec) {
+		exitCode = int(ec)
+		return
+	}
+	fail(err.Error())
 }
