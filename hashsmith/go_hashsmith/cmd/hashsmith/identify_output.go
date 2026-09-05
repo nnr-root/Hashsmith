@@ -14,6 +14,14 @@ import (
 // a command that can be pasted. A format with no foreign equivalent prints "-",
 // which is how Hashsmith's coverage advantage stays visible instead of being
 // asserted in documentation.
+//
+// The trailing command line is `crack` only when the leading candidate is
+// actually crackable. Base64, Morse and the other identify-only recognitions
+// (universalHashRegistry.crackable reports false for them) have no attack
+// routine — `crack -t base64 ...` fails with "unsupported hash algorithm" —
+// so for those the honest analogue is `decode`, printed only when decodeText
+// genuinely accepts the type; if it does not (or crack does not either), no
+// command line is printed rather than a broken one.
 func renderIdentifyHuman(input string, cs []hashid.Candidate) string {
 	if len(cs) == 0 {
 		return "  no candidate identified\n\n  " +
@@ -64,6 +72,13 @@ func renderIdentifyHuman(input string, cs []hashid.Candidate) string {
 	if ev := cs[0].Evidence; ev != "" {
 		fmt.Fprintf(&sb, "\n  %s\n", ev)
 	}
-	fmt.Fprintf(&sb, "  hashsmith crack -t %s %s\n", cs[0].Type, input)
+	switch {
+	case universalHashRegistry.crackable(cs[0].Type):
+		fmt.Fprintf(&sb, "  hashsmith crack -t %s %s\n", cs[0].Type, input)
+	default:
+		if _, err := decodeText(input, cs[0].Type, 3, "", 2); err == nil {
+			fmt.Fprintf(&sb, "  hashsmith decode -t %s %s\n", cs[0].Type, input)
+		}
+	}
 	return sb.String()
 }

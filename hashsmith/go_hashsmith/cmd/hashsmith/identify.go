@@ -32,7 +32,6 @@ var (
 	reHexEsc    = regexp.MustCompile(`(?:\\[xX][0-9a-fA-F]{2})`)
 	reJWT       = regexp.MustCompile(`^eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$`)
 	reUUID      = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-	reNATOSep   = regexp.MustCompile(`[\s,]+`)
 )
 
 // ── CLI entry ─────────────────────────────────────────────────────────────────
@@ -109,7 +108,6 @@ func identifyText(value string) string {
 	return renderIdentifyHuman(strings.TrimSpace(value), identifyCandidates(value))
 }
 
-
 // ── Format / charset classifiers ──────────────────────────────────────────────
 
 func allPrintable(b []byte) bool {
@@ -118,32 +116,6 @@ func allPrintable(b []byte) bool {
 	}
 	for _, c := range b {
 		if (c < 0x20 && c != '\t' && c != '\n' && c != '\r') || c == 0x7f {
-			return false
-		}
-	}
-	return true
-}
-
-func printableRatio(s string) float64 {
-	if len(s) == 0 {
-		return 0
-	}
-	n := 0
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= 0x20 && c < 0x7f {
-			n++
-		}
-	}
-	return float64(n) / float64(len(s))
-}
-
-func isAllAlpha(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, c := range s {
-		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
 			return false
 		}
 	}

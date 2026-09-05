@@ -17,6 +17,11 @@ type hashFormat struct {
 	aliases     []string
 	vectors     []selfTestVector
 	slow        bool
+	// identifyOnly marks a format identify.go's prototype table can
+	// recognize (Base64, Morse, Bech32, ...) that `crack` has no routine
+	// for. It is true only for formats registered via
+	// nonHashRecognitionFormatSeed. See (*hashRegistry).crackable.
+	identifyOnly bool
 }
 
 // hashRegistry is Hashsmith's single source of truth for hash/code metadata.
@@ -118,9 +123,20 @@ func buildHashRegistry() *hashRegistry {
 	// prototypes_nonhash.go.
 	const nonHashGroupLabel = "Encodings and structural formats identify recognizes (not crackable via -t)"
 	for name, description := range nonHashRecognitionFormatSeed() {
-		ensureFormat(name, description, nonHashGroupLabel)
+		ensureFormat(name, description, nonHashGroupLabel).identifyOnly = true
 	}
 	return registry
+}
+
+// crackable reports whether `crack -t <name>` has an actual attack routine
+// for a format, as opposed to being an identify-only recognition (Base64,
+// Morse, Bech32, ...) with no cracking routine at all. identify's rendered
+// output uses this to decide whether the trailing command line it prints is
+// `crack` (runnable) or `decode` (the honest analogue for a recognized
+// encoding) — see renderIdentifyHuman in identify_output.go.
+func (r *hashRegistry) crackable(name string) bool {
+	format := r.formats[canonicalHashType(name)]
+	return format != nil && !format.identifyOnly
 }
 
 // nonHashRecognitionFormatSeed names the encodings and structural formats

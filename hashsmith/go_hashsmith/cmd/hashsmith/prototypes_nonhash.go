@@ -23,6 +23,26 @@ import (
 // this table is to make evidence-strength claims that hold up, not to
 // maximize a Tier.
 //
+// Fix round 1: this file's own stated invariant ("every entry here is
+// Exclusive: false") was false for the dozen entries built with
+// predicateProto — that helper hardcodes Exclusive: true, which is correct
+// for the cascade batches it was built for (prototypes_records.go) but wrong
+// here: it made these non-hash prototypes suppress EACH OTHER (Evaluate's
+// "first exclusive match wins, everything else — before or after it — is
+// suppressed" rule applies regardless of which prototype is exclusive), so
+// e.g. "0 1 2 3 4 5 6 7" reported "likely" Crockford Base32 while ruling out
+// Decimal and Octal as "ruled out by a stronger match" even though nothing
+// about Crockford's evidence is stronger. predicateProtoShared below wraps
+// predicateProto and clears Exclusive; every non-hash entry in this file
+// uses it now. predicateProto itself, and every batch outside this file that
+// calls it, is untouched — those are cascade ports whose Exclusive: true is
+// correct.
+func predicateProtoShared(fn func(string) bool, display string, tier hashid.Tier, evidence string, prevalence uint8, rationale string, types ...string) hashid.Prototype {
+	p := predicateProto(fn, display, tier, evidence, prevalence, rationale, types...)
+	p.Exclusive = false
+	return p
+}
+
 // Two categories of formats the deleted groups also recognized are
 // deliberately NOT ported: Plain Text and the Caesar/Vigenere/ROT13
 // "Substitution Cipher" guess. Both were entropy/chi-squared HEURISTICS —
@@ -107,10 +127,10 @@ func nonHashPrototypes() []hashid.Prototype {
 			},
 			Prevalence: 10, Rationale: "no basis for a better estimate; revisit with corpus data",
 		},
-		predicateProto(func(v string) bool { return !isHex(v) && isCrockfordCandidate(v) },
+		predicateProtoShared(func(v string) bool { return !isHex(v) && isCrockfordCandidate(v) },
 			"Crockford Base32", hashid.TierStructural, "decodes under the Crockford Base32 alphabet (O/I/L typo-tolerant)",
 			10, "no basis for a better estimate; revisit with corpus data", "base32crockford"),
-		predicateProto(func(v string) bool { return !isHex(v) && isZBase32Candidate(v) },
+		predicateProtoShared(func(v string) bool { return !isHex(v) && isZBase32Candidate(v) },
 			"z-base-32", hashid.TierStructural, "canonical z-base-32 alphabet; round-trips through its own encoder",
 			10, "no basis for a better estimate; revisit with corpus data", "zbase32"),
 		{
@@ -186,21 +206,21 @@ func nonHashPrototypes() []hashid.Prototype {
 			},
 			Prevalence: 10, Rationale: "no basis for a better estimate; revisit with corpus data",
 		},
-		predicateProto(isUUStr, "UU Encoded", hashid.TierStructural,
+		predicateProtoShared(isUUStr, "UU Encoded", hashid.TierStructural,
 			"length-prefixed UU line format", 10, "no basis for a better estimate; revisit with corpus data", "uu"),
-		predicateProto(isPEMData, "PEM", hashid.TierStructural,
+		predicateProtoShared(isPEMData, "PEM", hashid.TierStructural,
 			"BEGIN/END block with a valid Base64 payload", 15,
 			"PEM wraps certificates and private keys, both routine in TLS and SSH tooling, but is rare as an identify target compared to a bare hash", "pem"),
-		predicateProto(func(v string) bool { return isBech32(v, "bech32") }, "Bech32", hashid.TierStructural,
+		predicateProtoShared(func(v string) bool { return isBech32(v, "bech32") }, "Bech32", hashid.TierStructural,
 			"valid Bech32 polymod checksum", 20,
 			"Bech32 is the current native SegWit address format for Bitcoin and several other UTXO chains", "bech32"),
-		predicateProto(func(v string) bool { return isBech32(v, "bech32m") }, "Bech32m", hashid.TierStructural,
+		predicateProtoShared(func(v string) bool { return isBech32(v, "bech32m") }, "Bech32m", hashid.TierStructural,
 			"valid Bech32m polymod checksum", 10,
 			"Bech32m covers only Taproot addresses, a narrower slice of wallet traffic than Bech32", "bech32m"),
-		predicateProto(isBubbleBabble, "Bubble Babble", hashid.TierStructural,
+		predicateProtoShared(isBubbleBabble, "Bubble Babble", hashid.TierStructural,
 			"valid pronounceable Bubble Babble record", 10,
 			"Bubble Babble fingerprints appear mainly in older SSH tooling (ssh-keygen -B); rare in general corpora", "bubblebabble"),
-		predicateProto(reUUID.MatchString, "UUID", hashid.TierStructural,
+		predicateProtoShared(reUUID.MatchString, "UUID", hashid.TierStructural,
 			"8-4-4-4-12 hex groups", 30,
 			"UUIDs are a ubiquitous identifier format across databases and APIs, so a random-looking token is fairly likely to be one rather than a hash", "uuid"),
 		{
@@ -214,20 +234,39 @@ func nonHashPrototypes() []hashid.Prototype {
 			},
 			Prevalence: 10, Rationale: "no basis for a better estimate; revisit with corpus data",
 		},
-		predicateProto(isBinaryStr, "Binary", hashid.TierStructural,
+		predicateProtoShared(isBinaryStr, "Binary", hashid.TierStructural,
 			"space-separated 8-bit groups", 10, "no basis for a better estimate; revisit with corpus data", "binary"),
-		predicateProto(isDecimalStr, "Decimal", hashid.TierStructural,
+		predicateProtoShared(isDecimalStr, "Decimal", hashid.TierStructural,
 			"space-separated byte values 0-255", 10, "no basis for a better estimate; revisit with corpus data", "decimal"),
-		predicateProto(isOctalStr, "Octal", hashid.TierStructural,
+		predicateProtoShared(isOctalStr, "Octal", hashid.TierStructural,
 			"space-separated octal byte values", 10, "no basis for a better estimate; revisit with corpus data", "octal"),
-		predicateProto(isBaconianStr, "Baconian Cipher", hashid.TierStructural,
+		// Fix round 1 (Critical): Morse was never ported in the first pass —
+		// isMorseStr survived as dead code and "morse" was a resolvable
+		// format with no prototype behind it, so a genuine Morse string like
+		// ".... . .-.. .-.. ---" (HELLO) fell through to Brainf*ck below,
+		// which shares Morse's dot/dash characters. Ported here, mirroring
+		// Binary/Decimal/Octal above.
+		predicateProtoShared(isMorseStr, "Morse Code", hashid.TierStructural,
+			"dot/dash/slash pattern", 10, "no basis for a better estimate; revisit with corpus data", "morse"),
+		predicateProtoShared(isBaconianStr, "Baconian Cipher", hashid.TierStructural,
 			"5-char A/B groups", 10, "no basis for a better estimate; revisit with corpus data", "baconian"),
-		predicateProto(isPolybiusStr, "Polybius Square", hashid.TierStructural,
+		predicateProtoShared(isPolybiusStr, "Polybius Square", hashid.TierStructural,
 			"digit-pair groups (1-5)", 10, "no basis for a better estimate; revisit with corpus data", "polybius"),
 		{
 			Types: []string{"brainf*ck"}, Display: "Brainf*ck", Tier: hashid.TierShape, Exclusive: false,
+			// Mirrors the deleted scoreStructuralGroup's own guard exactly
+			// (`if !morseMatch && isBrainfuckStr(v)`): Brainfuck's operator
+			// set (+-<>[].,) overlaps Morse's alphabet (.-/space) in its two
+			// most frequent characters, '.' and '-', so an unambiguous Morse
+			// string like ".... . .-.. .-.. ---" also satisfies
+			// isBrainfuckStr's "≥60% operators" threshold. Excluding
+			// Morse-shaped input here (rather than tightening isBrainfuckStr
+			// itself) keeps the shared helper's behavior unchanged for any
+			// other caller and restores exactly the mutual exclusion the
+			// original cascade had, instead of inventing a new rule.
 			Match: func(in hashid.Input) (hashid.Evidence, bool) {
-				if !isBrainfuckStr(in.Normalized) {
+				v := in.Normalized
+				if isMorseStr(v) || !isBrainfuckStr(v) {
 					return "", false
 				}
 				return "BF operator set (+-<>[].,) is at least 60% of non-whitespace characters", true
