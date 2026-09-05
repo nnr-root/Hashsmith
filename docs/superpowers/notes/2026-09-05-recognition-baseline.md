@@ -453,3 +453,145 @@ category Step 4 authorizes fixing):
 `go test ./... -count=1` passed cleanly (no failures) in this session's own
 run — the pre-existing `TestBatchFeasibilityETAThroughRunCrack` wall-clock
 flake noted in this task's brief did not occur.
+
+---
+
+# Task 19 addendum: benchmarks, and a `selftest` coverage fix
+
+Measured 2026-09-05, on this machine (darwin/arm64, Apple M2, 8 cores), Go
+`go1.26.3 darwin/arm64` (module declares `go 1.25.0` in `go.mod`; that is the
+minimum, not the toolchain used here), at commit `f7375e3` plus this task's
+own uncommitted work.
+
+## Performance
+
+Command (three fast benchmarks, best-of-5, `-benchtime 200x`):
+
+```
+go test ./cmd/hashsmith -run '^$' \
+  -bench 'BenchmarkIdentifySingle|BenchmarkIdentifySignature|BenchmarkDetectHashTypes' \
+  -benchtime 200x -count=5
+```
+
+| Benchmark | Best ns/op | B/op | allocs/op |
+|---|---|---|---|
+| `BenchmarkIdentifySingle` (`5f4dcc3b...`, 32-hex MD5-shaped) | 28,323 | 4,229 | 98 |
+| `BenchmarkIdentifySignature` (bcrypt `$2y$10$...`) | 18,879 | 3,036 | 94 |
+| `BenchmarkDetectHashTypes` (same MD5-shaped input, engine only) | 24,714 | 2,755 | 91 |
+
+Five interleaved rounds on this machine spread roughly 19,000–46,000 ns/op
+across all three benchmarks — consistent with the ~40% intra-session load
+drift documented in `docs/superpowers/notes/2026-08-31-phase1-measurements.md`
+for this same machine. The figures above are each benchmark's own best of 5,
+not a single run's numbers.
+
+`BenchmarkScanBatch100k` (100,000 repeated identical MD5-shaped lines through
+`scanBatch`) exceeded the brief's 2-second-per-iteration checkpoint on the
+first measurement (`-benchtime 3x`: 3.926 s/op), so it was profiled before
+being run to a final figure, per the brief's Step 2:
+
+```
+go test ./cmd/hashsmith -run '^$' -bench BenchmarkScanBatch100k -benchtime 5x -cpuprofile /tmp/cpu.out
+go tool pprof -top -nodecount=15 /tmp/cpu.out
+```
+
+Top of profile (15,950ms sampled over 18.46s wall):
+
+```
+      flat  flat%   sum%        cum   cum%
+    1410ms  8.84%  8.84%     1410ms  8.84%  internal/bytealg.IndexByteString
+     940ms  5.89% 14.73%    11410ms 71.54%  hashsmith-go/internal/hashid.Evaluate
+     910ms  5.71% 20.44%     1010ms  6.33%  hashsmith-go/internal/hashid.prevalenceOf
+     610ms  3.82% 24.26%      610ms  3.82%  runtime.pthread_cond_signal
+     440ms  2.76% 27.02%      940ms  5.89%  strings.ToUpper
+     420ms  2.63% 29.66%      420ms  2.63%  math/big.nat.norm (inline)
+     420ms  2.63% 32.29%      420ms  2.63%  strings.ToLower
+    (…10 more, each <3% flat)
+```
+
+71.54% of cumulative time is inside `hashid.Evaluate` itself — the shared
+detection engine genuinely evaluating the prototype table once per line,
+100,000 times, not an accidental quadratic blowup or a stray retry loop. No
+single frame outside `Evaluate`'s own call tree stood out as a bug; this is
+the cost of one call to `detectHashTypes` per line, paid 100,000 times.
+`BenchmarkDetectHashTypes` above independently measured that one call at
+24,714 ns; 100,000 × 24,714 ns ≈ 2.47s, which is within noise of the
+`ScanBatch100k` figure below — the batch path is not paying meaningfully more
+per line than a standalone call does. No fix was made or needed; this section
+exists because the brief's checkpoint required profiling, not because a
+problem was found.
+
+Final figure, best of 3 rounds of 5 iterations each (reduced from the brief's
+flat `-benchtime 200x` for this one benchmark only, because at ~2.7-3.9s/op,
+200 iterations would have run 10+ minutes under this task's foreground-only,
+one-command-at-a-time constraint):
+
+```
+go test ./cmd/hashsmith -run '^$' -bench BenchmarkScanBatch100k -benchtime 5x -count=3
+```
+
+| Benchmark | Best ns/op | B/op | allocs/op |
+|---|---|---|---|
+| `BenchmarkScanBatch100k` (100,000 lines) | 2,650,698,475 (≈2.65 s) | 426,213,150 (≈406 MiB) | 10,000,690 (~100/line) |
+
+≈26.5 µs/line end-to-end through `scanBatch`, against 24.7 µs for one direct
+`detectHashTypes` call above — the ~7% gap is line-scanning and aggregation
+overhead in `scanBatch` itself, not a second detection pass.
+
+A separate, unmodified full run of all four benchmarks together (the brief's
+exact command, `-benchtime 200x -count=1`) also completed in this session and
+is consistent with the figures above: `BenchmarkScanBatch100k-8 200
+3944581276 ns/op 425851784 B/op 10000632 allocs/op` (≈3.94 s/op, inside the
+2.65-3.94s spread already seen). Both measurements are reported here rather
+than only the more convenient one.
+
+## `selftest`'s closing line was corrected, not just quoted
+
+Before this task, `hashsmith selftest`'s closing line read "457 of 484
+registry formats carry a vector; 27 do not." The 27 are the identify-only
+codec entries (base64, base32, morse, uuid, brainf*ck, ...) registered during
+this plan for recognition only — a codec has no password to verify, so it
+structurally can never carry a known-answer vector. Counting it in the
+denominator as a coverage "gap" is the same defect that once made
+`identify --coverage` print `65/484` before Task 12 corrected it to `65/457`
+by filtering on `identifyOnly`. `selftest` was never corrected at the same
+time; this task does so.
+
+`selfTestCoverage()` in `cmd/hashsmith/selftest.go` now skips
+`format.identifyOnly` entries in both the covered and uncovered tallies, and
+the closing line's wording changed from "registry formats" to "crackable
+formats" to name the population it actually measures. Measured after the
+fix:
+
+```
+$ hashsmith -N selftest | tail -1
+  457 of 457 crackable formats carry a vector; 0 do not.
+```
+
+`TestSelfTestCoverageAccounting` (`cmd/hashsmith/selftest_test.go`) does not
+assert an exact total, only internal consistency (no double-counted names, no
+"uncovered" type that actually has a vector) — it passed unchanged after the
+fix. `cmd/hashsmith/testdata/detect_golden.txt` is untouched by this change
+(it has nothing to do with self-test coverage accounting).
+
+## A second stale figure found in the README
+
+`README.md`'s "Built-in known-answer self-test" narrative previously read
+"All 457 formats now carry one: 371 published vectors, 112 independently
+cross-checked vectors, and 19 regression-only vectors (502 total)." That
+371/112/19 split does not match `hashsmith selftest`'s own measured output
+(`hashsmith -N selftest`, quoted above under "`selftest`'s closing line..."):
+256 published + 95 cross-checked + 5 regression = 356 vectors run by
+default, plus 146 skipped (high-iteration KDFs) unless `-slow` is given —
+502 total, but not the 371/112/19 breakdown the README asserted.
+
+A `-slow` run would tally the by-source split across all 502 including the
+146 skipped ones, but was abandoned mid-run in this session after passing
+five minutes of wall-clock time with no output yet (`truecrypt`/`veracrypt`
+and similar vectors deliberately use very high real KDF iteration counts) —
+running it to completion was disproportionate to what it would buy for this
+task, and this task's own foreground-only, one-command-at-a-time constraint
+made that wait costly. Rather than publish an unmeasured full-corpus split,
+the README now states only the numbers this session actually measured: the
+356/146/502 breakdown above, not a published/cross-checked/regression split
+over all 502.

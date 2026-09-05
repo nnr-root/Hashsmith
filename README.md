@@ -56,6 +56,26 @@ hashsmith crack -t md5 5f4dcc3b5aa765d61d8327deb882cf99 -w custom.txt   # or -w 
 hashsmith identify "5f4dcc3b5aa765d61d8327deb882cf99, 8846f7ea…"  # identify several at once
 ```
 
+`identify` and `crack` run on the same detection engine, so what `identify`
+reports is exactly what `crack`'s own auto-detection sees. Each candidate
+line carries the Hashcat `-m` mode, the John label, and the canonical `-t`
+name, ending in a runnable command:
+```
+$ hashsmith -N identify 5f4dcc3b5aa765d61d8327deb882cf99
+  MD5               likely    -m 0     raw-md5  -t md5 
+  NTLM              likely    -m 1000  NT       -t ntlm
+  MD4               possible  -m 900   raw-md4  -t md4 
+  LM (LAN Manager)  unlikely  -m 3000  LM       -t lm    LM digests are upper-case
+  MD2               unlikely  -        -        -t md2   effectively extinct; no modern system emits it
+
+  32-char lowercase hex
+  hashsmith crack -t md5 5f4dcc3b5aa765d61d8327deb882cf99
+```
+Confidence is an ordinal (`certain` > `likely` > `possible` > `unlikely`),
+not an invented percentage — MD5, NTLM and MD4 are all genuinely
+indistinguishable from a bare 32-char hex digest, so all three are reported
+rather than picking one and hiding the rest.
+
 Auto-detect & crack — no need to name the hash type:
 ```bash
 hashsmith 5f4dcc3b5aa765d61d8327deb882cf99   # detects the type, then cracks it
@@ -958,7 +978,10 @@ self-contained binary that tries to make the common path short.
 | | Hashsmith | Hashcat | John the Ripper (jumbo) |
 |---|---|---|---|
 | Universal hash/code formats | 457 | 450+ native hash types | hundreds of native formats |
-| Hash-type auto-detection | yes, by default | yes in Hashcat 7.x; `--identify` lists possibilities | yes for recognizable ciphertexts; first matching format wins |
+| Hash-type auto-detection | yes, by default — `identify` and `crack` run on one shared detection engine, so every candidate carries a Hashcat `-m` mode and a John label, not just a yes/no guess | yes in Hashcat 7.x; `--identify` lists possibilities | yes for recognizable ciphertexts; first matching format wins |
+| Machine-readable identify output | `--json`, versioned schema (`hashsmith.identify/1`) | `--identify` prints text, not JSON | text only |
+| Container-file identification | file bytes alone route to the matching `*2smith` extractor for 12 of Hashsmith's 47 extractors; the other 35 must still be named explicitly (`hashsmith identify --coverage`) | no built-in file-type sniffing; separate hashcat-utils scripts convert known formats | `*2john` scripts convert known container formats; no auto-identification step |
+| Record-internal decoding | `--explain` decodes the leading candidate's own fields (JWT `alg`, Kerberos `etype`, PEM key type, ...) | not applicable | not applicable |
 | Accepted type vocabulary | 1,163 names/codes resolving into those same 457 formats, including 503 numeric Hashcat aliases | native numeric modes | native format labels |
 | Attack modes | dict, brute, mask, markov, hybrid, combinator, PRINCE | straight, combinator, mask, hybrid, association | wordlist, incremental, mask, external |
 | Rule engine | ~35 operators | full, on-GPU, the de-facto standard | full, plus C-like external mode |
@@ -983,6 +1006,25 @@ hashsmith crack -t john:dynamic_12 '<md5>:<salt>'  # John dynamic format
 hashsmith crack -w rockyou.txt '<any hash>'     # or just let detection decide
 ```
 
+**What the recognition rate actually means.** Run against Hashsmith's own
+502-vector self-test corpus, `identify` resolves 272/502 = 54.2% of vectors to
+a `certain` or `likely` candidate that names the vector's own type
+(`go test ./cmd/hashsmith -run TestRecognitionAccuracy -v`). That is not the
+whole story in either direction. Most of the remaining 209 formats are not
+missed table entries — they are HMAC variants, same-length raw digests, and
+composite MD5/SHA constructions (`md5-md5`, `sha256-sha256pass-salt`, and
+similar) that are genuinely indistinguishable from one or more sibling
+formats by shape alone: a bare 32-hex string really is consistent with MD5,
+MD4, MD2, NTLM and LM at once, and reporting all of them as `possible` rather
+than picking one is the confidence model working as designed, not failing.
+At the same time, 54.2% is not a number to round up: the John-label table
+that makes `identify`'s printed command runnable covers 65 of 457 crackable
+formats (`hashsmith identify --coverage`), and container-file sniffing
+recognizes 12 of Hashsmith's 47 extractors by file bytes alone — both real,
+measured gaps, not rounding error. See
+`docs/superpowers/notes/2026-09-05-recognition-baseline.md` for the full
+list of what is and isn't recognized and why.
+
 **Verifying your own build.** `hashsmith selftest` runs the known-answer vectors
 compiled into the binary, which answers a question a version number cannot: is
 this copy, built by this toolchain, still computing the right answers? A
@@ -990,7 +1032,7 @@ miscompilation, a bad optimisation or a corrupted download shows up here and
 nowhere else.
 
 ```bash
-hashsmith selftest              # 355 fast vectors
+hashsmith selftest              # 356 fast vectors
 hashsmith selftest -slow        # include the high-iteration KDFs
 hashsmith selftest -gaps        # list the types that have no vector yet
 ```
@@ -1002,8 +1044,10 @@ OpenSSL) and `regression` (produced by Hashsmith itself, which catches drift but
 cannot prove the implementation was right to begin with). The summary reports
 the three separately rather than flattening them into one reassuring number, and
 tells you honestly how many universal formats have no vector at all. All 457
-formats now carry one: 371 published vectors, 112 independently cross-checked
-vectors, and 19 regression-only vectors (502 total).
+crackable formats now carry one — `hashsmith selftest` runs 356 of them by
+default (256 published, 95 cross-checked, 5 regression) and skips the
+remaining 146 high-iteration KDF vectors unless `-slow` is given, 502 in
+total.
 
 **Where they are the better tool.** For a large wordlist against a fast hash on
 a real GPU, Hashcat will beat Hashsmith by orders of magnitude — its kernels are

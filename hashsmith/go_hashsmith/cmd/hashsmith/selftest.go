@@ -174,7 +174,7 @@ func runSelfTest(args []string) error {
 	}
 
 	covered, uncovered := selfTestCoverage()
-	fmt.Printf("\n  %d of %d registry formats carry a vector; %d do not.\n",
+	fmt.Printf("\n  %d of %d crackable formats carry a vector; %d do not.\n",
 		len(covered), len(covered)+len(uncovered), len(uncovered))
 	if *showGaps && len(uncovered) > 0 {
 		fmt.Println("\nTypes without a self-test vector:")
@@ -214,8 +214,19 @@ func wrongPassword(password string) string {
 }
 
 // selfTestCoverage derives coverage directly from the universal registry.
+// Identify-only entries (Base64, Morse, Bech32, UUID, ...) are excluded from
+// both the numerator and the denominator: a codec has no password-hashing to
+// verify, so it can never carry a known-answer vector, and counting it as an
+// uncovered "gap" (as an earlier version of this function did, producing the
+// misleading "457 of 484 ... 27 do not" line) invites a false read of missing
+// test coverage rather than the true state, which is that those 27 formats
+// are structurally exempt. See universalHashRegistry.crackable and
+// identify.go's --coverage, which apply the same filter.
 func selfTestCoverage() (covered, uncovered []string) {
 	for name, format := range universalHashRegistry.formats {
+		if format.identifyOnly {
+			continue
+		}
 		if len(format.vectors) > 0 {
 			covered = append(covered, name)
 		} else {

@@ -165,7 +165,9 @@ func printHelp() {
 	fmt.Println("  selftest      [-t type] [-v] [-gaps]   verify built-in known-answer vectors")
 	fmt.Println("  types         list every supported -t hash type")
 	fmt.Println("  encodings     list every supported encode/decode -t type (alias: codecs)")
-	fmt.Println("  identify      [-o out] [-c]  INPUT...")
+	fmt.Println("  identify      [--json] [--explain] [--summary] [--coverage]")
+	fmt.Println("                [--split-by-type <dir>] [--unmatched <file>] [-o out] [-c]  INPUT...")
+	fmt.Println("                INPUT may also be a container file (.kdbx, .zip, .pdf, …)")
 	fmt.Printf("  extractors    list all %d integrated *2smith extractors and formats\n", len(universalExtractorRegistry))
 	fmt.Println("  <name>2smith  -f <file> [-o out] [-c]   extract crack-ready records; see `extractors`")
 	fmt.Println("  rules         <rulefile> [word]   preview/validate a mangling-rule file")
@@ -190,6 +192,7 @@ func printHelp() {
 	fmt.Println("Shortcuts:  -i <hash|file>  →  identify command")
 	fmt.Println()
 	fmt.Println("Exit codes (crack):  0 = all targets cracked   1 = some not cracked   2 = error")
+	fmt.Println("Exit codes (identify):  0 = confident answer   1 = ambiguous or none   2 = error")
 }
 
 func fail(msg string) {
