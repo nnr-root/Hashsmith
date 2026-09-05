@@ -15,13 +15,9 @@ import (
 // which is how Hashsmith's coverage advantage stays visible instead of being
 // asserted in documentation.
 //
-// The trailing command line is `crack` only when the leading candidate is
-// actually crackable. Base64, Morse and the other identify-only recognitions
-// (universalHashRegistry.crackable reports false for them) have no attack
-// routine — `crack -t base64 ...` fails with "unsupported hash algorithm" —
-// so for those the honest analogue is `decode`, printed only when decodeText
-// genuinely accepts the type; if it does not (or crack does not either), no
-// command line is printed rather than a broken one.
+// The trailing command line is chosen by identifyRunnableCommand — see its
+// doc comment for the crack/decode/neither logic, which buildIdentifyReport's
+// JSON "command" field also uses so the two renderers never drift apart.
 func renderIdentifyHuman(input string, cs []hashid.Candidate) string {
 	if len(cs) == 0 {
 		return "  no candidate identified\n\n  " +
@@ -72,15 +68,34 @@ func renderIdentifyHuman(input string, cs []hashid.Candidate) string {
 	if ev := cs[0].Evidence; ev != "" {
 		fmt.Fprintf(&sb, "\n  %s\n", ev)
 	}
-	switch {
-	case universalHashRegistry.crackable(cs[0].Type):
-		fmt.Fprintf(&sb, "  hashsmith crack -t %s %s\n", cs[0].Type, input)
-	default:
-		if _, err := decodeText(input, cs[0].Type, 3, "", 2); err == nil {
-			fmt.Fprintf(&sb, "  hashsmith decode -t %s %s\n", cs[0].Type, input)
-		}
+	if cmd := identifyRunnableCommand(cs[0].Type, input); cmd != "" {
+		fmt.Fprintf(&sb, "  %s\n", cmd)
 	}
 	return sb.String()
+}
+
+// identifyRunnableCommand picks the one command a caller can paste for a
+// leading candidate of the given type: `crack` when
+// universalHashRegistry.crackable reports true, `decode` when decodeText
+// genuinely accepts the type (Base64, Morse and the other identify-only
+// recognitions have no attack routine — `crack -t base64 ...` fails with
+// "unsupported hash algorithm" — so decode is the honest analogue there),
+// and "" when neither applies, rather than printing a command that errors.
+//
+// Both renderIdentifyHuman and buildIdentifyReport call this single
+// implementation instead of each carrying their own copy of the branch, so a
+// future change to the decode arguments — or a third case — cannot update
+// one and silently leave the other advertising a broken command.
+func identifyRunnableCommand(typ, input string) string {
+	switch {
+	case universalHashRegistry.crackable(typ):
+		return "hashsmith crack -t " + typ + " " + input
+	default:
+		if _, err := decodeText(input, typ, 3, "", 2); err == nil {
+			return "hashsmith decode -t " + typ + " " + input
+		}
+		return ""
+	}
 }
 
 // identifySchemaVersion is versioned from the first release so fields can be
@@ -98,17 +113,25 @@ const identifySchemaVersion = "hashsmith.identify/1"
 //
 // No percentage, score, or confidence number appears anywhere in this type:
 // Confidence carries exactly the four words the ordinal model defines.
+//
+// DemotionReason is hashid.Candidate.Reason, documented there as "why it was
+// demoted, when it was" — it is not a rationale for the pick (that is what
+// Evidence is for), so the JSON key says exactly what the field holds. It
+// carries omitempty because the common case, an undemoted candidate, has no
+// reason to give; without omitempty every such candidate would ship
+// "demotion_reason": "" and a consumer could not tell "nothing to report"
+// from "a reason was dropped by a bug".
 type identifyCandidateJSON struct {
-	Name       string  `json:"name"`
-	Type       string  `json:"type"`
-	Confidence string  `json:"confidence"`
-	Tier       string  `json:"tier"`
-	Hashcat    *int    `json:"hashcat"`
-	John       *string `json:"john"`
-	Evidence   string  `json:"evidence"`
-	Rationale  string  `json:"rationale"`
-	Command    string  `json:"command"`
-	Suppressed bool    `json:"suppressed,omitempty"`
+	Name           string  `json:"name"`
+	Type           string  `json:"type"`
+	Confidence     string  `json:"confidence"`
+	Tier           string  `json:"tier"`
+	Hashcat        *int    `json:"hashcat"`
+	John           *string `json:"john"`
+	Evidence       string  `json:"evidence"`
+	DemotionReason string  `json:"demotion_reason,omitempty"`
+	Command        string  `json:"command"`
+	Suppressed     bool    `json:"suppressed,omitempty"`
 }
 
 // identifyReport is the top-level machine-readable payload for one input.
@@ -122,12 +145,9 @@ type identifyReport struct {
 // buildIdentifyReport renders the same candidates renderIdentifyHuman does,
 // as a versioned, script-friendly structure instead of a terminal table.
 //
-// The printed command mirrors renderIdentifyHuman's own choice between crack
-// and decode: a leading candidate that universalHashRegistry.crackable
-// reports false for (Base64, Morse, ...) has no crack routine, so advertising
-// `crack -t <type> ...` there would hand the caller a command that errors.
-// decodeText is consulted the same way the human renderer consults it, and
-// when neither applies the command is left empty rather than guessed.
+// The printed command comes from identifyRunnableCommand, the single
+// implementation renderIdentifyHuman also calls, so the JSON and human
+// renderings can never disagree about which of crack/decode/neither applies.
 func buildIdentifyReport(input string, cs []hashid.Candidate) identifyReport {
 	rep := identifyReport{
 		Schema:     identifySchemaVersion,
@@ -137,13 +157,13 @@ func buildIdentifyReport(input string, cs []hashid.Candidate) identifyReport {
 	}
 	for i, c := range cs {
 		item := identifyCandidateJSON{
-			Name:       c.Display,
-			Type:       c.Type,
-			Confidence: c.Confidence.String(),
-			Tier:       c.Tier.String(),
-			Evidence:   string(c.Evidence),
-			Rationale:  c.Reason,
-			Suppressed: c.Suppressed,
+			Name:           c.Display,
+			Type:           c.Type,
+			Confidence:     c.Confidence.String(),
+			Tier:           c.Tier.String(),
+			Evidence:       string(c.Evidence),
+			DemotionReason: c.Reason,
+			Suppressed:     c.Suppressed,
 		}
 		if m, ok := universalHashRegistry.hashcatMode(c.Type); ok {
 			mode := m
@@ -154,14 +174,7 @@ func buildIdentifyReport(input string, cs []hashid.Candidate) identifyReport {
 			item.John = &label
 		}
 		if i == 0 {
-			switch {
-			case universalHashRegistry.crackable(c.Type):
-				item.Command = "hashsmith crack -t " + c.Type + " " + input
-			default:
-				if _, err := decodeText(input, c.Type, 3, "", 2); err == nil {
-					item.Command = "hashsmith decode -t " + c.Type + " " + input
-				}
-			}
+			item.Command = identifyRunnableCommand(c.Type, input)
 		}
 		rep.Candidates = append(rep.Candidates, item)
 	}

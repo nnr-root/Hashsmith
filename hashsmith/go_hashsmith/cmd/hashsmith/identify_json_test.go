@@ -8,8 +8,8 @@ import (
 )
 
 func TestJSONReportShape(t *testing.T) {
-	rep := buildIdentifyReport("5f4dcc3b5aa765d61d8327deb882cf99",
-		identifyCandidates("5f4dcc3b5aa765d61d8327deb882cf99"))
+	target := "5f4dcc3b5aa765d61d8327deb882cf99"
+	rep := buildIdentifyReport(target, identifyCandidates(target))
 	blob, err := json.Marshal(rep)
 	if err != nil {
 		t.Fatal(err)
@@ -26,13 +26,42 @@ func TestJSONReportShape(t *testing.T) {
 		t.Fatalf("candidates = %v, want a non-empty array", back["candidates"])
 	}
 	first := cands[0].(map[string]any)
-	for _, k := range []string{"name", "type", "confidence", "tier", "hashcat", "john", "evidence", "rationale", "command"} {
+	for _, k := range []string{"name", "type", "confidence", "tier", "hashcat", "john", "evidence", "command"} {
 		if _, present := first[k]; !present {
 			t.Errorf("candidate is missing key %q", k)
 		}
 	}
 	if first["hashcat"] != float64(0) {
 		t.Errorf("md5 hashcat = %v, want 0", first["hashcat"])
+	}
+
+	// demotion_reason holds hashid.Candidate.Reason — "why it was demoted,
+	// when it was" — not a rationale for the pick, and it carries omitempty
+	// because the common case (an undemoted candidate, like the leading MD5
+	// match here) has nothing to report. Its absence must be a missing key,
+	// not an empty string, so a consumer can tell "nothing to report" from
+	// "a reason was dropped by a bug".
+	if _, present := first["demotion_reason"]; present {
+		t.Errorf("undemoted MD5 candidate carries demotion_reason = %v, want the key absent", first["demotion_reason"])
+	}
+
+	// lm is demoted by negative evidence on this lowercase-hex input (LM
+	// digests are upper-case) — a real fixture for the field's other half:
+	// present, with the demotion text, on a candidate that was actually
+	// demoted.
+	var lm map[string]any
+	for _, c := range cands {
+		m := c.(map[string]any)
+		if m["type"] == "lm" {
+			lm = m
+			break
+		}
+	}
+	if lm == nil {
+		t.Fatal("expected an lm candidate among the MD5-shaped matches")
+	}
+	if reason, _ := lm["demotion_reason"].(string); reason == "" {
+		t.Errorf("lm demotion_reason = %v, want a non-empty demotion explanation", lm["demotion_reason"])
 	}
 }
 
