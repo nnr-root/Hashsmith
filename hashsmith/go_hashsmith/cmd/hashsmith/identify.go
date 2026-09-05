@@ -53,23 +53,42 @@ func runIdentify(args []string) error {
 
 	if *coverage {
 		withSniff, totalExtractors := sniffCoverage()
-		withJohn := 0
+		// Only formats crack -t can actually attack are counted, on both
+		// sides of the ratio: an identifyOnly recognition entry (Base64,
+		// Morse, Bech32, ...) has no John format and never could, so leaving
+		// it in the denominator would understate John coverage against the
+		// tool's own work. universalHashRegistry.crackable is exactly the
+		// existing field this distinction already lives in.
+		withJohn, totalCrackable := 0, 0
 		for name := range universalHashRegistry.formats {
+			if !universalHashRegistry.crackable(name) {
+				continue
+			}
+			totalCrackable++
 			if _, ok := universalHashRegistry.johnLabel(name); ok {
 				withJohn++
 			}
 		}
 		fmt.Printf("container sniffers: %d/%d extractors\n", withSniff, totalExtractors)
-		fmt.Printf("John labels:        %d/%d formats\n", withJohn, len(universalHashRegistry.formats))
+		fmt.Printf("John labels:        %d/%d formats\n", withJohn, totalCrackable)
 		return nil
 	}
 
 	// A readable file that a sniffer recognizes is a container, not a hash
-	// list. This must run before collectIdentifyInputs, which would otherwise
-	// read the file as one hash-candidate per line.
-	for _, arg := range fs.Args() {
-		if d, ev, ok := sniffContainer(arg); ok {
-			color.New(themeAttr).Fprintln(os.Stdout, renderContainerIdentification(arg, d, ev))
+	// list. This must run before collectIdentifyInputs — which would
+	// otherwise read a container's bytes as one hash-candidate per line — and
+	// it must check every way identify accepts a file path: -f, -i (whose own
+	// help text above advertises that it takes a file too), and a bare
+	// positional argument. sniffContainer's os.Open tolerates a candidate
+	// that isn't a path at all (a literal hash value passed via -i) by simply
+	// reporting no match, so no separate existence check is needed here.
+	sniffCandidates := append([]string{*filePath, *text}, fs.Args()...)
+	for _, arg := range sniffCandidates {
+		if strings.TrimSpace(arg) == "" {
+			continue
+		}
+		if d, ev, conf, ok := sniffContainer(arg); ok {
+			color.New(themeAttr).Fprintln(os.Stdout, renderContainerIdentification(arg, d, ev, conf))
 			return nil
 		}
 	}

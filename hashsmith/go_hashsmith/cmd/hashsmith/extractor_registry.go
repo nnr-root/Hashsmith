@@ -17,10 +17,15 @@ type extractorDefinition struct {
 	formats string
 	run     func([]string) error
 
-	// sniff recognizes this extractor's container from the file's first bytes.
-	// It is optional: an extractor without one is simply never auto-routed, and
-	// sniffCoverage reports the gap rather than hiding it.
-	sniff func(head []byte) (hashid.Evidence, bool)
+	// sniff recognizes this extractor's container from the file's first bytes
+	// and reports how sure that recognition is. It is optional: an extractor
+	// without one is simply never auto-routed, and sniffCoverage reports the
+	// gap rather than hiding it. The confidence matters as much as the bool:
+	// a fully-specific signature (KDBX, ZIP, LUKS, ...) reports hashid.Certain,
+	// while a structural-but-partial match (PKCS#12's DER shape, a bare OLE2
+	// header with no confirmed encryption stream) must report something lower
+	// rather than claim proof it doesn't have — see sniff.go.
+	sniff func(head []byte) (hashid.Evidence, hashid.Confidence, bool)
 }
 
 var universalExtractorRegistry = []extractorDefinition{

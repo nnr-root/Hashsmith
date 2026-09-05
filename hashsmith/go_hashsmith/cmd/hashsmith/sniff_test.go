@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"hashsmith-go/internal/hashid"
 )
 
 func writeTemp(t *testing.T, name string, data []byte) string {
@@ -22,7 +24,7 @@ func TestSniffKeePassKDBX4(t *testing.T) {
 	head = append(head, make([]byte, 64)...)
 	p := writeTemp(t, "Database.kdbx", head)
 
-	d, ev, ok := sniffContainer(p)
+	d, ev, conf, ok := sniffContainer(p)
 	if !ok {
 		t.Fatal("KDBX file was not recognized")
 	}
@@ -32,11 +34,14 @@ func TestSniffKeePassKDBX4(t *testing.T) {
 	if !strings.Contains(string(ev), "KDBX") {
 		t.Errorf("evidence = %q, want it to mention KDBX", ev)
 	}
+	if conf != hashid.Certain {
+		t.Errorf("confidence = %s, want certain (both signature words matched)", conf)
+	}
 }
 
 func TestSniffZip(t *testing.T) {
 	p := writeTemp(t, "archive.zip", append([]byte("PK\x03\x04"), make([]byte, 64)...))
-	d, _, ok := sniffContainer(p)
+	d, _, _, ok := sniffContainer(p)
 	if !ok || d.name != "zip2smith" {
 		t.Fatalf("zip routed to %v (ok=%v), want zip2smith", d, ok)
 	}
@@ -44,7 +49,7 @@ func TestSniffZip(t *testing.T) {
 
 func TestSniffPDF(t *testing.T) {
 	p := writeTemp(t, "doc.pdf", append([]byte("%PDF-1.7\n"), make([]byte, 64)...))
-	d, _, ok := sniffContainer(p)
+	d, _, _, ok := sniffContainer(p)
 	if !ok || d.name != "pdf2smith" {
 		t.Fatalf("pdf routed to %v (ok=%v), want pdf2smith", d, ok)
 	}
@@ -52,16 +57,27 @@ func TestSniffPDF(t *testing.T) {
 
 func TestSniffRejectsPlainText(t *testing.T) {
 	p := writeTemp(t, "hashes.txt", []byte("5f4dcc3b5aa765d61d8327deb882cf99\n"))
-	if _, _, ok := sniffContainer(p); ok {
+	if _, _, _, ok := sniffContainer(p); ok {
 		t.Error("a text file of hashes must not be treated as a container")
 	}
 }
 
 func TestContainerOutputNamesTheExtractorCommand(t *testing.T) {
 	d, _ := findExtractor("keepass2smith")
-	out := renderContainerIdentification("Database.kdbx", d, "KDBX 4.0, KDF Argon2d")
+	out := renderContainerIdentification("Database.kdbx", d, "KDBX 4.0, KDF Argon2d", hashid.Certain)
 	if !strings.Contains(out, "hashsmith keepass2smith -f Database.kdbx") {
 		t.Errorf("output missing the runnable extractor command\n---\n%s", out)
+	}
+}
+
+func TestContainerOutputRendersTheSniffersConfidenceNotALiteral(t *testing.T) {
+	d, _ := findExtractor("pfx2smith")
+	out := renderContainerIdentification("keystore.pfx", d, "structural match only", hashid.Likely)
+	if strings.Contains(out, "certain") {
+		t.Errorf("output claims certain for a Likely sniff result\n---\n%s", out)
+	}
+	if !strings.Contains(out, "likely") {
+		t.Errorf("output missing the actual confidence word 'likely'\n---\n%s", out)
 	}
 }
 
@@ -72,9 +88,14 @@ func TestSniffPKCS12Recognized(t *testing.T) {
 	head = append(head, make([]byte, 64)...)
 	p := writeTemp(t, "keystore.pfx", head)
 
-	d, _, ok := sniffContainer(p)
+	d, _, conf, ok := sniffContainer(p)
 	if !ok || d.name != "pfx2smith" {
 		t.Fatalf("pfx routed to %v (ok=%v), want pfx2smith", d, ok)
+	}
+	// Only the outer SEQUENCE + version INTEGER were checked, not the
+	// ContentInfo that follows, so this must not claim Certain.
+	if conf != hashid.Likely {
+		t.Errorf("confidence = %s, want likely (structural match only, not a full ASN.1 decode)", conf)
 	}
 }
 
@@ -87,8 +108,42 @@ func TestSniffPKCS12RejectsGenericDER(t *testing.T) {
 	head = append(head, make([]byte, 64)...)
 	p := writeTemp(t, "cert.der", head)
 
-	if _, _, ok := sniffContainer(p); ok {
+	if _, _, _, ok := sniffContainer(p); ok {
 		t.Error("a generic DER SEQUENCE must not be treated as a PKCS#12 keystore")
+	}
+}
+
+func TestSniffOfficeBareHeaderIsLikelyNotCertain(t *testing.T) {
+	// The bare OLE2/CFBF magic is shared by .msi, .msg, Thumbs.db and
+	// unencrypted legacy Office documents, so without a confirmed
+	// EncryptionInfo/EncryptedPackage stream this must not claim Certain.
+	head := append([]byte{0xD0, 0xCF, 0x11, 0xE0}, make([]byte, 64)...)
+	p := writeTemp(t, "installer.msi", head)
+
+	d, _, conf, ok := sniffContainer(p)
+	if !ok || d.name != "office2smith" {
+		t.Fatalf("OLE2 file routed to %v (ok=%v), want office2smith", d, ok)
+	}
+	if conf != hashid.Likely {
+		t.Errorf("confidence = %s, want likely (bare OLE2 magic; not confirmed as encrypted Office)", conf)
+	}
+}
+
+func TestSniffOfficeWithEncryptionInfoStreamIsCertain(t *testing.T) {
+	head := []byte{0xD0, 0xCF, 0x11, 0xE0}
+	head = append(head, make([]byte, 64)...)
+	head = append(head, utf16LEBytes("EncryptionInfo")...)
+	p := writeTemp(t, "Encrypted.docx.cfb", head)
+
+	d, ev, conf, ok := sniffContainer(p)
+	if !ok || d.name != "office2smith" {
+		t.Fatalf("routed to %v (ok=%v), want office2smith", d, ok)
+	}
+	if conf != hashid.Certain {
+		t.Errorf("confidence = %s, want certain (EncryptionInfo stream name found)", conf)
+	}
+	if !strings.Contains(string(ev), "EncryptionInfo") {
+		t.Errorf("evidence = %q, want it to mention EncryptionInfo", ev)
 	}
 }
 
@@ -101,4 +156,52 @@ func TestSniffCoverageIsReported(t *testing.T) {
 		t.Error("no extractor implements sniff")
 	}
 	t.Logf("sniff coverage: %d/%d extractors", with, total)
+}
+
+// TestIdentifyStillReadsAHashFileAsHashesNotAsAContainer is the integration
+// check finding 5 asked for: TestSniffRejectsPlainText only proves
+// sniffContainer itself declines a hash file. This drives the real
+// runIdentify entry point end to end and asserts the rendered output is hash
+// identification (an MD5/NTLM candidate table), not container-routing text —
+// so a future reordering of the sniff-vs-read branch in runIdentify would
+// fail a test instead of only being caught by inspection.
+func TestIdentifyStillReadsAHashFileAsHashesNotAsAContainer(t *testing.T) {
+	p := writeTemp(t, "hashes.txt", []byte(
+		"5f4dcc3b5aa765d61d8327deb882cf99\n"+
+			"098f6bcd4621d373cade4e832627b4f6\n"))
+
+	out := captureStdout(t, func() error {
+		return runIdentify([]string{p})
+	})
+
+	if strings.Contains(out, "This is a container") {
+		t.Errorf("a two-hash text file was routed as a container:\n%s", out)
+	}
+	if !strings.Contains(out, "MD5") {
+		t.Errorf("expected MD5 hash identification in output, got:\n%s", out)
+	}
+}
+
+// TestIdentifyDashFRoutesAContainerThroughTheSniffer covers finding 4:
+// identify.go's own -i help text advertises that -i (and -f) accept a file
+// path, so a container passed that way must be sniffed exactly like a bare
+// positional argument, not handed to readInputLines as a line-oriented hash
+// file.
+func TestIdentifyDashFRoutesAContainerThroughTheSniffer(t *testing.T) {
+	head := append([]byte("PK\x03\x04"), make([]byte, 64)...)
+	p := writeTemp(t, "archive.zip", head)
+
+	out := captureStdout(t, func() error {
+		return runIdentify([]string{"-f", p})
+	})
+	if !strings.Contains(out, "zip2smith") {
+		t.Errorf("identify -f <zip> did not route through the sniffer:\n%s", out)
+	}
+
+	out = captureStdout(t, func() error {
+		return runIdentify([]string{"-i", p})
+	})
+	if !strings.Contains(out, "zip2smith") {
+		t.Errorf("identify -i <zip> did not route through the sniffer:\n%s", out)
+	}
 }
