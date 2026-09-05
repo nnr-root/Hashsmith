@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"hashsmith-go/internal/hashid"
 	"sort"
 	"strings"
 )
@@ -15,6 +16,11 @@ type extractorDefinition struct {
 	input   string
 	formats string
 	run     func([]string) error
+
+	// sniff recognizes this extractor's container from the file's first bytes.
+	// It is optional: an extractor without one is simply never auto-routed, and
+	// sniffCoverage reports the gap rather than hiding it.
+	sniff func(head []byte) (hashid.Evidence, bool)
 }
 
 var universalExtractorRegistry = []extractorDefinition{

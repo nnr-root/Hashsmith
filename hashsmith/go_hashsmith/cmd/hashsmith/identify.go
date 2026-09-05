@@ -46,8 +46,32 @@ func runIdentify(args []string) error {
 	outFile := fs.String("o", "", "output file")
 	copyRes := fs.Bool("c", false, "copy to clipboard")
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON (schema hashsmith.identify/1)")
+	coverage := fs.Bool("coverage", false, "report container-sniffer and John-label coverage, then exit")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
+	}
+
+	if *coverage {
+		withSniff, totalExtractors := sniffCoverage()
+		withJohn := 0
+		for name := range universalHashRegistry.formats {
+			if _, ok := universalHashRegistry.johnLabel(name); ok {
+				withJohn++
+			}
+		}
+		fmt.Printf("container sniffers: %d/%d extractors\n", withSniff, totalExtractors)
+		fmt.Printf("John labels:        %d/%d formats\n", withJohn, len(universalHashRegistry.formats))
+		return nil
+	}
+
+	// A readable file that a sniffer recognizes is a container, not a hash
+	// list. This must run before collectIdentifyInputs, which would otherwise
+	// read the file as one hash-candidate per line.
+	for _, arg := range fs.Args() {
+		if d, ev, ok := sniffContainer(arg); ok {
+			color.New(themeAttr).Fprintln(os.Stdout, renderContainerIdentification(arg, d, ev))
+			return nil
+		}
 	}
 
 	inputs, err := collectIdentifyInputs(*text, *filePath, fs.Args())
