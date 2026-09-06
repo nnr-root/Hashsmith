@@ -339,7 +339,7 @@ Add to `blowfish_test.go`:
 // cursor semantics, including the wrap that happens mid-word for key lengths
 // that are not multiples of four.
 func TestNextWordMatchesCursor(t *testing.T) {
-	for _, key := range [][]byte{[]byte("a"), []byte("abc"), []byte("abcd"), []byte("seven77"), []byte("password ")} {
+	for _, key := range [][]byte{[]byte("a"), []byte("abc"), []byte("abcd"), []byte("seven77"), []byte("password\x00")} {
 		j := 0
 		for i := 0; i < 18; i++ {
 			// upstream's inlined cursor read
