@@ -270,6 +270,9 @@ func maskAttack(ctx context.Context, targetHash, typ string, cfg *maskConfig,
 	if err != nil {
 		return "", err
 	}
+	if newHasher, ok := newLaneHasher(typ, targetHash, salt, saltMode); ok {
+		return runLayoutLanes(ctx, layout, 0, 0, workers, atomicAttempts, nil, newHasher)
+	}
 	return runLayout(ctx, layout, 0, 0, workers, atomicAttempts, nil,
 		func(c string) bool {
 			ok, _ := verifyCandidate(c, targetHash, typ, salt, saltMode)

@@ -207,3 +207,54 @@ func TestDictAttackLanesRuleLabels(t *testing.T) {
 		t.Errorf("rule label %q, want \"$1\"", res.ruleLabel)
 	}
 }
+
+// TestMaskLanesFindsAtEveryPosition mirrors the dict test for the keyspace
+// runner. The mask ?l?l covers 676 candidates; planting the answer at the first,
+// a middle and the last index exercises the same flush boundaries.
+func TestMaskLanesFindsAtEveryPosition(t *testing.T) {
+	for _, pw := range []string{"aa", "mn", "zz"} {
+		crypt, err := bcrypt.GenerateFromPassword([]byte(pw), 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg := buildMaskConfig("?l?l", "", "", "", "", false, 0, false)
+		var attempts int64
+		got, err := maskAttack(context.Background(), string(crypt), "bcrypt", cfg, 2, "", "prefix", &attempts)
+		if err != nil {
+			t.Fatalf("%s: %v", pw, err)
+		}
+		if got != pw {
+			t.Errorf("mask found %q, want %q", got, pw)
+		}
+	}
+}
+
+// TestLanesRespectSessionWatermark pins the contract runLayoutLanes shares with
+// its sibling runners: a resumed run must not retest what the first run covered
+// and must still find an answer past the resume point.
+func TestLanesRespectSessionWatermark(t *testing.T) {
+	crypt, err := bcrypt.GenerateFromPassword([]byte("zz"), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, ok := newLaneHasher("bcrypt", string(crypt), "", "prefix")
+	if !ok {
+		t.Fatal("newLaneHasher declined a valid bcrypt target")
+	}
+	layout, err := maskLayout(buildMaskConfig("?l?l", "", "", "", "", false, 0, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attempts, watermark int64
+	// Start past every candidate except the last few; the answer is index 675.
+	got, err := runLayoutLanes(context.Background(), layout, 670, 0, 2, &attempts, &watermark, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "zz" {
+		t.Errorf("resumed run found %q, want \"zz\"", got)
+	}
+	if watermark < 670 {
+		t.Errorf("watermark went backwards: %d", watermark)
+	}
+}

@@ -114,6 +114,15 @@ func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *ses
 			})
 		}
 	}
+	// bcrypt (and only bcrypt, single-target) has an interleaved multi-candidate
+	// core: several candidates advance through each Blowfish round together,
+	// which is the only way to make a CPU-bound KDF faster. See
+	// internal/bcryptlane and docs/superpowers/specs/2026-09-06-bcrypt-lanes-design.md.
+	if newHasher, ok := newLaneHasher(typ, effHash, effSalt, saltMode); ok {
+		return runSessionRunner(ctx, layout, sess, resumeFrom, func(watermark *int64) (string, error) {
+			return runLayoutLanes(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark, newHasher)
+		})
+	}
 	return runSessionLayout(ctx, layout, sess, resumeFrom, limit, workers, atomicAttempts, verify)
 }
 
