@@ -8,8 +8,13 @@ import (
 )
 
 // Lanes is the interleave width: the maximum number of candidates Run hashes in
-// one pass. Tuned by measurement in docs/superpowers/notes/, not by guesswork.
-const Lanes = 1
+// one pass. Tuned by measurement in
+// docs/superpowers/notes/2026-09-06-bcrypt-lane-tuning.md: best-of-5 ns/candidate
+// at benchtime=5s was width1 3,386,037 / width2 1,861,100 / width4 1,535,169 /
+// width8 1,662,749 on this machine (Apple M2). Width 4 wins outright (8.3%
+// better than width8, well outside the brief's 3% tie-break band), matching the
+// planning-session cipher-level pointer (4 lanes 2.15x).
+const Lanes = 4
 
 // bcrypt's own base64 alphabet, which is not the standard one.
 const alphabet = "./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"

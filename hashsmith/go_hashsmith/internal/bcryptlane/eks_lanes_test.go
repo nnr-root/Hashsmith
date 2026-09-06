@@ -1,6 +1,7 @@
 package bcryptlane
 
 import (
+	"fmt"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -196,11 +197,22 @@ func TestNoBoundsChecksInRounds(t *testing.T) {
 }
 
 func benchWidth(b *testing.B, width int) {
-	crypt, _ := bcrypt.GenerateFromPassword([]byte("benchmark"), 5)
-	h, _ := NewHasher(string(crypt))
+	crypt, err := bcrypt.GenerateFromPassword([]byte("benchmark"), 5)
+	if err != nil {
+		b.Fatal(err)
+	}
+	h, err := NewHasher(string(crypt))
+	if err != nil {
+		b.Fatal(err)
+	}
 	pw := make([][]byte, width)
 	for i := range pw {
-		pw[i] = []byte("candidate")
+		// Distinct-but-equal-length candidates: identical candidates across
+		// lanes would give every lane the same S-box access pattern, which
+		// is not how a real wordlist behaves and could flatter or distort
+		// the lane result. Equal length keeps the block-encryption count
+		// identical across lanes so no lane does extra work.
+		pw[i] = []byte(fmt.Sprintf("candidate%02d", i))
 	}
 	out := make([]bool, width)
 	b.ResetTimer()
