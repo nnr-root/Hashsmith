@@ -97,7 +97,8 @@ func NewHasher(crypt string) (*Hasher, error) {
 func (h *Hasher) Cost() int { return h.cost }
 
 // Run hashes each pw[i] against the target and writes the verdict to out[i].
-// len(pw) must be <= Lanes and len(out) must be >= len(pw).
+// pw may be of ANY length; len(out) must be >= len(pw). Lanes is the width
+// callers should batch at for best throughput, NOT a cap Run enforces.
 //
 // A batch of any size is decomposed into the generated widths, largest first
 // (8, 4, 2, then singles), so a tail of three candidates costs one 2-lane pass
