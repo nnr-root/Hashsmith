@@ -262,6 +262,49 @@ precise to two decimal places; it does not affect the width-benchmark
 numbers used for the Lanes choice or the 651.4 c/s figure, which do not
 compare two different code paths within one test run.
 
+## Observed flake under load (Task 6 fix round 1)
+
+During Task 6's code review, `go test ./internal/bcryptlane/` was run on
+this same tuning machine while under contention from the review's own
+concurrent test execution, and `TestSpeedupOverXCrypto` **failed**:
+reported speedup 1.18x, below the 1.632 floor derived above. `uptime` at
+that time showed a load average of 30 on this machine's 8 cores. All ten
+correctness tests in the package passed in that same run; only this
+single wall-clock ratio gate failed. This is exactly the scenario this
+note's "Ratchet floor is validated on Apple M2 only" section anticipated
+in the abstract (noisy-neighbour contention producing a lower margin than
+the 15% measured here) — the difference is this is now a measured
+occurrence on the tuning machine itself, not only a risk flagged for
+other CI runners.
+
+Per the controller's Task 5 ruling, a flake is answered with measured
+data, not by deleting or weakening the test. The response implemented in
+Task 6 fix round 1 (`speed_test.go`):
+
+1. Both sides of the ratio (the lane hasher and the x/crypto reference)
+   now take the **minimum of 5 samples** via a `bestOfN` helper, rather
+   than one `testing.Benchmark` call each — load only ever adds time to a
+   wall-clock sample, so the minimum is the closest available estimate of
+   the unloaded cost.
+2. A **load guard**: `refQuietBaselineNs` (~3.3ms) records this same
+   machine's quiet-machine best-of-5 for `bcrypt.CompareHashAndPassword`
+   at cost 5 (see `docs/superpowers/notes/2026-09-06-bcrypt-bottleneck.md`,
+   which measured 3,305,662 ns/op library-wrapped / 3,291,526 ns/op raw
+   under low load). If the reference side's best-of-5 exceeds 2x that
+   baseline, the test now calls `t.Skipf` with a message naming the
+   observed value, the baseline, and stating explicitly that a skip means
+   "not measured here" — never "passed".
+3. The `1.632` floor itself is **unchanged**. The floor is correct for a
+   quiet machine; the defect this fixes is that the test could not tell a
+   loaded machine apart from a real regression, not that the floor was
+   wrong.
+
+This section is deliberately not softened: it records that the ratchet
+was observed to fail (not skip, not pass) at 1.18x under load average 30
+on the tuning machine, as evidence about the measurement environment, per
+the controller's explicit instruction not to present this as anything
+gentler than what was measured.
+
 ## Summary
 
 | Quantity | Value |
@@ -274,3 +317,5 @@ compare two different code paths within one test run.
 | Ratchet floor (`bcryptSpeedupFloor`) | 1.92 * 0.85 = 1.632 |
 | Clears John the Ripper (591 c/s)? | Yes, 1.10x |
 | Clears project target (887 c/s)? | **No** |
+| Observed flake (Task 6 review, load avg 30) | 1.18x FAIL — see "Observed flake under load" above |
+| Fix | best-of-5 sampling + 2x-baseline load guard (`t.Skipf`, not a floor change) |
