@@ -69,24 +69,32 @@ jobs:
         with:
           go-version: "1.25"
       # The race detector is what guards the concurrent keyspace runner added
-      # in Phase 1. Two tests are excluded: TestBenchTypeRespectsBudgetForSlowKDF
-      # and TestFastVectorsStayWithinBudget. Both are wall-clock budget
-      # assertions, and a race build carries ~10x instrumentation overhead —
-      # under -race such a test measures the instrumentation, not the code, so
-      # an absolute millisecond threshold isn't merely strained there, it's
-      # meaningless. Do not "fix" this by loosening either budget: that would
-      # weaken these tests in the normal lane, which is where they actually do
-      # their job (e.g. catching a self-test vector that silently became a
-      # high-iteration KDF). Excluding them from a lane where they cannot be
-      # meaningful is the correct trade, applied consistently to both. Races in
-      # this file's code are still covered by the other tests in this lane.
+      # in Phase 1. Three tests are excluded: TestBenchTypeRespectsBudgetForSlowKDF,
+      # TestFastVectorsStayWithinBudget, and TestSpeedupOverXCrypto. The first
+      # two are wall-clock budget assertions, and a race build carries ~10x
+      # instrumentation overhead — under -race such a test measures the
+      # instrumentation, not the code, so an absolute millisecond threshold
+      # isn't merely strained there, it's meaningless. Do not "fix" this by
+      # loosening either budget: that would weaken these tests in the normal
+      # lane, which is where they actually do their job (e.g. catching a
+      # self-test vector that silently became a high-iteration KDF).
+      # TestSpeedupOverXCrypto is the same class of problem: it's a timing
+      # RATIO, not an absolute threshold, but race instrumentation is applied
+      # per memory access, and the 4-lane bcryptlane path touches four
+      # independent cipher states per call where the x/crypto reference
+      # touches one — so the instrumentation overhead is not applied evenly to
+      # both sides of the ratio, and the ratio itself is distorted, arguably
+      # more than a pure wall-clock budget would be. Excluding all three from
+      # a lane where they cannot be meaningful is the correct trade, applied
+      # consistently. Races in this file's code are still covered by the
+      # other tests in this lane.
       - name: Test (race detector)
         env:
           HASHSMITH_REQUIRE_AVX2: "1"   # amd64 runner: see the `test` job's note
         run: |
           cd hashsmith/go_hashsmith
           go test -race -timeout 20m \
-            -skip 'TestBenchTypeRespectsBudgetForSlowKDF|TestFastVectorsStayWithinBudget' ./...
+            -skip 'TestBenchTypeRespectsBudgetForSlowKDF|TestFastVectorsStayWithinBudget|TestSpeedupOverXCrypto' ./...
 
   cross-compile:
     runs-on: ubuntu-latest

@@ -29,10 +29,28 @@ initial benchmark attempt was run in the background and completed
 successfully (176.972s wall, exit 0), but per a controller correction it
 was discarded in favor of a foreground run bracketed by `uptime`
 immediately before and after, which is the run reported below. The
-discarded background run's numbers were broadly consistent with the ones
-below (same ordering, same width-4 winner) but are not used for the
-Lanes decision or the note's figures, since it was not bracketed the way
-this task requires.
+discarded run's best-of-5 ns/candidate, recomputed from its own printed
+numbers, is:
+
+| width | discarded run | authoritative run |
+|---|---|---|
+| 1 | 3,458,999 | 3,386,037 |
+| 2 | 2,067,628 | 1,861,100 |
+| 4 | 3,002,555 | **1,535,169** |
+| 8 | **1,669,500** | 1,662,749 |
+
+**This does NOT corroborate the width-4 choice — it contradicts it.** In
+the discarded run, width 8 is fastest and width 4 comes in third, behind
+both width 2 and width 8. It is excluded purely on procedural grounds
+(run in the background, not bracketed by `uptime`, load at the time not
+recorded), not because its ranking happened to agree with the
+authoritative run — it does not. Its disagreement is itself useful
+evidence: it shows how far this machine's uncontrolled load can distort
+which width even *looks* fastest, which is exactly why the brief
+requires the bracketed, foreground, best-of-5 protocol rather than a
+single convenient sample. The Lanes=4 decision below rests solely on the
+authoritative bracketed run, not on any agreement with this discarded
+one.
 
 ```
 $ uptime
@@ -89,10 +107,14 @@ ok  	hashsmith-go/internal/bcryptlane	154.444s
 
 Intra-session spread per width (max/min of the five best-column
 `ns/candidate` samples): width1 1.08x, width2 1.53x, width4 1.03x,
-width8 1.10x. This is smaller than the 1.80x spread the bottleneck note
-recorded for the raw cipher loop under much heavier load (17.99-34.98
-range there vs 7.34-4.94 here), consistent with the lower load average
-during this run.
+width8 1.10x. This machine's load average was 30.67 at this task's
+dispatch time and 17.99 at this Task 5 dispatch as reported by the
+controller (dropping to 7.34/4.94 by the time the bracketed benchmark
+above actually ran); the bottleneck note separately recorded a 34.98
+load average and up to a 1.80x ns/op spread on its own (unrelated)
+cipher-loop benchmark under that heavier load. The spread observed here
+is smaller than that 1.80x figure, consistent with the lower load this
+run happened to see.
 
 ## Best-of-5 per width
 
@@ -177,10 +199,17 @@ line 31, "1.5x John's 591"). It is, however, above John the Ripper's own
 does clear "faster than John" while falling short of the stricter 1.5x
 bar.
 
-This matches the "prior evidence projects roughly 630 c/s" orientation
-given in the task brief — this measurement lands close to that
-projection (651 vs ~630), on the high side but in the same
-neighborhood, not a large upward or downward surprise.
+The plan itself (`docs/superpowers/plans/2026-09-06-bcrypt-lanes.md`)
+records a projected 649 c/s at 4 lanes, derived from the planning
+session's 2.15x cipher-level measurement. This measurement's 651.4 c/s
+is a 0.4% agreement with that projection ((651.4 − 649) / 649 = 0.37%),
+tight enough to be a real cross-check rather than a coincidence dressed
+up as one. A second, lower projection of roughly 630 c/s also exists,
+derived from Task 4's own 2.06x ns/candidate measurement rather than the
+plan's 2.15x cipher-level figure; 651.4 is 3.4% above that number. Both
+projections are legitimate, from different data; the plan's own 649 c/s
+figure is the more relevant one to cite as "the projection," and this
+measurement lands almost exactly on it.
 
 Per spec `2026-09-06-bcrypt-lanes-design.md` line 253, this is recorded
 as a **bar decision for the project's author**, not an engineering
@@ -190,6 +219,48 @@ what that decision should be; it only reports the number without
 rounding in Hashsmith's favor. Restated as required by the task
 instructions: the measured single-thread c/s at cost 5 with `Lanes = 4`
 is 651.4, which does not clear 887.
+
+## Ratchet floor is validated on Apple M2 only
+
+The `bcryptSpeedupFloor = 1.92 * 0.85 = 1.632` floor above was derived
+entirely from measurements on this Apple M2 (darwin/arm64) machine. CI
+(`.github/workflows/ci.yml`) runs the normal (non-race) test lanes on
+`ubuntu-latest` (amd64) and `ubuntu-24.04-arm` (arm64), neither of which
+has been measured for this ratio. Different codegen and different,
+unpredictable noisy-neighbour contention on shared cloud runners could
+plausibly produce a lower margin than the 15% measured here. If CI shows
+this test flaking on either cloud runner, **the correct response is to
+widen the margin using a real measured cross-architecture number, not to
+delete or silently weaken the test** — consistent with this repository's
+existing race-lane precedent for `TestBenchTypeRespectsBudgetForSlowKDF`/
+`TestFastVectorsStayWithinBudget`. The margin is deliberately left at
+15% here rather than pre-emptively widened, because no cross-arch data
+exists yet and an invented number would itself be an unmeasured claim of
+exactly the kind this project's documentation standard exists to
+prevent. `TestSpeedupOverXCrypto` is excluded from the `-race` lane
+(see the CI workflow's `race` job comment) because race instrumentation
+is per-memory-access and the 4-lane path touches four independent cipher
+states versus the x/crypto reference's one, so the two sides of the
+ratio are not instrumented symmetrically and the ratio itself would be
+distorted under `-race`, not merely slowed down.
+
+## A caveat on measurement order (inherited from the brief, not fixed here)
+
+`TestSpeedupOverXCrypto` (`speed_test.go`) always benchmarks the
+bcryptlane lane path first, then the x/crypto reference second, rather
+than interleaving the two. Any monotonic drift across the ~7 seconds the
+test takes to run — CPU thermal throttling kicking in partway through
+being the obvious candidate on a laptop-class chip under sustained load
+— would bias whichever side runs second, and therefore bias the
+reported ratio in one consistent direction rather than adding
+zero-mean noise. This ordering is inherited verbatim from the task
+brief's specified test code and was not something this task's
+measurements could correct without deviating from the brief. It is
+flagged here as a reason the exact ratchet-test speedup numbers (1.92x-
+2.49x) should be read as directionally trustworthy rather than
+precise to two decimal places; it does not affect the width-benchmark
+numbers used for the Lanes choice or the 651.4 c/s figure, which do not
+compare two different code paths within one test run.
 
 ## Summary
 
