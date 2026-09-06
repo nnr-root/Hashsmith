@@ -104,6 +104,41 @@ func TestRunMatchesXCryptoSlow(t *testing.T) {
 	}
 }
 
+// TestRunMatchesXCryptoOver72Bytes exercises the >=72-byte comparison path
+// directly against bcrypt.CompareHashAndPassword, which - unlike
+// GenerateFromPassword - has no length check at all. This is testable even
+// though GenerateFromPassword cannot build a >72-byte fixture: build the
+// target from exactly 72 bytes, then compare long candidates against it.
+func TestRunMatchesXCryptoOver72Bytes(t *testing.T) {
+	base := bytes.Repeat([]byte("x"), 72)
+	crypt, err := bcrypt.GenerateFromPassword(base, 4)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword(72 bytes): %v", err)
+	}
+	h, err := NewHasher(string(crypt))
+	if err != nil {
+		t.Fatalf("NewHasher: %v", err)
+	}
+	out := make([]bool, 1)
+
+	// 100 bytes sharing the same first 72. Blowfish's key schedule XORs exactly
+	// 18 words of 4 bytes into the P-array, so bytes past 72 are never read and
+	// this must MATCH — on both sides, identically.
+	long := append(append([]byte{}, base...), bytes.Repeat([]byte("z"), 28)...)
+	h.Run([][]byte{long}, out)
+	if want := bcrypt.CompareHashAndPassword(crypt, long) == nil; out[0] != want {
+		t.Errorf("100-byte same-prefix password: got %v, want %v", out[0], want)
+	}
+
+	// Same length, but differing INSIDE the first 72 bytes: must not match.
+	diverged := append([]byte{}, long...)
+	diverged[10] ^= 0xFF
+	h.Run([][]byte{diverged}, out)
+	if want := bcrypt.CompareHashAndPassword(crypt, diverged) == nil; out[0] != want {
+		t.Errorf("divergent >72-byte password: got %v, want %v", out[0], want)
+	}
+}
+
 // TestNewHasherRejects pins the parser to x/crypto's acceptance set. Where
 // x/crypto errors, NewHasher must error too - a target Hashsmith would have
 // refused before must not silently start being cracked against a misparse.
