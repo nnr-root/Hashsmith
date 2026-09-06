@@ -140,28 +140,40 @@ run order, so it is not just noise reordering which one wins.
 | `BenchmarkCost5Serial` (raw vendored blowfish, no library overhead) | 3,270,410 | 305.8 |
 | `BenchmarkLibraryCompare` (real `x/crypto/bcrypt.CompareHashAndPassword`) | 4,658,557 | 214.7 |
 
-The raw cipher-loop number (305.8 c/s) lands within ~1.3% of the 302 c/s
-baseline already recorded in
-`docs/superpowers/specs/2026-09-06-bcrypt-lanes-design.md` — an
-independent cross-check that this measurement and that design doc's
-number are describing the same thing, not two different code paths that
-happen to be close by coincidence.
+The raw cipher-loop number (305.8 c/s) lands within ~0.6% of the 304 c/s
+figure `docs/superpowers/specs/2026-09-06-bcrypt-lanes-design.md:13-15`
+recorded for the same code path — "the EksBlowfish key schedule alone,
+no library wrapper" — not the 302 c/s row in that same table, which is
+that design doc's own measurement of the library-wrapped
+`bcrypt.CompareHashAndPassword` call, a different code path from this
+note's raw loop. Read as a cross-check against the correct row, 0.6%
+agreement is tighter than a same-code-path comparison needs to be to look
+plausible. But it should not be oversold: this section documents up to
+1.80x run-to-run spread on this exact benchmark under a load average of
+34.98 on 8 cores, so landing within 0.6% of one earlier single sample is
+also the kind of thing a lucky run under contention can produce. It is
+consistent with the two measurements describing the same code path; it
+is not, on its own, strong evidence against coincidence, and should be
+read as a mild consistency check rather than confirmation.
 
 The full-library number (214.7 c/s) is meaningfully lower — 1.42x slower
 than the raw cost-5 loop — because `bcrypt.CompareHashAndPassword` pays
 base64-alphabet decoding of the salt and stored hash, cost/version
 parsing out of the `$2a$05$...` string, and re-encoding the computed hash
 for comparison, on top of the same `ExpandKey` schedule the raw loop
-measures directly. That overhead is real and is paid on every comparison
-in production today; it is not something Task 2's core work is expected
-to touch, since the interleaving plan targets the `ExpandKey`/Blowfish
-core, not the encoding wrapper (the earlier design note put this wrapper
-cost at 0.4% of a *single* cost-5 hash's 3.31ms wall time — consistent in
-direction with a large fraction of it being fixed per-call overhead that
-does not scale with the lane count, though this note's 1.42x gap is
-larger than a 0.4% share alone would suggest, and the discrepancy has not
-been root-caused here; it is left as an open question rather than
-smoothed over).
+measures directly. Whether that overhead is actually 1.42x in normal
+operation is **not established by this note** and should not be asserted
+as real: the design doc measured this exact wrapper cost on this same
+machine at 0.4% (3,305,662 vs 3,291,526 ns/op, library vs raw), and this
+note's 1.42x is roughly a hundredfold larger than that, not a modest
+revision of it. `BenchmarkLibraryCompare` also carries this note's
+largest quoted spread (1.47x, under the same uncontrolled 34.98 load
+average documented above), so a measurement this noisy is a poor basis
+for overturning a prior low-load result by two orders of magnitude. The
+honest position is: this note's wrapper-overhead figure is inconsistent
+with the design doc's prior low-load measurement on this machine, the
+discrepancy has not been root-caused here, and it is left as an open
+question rather than smoothed over in either direction.
 
 ## Go/no-go
 
