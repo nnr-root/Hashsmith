@@ -27,10 +27,19 @@ var magicCipherData = []byte{
 var errInvalidHash = errors.New("bcryptlane: not a bcrypt crypt string")
 
 // Hasher is one parsed bcrypt target. Parsing happens once; Run is the hot path.
+//
+// NOT SAFE FOR CONCURRENT USE. The scratch fields below exist so that hashing a
+// full batch allocates nothing, which means two goroutines sharing one Hasher
+// would corrupt each other's lane state. Tasks 6 and 7 give every worker its
+// own via a factory; never share one.
 type Hasher struct {
 	cost   int
 	csalt  [16]byte
 	digest [23]byte
+
+	scratch    [8]state  // per-lane Blowfish state, reused across batches
+	keyScratch [8][]byte // per-lane key buffers, reused across batches
+	verdicts   [8]bool   // per-lane results, read by Run
 }
 
 // NewHasher parses a $2?$cc$<22-char salt><31-char digest> crypt string.
@@ -88,14 +97,53 @@ func NewHasher(crypt string) (*Hasher, error) {
 func (h *Hasher) Cost() int { return h.cost }
 
 // Run hashes each pw[i] against the target and writes the verdict to out[i].
-// pw may be of ANY length - Lanes is the width callers should batch at for
-// best throughput, not a hard cap Run enforces. len(out) must be >= len(pw).
-// In this task Run is a simple loop over one, so it is naturally
-// length-agnostic; interleaving arrives in a later task.
+// len(pw) must be <= Lanes and len(out) must be >= len(pw).
+//
+// A batch of any size is decomposed into the generated widths, largest first
+// (8, 4, 2, then singles), so a tail of three candidates costs one 2-lane pass
+// plus one single rather than a padded 4-lane pass. Padding would spend a whole
+// bcrypt computation on a dummy candidate, which at cost 12 is most of the cost
+// of the partial batch.
 func (h *Hasher) Run(pw [][]byte, out []bool) {
-	for i, p := range pw {
-		out[i] = h.one(p)
+	i := 0
+	for i < len(pw) {
+		switch n := len(pw) - i; {
+		case n >= 8:
+			h.run8(pw[i : i+8])
+			copy(out[i:], h.verdicts[:8])
+			i += 8
+		case n >= 4:
+			h.run4(pw[i : i+4])
+			copy(out[i:], h.verdicts[:4])
+			i += 4
+		case n >= 2:
+			h.run2(pw[i : i+2])
+			copy(out[i:], h.verdicts[:2])
+			i += 2
+		default:
+			out[i] = h.one(pw[i])
+			i++
+		}
 	}
+}
+
+// finish runs the 64 x 3 magic-data encryptions on a fully scheduled state and
+// compares against the target digest. Shared by the single-lane path and every
+// generated width, so the comparison rule lives in exactly one place.
+func (h *Hasher) finish(c *state) bool {
+	var buf [24]byte
+	copy(buf[:], magicCipherData)
+	for i := 0; i < 24; i += 8 {
+		l := uint32(buf[i])<<24 | uint32(buf[i+1])<<16 | uint32(buf[i+2])<<8 | uint32(buf[i+3])
+		r := uint32(buf[i+4])<<24 | uint32(buf[i+5])<<16 | uint32(buf[i+6])<<8 | uint32(buf[i+7])
+		for j := 0; j < 64; j++ {
+			l, r = encryptBlock(l, r, c)
+		}
+		buf[i], buf[i+1], buf[i+2], buf[i+3] = byte(l>>24), byte(l>>16), byte(l>>8), byte(l)
+		buf[i+4], buf[i+5], buf[i+6], buf[i+7] = byte(r>>24), byte(r>>16), byte(r>>8), byte(r)
+	}
+	// Only 23 of the 24 bytes are encoded, matching every C implementation.
+	return subtle.ConstantTimeCompare(buf[:23], h.digest[:]) == 1
 }
 
 func (h *Hasher) one(pw []byte) bool {
@@ -112,18 +160,5 @@ func (h *Hasher) one(pw []byte) bool {
 		expandKey(ckey, c)
 		expandKey(h.csalt[:], c)
 	}
-
-	var buf [24]byte
-	copy(buf[:], magicCipherData)
-	for i := 0; i < 24; i += 8 {
-		l := uint32(buf[i])<<24 | uint32(buf[i+1])<<16 | uint32(buf[i+2])<<8 | uint32(buf[i+3])
-		r := uint32(buf[i+4])<<24 | uint32(buf[i+5])<<16 | uint32(buf[i+6])<<8 | uint32(buf[i+7])
-		for j := 0; j < 64; j++ {
-			l, r = encryptBlock(l, r, c)
-		}
-		buf[i], buf[i+1], buf[i+2], buf[i+3] = byte(l>>24), byte(l>>16), byte(l>>8), byte(l)
-		buf[i+4], buf[i+5], buf[i+6], buf[i+7] = byte(r>>24), byte(r>>16), byte(r>>8), byte(r)
-	}
-	// Only 23 of the 24 bytes are encoded, matching every C implementation.
-	return subtle.ConstantTimeCompare(buf[:23], h.digest[:]) == 1
+	return h.finish(c)
 }
