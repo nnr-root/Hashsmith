@@ -34,7 +34,7 @@ func TestDictAttackUsesInjectedVerifier(t *testing.T) {
 	result, err := dictAttack(context.Background(), wordlist, 0, 0, 2, &attempts, nil, func(candidate string) bool {
 		verifierCalls.Add(1)
 		return candidate == "needle"
-	})
+	}, "", "md5", "", "prefix")
 	if err != nil || result.password != "needle" {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}

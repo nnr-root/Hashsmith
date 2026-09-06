@@ -115,7 +115,7 @@ func TestKeyspaceUnitIsSkipStepsToCoverDictRun(t *testing.T) {
 	// expansions) the real attack path would try.
 	baseline := map[string]int{}
 	if _, err := dictAttack(context.Background(), wordlistPath, 0, 0, 1, new(int64), rules,
-		func(pw string) bool { baseline[pw]++; return false }); err != nil {
+		func(pw string) bool { baseline[pw]++; return false }, "", "", "", ""); err != nil {
 		t.Fatalf("baseline dictAttack: %v", err)
 	}
 	if len(baseline) <= len(words) {
@@ -128,7 +128,7 @@ func TestKeyspaceUnitIsSkipStepsToCoverDictRun(t *testing.T) {
 	for skip := int64(0); skip < keyspace; skip++ {
 		var attempts int64
 		_, err := dictAttack(context.Background(), wordlistPath, skip, 1, 1, &attempts, rules,
-			func(pw string) bool { union[pw]++; return false })
+			func(pw string) bool { union[pw]++; return false }, "", "", "", "")
 		if err != nil {
 			t.Fatalf("dictAttack(skip=%d,limit=1): %v", skip, err)
 		}
@@ -152,7 +152,7 @@ func TestKeyspaceUnitIsSkipStepsToCoverDictRun(t *testing.T) {
 	// one more --skip step past it must cover nothing new.
 	var trailing int64
 	if _, err := dictAttack(context.Background(), wordlistPath, keyspace, 1, 1, &trailing, rules,
-		func(string) bool { return false }); err != nil {
+		func(string) bool { return false }, "", "", "", ""); err != nil {
 		t.Fatalf("dictAttack(skip=keyspace): %v", err)
 	}
 	if trailing != 0 {

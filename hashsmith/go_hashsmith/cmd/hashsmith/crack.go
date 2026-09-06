@@ -34,6 +34,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/crypto/scrypt"
+
+	"hashsmith-go/internal/bcryptlane"
 )
 
 const (
@@ -1353,7 +1355,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			if !usedGPU {
 				_, reason := activeGPUBackend()
 				clrYellow.Fprintf(os.Stderr, "GPU dictionary unavailable (%s) — using CPU\n", reason)
-				result, err = dictAttack(runCtx, wordlist, resumeFrom, limit, workers, &atomicAttempts, rules, verifyFn)
+				result, err = dictAttack(runCtx, wordlist, resumeFrom, limit, workers, &atomicAttempts, rules, verifyFn, targetHash, typ, salt, saltMode)
 			}
 		} else {
 			if cc != nil && cc.useGPU {
@@ -1363,7 +1365,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 					clrYellow.Fprintf(os.Stderr, "GPU dictionary currently supports unsalted MD5; using CPU for %s\n", typ)
 				}
 			}
-			result, err = dictAttack(runCtx, wordlist, resumeFrom, limit, workers, &atomicAttempts, rules, verifyFn)
+			result, err = dictAttack(runCtx, wordlist, resumeFrom, limit, workers, &atomicAttempts, rules, verifyFn, targetHash, typ, salt, saltMode)
 		}
 		interrupted = runCtx.Err() != nil
 	case "brute":
@@ -1799,7 +1801,7 @@ func dictWordBounds(skip, limit int64) (lo, upper int64) {
 // wordlist — --skip/--limit's dictionary-mode semantics — letting a dict
 // attack be split across machines the same way brute/mask/hybrid layouts are.
 func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, workers int, atomicAttempts *int64,
-	rules *ruleEngine, verify func(string) bool) (crackedResult, error) {
+	rules *ruleEngine, verify func(string) bool, targetHash, typ, salt, saltMode string) (crackedResult, error) {
 
 	// The source line ("Wordlist: ...") is announced once per run at the CLI
 	// entry point (resolveWordlistForMode), not once per target here.
@@ -1855,6 +1857,13 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 		}
 	}()
 
+	// newHasher/laned: whether typ has an interleaved multi-candidate bcrypt
+	// core for this target (bare bcrypt, single target, no external salt).
+	// When laned, each worker below hashes candidates bcryptlane.Lanes at a
+	// time instead of one at a time; everything else falls back to the
+	// scalar verify path unchanged.
+	newHasher, laned := newLaneHasher(typ, targetHash, salt, saltMode)
+
 	// workers
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
@@ -1865,33 +1874,98 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 				atomic.AddInt64(atomicAttempts, localAttempts)
 				wg.Done()
 			}()
-			tryCandidate := func(pw, ruleLabel string) bool {
-				localAttempts++
+
+			// lh is this worker's own lane hasher (nil when not laned, or
+			// when the factory failed and we fall back to scalar verify).
+			// It is never shared across goroutines: it carries reusable
+			// per-lane scratch and is not safe for concurrent use.
+			var lh *bcryptlane.Hasher
+			if laned {
+				lh = newHasher()
+			}
+
+			type cand struct{ pw, ruleLabel string }
+			buf := make([]cand, 0, bcryptlane.Lanes)
+			pwBuf := make([][]byte, bcryptlane.Lanes)
+			outBuf := make([]bool, bcryptlane.Lanes)
+
+			// flush tests everything buffered so far and reports the FIRST
+			// hit in buffer order, so a laned run reports the same password
+			// an unlaned run would. It must be called after every batch,
+			// before every innerCtx.Done() return, and after the batch
+			// channel closes — otherwise buffered-but-untested candidates
+			// are silently dropped and a crackable password is reported as
+			// not found.
+			flush := func() bool {
+				if len(buf) == 0 {
+					return false
+				}
+				// Re-slice into a local: assigning back to pwBuf would
+				// shorten it permanently and cap every later batch at this
+				// batch's length.
+				pw := pwBuf[:len(buf)]
+				for i, c := range buf {
+					pw[i] = []byte(c.pw)
+				}
+				lh.Run(pw, outBuf[:len(buf)])
+				localAttempts += int64(len(buf))
 				if localAttempts >= 1024 {
 					atomic.AddInt64(atomicAttempts, localAttempts)
 					localAttempts = 0
 				}
-				if !verify(pw) {
-					return false
+				found := false
+				for i, ok := range outBuf[:len(buf)] {
+					if ok {
+						select {
+						case resultCh <- crackedResult{password: buf[i].pw, ruleLabel: buf[i].ruleLabel}:
+						default:
+						}
+						cancel()
+						found = true
+						break
+					}
 				}
-				select {
-				case resultCh <- crackedResult{password: pw, ruleLabel: ruleLabel}:
-				default:
+				buf = buf[:0]
+				return found
+			}
+
+			tryCandidate := func(pw, ruleLabel string) bool {
+				if lh == nil {
+					localAttempts++
+					if localAttempts >= 1024 {
+						atomic.AddInt64(atomicAttempts, localAttempts)
+						localAttempts = 0
+					}
+					if !verify(pw) {
+						return false
+					}
+					select {
+					case resultCh <- crackedResult{password: pw, ruleLabel: ruleLabel}:
+					default:
+					}
+					cancel()
+					return true
 				}
-				cancel()
-				return true
+				buf = append(buf, cand{pw, ruleLabel})
+				if len(buf) == bcryptlane.Lanes {
+					return flush()
+				}
+				return false
 			}
 			for {
 				select {
 				case <-innerCtx.Done():
+					flush()
 					return
 				case words, ok := <-batchCh:
 					if !ok {
+						flush()
 						return
 					}
 					for _, word := range words {
 						select {
 						case <-innerCtx.Done():
+							flush()
 							return
 						default:
 						}
@@ -1904,6 +1978,7 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 							for _, mw := range rules.expand(word) {
 								select {
 								case <-innerCtx.Done():
+									flush()
 									return
 								default:
 								}
@@ -1912,6 +1987,13 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 								}
 							}
 						}
+					}
+					// End of batch: flush any leftover candidates (< Lanes)
+					// before waiting for the next one. Without this, a
+					// trailing partial buffer at end-of-wordlist is never
+					// tested (see TestDictAttackLanesFindsAtEveryPosition).
+					if flush() {
+						return
 					}
 				}
 			}
