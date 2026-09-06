@@ -1959,6 +1959,19 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 					return
 				case words, ok := <-batchCh:
 					if !ok {
+						// Deliberately redundant with the end-of-batch flush
+						// below: buf auto-flushes whenever it reaches Lanes,
+						// so at most Lanes-1 candidates ever survive past a
+						// batch, and the end-of-batch flush already empties
+						// buf before a worker can ever reach !ok. For any
+						// exhaustive (no-match) run this flush never has
+						// anything to do — mutation testing confirms no
+						// current test can catch its removal on its own.
+						// It stays as defensive insurance against a future
+						// change to this loop's shape (a new exit path, or
+						// buf persisting differently) silently removing the
+						// only flush that still mattered. Do NOT delete this
+						// on the evidence of a green test suite.
 						flush()
 						return
 					}
@@ -1992,6 +2005,17 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 					// before waiting for the next one. Without this, a
 					// trailing partial buffer at end-of-wordlist is never
 					// tested (see TestDictAttackLanesFindsAtEveryPosition).
+					//
+					// Deliberately redundant with the !ok flush above: buf
+					// auto-flushes whenever it reaches Lanes, so removing
+					// just this flush still leaves the final !ok flush to
+					// catch the last batch's leftover. Mutation testing
+					// confirms no current test can catch this flush's
+					// removal on its own either. Both are kept so a future
+					// change to this loop's shape can't silently drop the
+					// one flush that still mattered — do NOT "simplify" by
+					// deleting one of these two just because the tests stay
+					// green.
 					if flush() {
 						return
 					}

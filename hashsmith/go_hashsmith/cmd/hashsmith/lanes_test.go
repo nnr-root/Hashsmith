@@ -66,6 +66,16 @@ func TestDictAttackLanesFindsAtEveryPosition(t *testing.T) {
 // exactly. Any single missed flush point leaves a short count, which a >=
 // bound (as used above) would not catch but == does. n sweeps lengths that
 // straddle both the lane width (bcryptlane.Lanes=4) and dictBatchSize (512).
+//
+// What this test does and does not prove: it catches the loss of ALL
+// flushing — deleting both flush points at once leaves attempts short for
+// every n above except one exactly divisible by Lanes — and it pins attempt
+// accounting to exact equality rather than a loose lower bound. It cannot,
+// and is not meant to, attribute a failure to either individual flush point:
+// with buf auto-flushing at Lanes, each flush point alone is structurally
+// sufficient to cover for the other's absence in any exhaustive run, so no
+// test of this shape can tell them apart. See the "deliberately redundant"
+// comments at both flush call sites in crack.go.
 func TestDictAttackLanesExhaustiveAttemptCount(t *testing.T) {
 	crypt, err := bcrypt.GenerateFromPassword([]byte("absent-password"), 4)
 	if err != nil {
