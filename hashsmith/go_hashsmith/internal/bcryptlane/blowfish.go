@@ -1,6 +1,6 @@
 // Copyright 2010 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// license that can be found in the LICENSE file in this directory.
 
 // This file is vendored from golang.org/x/crypto/blowfish@v0.31.0 (block.go),
 // with the Cipher type renamed to state, decryptBlock removed, and the package
@@ -12,6 +12,10 @@
 // eks_lanes.go). blowfish.Cipher's p and s0..s3 fields are unexported, so the
 // public ExpandKey(key, *Cipher) API can only advance one candidate at a time.
 // Interleaving requires reaching inside the state, which requires owning it.
+//
+// LICENSING: internal/bcryptlane/LICENSE is the upstream BSD-3-Clause license
+// for this vendored file, distinct from this repository's MIT LICENSE at the
+// root. Both apply: MIT to Hashsmith's own code, BSD-3-Clause to this file.
 
 package bcryptlane
 
