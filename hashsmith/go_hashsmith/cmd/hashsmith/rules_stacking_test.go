@@ -395,7 +395,7 @@ func TestDictSkipLimitTilesWithStackedRules(t *testing.T) {
 		_, err := dictAttack(context.Background(), wordlistPath, skip, limit, 1, &attempts, e, func(pw string) bool {
 			seen[pw]++
 			return false // never match — force the full slice to be tried
-		})
+		}, "", "", "", "")
 		if err != nil {
 			t.Fatalf("dictAttack(skip=%d,limit=%d): %v", skip, limit, err)
 		}

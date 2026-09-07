@@ -175,7 +175,7 @@ func collectDictAttempts(t *testing.T, wordlistPath string, rules *ruleEngine, s
 	_, err := dictAttack(context.Background(), wordlistPath, skip, limit, 1, &attempts, rules, func(pw string) bool {
 		got = append(got, pw)
 		return false
-	})
+	}, "", "", "", "")
 	if err != nil {
 		t.Fatalf("dictAttack(skip=%d,limit=%d): %v", skip, limit, err)
 	}

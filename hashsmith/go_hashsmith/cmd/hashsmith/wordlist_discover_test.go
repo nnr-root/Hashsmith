@@ -574,7 +574,7 @@ func TestDictAttackReadsGzipWordlist(t *testing.T) {
 
 	var attempts int64
 	result, err := dictAttack(context.Background(), gz, 0, 0, 2, &attempts, nil,
-		func(candidate string) bool { return candidate == "needle" })
+		func(candidate string) bool { return candidate == "needle" }, "", "", "", "")
 	if err != nil || result.password != "needle" {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}

@@ -339,7 +339,7 @@ Add to `blowfish_test.go`:
 // cursor semantics, including the wrap that happens mid-word for key lengths
 // that are not multiples of four.
 func TestNextWordMatchesCursor(t *testing.T) {
-	for _, key := range [][]byte{[]byte("a"), []byte("abc"), []byte("abcd"), []byte("seven77"), []byte("password ")} {
+	for _, key := range [][]byte{[]byte("a"), []byte("abc"), []byte("abcd"), []byte("seven77"), []byte("password\x00")} {
 		j := 0
 		for i := 0; i < 18; i++ {
 			// upstream's inlined cursor read
@@ -605,9 +605,11 @@ func NewHasher(crypt string) (*Hasher, error) {
 func (h *Hasher) Cost() int { return h.cost }
 
 // Run hashes each pw[i] against the target and writes the verdict to out[i].
-// len(pw) must be <= Lanes and len(out) must be >= len(pw). A short pw slice is
-// handled without padding: padding would spend a full bcrypt computation on a
-// dummy candidate, which at cost 12 is the dominant cost of a partial batch.
+// pw may be of ANY length; len(out) must be >= len(pw). Lanes is the width
+// callers should batch at for best throughput, NOT a cap Run enforces — Run
+// decomposes whatever it is given. A short pw slice is handled without padding:
+// padding would spend a full bcrypt computation on a dummy candidate, which at
+// cost 12 is the dominant cost of a partial batch.
 func (h *Hasher) Run(pw [][]byte, out []bool) {
 	for i, p := range pw {
 		out[i] = h.one(p)
@@ -1007,7 +1009,8 @@ Replace `Run` in `bcrypt.go`:
 
 ```go
 // Run hashes each pw[i] against the target and writes the verdict to out[i].
-// len(pw) must be <= Lanes and len(out) must be >= len(pw).
+// pw may be of ANY length; len(out) must be >= len(pw). Lanes is the width
+// callers should batch at for best throughput, NOT a cap Run enforces.
 //
 // A batch of any size is decomposed into the generated widths, largest first
 // (8, 4, 2, then singles), so a tail of three candidates costs one 2-lane pass
