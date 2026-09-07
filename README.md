@@ -542,14 +542,21 @@ and both `uptime` readings around each block, including a load spike to
 | | c/s |
 |---|---|
 | Hashsmith | 609.76 |
-| John the Ripper (`--test=10`) | 514 |
+| John (`--test=10` self-report) | 514 |
+| John (sustained, per-CPU-second across `--fork=8` runs) | 560-576 |
 | Project target | 887 |
 
-Hashsmith is ahead of John's own single-thread self-report here, but
-well short of the 887 c/s target (68.7% of it) — both numbers were
-measured under a loaded machine; a quieter-machine measurement earlier
-in this plan put Hashsmith's isolated core at 651.4 c/s, 73.4% of the
-target and 1.10x John's own quieter-machine 591 c/s.
+Two John comparators are given because they disagree, and publishing
+only the more favourable one is the exact failure this table exists to
+prevent: `john --test=10` reports 514 c/s, but the same session's
+`--fork=8` runs sustained 560-576 candidates per CPU-second per worker
+(derived from `user` CPU-seconds in the same runs the wall-clock table
+below uses) — *above* the `--test` figure. Read against the sustained
+number, Hashsmith is 1.06x-1.09x John, not the 1.19x a `--test`-only
+comparison would suggest. Either way Hashsmith is well short of the
+887 c/s target (68.7% of it); a quieter-machine measurement earlier in
+this plan put Hashsmith's isolated core at 651.4 c/s, 73.4% of the
+target and 1.10x John's own quieter-machine 591 c/s reference.
 
 **Multi-threaded wall clock, all cores (Hashsmith and Hashcat default to
 all cores; John given `--fork=8` to match):**
@@ -559,16 +566,44 @@ all cores; John given `--fork=8` to match):**
 | 4,000 | **1.860 s** | 2.310 s | 7.219 s |
 | 40,000 | 16.411 s | **13.669 s** | 23.419 s |
 
-Hashsmith wins wall clock at 4,000 but loses it to John at 40,000 —
-consistent with the per-thread table above, not contradicting it. 400,000
-candidates was attempted but dropped from this comparison: load climbed
-past 86 on this 8-core machine mid-measurement (see the results note),
-making a three-way comparison at that size meaningless. Against this
-plan's own pre-lane-work reference at 40,000 (Hashsmith 18.74s, John
-16.61s, Hashcat 22.32s), Hashsmith did get 14.2% faster (18.74s →
-16.411s) — but John also got faster over the same interval, so
-Hashsmith's position relative to John did not improve: it was behind
-John at 40k before this work and remains behind it after.
+**This table contradicts the per-thread one above, and the contradiction
+is unexplained.** Per thread, Hashsmith leads John modestly at every
+size. Both tools then get the whole 8-core machine. A per-thread lead
+that turns into a wall-clock *loss* at 40,000 is not consistent with the
+per-thread table — something is eating Hashsmith's per-core advantage
+specifically as the run scales from 4,000 to 40,000 candidates. The
+results note's "Candidates per CPU-second" section shows this directly:
+Hashsmith's own best-case throughput per CPU-second falls ~20% between
+those two sizes while John's stays flat, and lays out a heterogeneous
+P-core/E-core hypothesis for *why* — plausible but not proven, with
+machine contention as an uncontrolled confound, and a specific
+quiet-machine `-p 4` vs. `-p 8` experiment named as what would settle
+it. Both wall-clock margins above are also smaller than this session's
+own run-to-run spread (see the note) and should be read as directional,
+not exact.
+
+400,000 candidates was attempted but dropped from this comparison: load
+climbed past 86 on this 8-core machine mid-measurement, with CPU
+utilization falling as wall clock rose (evidence of contention, not
+regression — see the results note). No John or Hashcat run was
+attempted at that size.
+
+Against this plan's own pre-lane-work reference at 40,000 (Hashsmith
+18.74s, John 16.61s, Hashcat 22.32s), Hashsmith's wall clock improved by
+**12.4%** (18.74s → 16.411s, equivalently a 1.142x rate gain) — but John
+also got faster over the same interval, so Hashsmith's position relative
+to John did not improve: it was behind John at 40k before this work and
+remains behind it after. And the isolated core's own 2.15x-2.49x speedup
+over `x/crypto/bcrypt` (Task 5) shows up end to end as **2.02x**
+single-thread (609.76 / 302, against Task 1's pre-lane baseline) but
+only **1.14x** at 40,000 wall clock — that gap is this measurement's
+central finding, not either number alone.
+
+**Verdict: neither half of this plan's two-part target is met.** Not the
+`>= 887 c/s` single-thread bar (609.76 c/s reaches 68.7% of it), and not
+a wall-clock win against John at every size tested (John wins at
+40,000). Per the design doc's own risk section this is recorded as a bar
+decision for the project's author, not an engineering failure.
 
 ### What each option costs
 
