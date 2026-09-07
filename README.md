@@ -524,6 +524,52 @@ dictionaries, rules, single-crack, PRINCE, and masks up to six or seven
 characters. Hashcat is the faster tool for very large brute-force sweeps. John
 is slower than both here by a wide margin.
 
+### bcrypt: per-thread and wall clock
+
+bcrypt is a different case, and the per-thread number is the point.
+Wall clock alone previously hid a 1.96x per-thread deficit against John
+behind Go's scheduler beating John's 8-process fork model — the
+per-thread table below exists so a wall-clock win can never hide a
+per-core loss again. Apple M2 (8-core), bcrypt cost 5, wordlist exhausted
+(target absent so every tool does the full keyspace), best-of-kept after
+discarding each tool's first run at a new size —
+`docs/superpowers/notes/2026-09-06-bcrypt-results.md` has every raw run
+and both `uptime` readings around each block, including a load spike to
+86 on this 8-core machine partway through.
+
+**Single-thread (4,000 candidates, `-p 1`):**
+
+| | c/s |
+|---|---|
+| Hashsmith | 609.76 |
+| John the Ripper (`--test=10`) | 514 |
+| Project target | 887 |
+
+Hashsmith is ahead of John's own single-thread self-report here, but
+well short of the 887 c/s target (68.7% of it) — both numbers were
+measured under a loaded machine; a quieter-machine measurement earlier
+in this plan put Hashsmith's isolated core at 651.4 c/s, 73.4% of the
+target and 1.10x John's own quieter-machine 591 c/s.
+
+**Multi-threaded wall clock, all cores (Hashsmith and Hashcat default to
+all cores; John given `--fork=8` to match):**
+
+| candidates | Hashsmith | John `--fork=8` | Hashcat |
+|---|---|---|---|
+| 4,000 | **1.860 s** | 2.310 s | 7.219 s |
+| 40,000 | 16.411 s | **13.669 s** | 23.419 s |
+
+Hashsmith wins wall clock at 4,000 but loses it to John at 40,000 —
+consistent with the per-thread table above, not contradicting it. 400,000
+candidates was attempted but dropped from this comparison: load climbed
+past 86 on this 8-core machine mid-measurement (see the results note),
+making a three-way comparison at that size meaningless. Against this
+plan's own pre-lane-work reference at 40,000 (Hashsmith 18.74s, John
+16.61s, Hashcat 22.32s), Hashsmith did get 14.2% faster (18.74s →
+16.411s) — but John also got faster over the same interval, so
+Hashsmith's position relative to John did not improve: it was behind
+John at 40k before this work and remains behind it after.
+
 ### What each option costs
 
 Ratios rather than absolutes, because these were measured back-to-back or as a
