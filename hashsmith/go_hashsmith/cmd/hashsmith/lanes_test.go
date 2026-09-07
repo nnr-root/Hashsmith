@@ -254,7 +254,77 @@ func TestLanesRespectSessionWatermark(t *testing.T) {
 	if got != "zz" {
 		t.Errorf("resumed run found %q, want \"zz\"", got)
 	}
-	if watermark < 670 {
-		t.Errorf("watermark went backwards: %d", watermark)
+	// Exact assertions, not a loose bound: indices 0..669 must never be
+	// touched (attempts counts only 670..675, six candidates) and the
+	// watermark must land exactly on the keyspace total once the run
+	// completes. A regression that resets from to start instead of
+	// max(start, resumeFrom) — retesting the whole chunk from 0 — would still
+	// find "zz" and would still leave watermark >= 670, so this exact form is
+	// what actually catches it.
+	if attempts != 6 {
+		t.Errorf("attempts = %d, want 6 (indices 670..675)", attempts)
+	}
+	if watermark != 676 {
+		t.Errorf("watermark = %d, want 676", watermark)
+	}
+}
+
+// TestLanesFlushFinalChunkTail closes the gap TestMaskLanesFindsAtEveryPosition
+// leaves open: ?l?l is exactly 676 = 169*Lanes candidates in one chunk, so its
+// tail is always empty and it cannot detect a missing end-of-chunk flush.
+// bruteLayout("abc", 1, 3) has 39 candidates (3 + 9 + 27) — NOT a multiple of
+// Lanes(4) — so the final chunk (the only chunk; 39 < keyspaceChunk) ends with
+// a real 3-candidate tail (indices 36, 37, 38). Planting the answer at the
+// last index (38, "ccc") means an unflushed tail loses it: this test fails if
+// the end-of-chunk `if flush() { return }` after the candidate loop is
+// removed.
+func TestLanesFlushFinalChunkTail(t *testing.T) {
+	crypt, err := bcrypt.GenerateFromPassword([]byte("ccc"), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, ok := newLaneHasher("bcrypt", string(crypt), "", "prefix")
+	if !ok {
+		t.Fatal("newLaneHasher declined a valid bcrypt target")
+	}
+	layout := bruteLayout("abc", 1, 3)
+	if layout.total != 39 {
+		t.Fatalf("test setup: keyspace is %d candidates, want 39", layout.total)
+	}
+	if got := layout.candidate(38); got != "ccc" {
+		t.Fatalf("test setup: index 38 is %q, want \"ccc\"", got)
+	}
+	var attempts, watermark int64
+	got, err := runLayoutLanes(context.Background(), layout, 0, 0, 1, &attempts, &watermark, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "ccc" {
+		t.Errorf("got %q, want \"ccc\" — the unflushed chunk tail was silently skipped", got)
+	}
+}
+
+// TestBcryptBruteThroughProductionDispatch drives a bcrypt brute run through
+// doCrack -> runBruteOrMaskLayout, the ACTUAL production dispatch `-M brute`
+// and `-M mask` use (crack.go:117-125). TestMaskLanesFindsAtEveryPosition and
+// TestLanesRespectSessionWatermark exercise maskAttack / runLayoutLanes
+// directly, but maskAttack has no non-test caller in this module — it does
+// not prove the dispatch branch added to runBruteOrMaskLayout is ever
+// actually reached and correct end to end.
+func TestBcryptBruteThroughProductionDispatch(t *testing.T) {
+	crypt, err := bcrypt.GenerateFromPassword([]byte("cab"), 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc, err := newCrackCtx("", true, "", false, "", false, 0, 0)
+	if err != nil {
+		t.Fatalf("newCrackCtx: %v", err)
+	}
+	found, err := doCrack(string(crypt), "bcrypt", "brute", "", "abc", 1, 3, 2, "", "prefix", "", false, nil, nil, cc)
+	if err != nil {
+		t.Fatalf("doCrack: %v", err)
+	}
+	if !found {
+		t.Fatal("bcrypt brute through the production runBruteOrMaskLayout dispatch must find its password")
 	}
 }

@@ -157,7 +157,16 @@ func runLayoutLanes(ctx context.Context, l *keyspaceLayout, resumeFrom, limit in
 						case <-innerCtx.Done():
 							// Cancelled mid-chunk: test what is buffered before
 							// leaving, or those candidates are silently skipped.
-							flush()
+							// A hit here already accumulates atomicAttempts inside
+							// flush() itself, so return immediately instead of
+							// falling through to the unconditional add below, which
+							// would double-count attempts. atomicAttempts is not
+							// progress-only: doCrack's feasibility probe divides it
+							// by elapsed time for the ETA/refuse-proceed verdict,
+							// under a timeout context where cancellation is routine.
+							if flush() {
+								return
+							}
 							atomic.AddInt64(atomicAttempts, local)
 							return
 						default:
@@ -170,9 +179,14 @@ func runLayoutLanes(ctx context.Context, l *keyspaceLayout, resumeFrom, limit in
 						}
 					}
 				}
-				// End of chunk: the tail is almost never a full lane width, and
-				// dropping it would silently skip up to Lanes-1 candidates per
-				// chunk. TestMaskLanesFindsAtEveryPosition covers exactly this.
+				// End of chunk: keyspaceChunk (4096) is a multiple of
+				// bcryptlane.Lanes (4), so an interior chunk's tail is always
+				// empty and this flush is a no-op there. It is load-bearing for
+				// the run's FINAL chunk (whose end is bound, not lane-aligned)
+				// and for a resume-start chunk whose from is not lane-aligned
+				// either. Dropping it would silently skip up to Lanes-1
+				// candidates in those chunks. See
+				// TestLanesFlushFinalChunkTail and TestLanesRespectSessionWatermark.
 				if flush() {
 					return
 				}
