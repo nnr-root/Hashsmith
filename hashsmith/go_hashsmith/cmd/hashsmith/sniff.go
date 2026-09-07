@@ -121,6 +121,59 @@ func sniffOffice(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
 		"an .msi installer, or an Outlook .msg rather than an encrypted Office document"), hashid.Likely, true
 }
 
+// sniffAtOffset builds a recognizer for a signature that sits at a fixed
+// offset rather than at byte 0.
+func sniffAtOffset(off int, magic []byte, evidence string, confidence hashid.Confidence) func([]byte) (hashid.Evidence, hashid.Confidence, bool) {
+	return func(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+		if len(head) < off+len(magic) || !bytes.Equal(head[off:off+len(magic)], magic) {
+			return "", 0, false
+		}
+		return hashid.Evidence(evidence), confidence, true
+	}
+}
+
+// sniffBitLocker separates BitLocker's own volume signature from the generic
+// OEM name a BitLocker-to-Go volume reuses. Both are accepted by
+// extract_john_extended.go's parser, but only one of them is evidence: plenty
+// of ordinary FAT/NTFS volumes carry "MSWIN4.1" at the same offset and hold no
+// VMK at all, so that path reports Likely rather than Certain.
+func sniffBitLocker(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if len(head) < 11 {
+		return "", 0, false
+	}
+	switch string(head[3:11]) {
+	case "-FVE-FS-":
+		return hashid.Evidence("BitLocker volume signature \"-FVE-FS-\" at offset 3"), hashid.Certain, true
+	case "MSWIN4.1":
+		return hashid.Evidence("OEM name \"MSWIN4.1\" at offset 3 — the BitLocker-to-Go layout, but " +
+			"also the ordinary OEM name on many plain FAT/NTFS volumes, so this is a " +
+			"structural hint rather than proof of an encrypted volume"), hashid.Likely, true
+	}
+	return "", 0, false
+}
+
+// sniffCapture recognizes a packet capture by its file magic. That proves the
+// file is a pcap/pcapng, NOT that it contains the RFB authentication exchange
+// vncpcap2smith looks for — most captures do not — so this reports Likely and
+// says why.
+func sniffCapture(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if len(head) < 4 {
+		return "", 0, false
+	}
+	var kind string
+	switch [4]byte{head[0], head[1], head[2], head[3]} {
+	case [4]byte{0x0a, 0x0d, 0x0d, 0x0a}:
+		kind = "pcapng Section Header Block"
+	case [4]byte{0xd4, 0xc3, 0xb2, 0xa1}, [4]byte{0x4d, 0x3c, 0xb2, 0xa1},
+		[4]byte{0xa1, 0xb2, 0xc3, 0xd4}, [4]byte{0xa1, 0xb2, 0x3c, 0x4d}:
+		kind = "classic pcap header"
+	default:
+		return "", 0, false
+	}
+	return hashid.Evidence(kind + "; this identifies a packet capture, not the RFB/VNC " +
+		"authentication exchange itself — the capture is only useful here if it contains one"), hashid.Likely, true
+}
+
 // installSniffers attaches the magic-byte recognizers to the extractor
 // registry. It lives here rather than in the registry literal so the registry
 // stays a readable one-line-per-extractor table.
@@ -167,6 +220,22 @@ func installSniffers() {
 	set("office2smith", sniffOffice)
 	set("hccapx2smith", magicSniff([]byte("HCPX"), "hccapx capture; a bare 4-byte format tag with no "+
 		"secondary structural check beyond the signature itself", hashid.Likely))
+
+	// Each signature below is the same one the extractor's own parser already
+	// requires, so a sniffed route can never hand a file to an extractor that
+	// would reject it for lacking that magic.
+	set("androidbackup2smith", magicSniff([]byte("ANDROID BACKUP\n"),
+		"Android Backup header line", hashid.Certain))
+	set("telegram2smith", magicSniff([]byte("TDF$"),
+		"Telegram Desktop tdata signature (the Android XML/map path has no file magic "+
+			"and must still be named explicitly)", hashid.Certain))
+	set("dmg2smith", magicSniff([]byte("encrcdsa"),
+		"encrypted DMG v2 header (a v1 image carries no leading magic and must still be "+
+			"named explicitly)", hashid.Certain))
+	set("ansible2smith", magicSniff([]byte("$ANSIBLE_VAULT;"),
+		"Ansible Vault envelope header", hashid.Certain))
+	set("bitlocker2smith", sniffBitLocker)
+	set("vncpcap2smith", sniffCapture)
 }
 
 func init() { installSniffers() }

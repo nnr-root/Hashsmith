@@ -24,6 +24,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 )
 
 type vectorSource int
@@ -113,6 +114,7 @@ func runSelfTest(args []string) error {
 	verbose := fs.Bool("v", false, "list every vector, not just failures")
 	showGaps := fs.Bool("gaps", false, "list registry formats that have no vector")
 	withSlow := fs.Bool("slow", false, "include high-iteration KDFs (much slower)")
+	dump := fs.Bool("dump", false, "print every vector as type/password/salt/target TSV instead of running them")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -130,6 +132,11 @@ func runSelfTest(args []string) error {
 			return fmt.Errorf("no self-test vector for type %q", *only)
 		}
 		vectors = picked
+	}
+
+	if *dump {
+		fmt.Print(dumpSelfTestVectors(vectors))
+		return nil
 	}
 
 	var failures []string
@@ -236,4 +243,28 @@ func selfTestCoverage() (covered, uncovered []string) {
 	sort.Strings(covered)
 	sort.Strings(uncovered)
 	return covered, uncovered
+}
+
+// dumpSelfTestVectors renders vectors as tab-separated
+// type/password/salt/target records, one per line.
+//
+// This exists so the known-answer corpus can drive an EXTERNAL oracle:
+// scripts/john-labels-verify.sh feeds each record to the real John binary and
+// only accepts a --format= label that actually recovers the plaintext. That is
+// the standard hash_john_labels.go demands — a label is a claim about another
+// tool's interface, and the only honest way to make it is to watch that tool
+// act on it.
+//
+// A vector whose own fields contain a tab or a newline cannot be represented
+// in this format; it is skipped rather than emitted as a corrupt record that
+// would silently shift every field downstream.
+func dumpSelfTestVectors(vectors []selfTestVector) string {
+	var b strings.Builder
+	for _, v := range vectors {
+		if strings.ContainsAny(v.typ+v.password+v.salt+v.target, "\t\n\r") {
+			continue
+		}
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\n", v.typ, v.password, v.salt, v.target)
+	}
+	return b.String()
 }

@@ -24,8 +24,14 @@ func TestHumanOutputCarriesModeAndCommand(t *testing.T) {
 // A format Hashcat and John do not have must still be listed, with the gap
 // shown rather than hidden. This is the coverage advantage made visible.
 func TestFormatsWithoutForeignNamesPrintADash(t *testing.T) {
+	// zipaes192 is used because it has NEITHER a Hashcat mode NOR a John
+	// label, so both foreign-name columns must render as a dash. The earlier
+	// example here, hmailserver, stopped being one: it has Hashcat mode 1421,
+	// and a John label was later added for it once John was observed to crack
+	// the format (see hash_john_labels.go). Pick a genuinely bare format when
+	// this needs changing again — `identify --coverage` reports how many exist.
 	out := renderIdentifyHuman("x", []hashid.Candidate{{
-		Type: "hmailserver", Display: "hMailServer",
+		Type: "zipaes192", Display: "WinZip AES-192",
 		Confidence: hashid.Certain, Tier: hashid.TierSignature,
 		Evidence: "record prefix",
 	}})

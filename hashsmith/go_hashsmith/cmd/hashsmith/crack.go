@@ -535,6 +535,7 @@ func runCrack(args []string) error {
 	useRules := fs.Bool("r", false, "enable the built-in mangling rules in dict mode")
 	var rulesFiles stringSliceFlag
 	fs.Var(&rulesFiles, "rules", "path to a rule file (dict mode; overrides -r); repeatable to stack rule files left-to-right, e.g. --rules a.rule --rules b.rule")
+	rulesLenient := fs.Bool("rules-lenient", false, "skip rule lines that cannot be parsed instead of refusing to run (the skipped candidates are never tried)")
 	maskStr := fs.String("mask", "", "mask for -M mask (e.g. ?u?l?l?l?d?d)")
 	cs1 := fs.String("1", "", "custom charset 1 (mask -1)")
 	cs2 := fs.String("2", "", "custom charset 2 (mask -2)")
@@ -647,7 +648,7 @@ func runCrack(args []string) error {
 
 	// --stdout: generate candidates only, no target or hashing required.
 	if *stdoutMode {
-		engine, err := buildRuleEngine(rulesFiles.values, *useRules)
+		engine, err := buildRuleEngine(rulesFiles.values, *useRules, *rulesLenient)
 		if err != nil {
 			return err
 		}
@@ -752,7 +753,7 @@ func runCrack(args []string) error {
 		defer ow.Close()
 	}
 
-	engine, err := buildRuleEngine(rulesFiles.values, *useRules)
+	engine, err := buildRuleEngine(rulesFiles.values, *useRules, *rulesLenient)
 	if err != nil {
 		return err
 	}
@@ -977,11 +978,21 @@ func writeTempWordlist(words []string) (string, error) {
 // as a cross product — see loadRuleFiles/expandStacked), else the built-in set
 // when -r is present, else nil (no rules). A single rulesFiles entry produces
 // output byte-identical to before stacking existed.
-func buildRuleEngine(rulesFiles []string, useBuiltin bool) (*ruleEngine, error) {
+func buildRuleEngine(rulesFiles []string, useBuiltin, lenient bool) (*ruleEngine, error) {
 	if len(rulesFiles) > 0 {
 		e, bad, err := loadRuleFiles(rulesFiles)
 		if err != nil {
 			return nil, err
+		}
+		// A rule Hashsmith cannot parse is a rule whose candidates are never
+		// tried. Continuing quietly turns a shrunken keyspace into a "not
+		// found" the user has no reason to distrust, so refuse by default and
+		// make skipping an explicit choice.
+		if bad > 0 && !lenient {
+			return nil, fmt.Errorf(
+				"%d rule(s) in %s could not be parsed; those candidates would never be tried and the run could report \"not found\" for a password the ruleset covers.\n"+
+					"  Check the file against the supported commands (hashsmith rules %s <word> shows each line), or pass --rules-lenient to skip them anyway.",
+				bad, strings.Join(rulesFiles, " + "), rulesFiles[0])
 		}
 		var msg string
 		if len(rulesFiles) == 1 {
@@ -991,7 +1002,7 @@ func buildRuleEngine(rulesFiles []string, useBuiltin bool) (*ruleEngine, error) 
 				strings.Join(rulesFiles, " + "), e.count())
 		}
 		if bad > 0 {
-			msg += fmt.Sprintf(" (%d invalid rule(s) skipped)", bad)
+			msg += fmt.Sprintf(" (%d invalid rule(s) skipped — --rules-lenient)", bad)
 		}
 		clrGreen.Fprintln(os.Stderr, msg)
 		return e, nil

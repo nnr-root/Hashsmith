@@ -63,11 +63,11 @@ func TestComparisonProof(t *testing.T) {
 
 func TestComparisonCommandEnablesHashsmithGPUOnly(t *testing.T) {
 	c := comparisonCases[0]
-	hashsmithArgs, _ := comparisonCommand("hashsmith", c, "target", "target.txt", "words.txt", t.TempDir(), 0, true)
+	hashsmithArgs, _ := comparisonCommand("hashsmith", c, "target", "target.txt", "words.txt", t.TempDir(), 0, true, 1)
 	if !containsString(hashsmithArgs, "--gpu") {
 		t.Fatalf("Hashsmith args do not enable GPU: %q", hashsmithArgs)
 	}
-	johnArgs, _ := comparisonCommand("john", c, "target", "target.txt", "words.txt", t.TempDir(), 0, true)
+	johnArgs, _ := comparisonCommand("john", c, "target", "target.txt", "words.txt", t.TempDir(), 0, true, 1)
 	if containsString(johnArgs, "--gpu") {
 		t.Fatalf("Hashsmith GPU flag leaked into John args: %q", johnArgs)
 	}
@@ -102,5 +102,43 @@ func TestComparisonMissingToolsAreSkipped(t *testing.T) {
 	}
 	if len(report.Cases) != 1 || report.Cases[0].Tools["hashsmith"].Status != "skipped" || report.Candidates != 2 {
 		t.Fatalf("unexpected report: %#v", report)
+	}
+}
+
+// TestComparisonGivesJohnEveryCore is a fairness property, not a feature test.
+// Hashsmith saturates every core by default; John is single-threaded unless
+// told otherwise. Timing an 8-core tool against a 1-core tool and publishing
+// the ratio would inflate Hashsmith's margin by roughly the core count, so the
+// harness must hand John --fork with the same parallelism Hashsmith gets.
+func TestComparisonGivesJohnEveryCore(t *testing.T) {
+	c := comparisonCases[0]
+	johnArgs, _ := comparisonCommand("john", c, "target", "target.txt", "words.txt", t.TempDir(), 0, false, 8)
+	if !containsString(johnArgs, "--fork=8") {
+		t.Fatalf("John args do not request all cores: %q", johnArgs)
+	}
+}
+
+// TestComparisonOmitsForkOnSingleCore keeps the flag off where it is invalid.
+func TestComparisonOmitsForkOnSingleCore(t *testing.T) {
+	c := comparisonCases[0]
+	johnArgs, _ := comparisonCommand("john", c, "target", "target.txt", "words.txt", t.TempDir(), 0, false, 1)
+	for _, a := range johnArgs {
+		if strings.HasPrefix(a, "--fork") {
+			t.Fatalf("--fork must not be passed on a single core: %q", johnArgs)
+		}
+	}
+}
+
+// TestComparisonForkAppliesOnlyToJohn guards against the flag leaking into the
+// other two tools, which do their own thread management.
+func TestComparisonForkAppliesOnlyToJohn(t *testing.T) {
+	c := comparisonCases[0]
+	for _, name := range []string{"hashsmith", "hashcat"} {
+		args, _ := comparisonCommand(name, c, "target", "target.txt", "words.txt", t.TempDir(), 0, false, 8)
+		for _, a := range args {
+			if strings.HasPrefix(a, "--fork") {
+				t.Fatalf("%s args must not contain --fork: %q", name, args)
+			}
+		}
 	}
 }

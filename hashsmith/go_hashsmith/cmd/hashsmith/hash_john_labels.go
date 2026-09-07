@@ -79,10 +79,35 @@ func johnLabelSeed() map[string]string {
 		"phpass": "phpass", "drupal7": "Drupal7", "django": "django",
 		"mediawiki": "mediawiki",
 		"vbulletin": "vbulletin",
-		"sap-b": "sapb", "sap-fg": "sapg",
+		"sap-b":     "sapb", "sap-fg": "sapg",
 		"cisco-pix": "pix-md5", "cisco-asa": "asa-md5",
-		"grub2": "grub",
+		"grub2":   "grub",
 		"bitcoin": "bitcoin", "ethereum": "ethereum-opencl",
 		"wpa": "wpapsk", "vnc": "VNC", "sip": "SIP",
+
+		// ── Machine-verified against a real John binary ──────────────────────
+		//
+		// Every pair below was produced by scripts/john-labels-verify.sh in
+		// propose mode, which accepts a label ONLY after running
+		//
+		//	john --format=<label> --wordlist=<plaintext> <Hashsmith's own vector>
+		//
+		// and seeing John report that exact plaintext. That is the standard
+		// this file's header asks for — a claim about John's interface,
+		// checked by making John act on it — carried out mechanically instead
+		// of by hand, so it can be re-run when either tool moves.
+		//
+		// `scripts/john-labels-verify.sh verify` re-checks these against the
+		// baseline in scripts/john-labels-verified.txt and fails if a label
+		// that used to work stops working. Note the check is POSITIVE-ONLY:
+		// entries above that it cannot confirm are not thereby wrong, they are
+		// formats whose record Hashsmith and John spell differently.
+		"md2": "md2", "keccak256": "raw-keccak-256", "tripcode": "tripcode",
+		"android-backup": "androidbackup", "bitlocker": "bitlocker",
+		"blockchain": "blockchain", "electrum": "electrum", "encfs": "encfs",
+		"fortigate": "fortigate", "fortigate256": "fortigate256",
+		"hmailserver": "hmailserver", "signal": "signal",
+		"solarwinds": "solarwinds", "sspr": "sspr",
+		"tacacs-plus": "tacacs-plus", "xmpp-scram": "xmpp-scram",
 	}
 }

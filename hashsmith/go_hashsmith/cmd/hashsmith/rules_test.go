@@ -69,10 +69,13 @@ func TestRuleRejects(t *testing.T) {
 		{"_4", "hello"},    // len 5 != 4 → reject
 		{"!s", "password"}, // contains 's' → reject
 		{"/z", "password"}, // lacks 'z' → reject
-		{"T9", "hello"},    // position 9 out of range → reject
-		{"D9", "hello"},
-		{"*19", "hello"},
 	}
+	// NOTE: an out-of-range POSITION is deliberately not in this list. Rules
+	// like T9/D9/*19 on a short word used to be rejected here; hashcat leaves
+	// the word unchanged instead, and rejecting shrank the searched keyspace
+	// for any rule file using them. The reject list is now only the explicit
+	// gates (<N >N _N !X /X). See TestRuleOutOfRangePositionsPassThrough and
+	// the oracle vectors in rules_hashcat_compat_test.go.
 	for _, c := range rejects {
 		p, err := compileRuleLine(c.rule)
 		if err != nil {
@@ -117,5 +120,27 @@ func TestRuleEngineDedup(t *testing.T) {
 	got := e.expand("abc")
 	if len(got) != 2 {
 		t.Fatalf("want 2 unique candidates, got %d: %+v", len(got), got)
+	}
+}
+
+// TestRuleOutOfRangePositionsPassThrough pins the direction of the fix: a
+// position operand past the end of the word leaves the word unchanged rather
+// than dropping the candidate. Rejecting is the dangerous direction — it
+// silently removes candidates from the search and reports "not found".
+func TestRuleOutOfRangePositionsPassThrough(t *testing.T) {
+	for _, rule := range []string{"T9", "D9", "*19", "o9z", "i9z", "x29", "y9", "Y9", "O99", "+9", "-9", "L9", "R9", ".9", ",9"} {
+		p, err := compileRuleLine(rule)
+		if err != nil {
+			t.Errorf("%q: compile error %v", rule, err)
+			continue
+		}
+		got, ok := p.apply("hello")
+		if !ok {
+			t.Errorf("%q on %q: rejected; hashcat passes the word through", rule, "hello")
+			continue
+		}
+		if got != "hello" {
+			t.Errorf("%q on %q: got %q, want the word unchanged", rule, "hello", got)
+		}
 	}
 }

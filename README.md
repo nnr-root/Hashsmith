@@ -385,7 +385,51 @@ Common commands (positions/counts are base-36 digits: 0-9 then A-Z for 10-35):
 | `$X` `^X` | append / prepend char X | `Pass1` (`$1`) · `1Pass` (`^1`) |
 | `sXY` `@X` | replace all X→Y / purge all X | `sso`→`Paoo` · `@s`→`Pa` |
 | `oNX` `iNX` `DN` `xNM` | overwrite / insert / delete / extract | — |
+| `ONM` | omit M chars starting at N | `O12`→`Ps` |
+| `+N` `-N` | increment / decrement the char at N | `+0`→`Qass` · `-0`→`Oass` |
+| `LN` `RN` | bitwise shift the char at N left / right | `R0`→`(ass` |
+| `.N` `,N` | replace char at N with the one after / before it | `.0`→`aass` · `,1`→`PPss` |
+| `E` `eX` | title case, splitting on spaces / on X | `E` on `foo bar`→`Foo Bar` |
+| `3NX` | toggle the char after the (N+1)th X | `30 ` on `foo bar`→`foo Bar` |
 | `<N` `>N` `_N` `!X` `/X` | reject unless len&lt;N / &gt;N / ==N / lacks X / contains X | — |
+
+### hashcat rule compatibility
+
+Hashsmith implements hashcat's full rule operator set and is verified against
+the real hashcat binary candidate-for-candidate. Across **all 28 hashcat stock
+rule files** expanded over a 20-word dictionary, Hashsmith reproduces
+**2,878,178 of 2,878,178** hashcat candidates — 100%:
+
+```bash
+scripts/rules-oracle.sh          # re-run the sweep against your own hashcat
+```
+
+Two behaviours are inherited from hashcat on purpose, because diverging from
+them silently changes which passwords a rule file can find:
+
+- a position operand past the end of a word leaves the word **unchanged**
+  rather than dropping the candidate;
+- a command whose result would reach 256 bytes is skipped, and the word
+  carries on unchanged.
+
+**A rule Hashsmith cannot parse is an error, not a warning.** An unparsed rule
+is a rule whose candidates are never tried, so continuing quietly would let a
+run report "not found" for a password the ruleset actually covers.
+
+The exception is a rule form **hashcat rejects too** — a bare `z`/`Z` with no
+position operand, or the InsidePro-era `SXY`, both of which appear in hashcat's
+own `InsidePro-HashManager.rule` and both of which hashcat answers with "No
+valid rules left." Skipping those costs no candidate relative to hashcat, so
+they are reported and skipped rather than blocking the run. Everything else —
+a typo hashcat would have compiled — is fatal:
+
+```
+$ hashsmith crack -t md5 <hash> -w words.txt --rules custom.rule
+Error: 3 rule(s) in custom.rule could not be parsed; those candidates would never be
+tried and the run could report "not found" for a password the ruleset covers.
+  Check the file against the supported commands (hashsmith rules custom.rule <word>
+  shows each line), or pass --rules-lenient to skip them anyway.
+```
 
 ```
 # example.rule — one rule per line, '#' starts a comment
@@ -495,34 +539,56 @@ keyspace of an MD5 mask — best of three, every tool given the identical job.
 Wall clock is used rather than each tool's self-reported rate because it is the
 only number that includes startup, and startup turns out to decide the result.
 
+**Every tool is given the whole machine.** Hashsmith and Hashcat use all cores
+by default; John does not, and runs on one core unless it is passed `--fork`.
+Both John rows are shown below because the difference is a factor of five, and
+timing an 8-core tool against a 1-core one would inflate Hashsmith's margin by
+about the core count. `benchmark --compare` passes `--fork` automatically and
+records the value it used in its JSON (`john_fork`).
+
 **`?l`×6 — 308,915,776 candidates**
 
 | | time | effective |
 |---|---|---|
-| **Hashsmith** (CPU) | **2.39 s** | 129.4 MH/s |
-| Hashsmith (OpenCL) | 3.37 s | 91.8 MH/s |
-| Hashsmith (Metal) | 3.50 s | 88.2 MH/s |
-| Hashcat | 7.50 s | 41.2 MH/s |
-| John the Ripper | 32.22 s | 9.6 MH/s |
+| **Hashsmith** (CPU) | **2.13 s** | 145.4 MH/s |
+| John the Ripper (`--fork=8`) | 5.82 s | 53.0 MH/s |
+| Hashcat | 7.70 s | 40.1 MH/s |
+| John the Ripper (default, 1 core) | 28.30 s | 10.9 MH/s |
 
 **`?l`×7 — 8,031,810,176 candidates (26× larger)**
 
 | | time | effective |
 |---|---|---|
-| **Hashcat** | **23.89 s** | 336.2 MH/s |
-| Hashsmith (CPU) | 94.11 s | 85.3 MH/s |
+| **Hashcat** | **14.07 s** | 571.0 MH/s |
+| Hashsmith (CPU) | 109.51 s | 73.3 MH/s |
+| John the Ripper (`--fork=8`) | 120.69 s | 66.5 MH/s |
 
-The order reverses, and the reason is startup. Hashcat reports ~1100 MH/s of
-kernel speed, but solving for both data points gives an effective 471 MH/s
-behind a fixed ~6.8 s of device initialization and kernel compilation. Below
-roughly **1.2 billion candidates** — about `?l`×6.4 — that fixed cost dominates
-and Hashsmith finishes first; above it, Hashcat's kernel wins and keeps
-winning.
+The order reverses, and the reason is startup. Solving Hashcat's two data
+points gives roughly **1,210 MH/s of kernel throughput behind a fixed ~7.4 s**
+of device initialization and kernel compilation. Below somewhere between
+**0.6 and 1.2 billion candidates** — about `?l`×6.2 to `?l`×6.6, the range
+reflecting how much the CPU has thermally throttled by then — that fixed cost
+dominates and Hashsmith finishes first; above it, Hashcat's kernel wins and
+keeps winning.
+
+Two things are worth stating plainly rather than rounding in Hashsmith's
+favour:
+
+- **Hashsmith's own rate falls on long runs.** It sustains 145 MH/s over a
+  2-second sweep but only 73 MH/s over a 110-second one, on the same machine
+  and the same mask. That is thermal, not algorithmic, and it is why the
+  crossover is a range rather than a single number.
+- **A properly parallelized John is close, not far behind.** Given `--fork`,
+  John is 2.7× slower than Hashsmith at `?l`×6 and only about 1.1× slower at
+  `?l`×7 — and it beats Hashcat outright at `?l`×6. Earlier revisions of this
+  table reported John at 32 s for that mask, which was John on one core; the
+  gap that number implied was not real.
 
 So: Hashsmith is the faster tool for the work most runs actually are —
 dictionaries, rules, single-crack, PRINCE, and masks up to six or seven
-characters. Hashcat is the faster tool for very large brute-force sweeps. John
-is slower than both here by a wide margin.
+characters — and it is the fastest of the three at the small end by a clear
+margin. Hashcat is the faster tool for very large brute-force sweeps. John,
+given its cores, is competitive with both on long CPU runs.
 
 ### What each option costs
 
@@ -562,7 +628,7 @@ onto the scalar path, on the same runner:
 | `ubuntu-24.04-arm` arm64 (NEON) | 3.00 s — 103.0 MH/s | 21.00 s — 14.7 MH/s | **7.0×** |
 
 Absolute numbers on shared CI runners are noisy and lower than dedicated
-hardware — the same job takes 2.39 s on an idle M2. The ratio is the reliable
+hardware — the same job takes ~2.1 s on an idle M2. The ratio is the reliable
 part: it is an A/B between two runs of one binary on one machine, so it
 measures the cores rather than the runner.
 
@@ -688,7 +754,10 @@ jobs, so GPU remains an explicit choice.
 > indistinguishable on an MD5 mask — medians 93.4, 90.7 and 92.1 MH/s, a spread
 > of about 3% while each individual path varied by 1.5× between runs. End to end
 > the CPU path was the fastest of the three (2.39 s against 3.50 s and 3.37 s
-> for a `?l`×6 sweep).
+> for a `?l`×6 sweep). Those three figures come from one interleaved session and
+> are directly comparable to each other; the 2.13 s in the table above is a
+> later, separately measured run, so compare within a session rather than
+> across them.
 >
 > The older ratios in this section (~6×, ~10×, ~27×) date from before the
 > NEON/AVX2 CPU cores existed, so they divide by a CPU baseline several times
@@ -980,11 +1049,11 @@ self-contained binary that tries to make the common path short.
 | Universal hash/code formats | 457 | 450+ native hash types | hundreds of native formats |
 | Hash-type auto-detection | yes, by default — `identify` and `crack` run on one shared detection engine, so every candidate carries a Hashcat `-m` mode and a John label, not just a yes/no guess | yes in Hashcat 7.x; `--identify` lists possibilities | yes for recognizable ciphertexts; first matching format wins |
 | Machine-readable identify output | `--json`, versioned schema (`hashsmith.identify/1`) | `--identify` prints text, not JSON | text only |
-| Container-file identification | file bytes alone route to the matching `*2smith` extractor for 12 of Hashsmith's 47 extractors; the other 35 must still be named explicitly (`hashsmith identify --coverage`) | no built-in file-type sniffing; separate hashcat-utils scripts convert known formats | `*2john` scripts convert known container formats; no auto-identification step |
+| Container-file identification | file bytes alone route to the matching `*2smith` extractor for 18 of Hashsmith's 47 extractors; the other 29 must still be named explicitly (`hashsmith identify --coverage`) | no built-in file-type sniffing; separate hashcat-utils scripts convert known formats | `*2john` scripts convert known container formats; no auto-identification step |
 | Record-internal decoding | `--explain` decodes the leading candidate's own fields (JWT `alg`, Kerberos `etype`, PEM key type, ...) | not applicable | not applicable |
 | Accepted type vocabulary | 1,163 names/codes resolving into those same 457 formats, including 503 numeric Hashcat aliases | native numeric modes | native format labels |
 | Attack modes | dict, brute, mask, markov, hybrid, combinator, PRINCE | straight, combinator, mask, hybrid, association | wordlist, incremental, mask, external |
-| Rule engine | ~35 operators | full, on-GPU, the de-facto standard | full, plus C-like external mode |
+| Rule engine | full hashcat operator set; **100% candidate-for-candidate parity** with hashcat across all 28 of its stock rule files (2,878,178 candidates, `scripts/rules-oracle.sh`) | full, on-GPU, the de-facto standard | full, plus C-like external mode |
 | GPU | experimental, opt-in Metal/OpenCL; MD5 dictionary/rules plus MD5, MD4, NTLM, SHA-1, SHA-256 brute/mask/multi-target | mature CUDA / HIP / OpenCL / Metal across nearly every mode | OpenCL for a subset |
 | File → hash extractors | **47**, native and built into one registry/binary | dedicated converters in the official `tools/` tree | a much broader `run/*2john` script collection plus compiled converters |
 | Install | one static binary, no runtime deps | binary + GPU runtime | build or distro package + Perl/Python for extractors |
@@ -1018,9 +1087,9 @@ formats by shape alone: a bare 32-hex string really is consistent with MD5,
 MD4, MD2, NTLM and LM at once, and reporting all of them as `possible` rather
 than picking one is the confidence model working as designed, not failing.
 At the same time, 54.2% is not a number to round up: the John-label table
-that makes `identify`'s printed command runnable covers 65 of 457 crackable
+that makes `identify`'s printed command runnable covers 81 of 457 crackable
 formats (`hashsmith identify --coverage`), and container-file sniffing
-recognizes 12 of Hashsmith's 47 extractors by file bytes alone — both real,
+recognizes 18 of Hashsmith's 47 extractors by file bytes alone — both real,
 measured gaps, not rounding error. See
 `docs/superpowers/notes/2026-09-05-recognition-baseline.md` for the full
 list of what is and isn't recognized and why.

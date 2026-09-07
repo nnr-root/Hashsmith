@@ -66,6 +66,7 @@ type comparisonReport struct {
 	Candidates   int                           `json:"candidates"`
 	Repeats      int                           `json:"repeats"`
 	HashsmithGPU bool                          `json:"hashsmith_gpu"`
+	JohnFork     int                           `json:"john_fork"`
 	Tools        map[string]comparisonToolInfo `json:"tools"`
 	Cases        []comparisonCaseResult        `json:"cases"`
 }
@@ -127,6 +128,7 @@ func runComparisonBenchmark(cfg comparisonConfig) error {
 		Candidates:   cfg.candidates,
 		Repeats:      cfg.repeats,
 		HashsmithGPU: cfg.hashsmithGPU,
+		JohnFork:     johnComparisonCores(),
 		Tools:        map[string]comparisonToolInfo{},
 	}
 	tools := []comparisonTool{
@@ -183,6 +185,16 @@ func runComparisonBenchmark(cfg comparisonConfig) error {
 		fmt.Fprintf(os.Stderr, "\nJSON: %s\n", cfg.jsonPath)
 	}
 	return nil
+}
+
+// johnComparisonCores is the parallelism handed to John via --fork, matching
+// the cores Hashsmith and hashcat already use. John's --fork tops out at
+// well beyond any realistic core count, so NumCPU is passed through directly.
+func johnComparisonCores() int {
+	if n := runtime.NumCPU(); n > 1 {
+		return n
+	}
+	return 1
 }
 
 func fileSHA256(path string) (string, error) {
@@ -259,7 +271,7 @@ func writeComparisonWordlist(path string, candidates int) error {
 func benchmarkComparisonTool(cfg comparisonConfig, c comparisonCase, name, path, target, targetFile, wordlist, tmp string) comparisonToolResult {
 	runs := make([]float64, 0, cfg.repeats)
 	for run := 0; run < cfg.repeats; run++ {
-		args, proof := comparisonCommand(name, c, target, targetFile, wordlist, tmp, run, cfg.hashsmithGPU)
+		args, proof := comparisonCommand(name, c, target, targetFile, wordlist, tmp, run, cfg.hashsmithGPU, johnComparisonCores())
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.timeout)
 		cmd := exec.CommandContext(ctx, path, args...)
 		cmd.Env = append(os.Environ(), "NO_COLOR=1")
@@ -286,7 +298,15 @@ func benchmarkComparisonTool(cfg comparisonConfig, c comparisonCase, name, path,
 	}
 }
 
-func comparisonCommand(name string, c comparisonCase, target, targetFile, wordlist, tmp string, run int, hashsmithGPU bool) ([]string, string) {
+// comparisonCommand builds one tool's argv for a single comparison run.
+//
+// johnCores is the parallelism John should be given. Hashsmith uses every core
+// by default and hashcat manages its own devices, but John runs on a single
+// core unless it is passed --fork. Leaving that off does not make the
+// comparison "John as it ships" — it makes it an 8-core tool timed against a
+// 1-core one, and any ratio published from it is inflated by about the core
+// count. So John is given the same machine the others get.
+func comparisonCommand(name string, c comparisonCase, target, targetFile, wordlist, tmp string, run int, hashsmithGPU bool, johnCores int) ([]string, string) {
 	suffix := fmt.Sprintf("%s-%d", c.typ, run)
 	switch name {
 	case "hashsmith":
@@ -298,7 +318,11 @@ func comparisonCommand(name string, c comparisonCase, target, targetFile, wordli
 	case "john":
 		pot := filepath.Join(tmp, "john-"+suffix+".pot")
 		session := filepath.Join(tmp, "john-"+suffix)
-		return []string{"--format=" + c.johnFormat, "--wordlist=" + wordlist, "--pot=" + pot, "--session=" + session, "--nolog", targetFile}, pot
+		args := []string{"--format=" + c.johnFormat, "--wordlist=" + wordlist, "--pot=" + pot, "--session=" + session, "--nolog"}
+		if johnCores > 1 {
+			args = append(args, fmt.Sprintf("--fork=%d", johnCores))
+		}
+		return append(args, targetFile), pot
 	default:
 		out := filepath.Join(tmp, "hashcat-"+suffix+".out")
 		return []string{"-m", c.hashcatMode, "-a", "0", targetFile, wordlist, "--potfile-disable", "--restore-disable", "--logfile-disable", "--quiet", "--outfile", out, "--outfile-format", "2"}, out
