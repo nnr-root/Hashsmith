@@ -59,12 +59,11 @@ func juniperDecode(h string) ([]byte, bool) {
 }
 
 func verifyJuniper(targetHash, candidate string) (bool, error) {
-	i := strings.IndexByte(targetHash, '$')
-	if i < 0 {
-		return false, errors.New("invalid Juniper hash (need user$hash)")
+	user, body, ok := splitJuniper(targetHash)
+	if !ok {
+		return false, errors.New("invalid Juniper hash (need user$hash or hash:user)")
 	}
-	user := targetHash[:i]
-	target, ok := juniperDecode(targetHash[i+1:])
+	target, ok := juniperDecode(body)
 	if !ok {
 		return false, errors.New("invalid Juniper hash body")
 	}
@@ -72,8 +71,27 @@ func verifyJuniper(targetHash, candidate string) (bool, error) {
 	return bytesEqualCT(got[:], target), nil
 }
 
+// splitJuniper accepts both spellings of a NetScreen record and returns the
+// username and the 30-character encoded body.
+//
+// John writes <user>$<hash>; hashcat -m 22 writes <hash>:<user>. The two are
+// told apart without ambiguity because the encoded body is always exactly 30
+// characters and a ScreenOS username never contains ':'.
+func splitJuniper(s string) (user, body string, ok bool) {
+	if i := strings.IndexByte(s, '$'); i >= 0 {
+		return s[:i], s[i+1:], true
+	}
+	if i := strings.IndexByte(s, ':'); i == 30 {
+		return s[i+1:], s[:i], true
+	}
+	return "", "", false
+}
+
 // isJuniper: <user>$<30 base64 chars> with "nrcstn" at positions 0,6,12,17,23,29.
 func isJuniper(s string) bool {
+	if u, b, ok := splitJuniper(s); ok && len(b) == 30 {
+		s = u + "$" + b
+	}
 	i := strings.IndexByte(s, '$')
 	if i < 0 {
 		return false

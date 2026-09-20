@@ -15,9 +15,12 @@ func verifyAxCryptSHA1(targetHash, candidate string) (bool, error) {
 		return false, errors.New("invalid AxCrypt-SHA1 hash (missing prefix)")
 	}
 	want := targetHash[len("$axcrypt_sha1$"):]
-	if len(want) != 40 || !isHex(want) {
-		return false, errors.New("invalid AxCrypt-SHA1 digest")
+	// AxCrypt 1 keeps the in-memory SHA-1 truncated to its first 16 bytes, and
+	// that is the form hashcat -m 13300 publishes (32 hex characters). The full
+	// 40-character digest is accepted too, so a record from either source works.
+	if (len(want) != 40 && len(want) != 32) || !isHex(want) {
+		return false, errors.New("invalid AxCrypt-SHA1 digest (need 32 or 40 hex chars)")
 	}
 	d := sha1.Sum([]byte(candidate))
-	return strings.EqualFold(hex.EncodeToString(d[:]), want), nil
+	return strings.EqualFold(hex.EncodeToString(d[:])[:len(want)], want), nil
 }

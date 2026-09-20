@@ -80,10 +80,13 @@ func parseEpiserver(target string) (version int, salt, digest []byte, err error)
 	if err != nil || (version != 0 && version != 1) {
 		return 0, nil, nil, errors.New("unsupported Episerver version (need 0 or 1)")
 	}
-	if salt, err = base64.StdEncoding.DecodeString(f[1]); err != nil || len(salt) == 0 || len(salt) > maxKDFFieldSize {
+	// hashcat -m 141 / -m 1441 publish these fields WITHOUT base64 padding
+	// (e.g. "ZUgAmuaYTqAvisD0A427FA3oaWU", 27 characters). Padded records from
+	// other sources stay valid; base64Flexible accepts either.
+	if salt, err = episerverB64(f[1]); err != nil || len(salt) == 0 || len(salt) > maxKDFFieldSize {
 		return 0, nil, nil, errors.New("invalid Episerver salt")
 	}
-	if digest, err = base64.StdEncoding.DecodeString(f[2]); err != nil {
+	if digest, err = episerverB64(f[2]); err != nil {
 		return 0, nil, nil, errors.New("invalid Episerver digest")
 	}
 	wantLen := sha1.Size
@@ -167,4 +170,14 @@ func verifyHMailServer(targetHash, candidate string) (bool, error) {
 
 func isHMailServer(s string) bool {
 	return len(s) == 70 && isHex(s[6:]) && !isHex(s[:6])
+}
+
+// episerverB64 decodes a standard-alphabet base64 field with or without its
+// trailing padding. hashcat's -m 141 and -m 1441 example records omit the
+// padding; records from other sources carry it.
+func episerverB64(s string) ([]byte, error) {
+	if n := len(s) % 4; n != 0 {
+		s += strings.Repeat("=", 4-n)
+	}
+	return base64.StdEncoding.DecodeString(s)
 }

@@ -29,10 +29,17 @@ func verifyMongoDB(targetHash, candidate string) (bool, error) {
 	if !strings.HasPrefix(targetHash, "$mongodb-scram$") {
 		return false, errors.New("invalid MongoDB hash (missing $mongodb-scram$ prefix)")
 	}
-	f := strings.Split(targetHash[len("$mongodb-scram$"):], "$")
+	// Two spellings of the same record: John separates the fields with '$',
+	// hashcat -m 24100 / -m 24200 with '*' and a leading '*'. Both are read.
+	body := targetHash[len("$mongodb-scram$"):]
+	sep, hashcatDialect := "$", false
+	if strings.HasPrefix(body, "*") {
+		body, sep, hashcatDialect = body[1:], "*", true
+	}
+	f := strings.Split(body, sep)
 	// f: [version, user, iter, b64salt, b64storedkey]
 	if len(f) != 5 {
-		return false, errors.New("invalid MongoDB hash (need ver$user$iter$salt$key)")
+		return false, errors.New("invalid MongoDB hash (need ver$user$iter$salt$key, or hashcat's *-separated form)")
 	}
 	version, err := strconv.Atoi(f[0])
 	if err != nil || version < 0 || version > 2 {
@@ -53,6 +60,34 @@ func verifyMongoDB(targetHash, candidate string) (bool, error) {
 	}
 	if err != nil || len(want) != wantLen {
 		return false, errors.New("invalid MongoDB stored key")
+	}
+
+	// The two dialects disagree about what the version field selects, and the
+	// separator is what tells them apart.
+	//
+	// In the '$' spelling, version picks the derived key: 0 = SHA-1 StoredKey,
+	// 1 = SHA-256 StoredKey, 2 = SHA-256 ServerKey.
+	//
+	// In hashcat's '*' spelling it picks only the hash — 0 = SHA-1,
+	// 1 = SHA-256 — and the derived key is ALWAYS the ServerKey, because both
+	// modes that use this spelling are named "MongoDB ServerKey SCRAM-...".
+	// Confirmed against hashcat's own -m 24100 record: HMAC-SHA1 of the salted
+	// password under "Server Key", raw, reproduces the stored value, while
+	// either Client Key form and the SHA-1-wrapped form do not.
+	if hashcatDialect {
+		// hashcat base64-encodes the username; the '$' spelling stores it plain.
+		if u, err := base64.StdEncoding.DecodeString(f[1]); err == nil {
+			f[1] = string(u)
+		}
+		if version == 0 {
+			innerSum := md5.Sum([]byte(f[1] + ":mongo:" + candidate))
+			inner := []byte(hex.EncodeToString(innerSum[:]))
+			salted := pbkdf2.Key(inner, salt, iter, 20, sha1.New)
+			sk := hmac.New(sha1.New, salted)
+			sk.Write([]byte("Server Key"))
+			return bytesEqualCT(sk.Sum(nil), want), nil
+		}
+		version = 2 // SHA-256 ServerKey, which the shared path below computes
 	}
 
 	if version == 0 {

@@ -17,8 +17,9 @@ import (
 )
 
 func verifyOracle11g(targetHash, candidate string) (bool, error) {
+	targetHash = oracle11gCanonical(targetHash)
 	if len(targetHash) != 60 || !isHex(targetHash) {
-		return false, errors.New("invalid Oracle 11g hash (need 60 hex chars)")
+		return false, errors.New("invalid Oracle 11g hash (need 60 hex chars, or 40:20 hex)")
 	}
 	salt, err := hex.DecodeString(targetHash[40:])
 	if err != nil {
@@ -30,7 +31,19 @@ func verifyOracle11g(targetHash, candidate string) (bool, error) {
 	return strings.EqualFold(hex.EncodeToString(h.Sum(nil)), targetHash[:40]), nil
 }
 
-func isOracle11g(s string) bool { return len(s) == 60 && isHex(s) }
+func isOracle11g(s string) bool { s = oracle11gCanonical(s); return len(s) == 60 && isHex(s) }
+
+// oracle11gCanonical folds hashcat's -m 112 spelling, which separates the
+// 40-hex SHA-1 from the 20-hex salt with a colon, onto the concatenated
+// 60-hex form this verifier works in. A record already in that form is
+// returned unchanged.
+func oracle11gCanonical(s string) string {
+	i := strings.IndexByte(s, ':')
+	if i != 40 || len(s) != 61 {
+		return s
+	}
+	return s[:40] + s[41:]
+}
 
 // verifyOracle12c checks a candidate against an Oracle 12c "T:" verifier (160
 // hex = 64-byte SHA-512 digest + 16-byte salt):
