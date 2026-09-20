@@ -112,6 +112,45 @@ jobs:
           go test -race -timeout 20m \
             -skip 'TestBenchTypeRespectsBudgetForSlowKDF|TestFastVectorsStayWithinBudget|TestSpeedupOverXCrypto' ./...
 
+  # An sdist or wheel that omits a file the Go build needs is not detectably
+  # broken until a user installs it: the tree looks complete, and `go build`
+  # only fails at first run on their machine. It happened — both artifacts
+  # shipped without the hand-written Plan 9 assembly that the NEON and AVX2
+  # cores are implemented in, so `pip install hashsmith-cli` produced
+  # "missing function body" on every arm64 and amd64 host.
+  #
+  # This job builds both artifacts, unpacks each, and compiles the Go CLI from
+  # exactly the files that shipped — the only check that can catch it.
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --quiet build
+          python -m build --outdir dist .
+      - name: The WHEEL must contain a buildable Go tree
+        run: |
+          rm -rf /tmp/wheel && mkdir -p /tmp/wheel
+          python -m zipfile -e dist/*.whl /tmp/wheel
+          cd /tmp/wheel/hashsmith/go_hashsmith
+          CGO_ENABLED=0 go build -o /tmp/hs-wheel ./cmd/hashsmith
+          /tmp/hs-wheel --version
+      - name: The SDIST must contain a buildable Go tree
+        run: |
+          rm -rf /tmp/sdist && mkdir -p /tmp/sdist
+          tar xzf dist/*.tar.gz -C /tmp/sdist
+          cd /tmp/sdist/*/hashsmith/go_hashsmith
+          CGO_ENABLED=0 go build -o /tmp/hs-sdist ./cmd/hashsmith
+          /tmp/hs-sdist --version
+
   cross-compile:
     runs-on: ubuntu-latest
     steps:

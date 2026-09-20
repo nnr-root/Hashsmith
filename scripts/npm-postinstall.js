@@ -17,9 +17,19 @@ if (goCheck.error || goCheck.status !== 0) {
 
 fs.mkdirSync(outDir, { recursive: true });
 
+// Stamp this package's version into the binary it compiles, so an
+// npm-installed hashsmith can answer --version. The binary is built on the
+// user's machine from a tree with no VCS metadata, so nothing else can tell it.
+let pkgVersion = 'dev';
+try {
+  pkgVersion = require('../package.json').version || 'dev';
+} catch (_) {
+  /* keep 'dev' */
+}
+
 const build = spawnSync(
   'go',
-  ['build', '-o', outPath, './cmd/hashsmith'],
+  ['build', '-ldflags', `-X main.version=${pkgVersion}`, '-o', outPath, './cmd/hashsmith'],
   {
     cwd: goRoot,
     stdio: 'inherit',

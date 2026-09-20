@@ -1,4 +1,25 @@
 prune wordlists
 recursive-exclude wordlists *
-recursive-include hashsmith/go_hashsmith *.go go.mod go.sum
+
+# Everything the Go toolchain needs to build the CLI from an sdist.
+#
+# *.s is NOT optional: md5neon_arm64.go and md4neon_arm64.go (and their AVX2
+# counterparts) declare function bodies that live in hand-written Plan 9
+# assembly. Without those files `go build` fails with "missing function body"
+# on every arm64 and amd64 host, which is every host anyone installs on. An
+# sdist that omitted them shipped a tree that could not be built.
+recursive-include hashsmith/go_hashsmith *.go *.s go.mod go.sum
 recursive-include hashsmith/go_hashsmith *.txt
+
+# cgo sources for the optional GPU backends (-tags gpu / -tags opencl). The
+# default build never compiles these, but an sdist that drops them silently
+# removes the ability to make a GPU build from it.
+recursive-include hashsmith/go_hashsmith *.c *.h *.m *.cl
+
+# Vendored golang.org/x/crypto/blowfish keeps its upstream BSD-3-Clause text.
+include hashsmith/go_hashsmith/internal/bcryptlane/LICENSE
+
+# Test fixtures are not needed to build or run the CLI, and the hashcat
+# conformance corpus alone is 3.4 MB.
+recursive-exclude hashsmith/go_hashsmith/cmd/hashsmith/testdata *
+recursive-exclude hashsmith/go_hashsmith *_test.go
