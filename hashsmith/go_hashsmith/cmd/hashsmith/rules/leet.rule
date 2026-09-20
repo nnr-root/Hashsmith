@@ -1,0 +1,27 @@
+# leet.rule — character substitutions.
+#
+# Single substitutions first, because a password with every letter substituted
+# is far rarer than one with a single a->@. The combined forms at the end cover
+# the common pairs rather than the full cross-product, which would multiply the
+# wordlist by more than the yield justifies.
+:
+sa@
+sa4
+se3
+si1
+si!
+so0
+ss$
+ss5
+st7
+sb8
+sg9
+sa@ se3
+sa@ so0
+se3 so0
+sa@ se3 so0
+sa@ se3 si1 so0
+sa@ se3 si1 so0 ss$
+c sa@
+c se3
+c sa@ se3 so0

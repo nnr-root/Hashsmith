@@ -7,13 +7,32 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
 
 func runRules(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: hashsmith rules <rulefile> [sample-word]")
+		fmt.Println("Usage: hashsmith rules <rulefile|bundled-name> [sample-word]")
+		fmt.Println()
+		fmt.Println("Bundled rulesets (no path needed):")
+		for _, n := range builtinRuleNames() {
+			src, _ := builtinRuleSource(n)
+			count := 0
+			for _, line := range strings.Split(src, "\n") {
+				t := strings.TrimSpace(line)
+				if t != "" && !strings.HasPrefix(t, "#") {
+					count++
+				}
+			}
+			fmt.Printf("  %-10s %4d rules\n", n, count)
+		}
+		fmt.Println()
+		fmt.Println("  hashsmith rules best                 preview a bundled set")
+		fmt.Println("  hashsmith crack ... --rules best     use it in an attack")
+		fmt.Println("  hashsmith crack ... --rules toggles --rules digits   stack two")
+		return nil
 	}
 	path := args[0]
 	word := "Password"
@@ -21,16 +40,21 @@ func runRules(args []string) error {
 		word = args[1]
 	}
 
-	f, err := os.Open(path)
+	// Same resolution as --rules: a readable file first, then a bundled
+	// ruleset by bare name. Without this, `hashsmith rules best` reported
+	// "no such file" for a ruleset the binary carries.
+	src, label, err := openRuleSource(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	if c, ok := src.(io.Closer); ok {
+		defer c.Close()
+	}
 
-	accentPrintln(fmt.Sprintf("Rule preview for %q  (base word: %q)", path, word))
+	accentPrintln(fmt.Sprintf("Rule preview for %s  (base word: %q)", label, word))
 	fmt.Println()
 
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(src)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	lineNo, valid, invalid := 0, 0, 0
 	for sc.Scan() {

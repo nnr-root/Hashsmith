@@ -106,40 +106,58 @@ func TestWordlistResolutionOrderIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestDefaultCandidateListIsTheDocumentedCrossProduct pins the real, shipped
+// TestDefaultCandidateListIsTheDocumentedTierProduct pins the real, shipped
 // list. The list itself is the interface operators script against ("put it in
 // /usr/share/wordlists and hashsmith finds it"), so a silent edit to it is a
 // change in behaviour that a test should have to acknowledge.
 //
-// It is asserted as the STRUCTURE (dirs x filenames, directory-major) rather
-// than as fifty-six literal strings, because that is the property that has to
-// hold: every directory must be tried for both filenames, and adding a
-// directory must not silently skip the gzip variant.
-func TestDefaultCandidateListIsTheDocumentedCrossProduct(t *testing.T) {
-	if got := len(wordlistCandidatePaths); got != len(wordlistCandidateDirs)*len(wordlistCandidateFilenames) {
-		t.Fatalf("candidate list has %d entries; want %d dirs x %d filenames = %d",
-			got, len(wordlistCandidateDirs), len(wordlistCandidateFilenames),
-			len(wordlistCandidateDirs)*len(wordlistCandidateFilenames))
+// It is asserted as the STRUCTURE rather than as literal strings. The
+// structure is now tiered: every tier is tried across its directories before
+// the next begins, and WITHIN a tier the order stays directory-major.
+//
+// Tiering replaced a flat cross product when the bundled lists john and
+// hashcat ship were added. Directory-major is right for rockyou.txt versus
+// rockyou.txt.gz — the same words, so the more trustworthy install should win
+// — and wrong for rockyou.txt versus password.lst, which differ by three
+// orders of magnitude in size.
+func TestDefaultCandidateListIsTheDocumentedTierProduct(t *testing.T) {
+	want := buildWordlistCandidateTiers(wordlistCandidateTiers, wordlistCandidateDirs)
+	if len(wordlistCandidatePaths) != len(want) {
+		t.Fatalf("candidate list has %d entries; the tiers produce %d",
+			len(wordlistCandidatePaths), len(want))
 	}
+	for i := range want {
+		if wordlistCandidatePaths[i] != want[i] {
+			t.Fatalf("candidate %d = %q, want %q", i, wordlistCandidatePaths[i], want[i])
+		}
+	}
+
+	// Tier 1 is still rockyou, plain text before gzip.
 	if len(wordlistCandidateFilenames) != 2 ||
 		wordlistCandidateFilenames[0] != "rockyou.txt" ||
 		wordlistCandidateFilenames[1] != "rockyou.txt.gz" {
 		t.Fatalf("filenames = %q, want plain text before gzip", wordlistCandidateFilenames)
 	}
-	// Directory-major: both filenames in one directory before the next.
+	if len(wordlistCandidateTiers) == 0 || wordlistCandidateTiers[0].dirs != nil {
+		t.Fatal("the first tier must search every directory")
+	}
+
+	// Within the first tier, directory-major: both filenames in one directory
+	// before the next.
 	i := 0
 	for _, dir := range wordlistCandidateDirs {
 		for _, name := range wordlistCandidateFilenames {
-			want := joinWordlistCandidate(dir, name)
-			if wordlistCandidatePaths[i] != want {
-				t.Fatalf("candidate %d = %q, want %q (the cross product must be "+
+			expect := joinWordlistCandidate(dir, name)
+			if wordlistCandidatePaths[i] != expect {
+				t.Fatalf("candidate %d = %q, want %q (within a tier the order must be "+
 					"directory-major: the ranking that matters is which install is "+
 					"more trustworthy, not whether it is gzipped)",
-					i, wordlistCandidatePaths[i], want)
+					i, wordlistCandidatePaths[i], expect)
 			}
 			i++
 		}
 	}
+
 	// No duplicates: a repeated directory is a merge accident and would make
 	// the listing lie about how many places were actually checked.
 	seen := map[string]int{}
@@ -150,8 +168,19 @@ func TestDefaultCandidateListIsTheDocumentedCrossProduct(t *testing.T) {
 		seen[p] = i
 	}
 	// The stat budget: this list is walked once per run, on the attack path.
-	if len(wordlistCandidatePaths) > 80 {
-		t.Errorf("%d candidates is beyond the \"a few dozen stats\" budget this list "+
+	//
+	// Raised from 80 to 300 when the tool directories and the second tier of
+	// corpus names were added. The ceiling is not a guess: a full sweep of the
+	// 244 entries this currently produces was measured at 389 microseconds,
+	// best of five, on the development machine — 1.6 microseconds per entry,
+	// against an attack measured in minutes. Widening the search is worth that
+	// and trimming it by guessing which directories "probably" hold which
+	// filenames would cost real discoveries to save nothing measurable.
+	//
+	// The cap still exists because the list is walked on the attack path and
+	// unbounded growth should have to argue for itself here.
+	if len(wordlistCandidatePaths) > 300 {
+		t.Errorf("%d candidates is beyond the measured stat budget this list "+
 			"is allowed to cost", len(wordlistCandidatePaths))
 	}
 }

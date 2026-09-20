@@ -1,0 +1,67 @@
+# best.rule — a compact, high-yield ruleset for a first pass.
+#
+# Authored for Hashsmith rather than copied from another project, and kept
+# deliberately small: every rule here multiplies the wordlist, so a first pass
+# wants the transformations that recover the most passwords per unit of work,
+# not every transformation that exists. Run a larger set afterwards if this one
+# comes up empty.
+#
+# Order is roughly by yield: the identity and case changes first, then the
+# appended digits and symbols that dominate real password policies, then
+# duplication and reversal.
+:
+l
+u
+c
+C
+t
+r
+d
+$1
+$2
+$3
+$0
+$7
+$9
+$!
+$.
+$?
+$@
+$#
+$*
+^1
+^!
+$1 $2 $3
+$1 $2 $3 $4
+$1 $2 $3 $4 $5
+$0 $0
+$1 $1
+$1 $2
+$2 $3
+$1 $2 $3 $!
+c $1
+c $2
+c $!
+c $1 $2 $3
+l $1
+l $1 $2 $3
+u $1
+]
+[
+]]
+[[
+c $1 $9 $9 $0
+c $2 $0 $0 $0
+c $2 $0 $1 $0
+c $2 $0 $2 $0
+c $2 $0 $2 $4
+c $2 $0 $2 $5
+c $2 $0 $2 $6
+$1 $9 $9 $9
+$2 $0 $0 $0
+$2 $0 $1 $2
+$2 $0 $2 $0
+$2 $0 $2 $3
+$2 $0 $2 $4
+$2 $0 $2 $5
+$2 $0 $2 $6

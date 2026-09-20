@@ -135,6 +135,63 @@ var wordlistCandidateDirs = []string{
 // to count and to stream, and they hold the same words.
 var wordlistCandidateFilenames = []string{"rockyou.txt", "rockyou.txt.gz"}
 
+// wordlistToolDirs are the directories where John the Ripper and Hashcat
+// install the small password lists they ship with themselves.
+//
+// These are searched because of who actually runs this tool: someone cracking
+// hashes very often has john or hashcat installed already, and before this
+// their bundled lists were invisible. Discovery looked for exactly two
+// filenames, rockyou.txt and rockyou.txt.gz, so on a machine with both
+// competitors installed and no rockyou, Hashsmith found nothing and fell back
+// to its built-in list.
+//
+// Homebrew's unversioned opt/ symlinks are used rather than Cellar paths, so
+// no globbing over version numbers is needed and the entries stay
+// deterministic.
+var wordlistToolDirs = []string{
+	"/opt/homebrew/opt/john-jumbo/share/john",
+	"/opt/homebrew/opt/john/share/john",
+	"/opt/homebrew/share/john",
+	"/usr/share/john",
+	"/usr/local/share/john",
+	"/opt/homebrew/opt/hashcat/share/doc/hashcat",
+	"/opt/homebrew/share/doc/hashcat",
+	"/usr/share/hashcat",
+	"/usr/local/share/hashcat",
+	"/usr/share/doc/hashcat",
+}
+
+// wordlistTier is one round of the search. Every tier is tried across its
+// directories before the next tier begins.
+//
+// Tiering exists because the previous directory-major order answers the wrong
+// question once more than one filename is in play. That order is right for
+// rockyou.txt versus rockyou.txt.gz — the same words, so the more trustworthy
+// INSTALL should win. It is wrong for rockyou.txt versus password.lst, which
+// differ by three orders of magnitude in size: a 3,546-entry list found in a
+// well-ranked directory must not beat a 14-million-entry one found in a
+// lower-ranked directory. So the file decides first, and the directory decides
+// among equals.
+type wordlistTier struct {
+	names []string
+	dirs  []string // nil means every directory in wordlistCandidateDirs
+}
+
+var wordlistCandidateTiers = []wordlistTier{
+	// The real leaked-password corpora, in descending order of how commonly
+	// they are the one an operator means.
+	{names: wordlistCandidateFilenames},
+	{names: []string{
+		"rockyou2021.txt", "rockyou2024.txt",
+		"darkweb2017-top10000.txt", "10-million-password-list-top-1000000.txt",
+		"xato-net-10-million-passwords.txt", "probable-v2-top12000.txt",
+	}},
+	// Last: the small lists john and hashcat bundle. Better than the built-in
+	// fallback and always real passwords, but three orders of magnitude
+	// smaller than rockyou, so they are only reached when nothing above hits.
+	{names: []string{"password.lst", "example.dict"}, dirs: wordlistToolDirs},
+}
+
 // joinWordlistCandidate joins a candidate directory and filename WITHOUT
 // filepath.Join, which would be wrong twice over here: on Unix it turns
 // `C:\wordlists` into `C:\wordlists/rockyou.txt`, and it Cleans "." into a
@@ -180,7 +237,8 @@ func buildWordlistCandidatePaths(dirs, names []string) []string {
 // would be worthless — CI has no rockyou.txt.
 //
 // Cost: one os.Stat per entry, resolved exactly once per run (see the file
-// header). Even at ~56 entries that is a few hundred microseconds of failed
+// header). At ~250 entries — it grew when the tool directories and the second
+// tier of corpus names were added — that is well under a millisecond of failed
 // syscalls on a cold cache, against an attack measured in minutes; it is not
 // on any hot path and nothing below this file stats candidates again.
 //
@@ -188,7 +246,29 @@ func buildWordlistCandidatePaths(dirs, names []string) []string {
 // unless one of the C:\ entries or the portable ones (~/wordlists,
 // ./rockyou.txt) hits: there is no /usr/share there, and os.Stat simply fails
 // on each Unix candidate.
-var wordlistCandidatePaths = buildWordlistCandidatePaths(wordlistCandidateDirs, wordlistCandidateFilenames)
+var wordlistCandidatePaths = buildWordlistCandidateTiers(wordlistCandidateTiers, wordlistCandidateDirs)
+
+// buildWordlistCandidateTiers flattens the tier list into the single ordered
+// candidate list the rest of this file consumes. Within a tier the order stays
+// directory-major, which is what the original comment on
+// buildWordlistCandidatePaths describes and which is still correct there.
+func buildWordlistCandidateTiers(tiers []wordlistTier, defaultDirs []string) []string {
+	var out []string
+	seen := make(map[string]bool)
+	for _, tier := range tiers {
+		dirs := tier.dirs
+		if dirs == nil {
+			dirs = defaultDirs
+		}
+		for _, p := range buildWordlistCandidatePaths(dirs, tier.names) {
+			if !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
 
 // wordlistUserHomeDir resolves "~" in a candidate path. It is a var so tests
 // can supply a temp home without touching the real one.

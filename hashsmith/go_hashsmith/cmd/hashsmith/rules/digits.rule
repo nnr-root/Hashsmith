@@ -1,0 +1,44 @@
+# digits.rule — appended and prepended numbers.
+#
+# The single most productive family of rules against real password policies:
+# an expiry cycle that forces a change every 90 days produces a counter, and a
+# policy that demands a digit produces it at the end.
+$0
+$1
+$2
+$3
+$4
+$5
+$6
+$7
+$8
+$9
+$0 $0
+$1 $1
+$1 $2
+$1 $2 $3
+$2 $2
+$2 $3
+$3 $3
+$1 $2 $3 $4
+$1 $2 $3 $4 $5
+$1 $2 $3 $4 $5 $6
+$0 $1
+$0 $2
+$0 $7
+$8 $8
+$9 $9
+^1
+^2
+^1 ^2
+$1 $9 $8 $0
+$1 $9 $9 $0
+$1 $9 $9 $5
+$1 $9 $9 $9
+$2 $0 $0 $0
+$2 $0 $1 $0
+$2 $0 $2 $0
+$2 $0 $2 $3
+$2 $0 $2 $4
+$2 $0 $2 $5
+$2 $0 $2 $6

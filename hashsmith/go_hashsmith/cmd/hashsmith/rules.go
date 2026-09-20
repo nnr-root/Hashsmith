@@ -58,7 +58,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"os"
+	"io"
 	"strings"
 )
 
@@ -845,14 +845,19 @@ const maxStackedCandidates = 1_000_000
 // never causing a hard error by themselves — loadRuleFile and loadRuleFiles
 // decide what an all-invalid file means for their caller.
 func compileRuleFileLines(path string) ([]ruleProgram, int, error) {
-	f, err := os.Open(path)
+	// A readable file first, then a bundled ruleset by bare name. A user's own
+	// file always wins, because the bundled lookup is only reached when the
+	// open failed.
+	src, _, err := openRuleSource(path)
 	if err != nil {
 		return nil, 0, err
 	}
-	defer f.Close()
+	if c, ok := src.(io.Closer); ok {
+		defer c.Close()
+	}
 	var programs []ruleProgram
 	bad := 0 // rules only Hashsmith fails to parse — a real gap
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(src)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
 		line := strings.TrimRight(sc.Text(), "\r\n")
