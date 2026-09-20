@@ -15,6 +15,33 @@ import (
 // attacks work from any working directory and even when the package is
 // pip-installed without the external wordlists/ directory.
 //
+// The file is in two parts, and the split is the point.
+//
+// The first 3,583 lines are real passwords in frequency order — commonest
+// first — so a run that gives up after a few thousand candidates has spent
+// them on the candidates most likely to hit. The rest is an English word list
+// in alphabetical order. Dictionary words are genuinely used as passwords,
+// which is why they stay, but they carry no frequency signal and so they go
+// after everything that does.
+//
+// It used to be the other way round in all but 111 lines. The measurement
+// that showed it: of the 3,545 entries in John the Ripper's default
+// password.lst, the whole 230,930-line list contained 1,839 anywhere at all,
+// and just 91 within its first 5,000 lines. A Hashsmith run that tried 5,000
+// candidates from its own default was therefore trying 91 real passwords,
+// where John's default would have tried 3,545 — the list was long without
+// being useful, because after those 111 curated entries it was an
+// alphabetical dictionary and nothing else.
+//
+// password.lst is merged in as the frequency data the list was missing. Its
+// author, Solar Designer of the Openwall Project, states in its header that it
+// is assumed to be in the public domain; it was compiled 1996-2011 from Unix
+// systems and from public "top N passwords" lists, and is ordered by
+// decreasing frequency. The two orderings are combined by reciprocal rank
+// fusion, which is the ordinary way to merge two ranked lists that share no
+// scale: an entry near the top of either rises, an entry near the top of both
+// rises further, and neither list's ordering is destroyed by the other.
+//
 //go:embed common.txt
 var embeddedCommonWordlist string
 
