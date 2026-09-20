@@ -1,7 +1,8 @@
 # Beating John and Hashcat: Measured Gap Analysis and Roadmap
 
 **Date:** 2026-09-20
-**Status:** Phases 0 and 1 complete. Phase 2 in progress. Phase 3 partly done.
+**Status:** Phases 0 and 1 complete. Phase 2 complete except for unimplemented
+modes. Phase 3 partly done. Phases 4-7 not started.
 **Machine:** Apple M2 (4P+4E), 16 GB, darwin/arm64, Go 1.26.3
 **Comparators:** `hashcat` v7.1.2, `john` 1.9.0-jumbo-1 (ASIMD, MD4:2 MD5:2 interleaving)
 **Binary under test:** built from `d91a400` (`go build ./cmd/hashsmith`)
@@ -349,9 +350,11 @@ paths of the §1 harness produce byte-identical results; `crack ... | head` work
 
 With Phase 1 as the scoreboard, in strict value order:
 
-- [~] The 7 silent NOT-FOUNDs — 2 of 7 fixed (Skype, MSSQL 2000); 5 remain (§1.2) — wrong answers are worse than missing ones
+- [x] The 7 silent NOT-FOUNDs — all fixed (§1.2) — wrong answers are worse than missing ones
 - [x] LUKS v1 parser — **12 modes**, the single biggest rejection cluster
-- [~] Episerver, MongoDB SCRAM done; Oracle 11g, Juniper, AxCrypt 1 done. Werkzeug and 8 singletons remain
+- [x] Every rejection closed: Episerver, MongoDB SCRAM, Oracle 11g, Juniper,
+      AxCrypt 1, Werkzeug, PostgreSQL, Skip32, NetNTLMv2-NT, SNMPv3, Ansible,
+      Bitwarden, Blockchain, NSEC3, RAR5, iTunes
 - [ ] The 83 unimplemented modes, prioritised by engagement frequency. The
       largest coherent families are PKZIP/SecureZIP (10), Lotus Domino (3),
       DPAPI masterkey (4), MS Office <= 2003 (4), Electrum (2), AxCrypt 2 (2),
@@ -451,27 +454,71 @@ resolves a 3-layer nested payload unaided.
 
 ## 8. Progress log
 
-| Date | Commit | Change | CRACKED / 538 |
-|---|---|---|---|
-| 2026-09-20 | — | Baseline, corrected corpus | 418 (77.7%) |
-| 2026-09-20 | 8755a51 | Phase 0: input pipeline | 418 |
-| 2026-09-20 | 6178bcb | hashcat LUKS v1 record (12 modes) | 430 |
-| 2026-09-20 | e86b1ed | 7 record-dialect fixes | 438 |
-| 2026-09-20 | 1a94db8 | Skype and MSSQL 2000 implemented | 439 (81.6%) |
+| Commit | Change | CRACKED / 538 |
+|---|---|---|
+| — | Baseline, corrected corpus | 418 (77.7%) |
+| 8755a51 | Phase 0: input pipeline | 418 |
+| c5749dd, 36ada2d | Phase 1: conformance ratchet | 418 |
+| 6178bcb | hashcat LUKS v1 record (12 modes) | 430 |
+| e86b1ed | 7 record-dialect fixes | 438 |
+| 1a94db8 | Skype and MSSQL 2000 implemented | 439 |
+| fa731b4 | Phase 3: packaging blockers | 439 |
+| 03d9118 | Every remaining silently-wrong format | 444 |
+| aa4ecd2 | Candidate-shape guards, PostgreSQL, Werkzeug | 449 |
+| 5ba8465 | Ansible, Bitwarden, Blockchain record shapes | 452 |
+| ed5a332 | NSEC3, RAR5, iTunes | **455 (84.6%)** |
 
-Figures include the 13-14 VeraCrypt modes classified TIMEOUT by the harness's
-20-second bound, which do crack when unbounded.
+Figures include the 13-14 VeraCrypt modes the harness classifies TIMEOUT under
+its 20-second bound, which crack when unbounded.
 
-Still open in Phase 2:
+### Where the residue now is
 
-- **5 silent NOT-FOUNDs**: MS Office 2010 (9500), MS-AzureSync (12800),
-  KeePass KDBX v2/v3 (13400 and 29700), Windows Phone 8+ (13800)
-- **11 rejections**: PostgreSQL, DNSSEC NSEC3, Blockchain My Wallet, RAR5,
-  iTunes backup >= 10, Skip32, Ansible Vault, Bitwarden, NetNTLMv2 (NT),
-  Werkzeug MD5 and SHA-256
-- **83 unimplemented modes**, largest families: PKZIP/SecureZIP (10),
+| Outcome | Modes |
+|---|---|
+| CRACKED (incl. TIMEOUT) | 455 |
+| **NO-SUCH-MODE** | **83** |
+| REJECTED | **0** |
+| NOT-FOUND | **0** |
+
+Both failure classes that represent *defects* are closed. Every mode Hashsmith
+claims to support accepts hashcat's own canonical record and recovers the
+password hashcat states is correct. What is left is not a defect list — it is
+83 formats that have never been implemented.
+
+### What the burn-down actually found
+
+The interesting result is not the number. It is that **five self-test vectors
+were agreeing with bugs.** Each was produced by Hashsmith against its own
+derivation, so it could only ever confirm that the code still did what it had
+always done:
+
+| Format | What the vector pinned |
+|---|---|
+| `rar5` | Bytes 32..40 of a 40-byte PBKDF2, instead of RAR5's snapshot-and-fold. No RAR5 password could ever have verified. |
+| `mssql2000` | An unsalted SHA-1 that is not MSSQL 2000 at all |
+| `azuresync` | The raw NT hash as the PBKDF2 password, not its uppercase hex in UTF-16LE |
+| `ansible` | A field order neither john nor hashcat emits |
+| `sha256-salt-utf16lepass` (as -m 13800) | Salt-first, where Windows Phone 8+ appends it |
+
+All five are now hashcat's published records with `srcPublished` provenance.
+This is the strongest argument in the document for §6's Phase 1: a self-test
+built from your own output measures self-consistency, not correctness, and it
+stays green through exactly the bugs it exists to catch.
+
+### Still open
+
+- **83 unimplemented modes.** Largest coherent families: PKZIP/SecureZIP (10),
   DPAPI masterkey (4), MS Office <= 2003 (4), ENCsecurity (4), Lotus Domino (3),
-  DiskCryptor (3), Android FDE (3), PDF legacy (3)
+  DiskCryptor (3), Android FDE (3), legacy PDF (3), Electrum (2), AxCrypt 2 (2),
+  Telegram (2), Mozilla key3/key4 (2).
+- **Phase 3 remainder**: release binaries, Docker, shell completions, and
+  switching Homebrew and npm to prebuilt artifacts.
+- **Phases 4-7**: wordlists and rule files, extractors, the GPU decision, and
+  the encoding/decoding work. Untouched.
 
-Phase 3 still needs release binaries, Docker, shell completions and the
-Homebrew/npm switch to prebuilt artifacts. Phases 4 through 7 are untouched.
+### Verified at ed5a332
+
+`go build ./...`, `go vet ./...`, and `go test ./...` all clean. Both GPU build
+tags compile. All four cross-compile targets build. `selftest -slow` passes with
+461 of 461 crackable formats carrying a vector. The pip wheel unpacks to a Go
+tree that compiles.
