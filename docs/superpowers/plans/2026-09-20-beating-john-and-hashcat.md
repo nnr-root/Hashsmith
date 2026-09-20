@@ -635,6 +635,30 @@ Shipping the most plausible reading would have produced a verifier that parses
 every record and rejects every password. Two modes left honestly unsupported
 beat two that claim support and waste a run.
 
+### Android Backup, where the check was stronger than it needed to be
+
+`-m 18900` now cracks, and nothing about the cryptography changed. The
+verifier decrypted hashcat's record correctly all along and then rejected it on
+a structural check that was never the source of its strength.
+
+Android's master-key envelope is a fixed 83 bytes — a 16-byte IV, a 32-byte
+master key and a 32-byte checksum, each behind a length byte — so a 96-byte
+blob always unpads to exactly 83 with thirteen bytes of `0x0d`. The verifier
+additionally demanded the three length tags read 16, 32 and 32. That is true of
+the records `androidbackup2john` writes and NOT of hashcat's example, which
+carries its envelope differently.
+
+What settled it was noticing that hashcat's blob decrypts to **clean padding**
+under the same key derivation. A wrong password decrypts to noise, and noise
+ends in thirteen bytes of `0x0d` with probability 2^-104 — so the password was
+already proven right, and the tag check was rejecting a record it had no
+business rejecting. The check is now the envelope LENGTH, which carries that
+same 2^-104 and no longer encodes one tool's framing. Measured over 4,158 wrong
+passwords: none accepted.
+
+The lesson is narrower than "checks should be loose". The tags added nothing on
+top of 2^-104; they were pure format assumption wearing the clothes of rigour.
+
 ### The 14 timeouts are honest, which took measuring to say
 
 Every mode that times out in the conformance run is VeraCrypt, and only the
@@ -1305,7 +1329,6 @@ are ruled out.
 
 ### Still open
 
-- 67 unimplemented hashcat modes, and 62 missing extractors. Conformance is
-  453 of 538 (84.2%).
+- 66 unimplemented hashcat modes. Conformance is 454 of 538 (84.4%).
 - John's rule corpus reads at 98.4%. The four lines left expand to millions of
   rules each and are refused by design, so this item is closed.
