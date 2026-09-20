@@ -790,7 +790,7 @@ than asserted.
 Before implementing anything, every unsupported mode's published record was run
 through Hashsmith's own auto-detection. Six cracked already — the format was
 there and only the `-m` number was unmapped. Three more were implemented.
-Conformance is now **449 of 538 (83.5%)**, up from 441.
+Conformance is now **450 of 538 (83.6%)**, up from 441.
 
 Three were the **collider #2** modes. Hashcat splits MS Office 97-2003 and PDF
 revision 2 into two stages: `-m 9710`, `-m 9810` and `-m 10410` recover a
@@ -858,6 +858,25 @@ descriptor, and an entry too large to embed. Both still produce a working
 record and both now state the false-accept rate in the label, where it used to
 go unmentioned.
 
+**WBB4 (`-m 33800`) is implemented**, and it needed a new primitive rather than
+a new parser. WoltLab Burning Board 4 stores `bcrypt(bcrypt($pass))` under a
+single salt, and what the outer round hashes is the inner round's FULL crypt
+string, prefix included. Every bcrypt API in the tree answers "does this
+password match?"; this format first needs "what would this password have
+produced?", which no compare-only call can give. `bcryptlane` grew a `Digest`
+method for it, checked character-for-character against `x/crypto/bcrypt` so a
+nested format built on it cannot feed a subtly wrong inner string to the outer
+comparison and simply never crack.
+
+Its record is an ordinary bcrypt crypt string and says nothing about being
+nested, which is the real difficulty. Auto-detection therefore does NOT offer
+it: proposing both readings would double the bcrypt work on every bcrypt
+target — the slowest common format there is — to cover one forum product. That
+is the same trade already made for `keepass-keyfile`, decided the same way and
+recorded in the same place. A test pins that a WBB4 record still detects as
+bcrypt and that plain bcrypt does NOT crack it, which is the trap the catalogue
+entry warns about.
+
 Adding these turned up a distinction the detectability ratchet did not draw.
 That ratchet counts vectors whose own type auto-detection does not offer, and
 every one it covered was an ambiguous record that could in principle become
@@ -881,9 +900,35 @@ weaker with nothing to show for it. A mode already pinned CRACKED now keeps
 that pin through a timeout. Nothing else is preserved: a CRACKED that becomes
 NOT-FOUND or REJECTED is a real regression and still shows up as one.
 
+### A mode NOT implemented, and why that is the result
+
+MultiBit HD (`-m 22700`/`27700`) and Bisq (`-m 29800`) looked like the next
+cheap wins: their records carry scrypt parameters in plain sight —
+`$multibit$3*16384*8*1*<salt>*<data>` — and Hashsmith already has scrypt. They
+are not implemented, and the reason is worth keeping.
+
+What was established, against the published vectors: the 32-byte data field is
+NOT the scrypt output. Deriving a 32-byte key with the record's own N, r and p
+and comparing it directly fails for both. Decrypting the data with that key as
+AES — ECB, and CBC under a zero IV and under bitcoinj's constant IV — produces
+nothing recognisable under any of the six combinations. So the data is
+ciphertext whose key derivation or cipher framing has a step the record does
+not show.
+
+The temptation was to implement the most plausible reading and move on. That
+produces a verifier that parses every record, rejects every password, and
+reports "not found" — the exact failure the 7-Zip refusal existed to prevent,
+and one that a self-test vector would have caught only because hashcat
+publishes one. Two modes left honestly unsupported are better than two modes
+that claim support and waste a user's attack.
+
+What a later attempt should start from: the field layout above is confirmed,
+the scrypt parameters are the record's own, and the six cipher framings listed
+are ruled out.
+
 ### Still open
 
-- 70 unimplemented hashcat modes, and 62 missing extractors.
+- 69 unimplemented hashcat modes, and 62 missing extractors.
 - 17.5% of John's rule corpus: numeric variables (`vVNM`), the memory-substring
   command (`XNMI`), single-crack word-pair selectors (`1`, `2`, `+`), and
   several preprocessor back-reference forms.
