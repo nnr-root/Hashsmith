@@ -703,6 +703,25 @@ The recorded failure is worth keeping in view: a ratchet that flakes gets
 lowered, and a floor lowered to silence a measurement artefact is a floor that
 no longer ratchets anything.
 
+**A second throughput ratchet had the same defect**, found by the same
+full-suite run that confirmed the first fix. `TestBatchFeasibilityProbeBeats­ScalarPath`
+compares the batch dispatch path against the scalar verify closure and read
+0.93x against a 1.20x floor, with nothing slower — it passed three times in a
+row when run alone.
+
+The test already skipped itself under binary translation and under the race
+detector, both for the same stated reason: the comparison is only meaningful
+when its overhead falls evenly across the two paths. A machine doing something
+else is a third way for that to stop being true, and it was not covered. Both
+probes run four goroutines, but the dispatch path also coordinates a batch, so
+contention costs it more.
+
+The fix is the retry-and-keep-the-best loop its own sibling test in the same
+file already used, which is a better answer here than the exclusivity gate:
+it keeps the test running everywhere, and it keeps the mutation check the test
+doubles as. A dispatch path that is genuinely slower than the scalar closure is
+slower on every attempt, so nothing is hidden.
+
 ### The fallback wordlist was long, not useful
 
 The embedded `common.txt` is what a run uses on any machine without a
