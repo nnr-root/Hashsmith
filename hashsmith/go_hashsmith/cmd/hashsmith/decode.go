@@ -26,10 +26,11 @@ func runDecode(args []string) error {
 	shift := fs.Int("s", 3, "shift")
 	key := fs.String("k", "", "key")
 	rails := fs.Int("r", 2, "rails")
+	splitSep := fs.String("split", "", "split each INPUT on this separator (e.g. --split ,)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
-	inputs, err := gatherInputs(fs.Args())
+	inputs, err := gatherInputsOpts(fs.Args(), withSplit(payloadInputOpts(), *splitSep))
 	if err != nil {
 		return err
 	}

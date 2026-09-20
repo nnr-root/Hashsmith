@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"strings"
 )
@@ -26,7 +27,14 @@ func parseArgsFlexible(fs *flag.FlagSet, args []string) error {
 			boolFlags[f.Name] = true
 		}
 	})
-	return fs.Parse(reorderArgs(args, boolFlags))
+	err := fs.Parse(reorderArgs(args, boolFlags))
+	// `--help` / `-h` on a subcommand reaches here as flag.ErrHelp. Every
+	// command builds its FlagSet with io.Discard output, so without this the
+	// user saw "Error: flag: help requested" and an exit status of 2.
+	if errors.Is(err, flag.ErrHelp) {
+		printCommandHelp(fs)
+	}
+	return err
 }
 
 // stringSliceFlag is a flag.Value that accumulates every occurrence of a

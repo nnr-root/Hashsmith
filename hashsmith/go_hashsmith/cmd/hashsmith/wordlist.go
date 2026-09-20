@@ -101,6 +101,17 @@ func readerLooksGzipped(r io.Reader) bool {
 // A missing or unreadable file is simply "not gzip" — this is only used to
 // label the source line, never to decide whether a run may proceed.
 func isGzipFile(path string) bool {
+	// Only a regular file may be inspected. readerLooksGzipped's non-bufio
+	// branch READS the first two bytes, and for a pipe, FIFO or /dev/stdin
+	// those bytes are gone for good: the attack that follows re-opens the same
+	// stream and starts two bytes in, so `printf 'password\n' | hashsmith
+	// crack ... -w /dev/stdin` silently tried "ssword" and reported the
+	// password uncrackable. This label is cosmetic — it names the source in one
+	// status line — and must never cost the run its first candidate.
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return false

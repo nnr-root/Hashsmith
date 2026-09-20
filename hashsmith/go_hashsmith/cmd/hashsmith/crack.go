@@ -574,6 +574,7 @@ func runCrack(args []string) error {
 	single := fs.Bool("single", false, "single-crack mode: before the main attack, try candidates derived from each account's own username (via --username), tried only against that account's hash — with --rules/-r applied; requires --username")
 	force := fs.Bool("force", false, "start an attack even when the feasibility guard estimates it cannot finish (the ETA is still measured and printed)")
 	passwdPath := fs.String("passwd", "", "optional /etc/passwd-format file for --single: also derive candidates from each account's GECOS/real-name field (\"John Smith\" -> jsmith, johns, smithj, john.smith, ...), tried only against that account's hash; unused without --single")
+	splitSep := fs.String("split", "", "split each TARGET on this separator (e.g. --split ,)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -671,7 +672,7 @@ func runCrack(args []string) error {
 		return err
 	}
 
-	rawInputs, err := gatherInputs(fs.Args())
+	rawInputs, err := gatherInputsOpts(fs.Args(), withSplit(targetInputOpts(), *splitSep))
 	if err != nil {
 		return err
 	}
@@ -1573,6 +1574,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		}
 	}
 	if found {
+		emitStdoutResult(cc, targetHash, result.password)
 		clrGreen.Fprint(os.Stderr, "Found: ")
 		if result.ruleLabel != "" {
 			fmt.Fprintf(os.Stderr, "%s (via rule: %s)\n", result.password, result.ruleLabel)
@@ -1673,6 +1675,7 @@ func showPotEntry(cc *crackCtx, origKey, target, outFile string, copyResult bool
 		return false, nil
 	}
 	if pw, ok := cc.pot.lookup(target); ok {
+		emitStdoutResult(cc, target, pw)
 		clrGreen.Fprint(os.Stderr, "Found (potfile): ")
 		fmt.Fprintln(os.Stderr, pw)
 		emitResult(cc, origKey, pw, outFile, copyResult)
@@ -1723,8 +1726,7 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 			target[:strings.IndexByte(target, ':')])
 		target = stripped
 	}
-	skipNormalization := canonicalHashType(explicitType) == "cisco4"
-	if normalized, enc := normalizeHashInput(target); !skipNormalization && enc != "" {
+	if normalized, enc := normalizeHashInput(target); shouldNormalizeTarget(explicitType) && enc != "" {
 		clrYellow.Fprintf(os.Stderr, "Detected %s encoded hash — normalizing to hex\n", enc)
 		target = normalized
 	}
@@ -1736,6 +1738,7 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 	// A hash already in the potfile is reported without re-running the attack.
 	if cc != nil {
 		if pw, ok := cc.pot.lookup(target); ok {
+			emitStdoutResult(cc, target, pw)
 			clrGreen.Fprint(os.Stderr, "Already cracked (potfile): ")
 			fmt.Fprintln(os.Stderr, pw)
 			emitResult(cc, origKey, pw, outFile, copyResult)

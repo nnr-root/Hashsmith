@@ -58,6 +58,7 @@ func runAuto(args []string) error {
 	princeElems := fs.Int("prince-elems", princeDefaultElems, "maximum elements concatenated into one chain (-M prince)")
 	useGPU := fs.Bool("gpu", false, "use GPU brute/mask for md5, md4, ntlm, sha1, or sha256")
 	force := fs.Bool("force", false, "start an attack even when the feasibility guard estimates it cannot finish (the ETA is still measured and printed)")
+	splitSep := fs.String("split", "", "split each TARGET on this separator (e.g. --split ,)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
@@ -68,7 +69,7 @@ func runAuto(args []string) error {
 		return err
 	}
 
-	targets, err := gatherInputs(fs.Args())
+	targets, err := gatherInputsOpts(fs.Args(), withSplit(targetInputOpts(), *splitSep))
 	if err != nil {
 		return err
 	}

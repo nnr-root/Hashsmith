@@ -21,6 +21,8 @@ func main() {
 		switch {
 		case arg == "-N" || arg == "--no-banner":
 			noBanner = true
+		case arg == "-V" || arg == "--version":
+			printVersion()
 		case arg == "-T" || arg == "--theme":
 			if i+1 < len(rawArgs) {
 				i++
@@ -49,6 +51,14 @@ func main() {
 	if cmd == "-h" || cmd == "--help" || cmd == "help" {
 		printHelp()
 		os.Exit(0)
+	}
+	if cmd == "version" {
+		printVersion()
+	}
+
+	// Commands that never build a FlagSet cannot answer --help themselves.
+	if flaglessCommands[cmd] && wantsHelp(rest) {
+		printFlaglessHelp(cmd)
 	}
 
 	renderBanner()
@@ -156,7 +166,7 @@ func printHelp() {
 	fmt.Println("  hashsmith [global-flags] <command> [options]")
 	fmt.Println("  hashsmith <hash | hashfile> [crack-options]   auto-detect the type and crack")
 	fmt.Println()
-	fmt.Println("Commands (INPUT is text, a quoted comma-list \"a, b, c\", or a file with one input per line):")
+	fmt.Println("Commands (INPUT is literal text, \"-\" for standard input, or a file with one input per line):")
 	fmt.Println("  encode        -t <type> [-s shift] [-k key] [-r rails] [-o out] [-c]  INPUT...")
 	fmt.Println("  decode        -t <type> [-s shift] [-k key] [-r rails] [-o out] [-c]  INPUT...")
 	fmt.Println("  hash          -t <type> [-s salt] [-S prefix|suffix] [-e encoding] [-o out] [-c]  INPUT...")
@@ -182,6 +192,7 @@ func printHelp() {
 	fmt.Println()
 	fmt.Println("Global flags:")
 	fmt.Println("  -N, --no-banner   suppress the banner")
+	fmt.Println("  -V, --version     print the version and exit (also: hashsmith version)")
 	fmt.Println("  -T <theme>        accent colour: cyan green magenta blue yellow red white")
 	fmt.Println()
 	fmt.Println("Wordlists:  with no -w, an installed rockyou.txt is auto-detected (gzip is read directly);")

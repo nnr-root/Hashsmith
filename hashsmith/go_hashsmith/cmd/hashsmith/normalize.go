@@ -122,3 +122,22 @@ func normalizeHashInput(target string) (hexHash, format string) {
 
 	return target, "" // unchanged
 }
+
+// shouldNormalizeTarget reports whether automatic Base32/58/62/64 → hex
+// rewriting should run for a target.
+//
+// Normalization exists to help AUTO-DETECTION: when the type is unknown, a
+// Base64-wrapped digest should still be recognized. When the user names the
+// type with -t, they have declared what the bytes are, and rewriting them is
+// the tool overruling its operator.
+//
+// That was not a hypothetical. Hashcat's own canonical descrypt record,
+// 24leDr0hHfb3A, is valid crypt-base64 and also matches the Base32hex pattern;
+// with an explicit `-t descrypt` it was rewritten to hex and then rejected as
+// "invalid descrypt hash", so the one format whose alphabet most overlaps the
+// detectors was unreachable by name. See
+// docs/superpowers/plans/2026-09-20-beating-john-and-hashcat.md §2.1 defect F.
+func shouldNormalizeTarget(explicitType string) bool {
+	t := strings.TrimSpace(explicitType)
+	return t == "" || strings.EqualFold(t, "auto")
+}

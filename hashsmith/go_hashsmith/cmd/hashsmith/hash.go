@@ -40,13 +40,14 @@ func runHash(args []string) error {
 	salt := fs.String("s", "", "salt")
 	saltMode := fs.String("S", "prefix", "salt mode")
 	outEncoding := fs.String("e", "hex", "output encoding")
+	splitSep := fs.String("split", "", "split each INPUT on this separator (e.g. --split ,)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
 	if err := checkSaltMode(*saltMode); err != nil {
 		return err
 	}
-	inputs, err := gatherInputs(fs.Args())
+	inputs, err := gatherInputsOpts(fs.Args(), withSplit(payloadInputOpts(), *splitSep))
 	if err != nil {
 		return err
 	}

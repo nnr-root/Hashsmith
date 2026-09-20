@@ -212,12 +212,15 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 		if stripped := stripShadowUsername(target); stripped != target {
 			target = stripped
 		}
-		if normalized, enc := normalizeHashInput(target); enc != "" {
+		// Same rule as the single-target path: an explicit -t is the user
+		// declaring the format, and auto-normalization must not overrule it.
+		if normalized, enc := normalizeHashInput(target); shouldNormalizeTarget(typ) && enc != "" {
 			target = normalized
 		}
 		// Potfile hits are reported immediately and never re-attacked.
 		if cc != nil {
 			if pw, ok := cc.pot.lookup(target); ok {
+				emitStdoutResult(cc, target, pw)
 				clrGreen.Fprintf(os.Stderr, "  %s  =>  %s  (potfile)\n", target, pw)
 				if u := cc.usernameFor(origKey); u != "" {
 					clrGreen.Fprintf(os.Stderr, "    user: %s\n", u)
@@ -458,6 +461,7 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 	for _, e := range batch {
 		if atomic.LoadInt32(&e.flag) == 1 {
 			foundCount++
+			emitStdoutResult(cc, e.norm, e.password)
 			clrGreen.Fprintf(os.Stderr, "  %s  =>  %s\n", e.norm, e.password)
 			if u := cc.usernameFor(e.orig); u != "" {
 				clrGreen.Fprintf(os.Stderr, "    user: %s\n", u)
