@@ -570,6 +570,7 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		// cryptography in the way to fail first for some other reason.
 		{"plaintext", "hashcat", "", "hashcat", srcPublished},
 		{"ecryptfs", "hashcat", "", "$ecryptfs$0$1$4207883745556753$567daa975114206c", srcPublished},
+		{"wbb4", "hashcat", "", "$2a$08$hashcatohohohohohohohegk6PN.SFkoXxDIkacAGKFN9AF8nx.Hi", srcPublished},
 		{"winzip", "hashcat", "", "$zip2$*0*1*0*0675369741458183*5dc5*0**36b85538918416712640*$/zip2$", srcPublished},
 
 		// ── Hashcat OpenPGP protected secret-key records ──────────────────────

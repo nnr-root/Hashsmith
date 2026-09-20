@@ -88,7 +88,15 @@ func TestRecognitionAccuracy(t *testing.T) {
 //     AES-KDF on every KeePass target, to cover a mode that applies only when
 //     a database's sole credential is its keyfile. It is reachable with
 //     -t keepass-keyfile or -m 29700.
-const detectableFloor = 196
+//
+//   - wbb4 (Hashcat 33800). WoltLab Burning Board 4 stores
+//     bcrypt(bcrypt($pass)) in an ordinary bcrypt crypt string, so its record
+//     is byte-identical in shape to a plain bcrypt one and nothing in it can
+//     choose between the two readings. Offering it would double the bcrypt
+//     work on EVERY bcrypt target — the slowest common format there is — to
+//     cover one forum product. The same trade as keepass-keyfile, and decided
+//     the same way. It is reachable with -t wbb4 or -m 33800.
+const detectableFloor = 197
 
 // undetectableByDesign names types that must NEVER be reachable from
 // auto-detection, and so are excluded from the count above rather than

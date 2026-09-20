@@ -137,6 +137,14 @@ func (h *Hasher) Run(pw [][]byte, out []bool) {
 // compares against the target digest. Shared by the single-lane path and every
 // generated width, so the comparison rule lives in exactly one place.
 func (h *Hasher) finish(c *state) bool {
+	buf := magicCipher(c)
+	// Only 23 of the 24 bytes are encoded, matching every C implementation.
+	return subtle.ConstantTimeCompare(buf[:23], h.digest[:]) == 1
+}
+
+// magicCipher runs the 64 x 3 magic-data encryptions on a fully scheduled
+// state and returns the 24-byte result. finish compares it; Digest encodes it.
+func magicCipher(c *state) [24]byte {
 	var buf [24]byte
 	copy(buf[:], magicCipherData)
 	for i := 0; i < 24; i += 8 {
@@ -148,8 +156,38 @@ func (h *Hasher) finish(c *state) bool {
 		buf[i], buf[i+1], buf[i+2], buf[i+3] = byte(l>>24), byte(l>>16), byte(l>>8), byte(l)
 		buf[i+4], buf[i+5], buf[i+6], buf[i+7] = byte(r>>24), byte(r>>16), byte(r>>8), byte(r)
 	}
-	// Only 23 of the 24 bytes are encoded, matching every C implementation.
-	return subtle.ConstantTimeCompare(buf[:23], h.digest[:]) == 1
+	return buf
+}
+
+// Digest hashes pw under THIS target's salt and cost and returns the 31
+// characters that would follow the "$2?$cc$<salt>" prefix of a crypt string —
+// that is, the target's own trailing field, recomputed for a different
+// password.
+//
+// Everything else here answers "does this password match?". This answers
+// "what would this password have produced?", which is a different question and
+// is the one a nested-bcrypt format asks. WoltLab Burning Board 4 stores
+// bcrypt(bcrypt(password)) under a single salt, so checking a candidate means
+// producing the inner crypt string before the outer comparison can happen at
+// all, and no compare-only API can do it.
+//
+// It is deliberately NOT constant-time: it returns the digest rather than a
+// verdict, so there is nothing secret in the comparison to protect, and the
+// caller does the constant-time compare.
+func (h *Hasher) Digest(pw []byte) string {
+	ckey := make([]byte, len(pw)+1)
+	copy(ckey, pw)
+
+	c := newSaltedState(ckey, h.csalt[:])
+	if c == nil {
+		return ""
+	}
+	for i, rounds := uint64(0), uint64(1)<<uint(h.cost); i < rounds; i++ {
+		expandKey(ckey, c)
+		expandKey(h.csalt[:], c)
+	}
+	buf := magicCipher(c)
+	return bcEncoding.EncodeToString(buf[:23])
 }
 
 func (h *Hasher) one(pw []byte) bool {
