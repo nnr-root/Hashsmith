@@ -157,7 +157,67 @@ func TestZipAESRoundTrip(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("7z could not build a WinZip AES archive: %v\n%s", err, out)
 	}
+
+	// The record must be the AUTHENTICATED form. The extractor used to emit
+	// $zipaes256$ with only the two-byte password verifier, which cracks this
+	// test's archive perfectly well and accepts one wrong password in 65,536
+	// on a real run. A round trip over a single known password cannot tell the
+	// two apart, so the shape is asserted separately from the behaviour.
+	recs := extractRecords(t, bin, "zip2smith", archive)
+	if !strings.HasPrefix(recs[0], "$zip2$") {
+		t.Errorf("zip2smith produced a verifier-only record for an archive whose size is known; "+
+			"the authentication code was available and would have made it exact:\n%s", recs[0])
+	}
+
 	assertRoundTrip(t, bin, "zip2smith", archive, password)
+}
+
+// TestWinZipRecordIsHashcatCompatible checks the claim the extractor's own
+// label makes: that its $zip2$ record is hashcat's, not merely shaped like it.
+//
+// As with 7-Zip, Hashsmith cracking its own record proves only that its
+// extractor and its verifier agree, which they would even if both were wrong
+// about the format. Running hashcat over the same bytes is the only check that
+// reaches outside that agreement.
+func TestWinZipRecordIsHashcatCompatible(t *testing.T) {
+	sevenZip := requireTool(t, "7z")
+	hashcat := requireTool(t, "hashcat")
+	if testing.Short() {
+		t.Skip("running hashcat takes tens of seconds")
+	}
+	bin := buildTestBinary(t)
+	dir := t.TempDir()
+
+	payload := filepath.Join(dir, "secret.txt")
+	if err := os.WriteFile(payload, []byte(strings.Repeat("aes payload. ", 64)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(dir, "hc-aes.zip")
+	const password = "correct horse"
+	if out, err := exec.Command(sevenZip, "a", "-tzip", "-mem=AES256",
+		"-p"+password, archive, payload).CombinedOutput(); err != nil {
+		t.Skipf("7z could not build a WinZip AES archive: %v\n%s", err, out)
+	}
+
+	recs := extractRecords(t, bin, "zip2smith", archive)
+	hashFile := filepath.Join(dir, "wz.hash")
+	if err := os.WriteFile(hashFile, []byte(recs[0]+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wordlist := filepath.Join(dir, "words.txt")
+	if err := os.WriteFile(wordlist, []byte("nope\n"+password+"\nalso-nope\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd2 := exec.Command(hashcat, "-m", "13600", "-a", "0",
+		hashFile, wordlist, "--potfile-disable", "--quiet", "--self-test-disable")
+	cmd2.Stdin = strings.NewReader("")
+	cmd2.Env = append(os.Environ(), "HOME="+dir)
+	out, _ := cmd2.CombinedOutput()
+	if !strings.Contains(string(out), ":"+password) {
+		t.Errorf("hashcat did not crack the record Hashsmith calls hashcat -m 13600 compatible:\n%s\n%s",
+			recs[0], out)
+	}
 }
 
 // 7-Zip round trip, over every coder chain 7z writes for a password.

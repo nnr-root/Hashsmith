@@ -342,7 +342,11 @@ func compatibilityHashAliasSeed() map[string]string {
 		"22600": "telegram-desktop", "24500": "telegram-desktop",
 		"23100": "macos-keychain",
 		"99999": "plaintext", "12200": "ecryptfs",
-		"pfx": "pfx", "p12": "pfx", "pkcs12": "pfx",
+		// zip2john's WinZip AES record. The same algorithm the $zipaes*
+		// records use, with the key size in a field rather than in the tag —
+		// and with an authentication code the short form has no room for.
+		"13600": "winzip",
+		"pfx":   "pfx", "p12": "pfx", "pkcs12": "pfx",
 		"5200": "pwsafe", "pwsafe": "pwsafe",
 
 		// ── John the Ripper: raw digests ──────────────────────────────────────────

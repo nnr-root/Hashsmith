@@ -149,7 +149,7 @@ func scanForEncryptedEntry(r io.ReadSeeker) (*zipHashResult, error) {
 
 		// WinZip AES?
 		if ae := findAESExtra(extra); ae != nil {
-			return parseWinZipAES(r, fname, ae)
+			return parseWinZipAES(r, fname, ae, lh)
 		}
 
 		// Fall through to ZipCrypto.
@@ -200,7 +200,35 @@ func aesKeySaltLen(strength uint8) (keyLen, saltLen int, err error) {
 // WinZip AES data layout (RFC / APPNOTE §7.2):
 //
 //	[salt_length bytes] [2 bytes password verifier] [encrypted payload] [10 bytes HMAC-SHA1]
-func parseWinZipAES(r io.Reader, filename string, ae *aesExtraField) (*zipHashResult, error) {
+//
+// maxWinZipEmbeddedData bounds how much ciphertext goes into a record. The
+// record is a line in a hash file, and a WinZip entry can be gigabytes.
+const maxWinZipEmbeddedData = 1 << 20
+
+// parseWinZipAES reads a WinZip AES entry and builds the strongest record the
+// entry actually supports.
+//
+// The entry's encrypted blob is laid out as
+//
+//	[salt] [2-byte password verifier] [ciphertext] [10-byte authentication code]
+//
+// and the short $zipaes<bits>$ record keeps only the first two of those. That
+// is enough to attack and not enough to be sure: the verifier is two bytes, so
+// one wrong password in 65,536 passes it. Over a rockyou-sized run that is
+// thousands of reported passwords that do not open the archive, and the user
+// has no way to tell which.
+//
+// So when the entry's size is known and its ciphertext is small enough to
+// carry, the record written is zip2john's $zip2$ form, which includes the
+// authentication code — ten bytes of HMAC-SHA1 over the ciphertext, taking the
+// false-accept rate to one in 2^80. That record is also what hashcat reads as
+// -m 13600, so it travels.
+//
+// Two cases fall back to the short form, and both say so rather than failing:
+// an entry whose local header declares no size (bit 3 of the flags puts the
+// sizes in a trailing data descriptor instead) and an entry too large to
+// embed.
+func parseWinZipAES(r io.Reader, filename string, ae *aesExtraField, lh localFileHeader) (*zipHashResult, error) {
 	keyLen, saltLen, err := aesKeySaltLen(ae.Strength)
 	_ = keyLen
 	if err != nil {
@@ -218,12 +246,55 @@ func parseWinZipAES(r io.Reader, filename string, ae *aesExtraField) (*zipHashRe
 	}
 
 	bits := int(ae.Strength)*64 + 64 // 1→128, 2→192, 3→256
+
+	// overhead is everything in the blob that is not ciphertext.
+	//
+	// The arithmetic is int64 because CompressedSize is a uint32 that reaches
+	// 4 GiB, which overflows a 32-bit int — and 0xFFFFFFFF is ZIP64's "the
+	// real size is in the extra field" sentinel, which would then read as a
+	// negative length. At int64 it simply exceeds the embedding cap and falls
+	// through to the short form, which is the right answer for a ZIP64 entry
+	// anyway.
+	overhead := int64(saltLen) + 2 + 10
+	sizeKnown := lh.Flags&0x08 == 0 && int64(lh.CompressedSize) >= overhead
+	if sizeKnown {
+		dataLen := int64(lh.CompressedSize) - overhead
+		if dataLen <= maxWinZipEmbeddedData {
+			data := make([]byte, dataLen)
+			if _, err := io.ReadFull(r, data); err != nil {
+				return nil, fmt.Errorf("cannot read AES ciphertext: %w", err)
+			}
+			auth := make([]byte, 10)
+			if _, err := io.ReadFull(r, auth); err != nil {
+				return nil, fmt.Errorf("cannot read AES authentication code: %w", err)
+			}
+			hash := fmt.Sprintf("$zip2$*0*%d*0*%s*%s*%x*%s*%s*$/zip2$",
+				ae.Strength,
+				hex.EncodeToString(salt),
+				hex.EncodeToString(verif),
+				dataLen,
+				hex.EncodeToString(data),
+				hex.EncodeToString(auth))
+			return &zipHashResult{
+				hashType: "winzip",
+				hash:     hash,
+				filename: filename,
+				encLabel: fmt.Sprintf("WinZip AES-%d (authentication-code checked, hashcat -m 13600)", bits),
+			}, nil
+		}
+	}
+
 	hashType := fmt.Sprintf("zipaes%d", bits)
 	hash := fmt.Sprintf("$%s$%s$%s",
 		hashType,
 		hex.EncodeToString(salt),
 		hex.EncodeToString(verif))
-	label := fmt.Sprintf("WinZip AES-%d", bits)
+	why := "its entry is larger than this record can carry"
+	if !sizeKnown {
+		why = "its local header declares no size"
+	}
+	label := fmt.Sprintf("WinZip AES-%d (password-verifier only, because %s — "+
+		"roughly 1 wrong password in 65,536 will be reported as correct)", bits, why)
 
 	return &zipHashResult{
 		hashType: hashType,

@@ -115,6 +115,8 @@ func officePrototypes() []hashid.Prototype {
 			},
 			Prevalence: 15, Rationale: "Telegram Desktop's tdata local-storage encryption has protected the local session by default since Telegram Desktop's release, making it the more commonly recovered of the two Telegram record shapes here",
 		},
+		hasPrefixProto("$zip2$", "WinZip AES archive (zip2john)", 30,
+			"WinZip AES is the encryption every modern ZIP tool writes when asked for a password, so its records are among the most common archive targets in casework", "winzip"),
 		hasPrefixProto("$ecryptfs$", "eCryptfs passphrase signature", 12,
 			"eCryptfs guarded per-user home directories on Ubuntu by default until 18.04 replaced it with LUKS, so its signatures turn up in forensics of older installs rather than current ones", "ecryptfs"),
 		hasPrefixProto("$signal$", "Signal local master password", 15,

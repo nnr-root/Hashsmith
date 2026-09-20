@@ -478,6 +478,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 		}},
 		{"Encrypted containers (extract with the matching *2smith command)", [][2]string{
 			{"zipcrypto", "Traditional PKWARE ZipCrypto"},
+			{"winzip", "WinZip AES from zip2john ($zip2$…, any key size, authentication-code checked), Hashcat 13600"},
 			{"zipaes128", "WinZip AES-128"},
 			{"zipaes192", "WinZip AES-192"},
 			{"zipaes256", "WinZip AES-256"},

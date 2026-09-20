@@ -2643,7 +2643,10 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyMSSQL2012(targetHash, candidate)
 	case "zipcrypto":
 		return verifyZipCrypto(targetHash, candidate)
-	case "zipaes128", "zipaes192", "zipaes256":
+	case "zipaes128", "zipaes192", "zipaes256", "winzip":
+		// winzip is the $zip2$ record from zip2john, which names its key size
+		// in a field instead of in the type, so one type covers all three
+		// sizes where the $zipaes*$ short form needs three.
 		return verifyZipAES(targetHash, candidate)
 	case "7z":
 		return verify7z(targetHash, candidate)
@@ -2909,6 +2912,9 @@ func verifyZipCrypto(targetHash, candidate string) (bool, error) {
 //	$zipaes192$<salt_hex>$<verif_hex>  (12-byte salt, keyLen=24)
 //	$zipaes256$<salt_hex>$<verif_hex>  (16-byte salt, keyLen=32)
 func verifyZipAES(targetHash, candidate string) (bool, error) {
+	if strings.HasPrefix(targetHash, "$zip2$") {
+		return verifyWinZipAESRecord(targetHash, candidate)
+	}
 	var keyLen int
 	var rest string
 	switch {
@@ -2939,6 +2945,82 @@ func verifyZipAES(targetHash, candidate string) (bool, error) {
 	dkLen := 2*keyLen + 2
 	dk := pbkdf2.Key([]byte(candidate), salt, 1000, dkLen, sha1.New)
 	return dk[2*keyLen] == expectedVerif[0] && dk[2*keyLen+1] == expectedVerif[1], nil
+}
+
+// verifyWinZipAESRecord checks zip2john's WinZip AES record, which is what
+// hashcat reads as -m 13600.
+//
+//	$zip2$*<type>*<mode>*<magic>*<salt>*<verifier>*<len>*<data>*<authcode>*$/zip2$
+//
+// The algorithm is the one verifyZipAES already implements — PBKDF2-HMAC-SHA1
+// over the salt for 1000 iterations, yielding an AES key, an HMAC key and a
+// two-byte verifier — so this function is a record reader, not a second
+// cryptosystem. Two things make it worth having beyond the mode number.
+//
+// First, the record carries its key size in a field rather than in its tag, as
+// the $zipaes128$/$zipaes192$/$zipaes256$ form does. Mode 1, 2 and 3 mean
+// AES-128, 192 and 256, and the salt is half the key length — 8, 12 or 16
+// bytes. Getting that pairing wrong yields a verifier that never matches, so
+// it was settled against hashcat's published vector rather than assumed.
+//
+// Second, it carries an AUTHENTICATION CODE: the first ten bytes of
+// HMAC-SHA1 over the encrypted data under the derived HMAC key. The two-byte
+// verifier alone accepts one wrong password in 65,536, which over a
+// rockyou-sized run is several false hits; the authentication code closes
+// that to one in 2^80. When a record has one it is checked, and the verifier
+// becomes the cheap gate in front of it rather than the whole answer.
+func verifyWinZipAESRecord(targetHash, candidate string) (bool, error) {
+	body := strings.TrimSuffix(strings.TrimPrefix(targetHash, "$zip2$"), "$/zip2$")
+	f := strings.Split(strings.Trim(body, "*"), "*")
+	if len(f) < 8 {
+		return false, errors.New("invalid zip2 field count")
+	}
+	modeField, saltHex, verifHex, dataHex, authHex := f[1], f[3], f[4], f[6], f[7]
+
+	var keyLen int
+	switch modeField {
+	case "1":
+		keyLen = 16
+	case "2":
+		keyLen = 24
+	case "3":
+		keyLen = 32
+	default:
+		return false, errors.New("invalid zip2 AES mode " + modeField + " (want 1, 2 or 3)")
+	}
+	salt, err := hex.DecodeString(saltHex)
+	if err != nil {
+		return false, errors.New("invalid zip2 salt")
+	}
+	if len(salt) != keyLen/2 {
+		return false, fmt.Errorf("zip2 salt is %d bytes; AES-%d uses %d", len(salt), keyLen*8, keyLen/2)
+	}
+	verif, err := hex.DecodeString(verifHex)
+	if err != nil || len(verif) != 2 {
+		return false, errors.New("invalid zip2 password verifier")
+	}
+	data, err := hex.DecodeString(dataHex)
+	if err != nil {
+		return false, errors.New("invalid zip2 encrypted data")
+	}
+	auth, err := hex.DecodeString(authHex)
+	if err != nil || (len(auth) != 0 && len(auth) != 10) {
+		return false, errors.New("invalid zip2 authentication code")
+	}
+
+	dk := pbkdf2.Key([]byte(candidate), salt, 1000, 2*keyLen+2, sha1.New)
+	if dk[2*keyLen] != verif[0] || dk[2*keyLen+1] != verif[1] {
+		return false, nil
+	}
+	if len(auth) == 0 {
+		// No authentication code: the two-byte verifier is all the record
+		// offers, so say yes on it and accept the 1-in-65,536 false rate that
+		// comes with the record rather than with this code.
+		return true, nil
+	}
+	mac := hmac.New(sha1.New, dk[keyLen:2*keyLen])
+	mac.Write(data)
+	return equalConst(mac.Sum(nil)[:10], auth), nil
 }
 
 func verifyScrypt(targetHash, candidate string) (bool, error) {
