@@ -27,6 +27,8 @@ import (
 // realistic: mixed case, digits, punctuation, a word short enough for the
 // length rejections to bite, and one long enough that they do not.
 var johnProbeWords = []string{
+	// Multi-word entries, so the find-and-position rules have somewhere to point.
+	"one two three four five", "ab cd",
 	// Shape coverage.
 	"Crack96", "password", "admin", "hi", "Crack", "a", "P@ssw0rd!", "MiXeD",
 	// Grammar-command branches, each of which john treats differently and
@@ -123,6 +125,13 @@ func TestJohnRuleCommandsMatchJohnItself(t *testing.T) {
 		// the word as it was before `d` doubled it.
 		"X0z0", "X011", "Xm1z", "dX0zz", "<4X011X113X215",
 		"X002", "X1z0", "X0zz", "X099", "l M u X0z0", "M l X0zz",
+		// Numeric variables and `p`, the position matched by the last / or %.
+		// Dp is the probe that shows WHERE p points: %4[ ] Dp must delete the
+		// fourth space and not the first, which is the whole reason
+		// john.conf's `%N[ ] … vbpa Tb` capitalises the right word.
+		"/[ ] Dp", "%2[ ] Dp", "%3[ ] Dp", "%4[ ] Dp", "/[t] Dp",
+		"/[ ] va01 vbpa Tb", "val1 oay", "/[ ] vbp0 Db",
+		"%2[ ] va01 vbpa Tb", "va01 vbla Tb", "val1 Da",
 
 		// Preprocessor. These are the reason the corpus figure moved, and
 		// every one of them is a shape john.conf itself writes.
@@ -220,7 +229,7 @@ func dedupSorted(in []string) []string {
 // numeric variables (vVNM), its memory-substring command (XNMI), and its
 // single-crack word-pair selectors (1, 2, +).
 func TestJohnCorpusCoverageDoesNotRegress(t *testing.T) {
-	const floor = 0.84 // 84.9% measured; the floor lags so a small corpus change cannot fail it
+	const floor = 0.94 // 94.8% measured; the floor lags so a small corpus change cannot fail it
 
 	confPaths := []string{
 		"/opt/homebrew/share/john/john.conf",

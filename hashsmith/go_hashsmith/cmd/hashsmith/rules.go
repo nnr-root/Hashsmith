@@ -112,7 +112,41 @@ type ruleProgram struct {
 	// belongs to a single execution, so apply owns them rather than a
 	// closure.
 	extractAt map[int]xExtract
+	// runtimeAt marks the ops whose operands are not constants but John's
+	// numeric variables, its `p` (the position matched by the last / or %),
+	// or the current length. Only a rule that actually uses one pays for
+	// this: every constant-operand command stays an ordinary closure.
+	runtimeAt map[int]runtimeOp
+	// findsAt marks the / and % ops, which record into `p` the position they
+	// matched, so a later command can act on it.
+	findsAt map[int]findOp
 }
+
+// numSrc is where one numeric operand comes from.
+type numSrc struct {
+	kind byte // 'c' constant, 'v' variable, 'p' last-found position, 'l' length, 'm' length-1
+	val  int  // the constant, or the variable index for 'v'
+}
+
+// runtimeOp is a command whose operands are only known while a word is being
+// processed. The command letter selects what apply does with them.
+type runtimeOp struct {
+	cmd    byte   // 'v', 'T', 'D', 'o'
+	target int    // for 'v': the variable being assigned
+	a, b   numSrc // operands
+	lit    byte   // for 'o': the replacement character
+}
+
+// findOp is a / or % command, which both rejects and records a position.
+type findOp struct {
+	match func(byte) bool // nil when matching a literal byte
+	lit   byte
+	count int // %N wants the Nth match; / wants the first
+}
+
+// johnNumVars is the number of John's user-defined numeric variables, a
+// through k.
+const johnNumVars = 11
 
 // xExtract is one XNMI command: take up to length characters of the memorised
 // word starting at start, and insert them into the current word at insert.
@@ -130,6 +164,10 @@ const xMemLast = -1
 // xToEnd stands for John's `z`, "infinite" position or length. Any value past
 // the word's length behaves the same way, so one large sentinel covers it.
 const xToEnd = 1 << 20
+
+// xFoundPos is the start value for John's `p`, the position matched by the
+// last / or % command.
+const xFoundPos = -2
 
 // maxRuleCandidate is the largest candidate a rule may build. hashcat carries
 // a fixed password buffer (RP_PASSWORD_SIZE, 256) and skips any command whose
@@ -157,6 +195,24 @@ func (p ruleProgram) apply(word string) (string, bool) {
 	if len(p.memoryAt) > 0 || len(p.extractAt) > 0 {
 		memo = []byte(word)
 	}
+	// John's numeric state. `p` starts at 0 and is set by / and %; the
+	// variables start at 0 and are set by v.
+	var vars [johnNumVars]int
+	foundPos := 0
+	resolve := func(src numSrc, cur []byte) int {
+		switch src.kind {
+		case 'v':
+			return vars[src.val]
+		case 'p':
+			return foundPos
+		case 'l':
+			return len(cur)
+		case 'm':
+			return len(cur) - 1
+		default:
+			return src.val
+		}
+	}
 	for idx, op := range p.ops {
 		if ref, isLen := p.lengthRefAt[idx]; isLen {
 			want := origLen + ref.offset
@@ -183,13 +239,74 @@ func (p ruleProgram) apply(word string) (string, bool) {
 			}
 			continue
 		}
+		if f, isFind := p.findsAt[idx]; isFind {
+			// / and % both reject AND record where they matched, which is
+			// John's `p`. They are handled here rather than in a closure
+			// because that recorded position belongs to one execution.
+			seen, at := 0, -1
+			for i, b := range r {
+				hit := f.lit == b
+				if f.match != nil {
+					hit = f.match(b)
+				}
+				if hit {
+					seen++
+					if seen >= f.count {
+						at = i
+						break
+					}
+				}
+			}
+			if at < 0 {
+				return "", false
+			}
+			foundPos = at
+			continue
+		}
+		if op, isRuntime := p.runtimeAt[idx]; isRuntime {
+			switch op.cmd {
+			case 'v':
+				// vVNM: update the length first — John documents that `l` is
+				// refreshed by this command and is usable by it — then
+				// assign N-M. Intermediate values may legitimately be
+				// negative, so nothing is clamped here.
+				vars[op.target] = resolve(op.a, r) - resolve(op.b, r)
+			case 'T':
+				at := resolve(op.a, r)
+				if at >= 0 && at < len(r) {
+					out := append([]byte{}, r...)
+					out[at] = toggleByte(out[at])
+					r = out
+				}
+			case 'D':
+				at := resolve(op.a, r)
+				if at >= 0 && at < len(r) {
+					out := append([]byte{}, r[:at]...)
+					r = append(out, r[at+1:]...)
+				}
+			case 'o':
+				at := resolve(op.a, r)
+				if at >= 0 && at < len(r) {
+					out := append([]byte{}, r...)
+					out[at] = op.lit
+					r = out
+				}
+			}
+			continue
+		}
 		if x, isExtract := p.extractAt[idx]; isExtract {
 			start := x.start
-			if start == xMemLast {
+			switch {
+			case start == xMemLast:
 				start = len(memo) - 1
 				if start < 0 {
 					start = 0
 				}
+			case start == xFoundPos:
+				start = foundPos
+			}
+			if start < 0 {
+				start = 0
 			}
 			if start > len(memo) {
 				start = len(memo)
@@ -248,6 +365,8 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 	var memoryAt map[int]byte
 	var lengthRefAt map[int]lengthRef
 	var extractAt map[int]xExtract
+	var runtimeAt map[int]runtimeOp
+	var findsAt map[int]findOp
 	if john {
 		line = stripJohnRejectFlags(line)
 	}
@@ -330,6 +449,53 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 		return p, nil
 	}
 
+	// runtimeOperandNext reports whether the operand about to be read needs
+	// run-time state — a variable a-k, or John's `p`. It does not consume
+	// anything, so a command can keep its fast constant-operand path and take
+	// the slower one only when a rule actually uses a variable.
+	//
+	// `l` and `m` are deliberately NOT listed: posArg already resolves those
+	// for the commands that accept them, and re-routing them here would
+	// change behaviour that is measured and correct.
+	runtimeOperandNext := func() bool {
+		if !john || i >= n {
+			return false
+		}
+		ch := line[i]
+		return (ch >= 'a' && ch <= 'k') || ch == 'p'
+	}
+
+	// numArg reads one numeric operand in John's full vocabulary: a constant,
+	// a variable a-k, `p` (the position matched by the last / or %), `l` (the
+	// current length) or `m` (one less). It reports whether the operand needs
+	// run-time state, so a command with only constant operands stays an
+	// ordinary closure and pays nothing.
+	numArg := func(cmd byte, what string) (numSrc, error) {
+		ch, ok := arg()
+		if !ok {
+			return numSrc{}, fmt.Errorf("command %q is missing its %s", string(cmd), what)
+		}
+		if ch >= 'a' && ch <= 'k' {
+			return numSrc{kind: 'v', val: int(ch - 'a')}, nil
+		}
+		switch ch {
+		case 'p':
+			return numSrc{kind: 'p'}, nil
+		case 'l':
+			return numSrc{kind: 'l'}, nil
+		case 'm':
+			return numSrc{kind: 'm'}, nil
+		}
+		if v, isPos := rulePos(ch); isPos {
+			return numSrc{kind: 'c', val: v}, nil
+		}
+		if v, isLen := johnLengthValue(ch); isLen {
+			return numSrc{kind: 'c', val: v}, nil
+		}
+		return numSrc{}, fmt.Errorf("command %q: %s %q is not a number, a variable a-k, or "+
+			"one of John's p, l or m", string(cmd), what, string(ch))
+	}
+
 	// xArg reads one operand of the X command. It is deliberately stricter
 	// than posArg: X refuses an operand it cannot resolve rather than
 	// clamping it, because a clamped START silently extracts nothing.
@@ -346,13 +512,17 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 			return xToEnd, nil
 		case 'm':
 			return xMemLast, nil
+		case 'p':
+			if what == "length" {
+				return 0, errors.New("command 'X': a length cannot be 'p'")
+			}
+			return xFoundPos, nil
 		}
 		if v, isLen := johnLengthValue(ch); isLen {
 			return v, nil
 		}
-		return 0, fmt.Errorf("command 'X': %s %q resolves from run-time state Hashsmith does not "+
-			"track (John's 'p' is the position of the last character found by / or %%); "+
-			"the rule is refused rather than read as a position past the end", what, string(ch))
+		return 0, fmt.Errorf("command 'X': %s %q is not a number, 'z', 'm' or 'p'; the rule is "+
+			"refused rather than read as a position past the end", what, string(ch))
 	}
 
 	for i < n {
@@ -503,6 +673,18 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 				return out, true
 			})
 		case 'T':
+			if runtimeOperandNext() {
+				src, err := numArg('T', "position")
+				if err != nil {
+					return ruleProgram{}, err
+				}
+				if runtimeAt == nil {
+					runtimeAt = map[int]runtimeOp{}
+				}
+				runtimeAt[len(ops)] = runtimeOp{cmd: 'T', a: src}
+				ops = append(ops, func(r []byte) ([]byte, bool) { return r, true })
+				break
+			}
 			p, err := posArg(c)
 			if err != nil {
 				return ruleProgram{}, err
@@ -516,6 +698,18 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 				return out, true
 			})
 		case 'D':
+			if runtimeOperandNext() {
+				src, err := numArg('D', "position")
+				if err != nil {
+					return ruleProgram{}, err
+				}
+				if runtimeAt == nil {
+					runtimeAt = map[int]runtimeOp{}
+				}
+				runtimeAt[len(ops)] = runtimeOp{cmd: 'D', a: src}
+				ops = append(ops, func(r []byte) ([]byte, bool) { return r, true })
+				break
+			}
 			p, err := posArg(c)
 			if err != nil {
 				return ruleProgram{}, err
@@ -604,9 +798,15 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 				return ruleProgram{}, err
 			}
 			if isClass {
-				ops = append(ops, func(r []byte) ([]byte, bool) {
-					return r, countClass(r, match) >= cnt
-				})
+				// The Nth match is where `p` lands: john.conf's
+				// `%4[ ] … vbpa Tb` capitalises the word after the FOURTH
+				// space, which only works if % records that space's position
+				// rather than the first one's.
+				if findsAt == nil {
+					findsAt = map[int]findOp{}
+				}
+				findsAt[len(ops)] = findOp{match: match, count: cnt}
+				ops = append(ops, func(r []byte) ([]byte, bool) { return r, true })
 				break
 			}
 			x, ok := arg()
@@ -614,9 +814,11 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 				return ruleProgram{}, errors.New("command '%' needs a character (%NX)")
 			}
 			xr := x
-			ops = append(ops, func(r []byte) ([]byte, bool) {
-				return r, countByte(r, xr) >= cnt
-			})
+			if findsAt == nil {
+				findsAt = map[int]findOp{}
+			}
+			findsAt[len(ops)] = findOp{lit: xr, count: cnt}
+			ops = append(ops, func(r []byte) ([]byte, bool) { return r, true })
 		case 'A':
 			// AN"str" — insert a string at position N. John only; hashcat has
 			// the single-character iNX instead. The character after the
@@ -699,6 +901,22 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 				return r, true
 			})
 		case 'o':
+			if runtimeOperandNext() {
+				src, err := numArg('o', "position")
+				if err != nil {
+					return ruleProgram{}, err
+				}
+				x, ok := arg()
+				if !ok {
+					return ruleProgram{}, errors.New("command 'o' needs a character (oNX)")
+				}
+				if runtimeAt == nil {
+					runtimeAt = map[int]runtimeOp{}
+				}
+				runtimeAt[len(ops)] = runtimeOp{cmd: 'o', a: src, lit: x}
+				ops = append(ops, func(r []byte) ([]byte, bool) { return r, true })
+				break
+			}
 			p, err := posArg(c)
 			if err != nil {
 				return ruleProgram{}, err
@@ -882,11 +1100,24 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 			xr := x
 			ops = append(ops, func(r []byte) ([]byte, bool) { return r, !containsByte(r, xr) })
 		case '/':
+			// /X rejects unless the word contains X, and in John it ALSO
+			// records where it matched — that position is John's `p`, which
+			// `v` and the position commands read. In hashcat's dialect there
+			// is no `p`, so the rejection stays an ordinary closure there and
+			// only John's pays for the bookkeeping.
 			match, isClass, err := classArg('/')
 			if err != nil {
 				return ruleProgram{}, err
 			}
 			if isClass {
+				if john {
+					if findsAt == nil {
+						findsAt = map[int]findOp{}
+					}
+					findsAt[len(ops)] = findOp{match: match, count: 1}
+					ops = append(ops, func(r []byte) ([]byte, bool) { return r, true })
+					break
+				}
 				ops = append(ops, func(r []byte) ([]byte, bool) { return r, containsClass(r, match) })
 				break
 			}
@@ -895,6 +1126,14 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 				return ruleProgram{}, errors.New("command '/' needs a character (/X)")
 			}
 			xr := x
+			if john {
+				if findsAt == nil {
+					findsAt = map[int]findOp{}
+				}
+				findsAt[len(ops)] = findOp{lit: xr, count: 1}
+				ops = append(ops, func(r []byte) ([]byte, bool) { return r, true })
+				break
+			}
 			ops = append(ops, func(r []byte) ([]byte, bool) { return r, containsByte(r, xr) })
 		case 'O':
 			// ONM — omit M characters starting at position N.
@@ -1038,6 +1277,38 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 				break
 			}
 			return ruleProgram{}, fmt.Errorf("command %q is not implemented: %w", string(c), errRuleRejectedByHashcatToo)
+		case 'v':
+			// vVNM — set variable V to N minus M, having first refreshed `l`
+			// to the current length.
+			//
+			// The variables are a through k, and John documents that an
+			// intermediate value may legitimately be negative, so nothing is
+			// clamped at assignment; a command that later uses a negative
+			// position simply finds it out of range, which is what John does.
+			//
+			// john.conf's own use is `va01 vbpa Tb`: set a to -1, set b to
+			// p+1, toggle there — capitalise the character after the space
+			// that `%N[ ]` just matched.
+			if !john {
+				return ruleProgram{}, fmt.Errorf("unknown rule command %q", string(c))
+			}
+			target, ok := arg()
+			if !ok || target < 'a' || target > 'k' {
+				return ruleProgram{}, errors.New("command 'v' needs a variable a-k (vVNM)")
+			}
+			aSrc, err := numArg('v', "first operand")
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			bSrc, err := numArg('v', "second operand")
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			if runtimeAt == nil {
+				runtimeAt = map[int]runtimeOp{}
+			}
+			runtimeAt[len(ops)] = runtimeOp{cmd: 'v', target: int(target - 'a'), a: aSrc, b: bSrc}
+			ops = append(ops, func(r []byte) ([]byte, bool) { return r, true })
 		case 'X':
 			// XNMI — take up to M characters of the MEMORISED word starting
 			// at N, and insert them into the current word at position I.
@@ -1159,7 +1430,8 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 	if len(ops) == 0 {
 		return ruleProgram{}, errors.New("empty rule")
 	}
-	return ruleProgram{src: line, ops: ops, memoryAt: memoryAt, lengthRefAt: lengthRefAt, extractAt: extractAt}, nil
+	return ruleProgram{src: line, ops: ops, memoryAt: memoryAt, lengthRefAt: lengthRefAt,
+		extractAt: extractAt, runtimeAt: runtimeAt, findsAt: findsAt}, nil
 }
 
 // opAtPos builds an op that rewrites the single byte at position p with f,
