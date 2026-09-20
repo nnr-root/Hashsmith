@@ -92,6 +92,35 @@ jobs:
       - name: Test (fast vectors)
         run: cd hashsmith/go_hashsmith && go test -timeout 5m ./...
 
+  # Compatibility with John the Ripper is claimed in the rule engine, and the
+  # only check that does not rest on somebody having read John's documentation
+  # correctly is running John. Its rule commands are compared candidate stream
+  # against candidate stream, and its shipped john.conf is compiled to measure
+  # how much of it Hashsmith can read.
+  #
+  # The tests skip themselves when john is absent or is not a jumbo build, so a
+  # runner whose package differs reports a skip rather than a false failure —
+  # and the step below prints the build info either way, so a silent skip is
+  # visible in the log rather than looking like a pass.
+  john-differential:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
+      - name: Install John the Ripper
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y john
+          john --list=build-info 2>&1 | head -5 || true
+          ls /usr/share/john/john.conf || true
+      - name: Compare against john
+        run: |
+          cd hashsmith/go_hashsmith
+          go test -v -run 'TestJohnRuleCommandsMatchJohnItself|TestJohnCorpusCoverageDoesNotRegress' ./cmd/hashsmith
+
   race:
     runs-on: ubuntu-latest
     steps:

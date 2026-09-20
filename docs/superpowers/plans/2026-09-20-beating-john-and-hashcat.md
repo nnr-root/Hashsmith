@@ -703,8 +703,91 @@ The recorded failure is worth keeping in view: a ratchet that flakes gets
 lowered, and a floor lowered to silence a measurement artefact is a floor that
 no longer ratchets anything.
 
+### The fallback wordlist was long, not useful
+
+The embedded `common.txt` is what a run uses on any machine without a
+rockyou.txt, which is most machines that are not Kali. Its value is not its
+length — it is that the likeliest candidates come first, because an
+interrupted run, or one attacking a slow KDF, only ever reaches the beginning
+of it.
+
+That property was absent and nothing had checked for it. Of the 3,545 entries
+in John's default `password.lst`, the 230,930-line list contained 1,839
+anywhere at all and **91 within its first 5,000 lines**. A Hashsmith run that
+tried 5,000 candidates from its own default was trying 91 real passwords;
+John's default would have tried 3,545. The list was 111 curated passwords
+followed by an alphabetical English dictionary — 145,455 consecutive entries
+in sorted order.
+
+`password.lst` is merged in as the frequency data the list was missing. Its
+author states in its header that it is assumed to be in the public domain, and
+it is ordered by decreasing frequency. The two orderings combine by reciprocal
+rank fusion, the ordinary way to merge ranked lists that share no scale: near
+the top of either rises, near the top of both rises further, and neither
+ordering is destroyed. The head is now 3,583 frequency-ordered passwords; the
+dictionary stays, demoted below everything carrying a frequency signal,
+because dictionary words are genuinely used as passwords.
+
+The coverage figure after the merge is 100% by construction and is not the
+claim. The claim is the structural one: the list now has a frequency-ordered
+head, and three tests hold it there. One measures the longest alphabetically
+sorted run in the head, with the bar set from two measurements rather than
+taste — the defect ran 63% of the file sorted, while John's own list contains
+a deliberate 782-entry sorted block, so a strict bar would fail a canonical
+hand-curated list.
+
+`wordlists/common.txt` at the repo root is a second copy that nothing reads.
+It is kept in sync here, but it can drift silently and is worth either wiring
+up or deleting.
+
+### John's rule dialect, measured against John instead of against its manual
+
+The corpus figure was re-measured properly first, because the old one counted
+`.include` directives and blank lines as rules. Of **251 real rule lines** in
+john.conf, 168 compiled — **66.9%**. The failures were not one missing feature
+but nine, and naming them took reading john's `RULES` rather than guessing from
+the error text.
+
+What landed: `aN`/`bN` (early rejection on length), `S` (shift case by
+keyboard), `R`/`L` (shift every character one key right or left), `V` (lowercase
+vowels, uppercase consonants), `WN` (shift-toggle one character), `=NX` and
+`=N?C` (reject unless the character at N matches). Coverage is now **82.5%**,
+held by a ratchet.
+
+`R` and `L` were not missing so much as wrong. Hashcat spells the same letters
+`RN` and `LN` and means a bitwise shift of one character, taking an operand
+John's forms do not — so `l Q [RL]` in john.conf failed to compile, and where a
+command followed, it would have been eaten as a position and the rule would
+have run as something nobody wrote.
+
+**Then the differential test found four bugs the manual would never have
+shown.** Running john and comparing candidate streams, rather than comparing
+against a golden file captured from a previous reading of the docs:
+
+- `WN` is not a case toggle. It is a SHIFT toggle, so `W1` turns `P@ssw0rd!`
+  into `P2ssw0rd!` where a case toggle returns the word unchanged.
+- `p`, `P` and `I` are **case-sensitive**, which john's docs say in three words
+  — "(lowercase only)". Hashsmith lowercased before testing the suffix, so
+  every capitalised word ending in y, f, fe, s, x, z, ch or sh got a different
+  candidate. `WIFE` pluralises to `WIFEs`, not `WIVes`. Those are exactly the
+  words a ruleset reaches after a `c` or a `u`.
+- The grammar commands have length guards and skip conditions: `p` leaves a
+  one-character word alone, `P` and `I` leave anything under three, `P` skips a
+  word already ending in `ed` and doubles a trailing b, g or p (`walking` ->
+  `walkingged`), and `I` skips one already ending in `ing`.
+- A backslash escape resolved only when an unrelated bracket group appeared
+  elsewhere on the same line. `[ab]\[` expanded correctly; `\[` alone did not,
+  because the expander short-circuited on a line with no groups and returned it
+  raw. john.conf's own `>9 \[` hit exactly that.
+
+None of these were visible from the rule files, the documentation, or the
+existing golden-file test, which recorded what Hashsmith believed john does.
+CI now installs john and runs the comparison, so the claim is checked rather
+than asserted.
+
 ### Still open
 
 - 83 unimplemented hashcat modes, and 62 missing extractors.
-- 69% of John's rule corpus, dominated by its `a` command.
-- The embedded fallback wordlist is still an English dictionary.
+- 17.5% of John's rule corpus: numeric variables (`vVNM`), the memory-substring
+  command (`XNMI`), single-crack word-pair selectors (`1`, `2`, `+`), and
+  several preprocessor back-reference forms.
