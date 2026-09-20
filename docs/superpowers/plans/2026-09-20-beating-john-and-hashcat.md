@@ -785,9 +785,76 @@ existing golden-file test, which recorded what Hashsmith believed john does.
 CI now installs john and runs the comparison, so the claim is checked rather
 than asserted.
 
+### Hashcat modes: six more, and four that were never algorithms
+
+Before implementing anything, every unsupported mode's published record was run
+through Hashsmith's own auto-detection. Six cracked already — the format was
+there and only the `-m` number was unmapped. Conformance is now **446 of 538
+(82.9%)**, up from 441.
+
+Three were the **collider #2** modes. Hashcat splits MS Office 97-2003 and PDF
+revision 2 into two stages: `-m 9710`, `-m 9810` and `-m 10410` recover a
+five-byte intermediate, and `-m 9720`, `-m 9820` and `-m 10420` take that
+answer, appended to the record after a colon, and find the password behind it.
+What those five bytes are had to be measured — for MD5 it is
+`md5(16×(md5(utf16le(pass))[:5] ‖ salt))[:5]`, the value one step BEFORE the
+RC4 key, while for SHA-1 it is the RC4 key itself. Not symmetric, and not
+guessable.
+
+Hashsmith needs no two stages: it recovers the password from the bare record in
+one pass. So the record those modes produce is accepted, and the appended
+answer is used rather than discarded — it settles a candidate after two hashes
+instead of three plus an RC4 stream, which is the same shortcut hashcat takes.
+A test corrupts the answer and requires the record to stop cracking, because
+otherwise the pre-filter could be silently skipped and every test would still
+pass.
+
+**The first-stage modes are deliberately left unsupported.** They ask for a key
+fragment, not a password — hashcat's own example answer for 9710 is
+`$HEX[91b2e062b9]`. Mapping them at a password cracker would report a mode as
+supported while never returning what its user wants, and a test now pins that
+they stay unmapped.
+
+Four more of the 538 records are not password hashes at all, so the gap was
+overstated: `-m 2000` is hashcat's candidate-printing mode, which Hashsmith
+spells `--stdout`, and `-m 72000`, `73000` and `74000` hand the hashing to a
+Python or Rust program the user supplies at run time. Each now answers with
+what it actually is instead of "unsupported hash algorithm". `-m 99999`,
+Plaintext, is implemented: the target is the password, which is how you test a
+wordlist or a ruleset with the verifier taken out of the way.
+
+**eCryptfs (`-m 12200`) is implemented**, derived from its published vector
+rather than from a description. The signature is SHA-512 over the salt and
+passphrase, then 65,536 more SHA-512 rounds over the digest — 65,537
+invocations, not 65,536, which is exactly the sort of off-by-one a
+specification sentence hides and a vector settles in one run.
+
+Adding these turned up a distinction the detectability ratchet did not draw.
+That ratchet counts vectors whose own type auto-detection does not offer, and
+every one it covered was an ambiguous record that could in principle become
+detectable. `plaintext` never can: its record is the password, so any text at
+all is a valid one, and a prototype for it would claim every input Hashsmith is
+ever given. It is now excluded by name with that reason attached, rather than
+the floor being raised by one — raising it would have quietly bought room for a
+real detection gap to appear later without failing anything. eCryptfs, whose
+`$ecryptfs$` prefix is unambiguous, got the prototype instead.
+
+### A ratchet that a regeneration could quietly unpin
+
+Regenerating the conformance baseline to record those six modes also rewrote
+`-m 29441` from CRACKED to TIMEOUT, because the machine was compiling at the
+time. A timeout says "too slow to decide", not "this mode broke", which is why
+the ratchet ignores it in both directions — but a REGENERATION writes it, and
+a mode pinned TIMEOUT is held to nothing. The next real break in it would pass.
+
+One line among hundreds in the diff, and the ratchet would have been a little
+weaker with nothing to show for it. A mode already pinned CRACKED now keeps
+that pin through a timeout. Nothing else is preserved: a CRACKED that becomes
+NOT-FOUND or REJECTED is a real regression and still shows up as one.
+
 ### Still open
 
-- 83 unimplemented hashcat modes, and 62 missing extractors.
+- 77 unimplemented hashcat modes, and 62 missing extractors.
 - 17.5% of John's rule corpus: numeric variables (`vVNM`), the memory-substring
   command (`XNMI`), single-crack word-pair selectors (`1`, `2`, `+`), and
   several preprocessor back-reference forms.
