@@ -635,6 +635,38 @@ Shipping the most plausible reading would have produced a verifier that parses
 every record and rejects every password. Two modes left honestly unsupported
 beat two that claim support and waste a run.
 
+### The 14 timeouts are honest, which took measuring to say
+
+Every mode that times out in the conformance run is VeraCrypt, and only the
+RIPEMD-160, Whirlpool and Streebog variants — never the SHA ones. That
+asymmetry looks like a bug, so it was measured rather than assumed. PBKDF2 at
+20,000 iterations:
+
+| PRF | cost |
+|---|---|
+| SHA-256 | 9.7 ms |
+| SHA-512 | 13.6 ms |
+| RIPEMD-160 | 178.6 ms |
+| Whirlpool | 180.4 ms |
+| Streebog-512 | 385.4 ms |
+
+Splitting raw hashing from the HMAC wrapper showed the wrapper costs the same
+2.4x for SHA-512 and RIPEMD-160, so the gap is the hash itself: SHA-512 has a
+Go assembly implementation and the other three are pure Go. Streebog's is
+already table-driven, which is the fast shape.
+
+So the arithmetic decides it. VeraCrypt runs 500,000 PBKDF2 iterations, which
+at 23.5 µs per HMAC-Streebog operation is around 23 seconds for ONE candidate.
+Closing the gap would need roughly a 20x speedup, not the 2x a pure-Go
+implementation might yield — and a change tried on Streebog's hot loop measured
+2%, inside the noise, so it was reverted rather than committed with a claim it
+could not support.
+
+These modes are therefore correct and slow, not broken, and the per-record
+timeout is doing exactly what it was built to do: say "this machine was too
+slow to decide" instead of "this mode failed". Worth recording so the next
+person to see fourteen timeouts does not go looking for the bug.
+
 ### Still open
 
 - **83 unimplemented modes.** Largest coherent families: PKZIP/SecureZIP (10),
