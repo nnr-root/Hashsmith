@@ -587,6 +587,28 @@ sits in a directory named `.ecryptfs`, which is the layout eCryptfs actually
 creates, and a test extracts from a copy in a sibling directory to watch the
 salt NOT follow it.
 
+### An extractor that paired fields from different key bags
+
+Surveying john's extractors for ones whose record Hashsmith already verifies
+turned up `itunes_backup2john` — and the survey was wrong, because Hashsmith
+has had an iTunes extractor all along under a different name. Reading john's
+version beside it found a bug anyway.
+
+An iTunes backup key bag holds SEVERAL tag groups, one per protection class.
+Hashsmith took the first `SALT`, the first `ITER` and the first `WPKY` found
+anywhere in the file, which draws them from different groups whenever an
+unrelated `WPKY` comes first — a legal layout. The result is a record that is
+perfectly well formed and cannot crack: the salt and iteration count are the
+backup's, the wrapped key is something else's, and a user runs a full attack
+and gets "not found" for the correct password.
+
+Demonstrated before fixing, with a key bag built around hashcat's own published
+example: the extractor produced a record whose wrapped key was the decoy's, and
+the known-correct password did not verify against it. The three tags are now
+required in order and within a bounded distance, which is the constraint
+itunes_backup2john applies and for the same reason, and the test keeps a
+decoy group in front to hold it.
+
 ### A mode NOT implemented, three attempts over
 
 ODF (`-m 18400` and `-m 18600`) was attempted three times and abandoned, on the
