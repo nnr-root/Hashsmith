@@ -866,6 +866,30 @@ let `?s` stay wrong — no rule in the test list happened to use it on a `!`.
 
 Corpus coverage: **84.9%**.
 
+### `XNMI`, and an operand that must not be clamped
+
+John's memory-substring command takes up to M characters of the MEMORISED word
+starting at N and inserts them into the current word at I. Every one of john's
+documented examples now matches: `X011` duplicates the first character, `Xm1z`
+the last, `dX0zz` triplicates the word, and `X0z0` — the form john.conf uses six
+times — prefixes the word with its memorised self.
+
+`dX0zz` is the one worth having in the test list. It gives THREE copies, not
+four, because the memory holds the word as it was before `d` doubled it. An
+implementation that memorised lazily, or that read the current word instead,
+passes every other example here and fails that one.
+
+The operands deliberately do not go through the shared position parser. That
+parser clamps a position character it does not recognise to the maximum length,
+which is correct for a length and silently wrong for a START: `Xp…` would
+become "start past the end", extract nothing, and leave the word unchanged with
+no indication at all. John's `p` is the position of the last character found by
+`/` or `%`, which Hashsmith does not track, so `X` refuses it and says so.
+john.conf's two `Xpz0` lines stay unsupported and now explain themselves
+instead of compiling into a no-op.
+
+Corpus coverage: **87.3%**.
+
 ### Hashcat modes: nine more, and four that were never algorithms
 
 Before implementing anything, every unsupported mode's published record was run
@@ -1010,6 +1034,6 @@ are ruled out.
 ### Still open
 
 - 69 unimplemented hashcat modes, and 62 missing extractors.
-- 15.1% of John's rule corpus, now exactly three features: numeric variables
-  (`vVNM`, 17 lines), the memory-substring command (`XNMI`, 8 lines), and
-  single-crack word-pair selectors (`1`, `2`, `+`, 9 lines).
+- 12.7% of John's rule corpus, now two features and a remainder: numeric
+  variables (`vVNM`, 17 lines), single-crack word-pair selectors (`1`, `2`,
+  `+`, 9 lines), and the two `Xpz0` lines that need John's `p` tracked.
