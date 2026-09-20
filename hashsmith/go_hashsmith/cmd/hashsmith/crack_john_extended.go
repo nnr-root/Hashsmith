@@ -47,14 +47,35 @@ func verifyAndroidBackup(target, candidate string) (bool, error) {
 	plain := append([]byte(nil), blob...)
 	cipher.NewCBCDecrypter(block, iv).CryptBlocks(plain, plain)
 	plain, ok := strictPKCS7Unpad(plain, aes.BlockSize)
-	if !ok || len(plain) != 83 || plain[0] != 16 || plain[17] != 32 || plain[50] != 32 {
+	if !ok || len(plain) != androidBackupEnvelopeLen {
 		return false, nil
 	}
-	// The fixed length-tagged master-key envelope plus valid CBC padding gives
-	// a strong verifier without weakening compatibility with Android's two
-	// historical password-character encodings.
+	// The LENGTH is the check, not the length tags.
+	//
+	// Android's master-key envelope is a fixed 83 bytes — a 16-byte IV, a
+	// 32-byte master key and a 32-byte checksum, each behind a length byte —
+	// so a 96-byte blob always unpads to exactly 83 with thirteen bytes of
+	// 0x0d. A wrong password decrypts to noise, and noise ends in that exact
+	// padding with probability 2^-104. That is the verifier.
+	//
+	// It used to additionally require the three length tags to read 16, 32
+	// and 32, which is true of the records john's androidbackup2john writes
+	// and NOT of hashcat's -m 18900 example: that record's blob decrypts under
+	// the same key derivation to a clean 83 bytes with correct padding — so
+	// the password is right beyond any doubt — while carrying its envelope
+	// differently. Demanding the tags rejected a record whose password had
+	// already been proven correct.
+	//
+	// Nothing is given away by dropping them. 2^-104 is far past the point
+	// where extra structure adds anything, and the tags were never the source
+	// of the strength.
 	return true, nil
 }
+
+// androidBackupEnvelopeLen is the fixed size of Android's master-key
+// envelope: a length byte and a 16-byte IV, a length byte and a 32-byte master
+// key, a length byte and a 32-byte checksum.
+const androidBackupEnvelopeLen = 83
 
 func strictPKCS7Unpad(data []byte, blockSize int) ([]byte, bool) {
 	if len(data) == 0 || len(data)%blockSize != 0 {

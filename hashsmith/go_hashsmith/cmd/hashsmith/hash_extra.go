@@ -342,6 +342,7 @@ func compatibilityHashAliasSeed() map[string]string {
 		"22600": "telegram-desktop", "24500": "telegram-desktop",
 		"23100": "macos-keychain",
 		"99999": "plaintext", "12200": "ecryptfs", "33800": "wbb4",
+		"18900": "android-backup",
 		// zip2john's WinZip AES record. The same algorithm the $zipaes*
 		// records use, with the key size in a field rather than in the tag —
 		// and with an authentication code the short form has no room for.
