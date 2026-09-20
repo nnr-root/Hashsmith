@@ -171,7 +171,7 @@ func compatibilityHashAliasSeed() map[string]string {
 		"26401": "aes128-ecb-nokdf", "26402": "aes192-ecb-nokdf", "26403": "aes256-ecb-nokdf",
 
 		// ── Hashcat: Unix login / crypt(3) ────────────────────────────────────────
-		"500": "md5crypt", "1500": "descrypt", "1600": "apr1",
+		"500": "md5crypt", "1500": "descrypt", "1600": "apr1", "12400": "bsdicrypt",
 		"1800": "sha512crypt", "3200": "bcrypt", "7400": "sha256crypt",
 		"25600": "bcrypt-md5", "25800": "bcrypt-sha1", "30600": "bcrypt-sha256",
 		"28400": "bcrypt-sha512", "30601": "passlib-bcrypt-sha256",

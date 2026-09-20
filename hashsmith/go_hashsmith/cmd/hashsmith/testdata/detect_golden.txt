@@ -377,6 +377,10 @@ USER$C8B48F26B87B7EA7	sap-b
 WPA*01*5ce7ebe97a1bbfeb2822ae627b726d5b*27462da350ac*accd10fb464e*686173686361742d6573736964***	wpa
 WPA*01*6d3c40446a165cfeb121c82f18bf97d8*001122334455*8899aabbccdd*49454545	wpa
 YnM6WYERjJfhxwepT7zV6odWoEUz1X4esYQb4bQ3KZ7bbZAyOTc1MDM3OTc1NjMyODA0ECcAAD3vFoc=	blockchain-second
+_GW..88416mVuR9sOsco	bsdicrypt
+_GW..8841Q0CPWkzzIys	bsdicrypt
+_GW..8841ferW8os/srY	bsdicrypt
+_GW..8841inaTltazRsQ	bsdicrypt
 a$nMf9FkrCIgHGccRAxsBAwxBtDtPHfn	juniper
 a0ab79f9e2b5a4434d2da61673b56362:1234	vbulletin,dcc,md5-pass-salt,md5-salt-pass,md5-utf16le-pass-salt,md5-salt-utf16le-pass,md5-md5-md5pass-salt,md5-md5binpass,md5-md5pass-md5salt,md5-md5pass-pass,md5-md5pass-salt,md5-md5passsalt,md5-md5salt-md5-md5pass,md5-md5salt-md5pass,md5-md5salt-pass,md5-pass-md5pass,md5-pass-pass,md5-salt-md5pass,md5-salt-md5pass-salt,md5-salt-md5passsalt,md5-salt-md5saltpass,md5-salt-pass-md5pass,md5-salt-pass-salt,md5-salt-sha1saltpass,md5-sha1-md5pass,md5-sha1pass-md5pass-sha1pass,md5-sha1pass-salt,md5-sha1passsalt,md5-sha1salt-md5pass,md5-sha1saltpass,skype
 a2c0342a2617026fbaeed01130c826cc3f58242799894b3ecc1abfa811ede03fd712efd14a886af6fa74045502f22c9feb1c45a291cf2d7bbe9bb94c388b6403:deadbeef	sha512-pass-salt,sha512-salt-pass,sha512-utf16le-pass-salt,sha512-salt-utf16le-pass,sha512-pass-pass,sha512-salt-pass-salt,sha512-sha512binpass,sha512-sha512binpass-salt,sha512-sha512pass-salt,whirlpool-salt-pass-salt

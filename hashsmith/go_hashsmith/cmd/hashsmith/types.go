@@ -230,6 +230,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 		}},
 		{"Unix login / crypt(3)", [][2]string{
 			{"descrypt", "traditional DES crypt (13-char)"},
+			{"bsdicrypt", "BSDi extended DES crypt (_ prefix, per-hash rounds), Hashcat 12400"},
 			{"md5crypt", "$1$ MD5 crypt"},
 			{"apr1", "Apache apr1 ($apr1$, .htpasswd MD5)"},
 			{"sha256crypt", "$5$ SHA-256 crypt"},

@@ -213,6 +213,15 @@ func saltedPrototypes() []hashid.Prototype {
 		// narrower alphabet the way cisco-pix below additionally excludes
 		// hex. That is genuinely "length and alphabet only, nothing more", so
 		// TierShape rather than TierStructural.
+		// BSDi extended crypt is a STRUCTURAL match, not a shape one: the
+		// leading '_' is a distinguished marker character no other crypt-64
+		// record carries, which is more than "length and alphabet" and is why
+		// it sits a tier above traditional DES crypt below. It also cannot be
+		// confused with it — 20 characters against 13, and descrypt has no
+		// prefix at all.
+		predicateProto(looksLikeBSDiCrypt, "BSDi extended DES crypt", hashid.TierStructural,
+			"leading '_', then 19 crypt-64 chars: 4 of iteration count, 4 of salt, 11 of result",
+			8, "BSDi's extended crypt was the 4.4BSD answer to descrypt's fixed 25 rounds and 8-character limit, so it appears in BSD-lineage and embedded shadow files rather than in Linux ones", "bsdicrypt"),
 		predicateProto(looksLikeDescrypt, "Traditional DES crypt(3)", hashid.TierShape,
 			"exactly 13 chars, all from the crypt-64 alphabet",
 			15, "the original 13-char DES crypt(3) hash still appears in legacy Unix and embedded-device shadow files that predate the MD5/SHA2/yescrypt crypt schemes", "descrypt"),

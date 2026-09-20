@@ -2657,6 +2657,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyRAR5(targetHash, candidate)
 	case "wbb4":
 		return verifyWBB4(targetHash, candidate)
+	case "bsdicrypt":
+		return verifyBSDiCrypt(targetHash, candidate)
 	case "ecryptfs":
 		return verifyECryptfs(targetHash, candidate)
 	case "plaintext":

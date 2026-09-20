@@ -215,8 +215,14 @@ func descryptRaw(password, salt string) (string, error) {
 		block = desEncryptBlock(block, ks, saltVal)
 	}
 
-	// Pack the 64-bit result into 11 crypt-base64 chars, MSB-first in 6-bit
-	// groups (3 bytes → 4 chars; the trailing 2 bytes → 3 chars).
+	return salt[:2] + descryptPack(block), nil
+}
+
+// descryptPack renders a 64-bit DES result as the 11 crypt-base64 characters
+// both traditional crypt and BSDi extended crypt end with: MSB-first in 6-bit
+// groups, three bytes to four characters, with the trailing two bytes giving
+// three.
+func descryptPack(block uint64) string {
 	var q [8]byte
 	for i := 0; i < 8; i++ {
 		q[i] = byte(block >> uint(56-8*i))
@@ -231,8 +237,7 @@ func descryptRaw(password, salt string) (string, error) {
 	emit(uint32(q[0])<<16|uint32(q[1])<<8|uint32(q[2]), 4)
 	emit(uint32(q[3])<<16|uint32(q[4])<<8|uint32(q[5]), 4)
 	emit(uint32(q[6])<<16|uint32(q[7])<<8, 3)
-
-	return salt[:2] + string(out), nil
+	return string(out)
 }
 
 // looksLikeDescrypt reports whether s has the shape of a traditional DES crypt

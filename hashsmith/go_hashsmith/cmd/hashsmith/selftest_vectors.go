@@ -570,6 +570,14 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		// cryptography in the way to fail first for some other reason.
 		{"plaintext", "hashcat", "", "hashcat", srcPublished},
 		{"ecryptfs", "hashcat", "", "$ecryptfs$0$1$4207883745556753$567daa975114206c", srcPublished},
+		{"bsdicrypt", "hashcat", "", "_GW..8841inaTltazRsQ", srcPublished},
+		// Long passwords, which the published vector cannot reach: its own is
+		// seven characters and never enters the folding loop. These records
+		// were generated here and then CRACKED BY JOHN, which is what makes
+		// them evidence rather than a transcript of this implementation.
+		{"bsdicrypt", "correcthorse", "", "_GW..8841ferW8os/srY", srcCrosschecked},
+		{"bsdicrypt", "correct horse battery staple", "", "_GW..8841Q0CPWkzzIys", srcCrosschecked},
+		{"bsdicrypt", "0123456789abcdefghij", "", "_GW..88416mVuR9sOsco", srcCrosschecked},
 		{"wbb4", "hashcat", "", "$2a$08$hashcatohohohohohohohegk6PN.SFkoXxDIkacAGKFN9AF8nx.Hi", srcPublished},
 		{"winzip", "hashcat", "", "$zip2$*0*1*0*0675369741458183*5dc5*0**36b85538918416712640*$/zip2$", srcPublished},
 
