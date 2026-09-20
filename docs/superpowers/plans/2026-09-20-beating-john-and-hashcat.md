@@ -840,8 +840,31 @@ is present**, and `\r` suppresses only the global pass. john.conf's own
 would have given it 36 branches against john's 35 — a difference of one
 candidate, in a line that looks like it was written to test exactly this.
 
-The live differential now runs 76 rules through john and compares streams,
+The live differential now runs 83 rules through john and compares streams,
 including every case in that table.
+
+### A character class that was a reasonable reading and still wrong
+
+Adding `s?CY` — substitute every character of a CLASS — immediately found a
+bug in the class table itself. `?s` was implemented as "printable, not a
+letter, not a digit", which is what the word "symbols" suggests. John's `?s` is
+an explicit 23-character set, and the nine characters of `?p` are PUNCTUATION
+and deliberately outside it. So `s?s_` on `P@ssw0rd!` gave `P_ssw0rd_` here
+against john's `P_ssw0rd!`.
+
+The class form was not merely missing, either. Without it `s?D*` read `?` as
+the character to replace and `D` as its replacement, then met `*` as a command
+and failed loudly — but a rule whose next character happened to be a valid
+command, `s?dl` say, would have compiled SILENTLY as "replace ? with d, then
+lowercase". Wrong candidates, no error.
+
+`?o`, `?y`, `?b` and `??` were missing outright. The whole table is now read
+out of john one byte at a time: substitute a marker for every member of a class
+over a word containing every printable byte, and compare the sets. All fifteen
+classes match. That comparison is a test, because a spot check is exactly what
+let `?s` stay wrong — no rule in the test list happened to use it on a `!`.
+
+Corpus coverage: **84.9%**.
 
 ### Hashcat modes: nine more, and four that were never algorithms
 
@@ -987,5 +1010,6 @@ are ruled out.
 ### Still open
 
 - 69 unimplemented hashcat modes, and 62 missing extractors.
-- 15.9% of John's rule corpus: numeric variables (`vVNM`), the memory-substring
-  command (`XNMI`), and single-crack word-pair selectors (`1`, `2`, `+`).
+- 15.1% of John's rule corpus, now exactly three features: numeric variables
+  (`vVNM`, 17 lines), the memory-substring command (`XNMI`, 8 lines), and
+  single-crack word-pair selectors (`1`, `2`, `+`, 9 lines).
