@@ -48,3 +48,96 @@ func TestHashcatRecordDialects(t *testing.T) {
 		})
 	}
 }
+
+// A verifier must error only when the TARGET is malformed. A candidate that
+// cannot possibly be the answer — the wrong length, the wrong alphabet — is an
+// ordinary negative, because a wordlist is expected to contain entries that do
+// not fit. Returning an error for one aborts the entire run on the first such
+// entry, which is how these modes rejected every target outright.
+//
+// verifyWPAPMKID already drew the line this way; these now match it.
+func TestWrongShapedCandidateIsANegativeNotAnError(t *testing.T) {
+	cases := []struct {
+		name     string
+		mode     string
+		verify   func(hash, candidate string) (bool, error)
+		unusable string
+		why      string
+	}{
+		{"Skip32", "14900", verifySkip32, "short", "Skip32 keys are exactly 10 bytes"},
+		{"NetNTLMv2-NT", "27100", verifyNetNTLMv2NT, "not-an-nt-hash", "candidates are 32-hex NT hashes"},
+		{"SNMPv3", "25000", verifySNMPv3, "short", "SNMPv3 localized keys need at least 8 characters"},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			rec, pass := hashcatExampleRecord(t, c.mode)
+			// The unusable candidate must not raise an error.
+			if _, err := c.verify(rec, c.unusable); err != nil {
+				t.Errorf("a candidate that cannot fit raised an error (%s): %v", c.why, err)
+			}
+			// And the real one must still be found.
+			ok, err := c.verify(rec, pass)
+			if err != nil {
+				t.Fatalf("verify: %v", err)
+			}
+			if !ok {
+				t.Error("hashcat's own password did not verify")
+			}
+		})
+	}
+	// A malformed RECORD must still be an error — that is a usage problem.
+	if _, err := verifyNetNTLMv2NT("user::domain:bad", "not-an-nt-hash"); err == nil {
+		t.Error("a malformed NetNTLMv2 record was accepted")
+	}
+	if _, err := verifySkip32("not-a-record", "0123456789"); err == nil {
+		t.Error("a malformed Skip32 record was accepted")
+	}
+}
+
+// Formats whose hashcat spelling differs from the one Hashsmith's own
+// extractors emit. Both must work; neither may displace the other.
+func TestBothSpellingsCoexist(t *testing.T) {
+	// PostgreSQL: hashcat writes <md5>:<username>, PostgreSQL stores md5<hex>
+	// and takes the username through -s.
+	rec, pass := hashcatExampleRecord(t, "12")
+	if ok, err := verifyCandidate(pass, rec, "postgres", "", "prefix"); err != nil || !ok {
+		t.Errorf("hashcat's -m 12 spelling: ok=%v err=%v", ok, err)
+	}
+	i := len(rec) - len("27032153220030464358344758762807") - 1
+	stored, user := "md5"+rec[:i], rec[i+1:]
+	if ok, err := verifyCandidate(pass, stored, "postgres", user, "prefix"); err != nil || !ok {
+		t.Errorf("PostgreSQL's own stored spelling: ok=%v err=%v", ok, err)
+	}
+}
+
+// Werkzeug before 2.3 wrote "<digest>$<salt>$<hmac>" with no iteration count.
+// Those methods were rejected as unsupported, so every -m 30000 and -m 30120
+// target failed at parse time.
+func TestWerkzeugLegacyHMACMethods(t *testing.T) {
+	for _, mode := range []string{"30000", "30120"} {
+		mode := mode
+		t.Run("m"+mode, func(t *testing.T) {
+			rec, pass := hashcatExampleRecord(t, mode)
+			ok, err := verifyWerkzeug(rec, pass)
+			if err != nil {
+				t.Fatalf("verifyWerkzeug: %v", err)
+			}
+			if !ok {
+				t.Error("hashcat's own password did not verify")
+			}
+			if bad, _ := verifyWerkzeug(rec, pass+"x"); bad {
+				t.Error("a wrong password verified")
+			}
+		})
+	}
+	// The modern methods must be untouched.
+	const modern = "pbkdf2:sha256:260000$salt$" +
+		"0000000000000000000000000000000000000000000000000000000000000000"
+	if _, err := parseWerkzeugHash(modern); err != nil {
+		t.Errorf("pbkdf2 method broke: %v", err)
+	}
+	if _, err := parseWerkzeugHash("nonsense$salt$0000000000000000000000000000000000000000000000000000000000000000"); err == nil {
+		t.Error("an unknown method was accepted")
+	}
+}

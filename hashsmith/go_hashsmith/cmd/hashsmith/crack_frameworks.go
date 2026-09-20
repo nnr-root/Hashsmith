@@ -3,6 +3,7 @@ package main
 // Password formats used by Python frameworks and ASP.NET Identity.
 
 import (
+	"crypto/hmac"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -108,6 +109,11 @@ type werkzeugHash struct {
 	n, r, p int
 	salt    []byte
 	digest  []byte
+	// legacyHMAC marks the pre-2.3 Werkzeug methods, which are a bare digest
+	// name rather than "pbkdf2:..." or "scrypt:...", and are HMAC of the
+	// password KEYED BY THE SALT rather than any KDF. Hashcat gives them their
+	// own modes (30000 md5, 30120 sha256, and the sha1/sha512 siblings).
+	legacyHMAC bool
 }
 
 func parseWerkzeugHash(target string) (*werkzeugHash, error) {
@@ -150,6 +156,20 @@ func parseWerkzeugHash(target string) (*werkzeugHash, error) {
 			w.r > 1<<20 || w.p > 1<<20 || uint64(132)*uint64(w.n)*uint64(w.r)*uint64(w.p) > maxScryptMemory {
 			return nil, errors.New("unsafe Werkzeug scrypt parameters")
 		}
+	case "md5", "sha1", "sha224", "sha256", "sha384", "sha512":
+		// Werkzeug before 2.3 wrote generate_password_hash(method="md5") and
+		// friends as "<digest>$<salt>$<hmac>", with no iteration count. These
+		// were rejected outright as an unsupported method, so every -m 30000
+		// and -m 30120 target failed at parse time.
+		if len(method) != 1 {
+			return nil, errors.New("invalid Werkzeug legacy method parameters")
+		}
+		var ok bool
+		w.newHash, ok = pbkdf2HashFactory(method[0])
+		if !ok {
+			return nil, errors.New("unsupported Werkzeug legacy digest")
+		}
+		w.legacyHMAC = true
 	default:
 		return nil, errors.New("unsupported Werkzeug password method")
 	}
@@ -173,9 +193,14 @@ func verifyWerkzeug(target, candidate string) (bool, error) {
 		return false, err
 	}
 	var got []byte
-	if w.newHash != nil {
+	switch {
+	case w.legacyHMAC:
+		mac := hmac.New(w.newHash, w.salt)
+		mac.Write([]byte(candidate))
+		got = mac.Sum(nil)
+	case w.newHash != nil:
 		got = pbkdf2.Key([]byte(candidate), w.salt, w.rounds, len(w.digest), w.newHash)
-	} else {
+	default:
 		got, err = scrypt.Key([]byte(candidate), w.salt, w.n, w.r, w.p, len(w.digest))
 		if err != nil {
 			return false, err

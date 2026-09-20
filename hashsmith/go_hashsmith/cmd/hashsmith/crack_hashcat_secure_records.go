@@ -135,10 +135,26 @@ func verifyKNXIPSecure(target, candidate string) (bool, error) {
 }
 
 func verifyNetNTLMv2NT(target, candidate string) (bool, error) {
-	if len(candidate) != 32 || !isHex(candidate) {
-		return false, errors.New("NetNTLMv2-NT candidate must be a 32-hex NT hash")
+	nthash, err := hex.DecodeString(candidate)
+	if len(candidate) != 32 || !isHex(candidate) || err != nil {
+		// A candidate that cannot possibly be the answer is a NEGATIVE, not an
+		// error: returning one here aborted the whole run on the first
+		// wordlist entry of the wrong shape, before any real candidate was
+		// tried, so every -m 27100 target failed outright.
+		//
+		// The RECORD is still validated, and a malformed one still errors —
+		// that is a usage problem worth stopping for. Passing a zero NT hash
+		// reaches exactly the same parsing and returns its error; it can never
+		// produce a false positive, because a genuine match would require the
+		// all-zero NT hash to be the answer, and that is reported honestly if
+		// it ever were.
+		if ok, rerr := verifyNetNTLMv2NTHash(target, make([]byte, 16)); rerr != nil {
+			return false, rerr
+		} else if ok {
+			return true, nil
+		}
+		return false, nil
 	}
-	nthash, _ := hex.DecodeString(candidate)
 	return verifyNetNTLMv2NTHash(target, nthash)
 }
 

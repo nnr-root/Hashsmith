@@ -219,8 +219,18 @@ func skip32Encrypt(key, plaintext []byte) [4]byte {
 }
 
 func verifySkip32(target, candidate string) (bool, error) {
-	if !isHexPair(target, 8, 8) || len([]byte(candidate)) != 10 {
-		return false, errors.New("invalid Skip32 record or key length")
+	if !isHexPair(target, 8, 8) {
+		return false, errors.New("invalid Skip32 record (need <8-hex ciphertext>:<8-hex plaintext>)")
+	}
+	// A candidate that cannot possibly be the answer is a NEGATIVE, not an
+	// error. Returning an error here aborts the whole run on the first
+	// wordlist entry of the wrong shape, before any real candidate is tried —
+	// which is how Hashcat -m 14900 rejected every target outright.
+	// Target validation still errors, because a malformed target IS a usage
+	// problem worth stopping for. verifyWPAPMKID already draws the line this
+	// way; these now match it.
+	if len([]byte(candidate)) != 10 {
+		return false, nil // Skip32 keys are exactly 10 bytes
 	}
 	fields := strings.Split(target, ":")
 	want, _ := hex.DecodeString(fields[0])

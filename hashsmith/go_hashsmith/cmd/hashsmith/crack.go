@@ -2295,6 +2295,16 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 	if algo == "postgres" && strings.HasPrefix(targetHash, "$postgres$") {
 		return verifyPostgresCRAM(targetHash, candidate)
 	}
+	// Hashcat -m 12 spells a stored PostgreSQL password <md5>:<username>,
+	// carrying the username in the record rather than requiring -s, and
+	// without PostgreSQL's own literal "md5" prefix. Hashsmith's spelling is
+	// the stored one — md5<hex> plus -s <username> — so hashcat's records were
+	// refused outright. Both are read now.
+	if algo == "postgres" {
+		if ok, matched := verifyPostgresInline(targetHash, candidate); matched {
+			return ok, nil
+		}
+	}
 	if algo == "bcrypt-sha256" && strings.HasPrefix(targetHash, "$bcrypt-sha256$") {
 		return verifyPasslibBcryptSHA256(targetHash, candidate)
 	}
@@ -3404,4 +3414,24 @@ func verifySkype(targetHash, candidate string) (bool, error) {
 	}
 	got := md5.Sum([]byte(user + "\nskyper\n" + candidate))
 	return strings.EqualFold(hex.EncodeToString(got[:]), want), nil
+}
+
+// verifyPostgresInline handles Hashcat's -m 12 spelling of a stored PostgreSQL
+// password: <md5>:<username>, with the username inside the record instead of in
+// -s, and without the literal "md5" prefix PostgreSQL itself stores.
+//
+// matched reports whether the target had that shape at all; when it is false
+// the caller falls through to the ordinary salted path, so Hashsmith's own
+// "md5<hex>" + -s spelling keeps working unchanged.
+func verifyPostgresInline(targetHash, candidate string) (ok, matched bool) {
+	i := strings.LastIndexByte(targetHash, ':')
+	if i < 0 || i == len(targetHash)-1 {
+		return false, false
+	}
+	digest, user := strings.TrimPrefix(targetHash[:i], "md5"), targetHash[i+1:]
+	if len(digest) != 32 || !isHex(digest) {
+		return false, false
+	}
+	got := md5.Sum([]byte(candidate + user))
+	return strings.EqualFold(hex.EncodeToString(got[:]), digest), true
 }

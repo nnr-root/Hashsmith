@@ -106,8 +106,21 @@ func snmpV3AuthDigest(candidate string, engineID, packet []byte, newHash func() 
 
 func verifySNMPv3(target, candidate string) (bool, error) {
 	parts := strings.Split(target, "$")
-	if len(parts) != 7 || parts[0] != "" || parts[1] != "SNMPv3" || len(candidate) < 8 || len(candidate) > 256 {
-		return false, errors.New("invalid SNMPv3 record or password length")
+	if len(parts) != 7 || parts[0] != "" || parts[1] != "SNMPv3" {
+		return false, errors.New("invalid SNMPv3 record (need $SNMPv3$ with 7 fields)")
+	}
+	// A candidate that cannot possibly be the answer is a NEGATIVE, not an
+	// error. Returning an error here aborts the whole run on the first
+	// wordlist entry of the wrong shape, before any real candidate is tried —
+	// which is how Hashcat -m 25000/25100/25200 rejected every target outright.
+	// Target validation still errors, because a malformed target IS a usage
+	// problem worth stopping for. verifyWPAPMKID already draws the line this
+	// way; these now match it.
+	//
+	// SNMPv3 localized keys require at least 8 characters, so a shorter
+	// candidate is simply not the password.
+	if len(candidate) < 8 || len(candidate) > 256 {
+		return false, nil
 	}
 	type snmpVariant struct {
 		newHash      func() hash.Hash
