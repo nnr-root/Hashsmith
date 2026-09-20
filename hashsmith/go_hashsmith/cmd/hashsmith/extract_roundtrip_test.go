@@ -49,12 +49,25 @@ func extractRecords(t *testing.T, bin, extractor, path string) []string {
 		t.Fatalf("%s -f %s failed: %v\n%s", extractor, filepath.Base(path), err, out)
 	}
 	var recs []string
+	seen := make(map[string]bool)
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
+		// Extractors print the record twice: once behind a "Hash:" label in
+		// the human summary and once bare, so that a shell pipeline can take
+		// it. Strip the label and drop the duplicate, or a test comparing
+		// recs[0] against a prefix is really testing the summary's wording.
+		if i := strings.Index(line, ":"); i > 0 && i < 24 && !strings.HasPrefix(line, "$") {
+			if rest := strings.TrimSpace(line[i+1:]); strings.HasPrefix(rest, "$") {
+				line = rest
+			}
+		}
 		// A record is the line that carries the format tag; the rest is banner
 		// and commentary.
 		if strings.HasPrefix(line, "$") || strings.Contains(line, "$") && len(line) > 20 {
-			recs = append(recs, line)
+			if !seen[line] {
+				seen[line] = true
+				recs = append(recs, line)
+			}
 		}
 	}
 	if len(recs) == 0 {
@@ -147,18 +160,25 @@ func TestZipAESRoundTrip(t *testing.T) {
 	assertRoundTrip(t, bin, "zip2smith", archive, password)
 }
 
-// 7z is a KNOWN GAP, asserted as one rather than left to look like a pass.
+// 7-Zip round trip, over every coder chain 7z writes for a password.
 //
-// The extractor reads the AES parameters correctly but cannot reach the CRC
-// and unpacked size that verification needs — those live inside the nested,
-// VINT-encoded next-header it does not parse. It used to emit a record anyway,
-// which could never crack: a user ran a long attack against something that
-// could not match and concluded their wordlist was wrong.
+// This replaces a test that pinned a refusal. The extractor could read the AES
+// parameters but not the CRC or the unpacked size, so it had nothing to check
+// a password against; rather than emit a record that could never crack, it
+// refused, and the refusal was asserted so the gap could not be mistaken for a
+// pass. The next-header parser now exists, so the gap is closed and the format
+// gets the same round trip as every other container.
 //
-// This test pins the refusal AND the reason. When the header parser is
-// written, this test starts failing, which is the signal to replace it with
-// the round trip the other extractors get.
-func Test7zRefusesRatherThanEmittingAnUncrackableRecord(t *testing.T) {
+// The chains are covered deliberately, because they take different paths
+// through the extractor:
+//
+//	-mhe=on    AES alone over the header      -> CRC record
+//	-m0=Copy   AES then the identity coder    -> CRC record
+//	(default)  AES then LZMA2                 -> padding record
+//
+// Two of those three are byte-for-byte hashcat records; TestSevenZipRecordIsHashcatCompatible
+// runs hashcat itself over them where it is installed.
+func TestSevenZipRoundTrip(t *testing.T) {
 	sevenZip := requireTool(t, "7z")
 	bin := buildTestBinary(t)
 	dir := t.TempDir()
@@ -169,31 +189,117 @@ func Test7zRefusesRatherThanEmittingAnUncrackableRecord(t *testing.T) {
 	}
 	const password = "correct horse"
 
-	// Both shapes: header-encrypted and data-only.
-	for _, args := range [][]string{
-		{"a", "-t7z", "-p" + password},
-		{"a", "-t7z", "-mhe=on", "-p" + password},
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		wantCRC bool
+	}{
+		{"header-encrypted", []string{"-mhe=on"}, true},
+		{"stored", []string{"-m0=Copy"}, true},
+		{"compressed", nil, false},
 	} {
-		archive := filepath.Join(dir, "a"+strings.Join(args, "")+".7z")
-		cmd := exec.Command(sevenZip, append(append([]string{}, args...), archive, payload)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Skipf("7z could not build an archive: %v\n%s", err, out)
-		}
-
-		run := exec.Command(bin, "-N", "7z2smith", "-f", archive)
-		run.Env = append(os.Environ(), "NO_COLOR=1", "TERM=dumb", "HOME="+dir)
-		out, err := run.CombinedOutput()
-		if err == nil {
-			t.Errorf("7z2smith produced a record for %s; if the next-header parser now exists, "+
-				"replace this test with a real round trip\n%s", filepath.Base(archive), out)
-			continue
-		}
-		msg := string(out)
-		for _, want := range []string{"CRC", "next-header", "11600"} {
-			if !strings.Contains(msg, want) {
-				t.Errorf("the refusal does not mention %q, so it does not tell the user what to do:\n%s", want, msg)
+		t.Run(tc.name, func(t *testing.T) {
+			archive := filepath.Join(dir, tc.name+".7z")
+			args := append([]string{"a", "-t7z", "-p" + password}, tc.args...)
+			args = append(args, archive, payload)
+			if out, err := exec.Command(sevenZip, args...).CombinedOutput(); err != nil {
+				t.Skipf("7z could not build an archive: %v\n%s", err, out)
 			}
-		}
+
+			recs := extractRecords(t, bin, "7z2smith", archive)
+			// The type field says which check the record carries, and getting
+			// it wrong is the bug this whole test exists to catch: a CRC
+			// record for a compressed chain would checksum compressed bytes
+			// against a plaintext CRC and never match.
+			gotCRC := strings.HasPrefix(recs[0], "$7z$0$")
+			if gotCRC != tc.wantCRC {
+				t.Errorf("record type is wrong for a %s archive (CRC-checked=%v, want %v):\n%s",
+					tc.name, gotCRC, tc.wantCRC, recs[0])
+			}
+
+			assertRoundTrip(t, bin, "7z2smith", archive, password)
+		})
+	}
+}
+
+// TestSevenZipRecordIsHashcatCompatible checks the claim the extractor makes
+// out loud: that a CRC-checked 7-Zip record is hashcat's own, not merely
+// something shaped like it.
+//
+// Nothing else can establish this. Hashsmith cracking its own record proves
+// only that its extractor and its verifier agree, which they would even if
+// both were wrong about the format. Running hashcat over the same bytes is the
+// only check that reaches outside that agreement.
+//
+// A padding record is deliberately NOT hashcat's — it keeps a byte count where
+// hashcat keeps a codec id — so this also pins that hashcat REFUSES it rather
+// than loading it and silently never cracking.
+func TestSevenZipRecordIsHashcatCompatible(t *testing.T) {
+	sevenZip := requireTool(t, "7z")
+	hashcat := requireTool(t, "hashcat")
+	if testing.Short() {
+		t.Skip("running hashcat takes tens of seconds per record")
+	}
+	bin := buildTestBinary(t)
+	dir := t.TempDir()
+
+	payload := filepath.Join(dir, "secret.txt")
+	if err := os.WriteFile(payload, []byte(strings.Repeat("seven zip payload. ", 64)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const password = "correct horse"
+	wordlist := filepath.Join(dir, "words.txt")
+	if err := os.WriteFile(wordlist, []byte("nope\n"+password+"\nalso-nope\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name          string
+		args          []string
+		wantHashcatOK bool
+	}{
+		{"header-encrypted", []string{"-mhe=on"}, true},
+		{"compressed", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			archive := filepath.Join(dir, "hc-"+tc.name+".7z")
+			args := append([]string{"a", "-t7z", "-p" + password}, tc.args...)
+			args = append(args, archive, payload)
+			if out, err := exec.Command(sevenZip, args...).CombinedOutput(); err != nil {
+				t.Skipf("7z could not build an archive: %v\n%s", err, out)
+			}
+			recs := extractRecords(t, bin, "7z2smith", archive)
+			hashFile := filepath.Join(dir, "hc-"+tc.name+".hash")
+			if err := os.WriteFile(hashFile, []byte(recs[0]+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			cmd := exec.Command(hashcat, "-m", "11600", "-a", "0",
+				hashFile, wordlist, "--potfile-disable", "--quiet", "--self-test-disable")
+			cmd.Stdin = strings.NewReader("")
+			cmd.Env = append(os.Environ(), "HOME="+dir)
+			out, _ := cmd.CombinedOutput()
+			cracked := strings.Contains(string(out), ":"+password)
+
+			if cracked != tc.wantHashcatOK {
+				if tc.wantHashcatOK {
+					t.Errorf("hashcat did not crack the record Hashsmith calls hashcat-compatible:\n%s\n%s",
+						recs[0], out)
+				} else {
+					t.Errorf("hashcat cracked a padding record, so the type field no longer keeps "+
+						"the two formats apart:\n%s\n%s", recs[0], out)
+				}
+			}
+			// "No hashes loaded" is the decisive line: hashcat rejected the
+			// record at parse time and never ran an attack. Which parse error
+			// it reports varies with the padding length — a short one trips
+			// the token count, a longer one the separator scan — so the
+			// assertion is on the outcome, not on the wording.
+			if !tc.wantHashcatOK && !strings.Contains(string(out), "No hashes loaded") {
+				t.Errorf("hashcat neither cracked nor cleanly refused the padding record, so a user "+
+					"could mistake it for an exhausted wordlist:\n%s", out)
+			}
+		})
 	}
 }
 

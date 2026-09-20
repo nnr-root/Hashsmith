@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/aes"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -18,7 +19,6 @@ import (
 // ── 7-Zip constants ───────────────────────────────────────────────────────────
 
 var sevenZMagic = [6]byte{0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C}
-var aesCodecID = []byte{0x06, 0xF1, 0x07, 0x01}
 
 // ── RAR constants ─────────────────────────────────────────────────────────────
 
@@ -237,135 +237,228 @@ func extractArchiveHash(path string) (*zipHashResult, error) {
 
 // ── 7-Zip extraction ──────────────────────────────────────────────────────────
 
-// extract7z parses a 7-Zip file and returns a crackable hash for AES-256 archives.
+// extract7z builds a crackable record from a password-protected 7-Zip archive.
 //
-// Hash format: $7z$<numCyclesPower>$<salt_hex>$<iv_hex>$<crc_hex>$<dataLen>$<data_hex>
+// It parses the archive's next-header properly rather than searching it for
+// the AES codec ID. The search finds the salt and IV, but not which bytes are
+// the ciphertext, how long the plaintext is, or what it should checksum to —
+// and without those the old implementation emitted a record that could never
+// crack, for any archive 7-Zip actually writes.
 //
-// The encrypted data blob and CRC come from the encoded/packed header region.
-// The KDF uses a rolling SHA-256 accumulation (2^numCyclesPower rounds).
+// Which of two checks a record carries is a property of the archive, not a
+// choice:
+//
+//   - The AES output IS the final data — the coder chain is AES alone, or AES
+//     followed only by Copy — and a CRC is recorded for it. Decrypting and
+//     checksumming is then a complete test, and the record is written in
+//     hashcat's own `$7z$0$…` form, which hashcat -m 11600 reads and cracks.
+//     `7z a -mhe=on` and `7z a -m0=Copy` both land here.
+//
+//   - Anything else. The chain compresses, so the recorded CRC belongs to the
+//     DECOMPRESSED bytes and checking it would mean running LZMA per
+//     candidate. 7-Zip zero-pads the AES stream to a 16-byte boundary, and
+//     those padding bytes are a complete test on their own: the right key
+//     leaves zeros, a wrong key leaves noise. This record carries the padding
+//     length where hashcat keeps its data-type, so hashcat refuses it outright
+//     rather than misreading it — see verify7z for why that field, and note
+//     that hashcat's own compressed-7z form was tried here and did not verify.
+//
+// An archive that offers neither — no usable CRC and too little padding — is
+// refused rather than given a record that cannot tell a right password from a
+// wrong one.
 func extract7z(path string) (*zipHashResult, error) {
-	f, err := os.Open(path)
+	raw, err := readExtractorFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("cannot open %q: %w", path, err)
+		return nil, err
 	}
-	defer f.Close()
-
-	// ── SignatureHeader (32 bytes) ────────────────────────────────────────────
-	var sig [6]byte
-	if _, err := io.ReadFull(f, sig[:]); err != nil {
-		return nil, errors.New("cannot read 7z signature")
-	}
-	if sig != sevenZMagic {
+	if len(raw) < 32 || !bytes.HasPrefix(raw, sevenZMagic[:]) {
 		return nil, errors.New("not a 7-zip file")
 	}
+	nextHeaderOffset := binary.LittleEndian.Uint64(raw[12:20])
+	nextHeaderSize := binary.LittleEndian.Uint64(raw[20:28])
 
-	// skip version (2 bytes) + startHeaderCRC (4 bytes)
-	if _, err := f.Seek(6, io.SeekCurrent); err != nil {
+	hdrStart := uint64(32) + nextHeaderOffset
+	if nextHeaderSize > 64<<20 || hdrStart > uint64(len(raw)) ||
+		hdrStart+nextHeaderSize > uint64(len(raw)) {
+		return nil, errors.New("7z next-header lies outside the file")
+	}
+	info, err := parseSevenZipNextHeader(raw[hdrStart : hdrStart+nextHeaderSize])
+	if err != nil {
 		return nil, err
 	}
 
-	var nextHeaderOffset, nextHeaderSize uint64
-	var nextHeaderCRC uint32
-	if err := binary.Read(f, binary.LittleEndian, &nextHeaderOffset); err != nil {
+	folderIdx, coderIdx := findSevenZipAESFolder(info)
+	if folderIdx < 0 {
+		return nil, errors.New("no AES-encrypted folder found — the archive may not be password-protected")
+	}
+	folder := info.folders[folderIdx]
+	params, err := parseSevenZipAESProps(folder.coders[coderIdx].props)
+	if err != nil {
 		return nil, err
 	}
-	if err := binary.Read(f, binary.LittleEndian, &nextHeaderSize); err != nil {
+
+	// The packed stream this folder reads from. Folders consume the packed
+	// streams in order, and a folder may consume more than one, so the offset
+	// is the sum of every stream the earlier folders took — not the sum of
+	// the first folderIdx sizes, which is the same number only while every
+	// folder happens to take exactly one.
+	packIdx := 0
+	for i := 0; i < folderIdx; i++ {
+		packIdx += info.folders[i].numPackedStreams
+	}
+	if folder.numPackedStreams != 1 {
+		return nil, fmt.Errorf("this 7z archive's encrypted folder draws on %d packed streams; "+
+			"Hashsmith reads single-stream folders, which is what 7-Zip writes for an "+
+			"encrypted archive. Use hashcat -m 11600 with a 7z2john record",
+			folder.numPackedStreams)
+	}
+	if packIdx >= len(info.packSizes) {
+		return nil, errors.New("7z folder has no packed stream")
+	}
+	packStart := uint64(32) + info.packPos
+	for i := 0; i < packIdx; i++ {
+		packStart += info.packSizes[i]
+	}
+	packSize := info.packSizes[packIdx]
+	if packStart+packSize > uint64(len(raw)) {
+		return nil, errors.New("7z packed stream lies outside the file")
+	}
+	if packSize < aes.BlockSize || packSize%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("7z packed stream is %d bytes, not a whole number of AES blocks", packSize)
+	}
+	if packSize > maxSevenZipRecordBytes {
+		return nil, fmt.Errorf("7z packed stream is %d bytes, past the %d-byte limit for a record",
+			packSize, maxSevenZipRecordBytes)
+	}
+	encData := raw[packStart : packStart+packSize]
+
+	// The AES coder's own output size, which is what the padding is measured
+	// against. Coder outputs are listed in chain order.
+	outIdx := 0
+	for i := 0; i < coderIdx; i++ {
+		outIdx += folder.coders[i].numOutStreams
+	}
+	if outIdx >= len(folder.unpackSizes) {
+		return nil, errors.New("7z folder is missing the AES coder's output size")
+	}
+	aesOutSize := folder.unpackSizes[outIdx]
+	if aesOutSize > packSize {
+		return nil, errors.New("7z AES output is larger than its packed stream")
+	}
+
+	// Copy is the identity coder, so a chain of AES followed only by Copy
+	// leaves the AES output as the archive's final data — and that is exactly
+	// the case where the recorded CRC checks the bytes we can produce.
+	plainIsFinal := true
+	for i, c := range folder.coders {
+		if i != coderIdx && !bytes.Equal(c.id, sevenZipCopyCoderID) {
+			plainIsFinal = false
+			break
+		}
+	}
+	padding := packSize - aesOutSize
+
+	var p int
+	var crc uint32
+	switch {
+	case plainIsFinal && folder.crcDefined:
+		p, crc = 0, folder.crc
+	case padding >= minSevenZipPaddingBytes:
+		p = int(padding)
+	default:
+		return nil, fmt.Errorf("this 7z archive offers no way to check a password: "+
+			"its AES stream feeds a %d-coder chain, so the recorded CRC covers the "+
+			"decompressed bytes, and only %d padding byte(s) remain — too few to tell "+
+			"a right password from a wrong one. Use hashcat -m 11600 with a 7z2john record",
+			len(folder.coders), padding)
+	}
+
+	hash := fmt.Sprintf("$7z$%d$%d$%d$%s$%d$%s$%d$%d$%d$%s",
+		p,
+		params.numCyclesPower,
+		len(params.salt), hex.EncodeToString(params.salt),
+		len(params.iv), hex.EncodeToString(params.iv),
+		crc,
+		packSize,
+		aesOutSize,
+		hex.EncodeToString(encData))
+
+	label := fmt.Sprintf("7-Zip AES-256 (2^%d KDF rounds, CRC-verified, hashcat -m 11600 compatible)",
+		params.numCyclesPower)
+	if p != 0 {
+		label = fmt.Sprintf("7-Zip AES-256 (2^%d KDF rounds, %d-byte padding check, Hashsmith only)",
+			params.numCyclesPower, p)
+	}
+	return &zipHashResult{
+		hashType: "7z",
+		hash:     hash,
+		filename: path,
+		encLabel: label,
+	}, nil
+}
+
+const (
+	// maxSevenZipRecordBytes bounds what goes into a record: the whole
+	// encrypted stream is embedded, and a record is a line in a hash file.
+	maxSevenZipRecordBytes = 1 << 20
+	// minSevenZipPaddingBytes is the least padding that makes the padding
+	// check meaningful. Each byte a wrong key has to get right is a factor of
+	// 256, so four bytes is about one false positive in four billion — and
+	// anything less is refused rather than shipped as a check.
+	minSevenZipPaddingBytes = 4
+)
+
+// sevenZipCopyCoderID is 7-Zip's Copy coder: it passes its input through
+// unchanged, so it does not stand between the AES output and the archive's
+// data the way a compressor does.
+var sevenZipCopyCoderID = []byte{0x00}
+
+// parseSevenZipNextHeader reads either a plain Header or an EncodedHeader and
+// returns the StreamsInfo inside it.
+func parseSevenZipNextHeader(hdr []byte) (*sevenZipStreamsInfo, error) {
+	if len(hdr) == 0 {
+		return nil, errors.New("7z next-header is empty")
+	}
+	r := &sevenZipReader{b: hdr}
+	id, err := r.byteAt()
+	if err != nil {
 		return nil, err
 	}
-	if err := binary.Read(f, binary.LittleEndian, &nextHeaderCRC); err != nil {
-		return nil, err
+	switch id {
+	case kEncodedHeaderMarker:
+		// -mhe=on: the real header is itself a packed, encrypted stream, and
+		// this StreamsInfo says where.
+		return r.readStreamsInfo()
+	case kHeader:
+		next, err := r.byteAt()
+		if err != nil {
+			return nil, err
+		}
+		for next == kArchiveProperties {
+			if next, err = r.byteAt(); err != nil {
+				return nil, err
+			}
+		}
+		if next != kMainStreamsInfo {
+			return nil, errors.New("7z header has no streams — the archive may hold no encrypted data")
+		}
+		return r.readStreamsInfo()
+	default:
+		return nil, fmt.Errorf("7z next-header starts with 0x%02x, which is neither a Header nor an EncodedHeader", id)
 	}
+}
 
-	// ── Encrypted data snapshot (at byte 32, before the header) ──────────────
-	// For archives with encrypted file content: the packed stream starts at 32.
-	// For archives with encrypted headers: the encoded header starts at 32.
-	const snapLen = 32
-	encSnap := make([]byte, snapLen)
-	nSnap, _ := f.Read(encSnap)
-	encSnap = encSnap[:nSnap]
-
-	// ── Read the header blob ─────────────────────────────────────────────────
-	headerOff := int64(32) + int64(nextHeaderOffset)
-	if _, err := f.Seek(headerOff, io.SeekStart); err != nil {
-		return nil, fmt.Errorf("cannot seek to 7z header: %w", err)
+// findSevenZipAESFolder returns the first folder with an AES coder, and that
+// coder's index within the folder, or (-1, -1).
+func findSevenZipAESFolder(info *sevenZipStreamsInfo) (int, int) {
+	for fi, f := range info.folders {
+		for ci, c := range f.coders {
+			if bytes.Equal(c.id, sevenZipAESCoderID) {
+				return fi, ci
+			}
+		}
 	}
-	if nextHeaderSize > 64<<20 {
-		return nil, errors.New("7z header too large (> 64 MiB)")
-	}
-	headerBuf := make([]byte, nextHeaderSize)
-	if _, err := io.ReadFull(f, headerBuf); err != nil {
-		return nil, fmt.Errorf("cannot read 7z header: %w", err)
-	}
-
-	// ── Find AES codec and parse properties ───────────────────────────────────
-	aesIdx := bytes.Index(headerBuf, aesCodecID)
-	if aesIdx < 0 {
-		return nil, errors.New("no AES codec found — archive may not be password-protected")
-	}
-
-	// After the 4-byte codec ID: properties-size byte (VINT, single byte for <128)
-	propOff := aesIdx + 4
-	if propOff >= len(headerBuf) {
-		return nil, errors.New("truncated 7z AES codec properties")
-	}
-	propsSize := int(headerBuf[propOff])
-	propOff++
-	if propOff+propsSize > len(headerBuf) || propsSize < 2 {
-		return nil, errors.New("invalid 7z AES properties length")
-	}
-	props := headerBuf[propOff : propOff+propsSize]
-
-	// Properties byte 0: bits 0-5 = numCyclesPower; bits 6-7 reserved
-	// Properties byte 1: bits 4-7 = saltLen; bits 0-3 = (ivLen - 1)
-	numCyclesPower := props[0] & 0x3F
-	saltLen := int((props[1] >> 4) & 0x0F)
-	ivLen := int(props[1]&0x0F) + 1
-
-	if 2+saltLen+ivLen > len(props) {
-		return nil, errors.New("7z AES properties: salt/iv exceed property block")
-	}
-	salt := props[2 : 2+saltLen]
-	iv := props[2+saltLen : 2+saltLen+ivLen]
-
-	// Pad IV to 16 bytes (AES block size).
-	ivPadded := make([]byte, 16)
-	copy(ivPadded, iv)
-
-	// CRC of the next-header: used for verification after decryption.
-	crcBuf := make([]byte, 4)
-	binary.BigEndian.PutUint32(crcBuf, nextHeaderCRC)
-
-	// REFUSED, deliberately. The record this used to build could never be
-	// cracked — not for a header-encrypted archive, and not for a data-only
-	// one. A round-trip test that builds a real archive with 7z, extracts,
-	// and cracks with the password it was built with fails on both.
-	//
-	// Why: verification needs the CRC32 of the DECRYPTED payload together
-	// with its unpacked size, and neither is available here. nextHeaderCRC is
-	// the CRC of the bytes as STORED — for -mhe=on that is the plaintext
-	// EncodedHeader descriptor, not the header it decrypts to. The 32-byte
-	// snapshot from offset 32 carries no length or checksum either, so the
-	// verifier fell back to a structural guess (an LZMA2 control byte, and a
-	// zero-padded second block) that holds only for a narrow shape of archive
-	// and not for the ones 7z actually writes.
-	//
-	// What a correct implementation needs, which this does not do: parse the
-	// next-header properly — a nested, VINT-encoded property stream — to
-	// reach the folder's coder chain, its unpacked size and its CRC, then
-	// emit verify7z's CANONICAL twelve-field form so verification is a real
-	// CRC check rather than a heuristic. The AES parameters gathered above
-	// (numCyclesPower, salt, ivPadded) are the part that is already correct.
-	//
-	// Emitting the old record is the worse option, and not by a little: a
-	// user runs a long attack against something that cannot match and
-	// concludes their wordlist does not contain the password. Refusing costs
-	// them the same archive and none of the time.
-	return nil, fmt.Errorf("7z2smith cannot yet produce a verifiable record for %s: "+
-		"7-Zip verification needs the decrypted payload's CRC and unpacked size, "+
-		"which requires parsing the archive's nested next-header (AES-256, "+
-		"numCyclesPower=%d, %d-byte salt were read successfully). "+
-		"For this archive use hashcat -m 11600 with a 7z2john record",
-		filepath.Base(path), numCyclesPower, len(salt))
+	return -1, -1
 }
 
 // ── RAR extraction ────────────────────────────────────────────────────────────

@@ -189,3 +189,53 @@ func FuzzCollectInputs(f *testing.F) {
 		_, _ = collectInputsOpts(arg, opts)
 	})
 }
+
+// The 7-Zip next-header is the most hostile input any extractor takes: a
+// nested, self-describing structure of variable-length integers, where every
+// count read from the file decides how many more reads follow. A length that
+// says "two billion coders" must be refused, not allocated; a truncated block
+// must end the parse, not index past the end.
+//
+// This target is why the parser reads counts through num(), which takes a cap,
+// instead of through number(), which does not.
+func FuzzSevenZipHeader(f *testing.F) {
+	// Real headers as seeds, so the fuzzer starts from something that parses
+	// and mutates outward rather than guessing the shape from nothing.
+	f.Add([]byte{0x01, 0x04, 0x06, 0x00, 0x01, 0x09, 0x30, 0x00})
+	f.Add([]byte{0x17, 0x06, 0x00, 0x01, 0x09, 0x50, 0x07, 0x0b, 0x01, 0x00})
+	f.Add([]byte{0x01})
+	f.Add([]byte{0x17})
+	f.Add([]byte{})
+	f.Add([]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff})
+
+	f.Fuzz(func(t *testing.T, hdr []byte) {
+		if len(hdr) > 1<<16 {
+			t.Skip()
+		}
+		info, err := parseSevenZipNextHeader(hdr)
+		if err != nil {
+			return
+		}
+		// A successful parse must not report more structure than the bytes
+		// could possibly describe. Every folder, coder and size costs at least
+		// one byte to encode, so a header claiming more of them than it has
+		// bytes means a count was trusted instead of checked.
+		if len(info.folders) > len(hdr) {
+			t.Fatalf("%d folders from a %d-byte header", len(info.folders), len(hdr))
+		}
+		if len(info.packSizes) > len(hdr) {
+			t.Fatalf("%d pack sizes from a %d-byte header", len(info.packSizes), len(hdr))
+		}
+		for _, fl := range info.folders {
+			if len(fl.coders) > len(hdr) {
+				t.Fatalf("%d coders from a %d-byte header", len(fl.coders), len(hdr))
+			}
+			for _, c := range fl.coders {
+				if len(c.props) > len(hdr) {
+					t.Fatalf("%d-byte props from a %d-byte header", len(c.props), len(hdr))
+				}
+				_, _ = parseSevenZipAESProps(c.props)
+			}
+		}
+	})
+}

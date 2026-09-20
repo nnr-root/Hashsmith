@@ -3017,9 +3017,29 @@ func verifyMSSQL2012(targetHash, candidate string) (bool, error) {
 // Canonical Hashcat format:
 // $7z$<type>$<cycles>$<saltLen>$<salt>$<ivLen>$<iv>$<crc>$<dataLen>$<unpackSize>$<data>
 //
+// Two kinds of canonical record are verified, told apart by the first field:
+//
+//	type 0  The AES output is the archive's final data, so the recorded CRC
+//	        covers bytes we can produce. Decrypt, checksum the first
+//	        <unpackSize> bytes, compare. This is hashcat's own record, and
+//	        hashcat -m 11600 cracks the ones Hashsmith writes.
+//
+//	type N  N > 0 is the number of zero-padding bytes 7-Zip appended to round
+//	        the AES stream up to a block boundary, which is the check when the
+//	        chain compresses and the CRC therefore covers bytes only an LZMA
+//	        decoder could produce. Decrypt and require the last N bytes to be
+//	        zero: a wrong key leaves each of them random, so four bytes is
+//	        already one false positive in four billion and a real archive
+//	        offers far more.
+//
+// Hashcat keeps a codec discriminator in that field rather than a length, so
+// a type-N record is one hashcat rejects with a parse error. That is the
+// point: a wrong-but-loadable record would silently never crack, and hashcat's
+// own compressed-7z form was tried against v7.1.2 and did not verify.
+//
 // Hashsmith's earlier abbreviated extractor format is accepted for backward
-// compatibility, but canonical records are verified with their CRC and exact
-// unpacked length instead of a structural heuristic.
+// compatibility, but canonical records are verified with their CRC or their
+// padding instead of a structural heuristic.
 func verify7z(targetHash, candidate string) (bool, error) {
 	parts := strings.Split(targetHash, "$")
 	if len(parts) < 8 || parts[1] != "7z" {
@@ -3028,10 +3048,12 @@ func verify7z(targetHash, candidate string) (bool, error) {
 
 	var cyclesField, saltField, ivField, dataField string
 	var wantCRC uint64
-	var unpackSize int
+	var unpackSize, padding int
 	canonical := len(parts) == 12
 	if canonical {
-		if parts[2] != "0" {
+		var err error
+		padding, err = strconv.Atoi(parts[2])
+		if err != nil || padding < 0 {
 			return false, errors.New("unsupported 7z data type")
 		}
 		cyclesField, saltField, ivField, dataField = parts[3], parts[5], parts[7], parts[11]
@@ -3051,6 +3073,16 @@ func verify7z(targetHash, candidate string) (bool, error) {
 		if err != nil || unpackSize < 0 || unpackSize > dataLen {
 			return false, errors.New("invalid 7z unpack size")
 		}
+		// A padding record states its own padding length twice — once as the
+		// type field and once as dataLen-unpackSize — so a record whose two
+		// halves disagree is rejected rather than checked against whichever
+		// one happens to be right.
+		if padding > 0 && dataLen-unpackSize != padding {
+			return false, errors.New("7z padding length disagrees with the data and unpack sizes")
+		}
+		if padding >= aes.BlockSize {
+			return false, errors.New("invalid 7z padding length")
+		}
 		wantCRC, err = strconv.ParseUint(parts[8], 10, 32)
 		if err != nil {
 			return false, errors.New("invalid 7z CRC")
@@ -3060,8 +3092,17 @@ func verify7z(targetHash, candidate string) (bool, error) {
 		}
 	} else if len(parts) == 8 {
 		cyclesField, saltField, ivField, dataField = parts[2], parts[3], parts[4], parts[7]
+	} else if len(parts) == 14 {
+		// hashcat's compressed form, which carries two extra fields for the
+		// compressor's coder attributes. Checking it means decompressing the
+		// decrypted bytes with LZMA before the CRC can be compared, which
+		// Hashsmith does not do — and hashcat v7.1.2 did not crack this form
+		// either in testing. Say so, rather than report a wrong password.
+		return false, errors.New("this 7z record is hashcat's compressed form, which needs an " +
+			"LZMA decode per candidate; re-extract the archive with Hashsmith's 7z2smith for a " +
+			"padding-checked record")
 	} else {
-		return false, errors.New("invalid 7z hash field count")
+		return false, fmt.Errorf("invalid 7z hash field count: %d, want 8, 12 or 14", len(parts))
 	}
 
 	numCyclesPower, err := strconv.Atoi(cyclesField)
@@ -3105,6 +3146,14 @@ func verify7z(targetHash, candidate string) (bool, error) {
 	decrypted := make([]byte, len(encData))
 	cipher.NewCBCDecrypter(block, iv).CryptBlocks(decrypted, encData)
 	if canonical {
+		if padding > 0 {
+			for _, b := range decrypted[len(decrypted)-padding:] {
+				if b != 0 {
+					return false, nil
+				}
+			}
+			return true, nil
+		}
 		return uint64(crc32.ChecksumIEEE(decrypted[:unpackSize])) == wantCRC, nil
 	}
 
