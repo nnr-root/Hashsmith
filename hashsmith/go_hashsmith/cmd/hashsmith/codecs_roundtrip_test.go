@@ -207,3 +207,54 @@ func TestAscii85KeepsThePartialFinalGroup(t *testing.T) {
 		}
 	}
 }
+
+// "<~>" is three characters in which the opening and closing Ascii85
+// delimiters are the SAME three characters, so stripping two from each end
+// asked for value[2:1] and took the whole process down. The length check is
+// not redundant with the prefix and suffix checks. Found by fuzzing.
+func TestAdobe85OverlappingDelimitersDoNotPanic(t *testing.T) {
+	for _, in := range []string{"<~>", "<~~>", "<~", "~>", "<", ">", "<~~~>"} {
+		// The only contract is that this returns rather than panics.
+		if _, err := decodeText(in, "adobe85", 3, "", 2); err != nil {
+			continue
+		}
+	}
+	// A real record must still decode.
+	got, err := decodeText("<~GQ~>", "adobe85", 3, "", 2)
+	if err != nil || got != "x" {
+		t.Errorf("decode(<~GQ~>) = %q, %v; want \"x\"", got, err)
+	}
+}
+
+// A compressed stream can expand by a thousand to one, so the ceiling on the
+// RESULT is what bounds the work — the input size says nothing.
+func TestCompressionBombIsRefusedAtTheCallersCeiling(t *testing.T) {
+	// gzip of 8 MiB of zeros is a few kilobytes.
+	big := strings.Repeat("\x00", 8<<20)
+	enc, err := encodeText(big, "gzip", 3, "", 2)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if len(enc) > 64<<10 {
+		t.Fatalf("the seed did not compress: %d chars", len(enc))
+	}
+
+	// The default ceiling accepts it: someone who typed `decode -t gzip`
+	// asked for whatever is in there.
+	if _, err := decodeText(enc, "gzip", 3, "", 2); err != nil {
+		t.Errorf("the default ceiling refused an 8 MiB result: %v", err)
+	}
+
+	// A caller with a smaller ceiling refuses it BEFORE building it. magic
+	// searches recursively and discards anything over its own cap, so
+	// inflating 64 MiB first was a large allocation for a result it had
+	// already decided to throw away.
+	if _, err := decodeTextLimited(enc, "gzip", 3, "", 2, 1<<20); err == nil {
+		t.Error("a 1 MiB ceiling accepted an 8 MiB result")
+	} else if !strings.Contains(err.Error(), "limit") {
+		t.Errorf("the refusal does not mention a limit: %v", err)
+	}
+
+	// And magic itself must survive it.
+	_ = magicDecode(enc, 2)
+}

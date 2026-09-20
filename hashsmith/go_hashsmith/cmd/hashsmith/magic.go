@@ -275,7 +275,9 @@ func magicDecode(input string, maxDepth int) []magicCandidate {
 		var next []magicCandidate
 		for _, cur := range frontier {
 			for _, codec := range codecs {
-				out, err := decodeText(cur.value, codec, 3, "", 2)
+				// magic's own ceiling, not the standalone decoder's: anything
+				// larger is discarded below, so inflating it first is waste.
+				out, err := decodeTextLimited(cur.value, codec, 3, "", 2, magicMaxValueLen)
 				if err != nil || out == "" || out == cur.value {
 					continue
 				}

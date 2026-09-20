@@ -197,7 +197,18 @@ func encodeCompressed(data []byte, typ string) (string, error) {
 	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }
 
-func decodeCompressed(text, typ string) ([]byte, error) {
+// decodeCompressed inflates a Base64-transported compressed stream, refusing
+// anything that would expand past limit.
+//
+// The limit is a parameter rather than the constant it used to be because the
+// right ceiling depends on the caller. A user who typed `decode -t gzip`
+// asked for whatever is in there and gets the full 64 MiB. `magic` tries
+// gzip at every node of its search and throws away anything over 1 MiB
+// regardless, so letting it inflate 64 MiB first was a 64x allocation for a
+// result it had already decided to discard — 186 MB of resident set from a
+// 136 KB argument, per node. Found by fuzzing, which stalled on exactly these
+// inputs.
+func decodeCompressed(text, typ string, limit int) ([]byte, error) {
 	compressed, err := decodeBase64Flexible(text, false)
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s Base64 transport", typ)
@@ -215,12 +226,12 @@ func decodeCompressed(text, typ string) ([]byte, error) {
 		return nil, fmt.Errorf("invalid %s stream", typ)
 	}
 	defer r.Close()
-	data, err := io.ReadAll(io.LimitReader(r, maxDecodedSize+1))
+	data, err := io.ReadAll(io.LimitReader(r, int64(limit)+1))
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s stream", typ)
 	}
-	if len(data) > maxDecodedSize {
-		return nil, fmt.Errorf("decoded %s data exceeds 64 MiB limit", typ)
+	if len(data) > limit {
+		return nil, fmt.Errorf("decoded %s data exceeds the %s limit", typ, humanSizeShort(int64(limit)))
 	}
 	return data, nil
 }

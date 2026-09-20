@@ -121,6 +121,39 @@ jobs:
   #
   # This job builds both artifacts, unpacks each, and compiles the Go CLI from
   # exactly the files that shipped — the only check that can catch it.
+  # 231 verify* functions across 70 files, and every one parses data an
+  # attacker supplied — a hash file is something handed to you. None had any
+  # fuzz coverage. The seed corpus runs as an ordinary test on every push; this
+  # job spends real time mutating it.
+  #
+  # The contract each target asserts is deliberately weak — NEVER PANIC —
+  # because that is the one contract that holds for every parser at once, which
+  # is what lets a single target cover all of them. It already found a slice
+  # bounds panic reachable from a three-character argument.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
+      - name: Fuzz the parsers
+        run: |
+          cd hashsmith/go_hashsmith
+          for target in FuzzVerifyCandidate FuzzDetectHashTypes FuzzDecodeText \
+                        FuzzMagicDecode FuzzCompileRuleLine FuzzCollectInputs; do
+            echo "=== $target ==="
+            go test ./cmd/hashsmith -run '^$' -fuzz "^$target\$" -fuzztime 60s
+          done
+      - name: Upload any crashers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashers
+          path: hashsmith/go_hashsmith/cmd/hashsmith/testdata/fuzz/
+          if-no-files-found: ignore
+
   packaging:
     runs-on: ubuntu-latest
     steps:

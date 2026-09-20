@@ -46,7 +46,17 @@ func runDecode(args []string) error {
 	return outputResult(strings.Join(results, "\n"), *outFile, *copyResult)
 }
 
+// decodeText decodes with the default size ceiling, which is what a user who
+// typed `decode -t ...` means: whatever is in there.
 func decodeText(text string, typ string, shift int, key string, rails int) (string, error) {
+	return decodeTextLimited(text, typ, shift, key, rails, maxDecodedSize)
+}
+
+// decodeTextLimited decodes, refusing a result larger than limit. Callers that
+// will discard anything over a smaller ceiling — magic, which searches
+// recursively — pass their own, so an oversized result is refused before it is
+// built rather than after.
+func decodeTextLimited(text string, typ string, shift int, key string, rails int, limit int) (string, error) {
 	t := canonicalCodecType(typ)
 	switch t {
 	case "base64", "base64raw":
@@ -105,7 +115,11 @@ func decodeText(text string, typ string, shift int, key string, rails int) (stri
 		return string(b), nil
 	case "base85", "adobe85":
 		value := compactASCIIWhitespace(text)
-		if strings.HasPrefix(value, "<~") && strings.HasSuffix(value, "~>") {
+		// The length check is not redundant with the prefix and suffix checks:
+		// in "<~>" both match the SAME three characters, and stripping two
+		// from each end asked for value[2:1] — a slice bounds panic that took
+		// the whole process down on a three-character input. Found by fuzzing.
+		if len(value) >= 4 && strings.HasPrefix(value, "<~") && strings.HasSuffix(value, "~>") {
 			value = value[2 : len(value)-2]
 		}
 		// The destination needs room for a whole 4-byte group beyond what the
@@ -194,7 +208,7 @@ func decodeText(text string, typ string, shift int, key string, rails int) (stri
 		}
 		return string(b), nil
 	case "gzip", "zlib":
-		b, err := decodeCompressed(text, t)
+		b, err := decodeCompressed(text, t, limit)
 		if err != nil {
 			return "", err
 		}
