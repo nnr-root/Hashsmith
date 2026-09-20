@@ -890,6 +890,37 @@ instead of compiling into a no-op.
 
 Corpus coverage: **87.3%**.
 
+### Numeric variables, and the position that makes them useful
+
+`vVNM` sets variable V to N minus M, over eleven variables `a` through `k`.
+On its own it is nearly pointless: john.conf's seventeen lines that use it all
+read `p` — the position matched by the LAST `/` or `%` — and `p` was the piece
+Hashsmith did not have.
+
+What `p` points at had to be measured, and `Dp` is the probe that shows it:
+
+| rule | on "one two three four five" |
+|---|---|
+| `/[ ] Dp` | deletes the FIRST space |
+| `%2[ ] Dp` | deletes the SECOND |
+| `%4[ ] Dp` | deletes the FOURTH |
+
+So `%N` records the Nth match, not the first. That is the whole point of
+john.conf's `%4[ ] … va01 vbpa Tb`: set `a` to -1, set `b` to `p`+1, toggle
+there — capitalise the word after the fourth space. Recording the first match
+would have capitalised the wrong word, quietly, in a ruleset whose output
+nobody diffs.
+
+The implementation stays off the hot path. A command with constant operands
+compiles to the same closure it always did; only a rule that actually writes a
+variable or `p` takes the slower route, through a side map like the one memory
+and the memory-substring command already use. `/` and `%` record their match
+position in John's dialect only, because hashcat has no `p` and should not pay
+for one.
+
+Corpus coverage: **94.8%**, and the live differential now runs 105 rules
+through john.
+
 ### Hashcat modes: nine more, and four that were never algorithms
 
 Before implementing anything, every unsupported mode's published record was run
@@ -1034,6 +1065,6 @@ are ruled out.
 ### Still open
 
 - 69 unimplemented hashcat modes, and 62 missing extractors.
-- 12.7% of John's rule corpus, now two features and a remainder: numeric
-  variables (`vVNM`, 17 lines), single-crack word-pair selectors (`1`, `2`,
-  `+`, 9 lines), and the two `Xpz0` lines that need John's `p` tracked.
+- 5.2% of John's rule corpus: the single-crack word-pair selectors `1`, `2`
+  and `+` (9 lines), which only apply to a wordlist of name pairs and so need
+  single-crack mode rather than the rule engine, and 4 lines beyond them.
