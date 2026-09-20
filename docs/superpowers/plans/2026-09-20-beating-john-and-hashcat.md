@@ -1,7 +1,7 @@
 # Beating John and Hashcat: Measured Gap Analysis and Roadmap
 
 **Date:** 2026-09-20
-**Status:** Analysis complete, roadmap proposed, not yet approved
+**Status:** Phases 0 and 1 complete. Phase 2 in progress. Phase 3 partly done.
 **Machine:** Apple M2 (4P+4E), 16 GB, darwin/arm64, Go 1.26.3
 **Comparators:** `hashcat` v7.1.2, `john` 1.9.0-jumbo-1 (ASIMD, MD4:2 MD5:2 interleaving)
 **Binary under test:** built from `d91a400` (`go build ./cmd/hashsmith`)
@@ -319,39 +319,39 @@ Recorded because a gap list that only grows is not being tested.
 Ordered so that each phase makes the next one measurable, and so the early
 phases produce wins a user can feel.
 
-### Phase 0 — Stop corrupting the user's input `[S]`
+### Phase 0 — Stop corrupting the user's input `[S]` — **DONE** (8755a51)
 
 Everything in §2.1. This is a few days of work that fixes defects in five
 commands at once, and it is a prerequisite for trusting any later measurement.
 
-- [ ] Route all input through one explicit layer with a documented contract: no
+- [x] Route all input through one explicit layer with a documented contract: no
       comma splitting unless the user opts in, no whitespace trimming, `--` to end
       flag parsing, `-` means stdin everywhere
-- [ ] Stop the normalizer rewriting the target when `-t` is explicit
-- [ ] Fix the two-byte loss on non-seekable wordlists
-- [ ] Send `crack` results to stdout; keep progress on stderr
-- [ ] Add `--version`, and per-command `--help`
+- [x] Stop the normalizer rewriting the target when `-t` is explicit
+- [x] Fix the two-byte loss on non-seekable wordlists
+- [x] Send `crack` results to stdout; keep progress on stderr
+- [x] Add `--version`, and per-command `--help`
 
 **Acceptance:** all six defects in §2.1 have a regression test; the argv and file
 paths of the §1 harness produce byte-identical results; `crack ... | head` works.
 
-### Phase 1 — Make the self-test measure the right boundary `[M]`
+### Phase 1 — Make the self-test measure the right boundary `[M]` — **DONE** (c5749dd, 36ada2d)
 
-- [ ] Add a CLI-level conformance harness that drives `hashcat --example-hashes`
+- [x] Add a CLI-level conformance harness that drives `hashcat --example-hashes`
       end-to-end through the real binary and records CRACKED / REJECTED /
       NO-SUCH-MODE / NOT-FOUND per mode
-- [ ] Commit the current 324/538 as the baseline and fail CI on regression
+- [x] Commit the baseline (418/538 corrected) and fail CI on regression
 - [ ] Add the equivalent for `john --list=formats`
 
 **Acceptance:** `make conformance` prints the §1 table; CI fails if CRACKED drops.
 
-### Phase 2 — Burn down the Hashcat record gap `[L]`
+### Phase 2 — Burn down the Hashcat record gap `[L]` — **IN PROGRESS**
 
 With Phase 1 as the scoreboard, in strict value order:
 
-- [ ] The 7 silent NOT-FOUNDs (§1.2) — wrong answers are worse than missing ones
-- [ ] LUKS v1 parser — **12 modes**, the single biggest rejection cluster
-- [ ] Episerver, MongoDB SCRAM, Werkzeug (2 each), then the 12 singletons
+- [~] The 7 silent NOT-FOUNDs — 2 of 7 fixed (Skype, MSSQL 2000); 5 remain (§1.2) — wrong answers are worse than missing ones
+- [x] LUKS v1 parser — **12 modes**, the single biggest rejection cluster
+- [~] Episerver, MongoDB SCRAM done; Oracle 11g, Juniper, AxCrypt 1 done. Werkzeug and 8 singletons remain
 - [ ] The 83 unimplemented modes, prioritised by engagement frequency. The
       largest coherent families are PKZIP/SecureZIP (10), Lotus Domino (3),
       DPAPI masterkey (4), MS Office <= 2003 (4), Electrum (2), AxCrypt 2 (2),
@@ -360,11 +360,11 @@ With Phase 1 as the scoreboard, in strict value order:
 
 **Acceptance:** CRACKED >= 500/538 (93%). State the residue and why.
 
-### Phase 3 — Ship something a stranger can install `[M]`
+### Phase 3 — Ship something a stranger can install `[M]` — **PARTLY DONE** (fa731b4)
 
 Nothing above reaches a user while every install path is broken or stale.
 
-- [ ] Fix `setup.cfg` `package_data` and `MANIFEST.in`
+- [x] Fix `setup.cfg` `package_data` and `MANIFEST.in`
 - [ ] Release workflow producing static binaries for linux/darwin × amd64/arm64
       and windows/amd64, plus GPU-enabled macOS builds
 - [ ] npm and Homebrew consume the release binaries instead of building from source
@@ -446,3 +446,32 @@ resolves a 3-layer nested payload unaided.
 - **It does not refactor to a module architecture yet.** That lead (§4) is real
   and probably right, but it is an XL change that would stall every phase above
   it. Revisit after Phase 3 ships.
+
+---
+
+## 8. Progress log
+
+| Date | Commit | Change | CRACKED / 538 |
+|---|---|---|---|
+| 2026-09-20 | — | Baseline, corrected corpus | 418 (77.7%) |
+| 2026-09-20 | 8755a51 | Phase 0: input pipeline | 418 |
+| 2026-09-20 | 6178bcb | hashcat LUKS v1 record (12 modes) | 430 |
+| 2026-09-20 | e86b1ed | 7 record-dialect fixes | 438 |
+| 2026-09-20 | 1a94db8 | Skype and MSSQL 2000 implemented | 439 (81.6%) |
+
+Figures include the 13-14 VeraCrypt modes classified TIMEOUT by the harness's
+20-second bound, which do crack when unbounded.
+
+Still open in Phase 2:
+
+- **5 silent NOT-FOUNDs**: MS Office 2010 (9500), MS-AzureSync (12800),
+  KeePass KDBX v2/v3 (13400 and 29700), Windows Phone 8+ (13800)
+- **11 rejections**: PostgreSQL, DNSSEC NSEC3, Blockchain My Wallet, RAR5,
+  iTunes backup >= 10, Skip32, Ansible Vault, Bitwarden, NetNTLMv2 (NT),
+  Werkzeug MD5 and SHA-256
+- **83 unimplemented modes**, largest families: PKZIP/SecureZIP (10),
+  DPAPI masterkey (4), MS Office <= 2003 (4), ENCsecurity (4), Lotus Domino (3),
+  DiskCryptor (3), Android FDE (3), PDF legacy (3)
+
+Phase 3 still needs release binaries, Docker, shell completions and the
+Homebrew/npm switch to prebuilt artifacts. Phases 4 through 7 are untouched.
