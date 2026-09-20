@@ -568,17 +568,46 @@ because a bare 64-character digest cannot say which it is, and offering only
 one would miss half the format. Auto-detection proposes both, which is the same
 treatment Streebog already gets in that family.
 
-### A mode NOT implemented, twice over
+### An extractor where the verifier was already the hard half
 
-ODF (`-m 18400` and `-m 18600`) was attempted and abandoned, on the same
-principle as MultiBit. The record is fully parameterised — cipher, checksum,
-iterations, key size, salt, IV — and the obvious reading does not reproduce
-either vector. Ruled out, against both published vectors: start key SHA-1 and
-SHA-256, PBKDF2 PRF SHA-1 and SHA-256, key length 16 and 20, Blowfish in CFB-64,
-CFB-8 and CBC, AES-256-CBC, and the checksum over the full plaintext and over
-its first 1024 bytes. None of the resulting plaintexts looks like the DEFLATE
-stream ODF stores, which says the key derivation is wrong rather than the
-cipher framing.
+`ecryptfs2smith` reads a wrapped-passphrase file, which is the container behind
+the `-m 12200` records implemented earlier. Two shapes, told apart by the first
+two bytes: version 2 carries its own eight-byte salt, version 1 does not and
+gets it from the user's `.ecryptfsrc`.
+
+It agrees with `ecryptfs2john` on version 2 byte for byte, and on version 1 it
+does slightly better: john takes the `.ecryptfsrc` as a second argument and
+emits the unsalted record when you forget, while Hashsmith finds it.
+
+Finding it is also where the bug was. The first version looked one directory up
+unconditionally, so a wrapped-passphrase copied anywhere under a home directory
+picked up that home's salt — producing a record that looks MORE precise than
+the short one and cannot crack. The parent is now consulted only when the file
+sits in a directory named `.ecryptfs`, which is the layout eCryptfs actually
+creates, and a test extracts from a copy in a sibling directory to watch the
+salt NOT follow it.
+
+### A mode NOT implemented, three attempts over
+
+ODF (`-m 18400` and `-m 18600`) was attempted three times and abandoned, on the
+same principle as MultiBit. The record is fully parameterised — cipher,
+checksum, iterations, key size, salt, IV — and no reading reproduces either
+vector.
+
+What is now established rather than assumed. John parses hashcat's record and
+cracks it, reporting `PBKDF2-SHA1 … BF/AES`, so the field reading here is
+right and the PRF is SHA-1. The OASIS specification says the cipher is Blowfish
+in **8-bit** CFB with an 8-byte IV, and that the checksum applies SHA-1 to the
+first 1024 bytes of the *compressed unencrypted* file — so over decrypted bytes
+that are still DEFLATE-compressed, which is what was assumed.
+
+Ruled out against both published vectors: start key SHA-1 and SHA-256, PBKDF2
+PRF SHA-1 and SHA-256, key length 16, 20 and 32, Blowfish in CFB-64, CFB-8 and
+CBC, AES-256-CBC, the IV and salt fields in both orders, and the checksum over
+the full plaintext and over its first 1024 bytes. None of the resulting
+plaintexts looks like a DEFLATE stream, which says the key derivation is wrong
+rather than the cipher framing — and the specification's own wording did not
+close the gap.
 
 Shipping the most plausible reading would have produced a verifier that parses
 every record and rejects every password. Two modes left honestly unsupported
