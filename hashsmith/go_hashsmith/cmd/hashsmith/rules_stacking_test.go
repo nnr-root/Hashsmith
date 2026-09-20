@@ -54,9 +54,9 @@ func stackedEngine(t *testing.T, layerLines ...[]string) *ruleEngine {
 // (src_0+src_1+...+src_n) and applying it once produces — agreeing on
 // rejection too.
 func TestStackedOracleMatchesConcatenatedLine(t *testing.T) {
-	fileA := []string{"c", "l", "u", "$1", "'3", ">6"}          // caps/case/append/truncate/length-gate
-	fileB := []string{"$9", "d", "r", "so0", "@a", "_4"}        // append/dup/reverse/subst/purge/exact-length
-	fileC := []string{":", "T0", "{", "D1", "!z", "z2"}         // no-op/toggle/rotate/delete/contains-gate/dup-first
+	fileA := []string{"c", "l", "u", "$1", "'3", ">6"}   // caps/case/append/truncate/length-gate
+	fileB := []string{"$9", "d", "r", "so0", "@a", "_4"} // append/dup/reverse/subst/purge/exact-length
+	fileC := []string{":", "T0", "{", "D1", "!z", "z2"}  // no-op/toggle/rotate/delete/contains-gate/dup-first
 
 	words := []string{
 		"password", "P4ss", "hi", "a", "", "aaaa", "Summer2024",
@@ -202,7 +202,7 @@ func TestStackedOrderFirstFileOuterLoop(t *testing.T) {
 	// or dedup collisions, order must be:
 	// (0,0) (0,1) (0,2) (1,0) (1,1) (1,2)
 	e := stackedEngine(t,
-		[]string{"^A", "^B"},        // prepend A / prepend B — layer0
+		[]string{"^A", "^B"},       // prepend A / prepend B — layer0
 		[]string{"$1", "$2", "$3"}, // append 1/2/3 — layer1
 	)
 	got := e.expand("x")
@@ -273,8 +273,8 @@ func TestStackedDedupWithinWord(t *testing.T) {
 // candidates" comment).
 func TestStackedCountIsProduct(t *testing.T) {
 	e := stackedEngine(t,
-		[]string{"c", "l", "u", ":"},          // 4
-		[]string{"$1", "$2", "r"},             // 3
+		[]string{"c", "l", "u", ":"},           // 4
+		[]string{"$1", "$2", "r"},              // 3
 		[]string{"so0", "sa@", "T0", "d", "f"}, // 5
 	)
 	want := 4 * 3 * 5

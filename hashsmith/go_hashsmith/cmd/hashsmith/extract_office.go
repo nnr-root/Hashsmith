@@ -187,22 +187,22 @@ func attrInt(elem, attr string) int {
 // ── Minimal OLE Compound File (CFB) reader ──────────────────────────────────────
 
 type cfbReader struct {
-	data         []byte
-	sectorSize   int
-	miniSize     int
-	miniCutoff   uint32
-	fat          []uint32
-	dir          []byte
-	miniFAT      []uint32
-	miniStream   []byte
+	data       []byte
+	sectorSize int
+	miniSize   int
+	miniCutoff uint32
+	fat        []uint32
+	dir        []byte
+	miniFAT    []uint32
+	miniStream []byte
 }
 
 const (
-	cfbFreeSector    = 0xFFFFFFFF
-	cfbEndOfChain    = 0xFFFFFFFE
-	cfbEntryStream   = 2
-	cfbEntryRoot     = 5
-	cfbDirEntrySize  = 128
+	cfbFreeSector   = 0xFFFFFFFF
+	cfbEndOfChain   = 0xFFFFFFFE
+	cfbEntryStream  = 2
+	cfbEntryRoot    = 5
+	cfbDirEntrySize = 128
 )
 
 // cfbReadStream returns the bytes of the named stream from a CFB container.

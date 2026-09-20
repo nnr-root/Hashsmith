@@ -198,7 +198,8 @@ func aesKeySaltLen(strength uint8) (keyLen, saltLen int, err error) {
 // encrypted data stream and builds the Hashsmith hash string.
 //
 // WinZip AES data layout (RFC / APPNOTE §7.2):
-//   [salt_length bytes] [2 bytes password verifier] [encrypted payload] [10 bytes HMAC-SHA1]
+//
+//	[salt_length bytes] [2 bytes password verifier] [encrypted payload] [10 bytes HMAC-SHA1]
 func parseWinZipAES(r io.Reader, filename string, ae *aesExtraField) (*zipHashResult, error) {
 	keyLen, saltLen, err := aesKeySaltLen(ae.Strength)
 	_ = keyLen
@@ -281,7 +282,7 @@ func newZipCryptoState(password string) zipCryptoState {
 	s := zipCryptoState{0x12345678, 0x23456789, 0x34567890}
 	for _, b := range []byte(password) {
 		s.k0 = zipCRC32Step(s.k0, b)
-		s.k1 = (s.k1 + (s.k0 & 0xFF)) * 0x08088405 + 1
+		s.k1 = (s.k1+(s.k0&0xFF))*0x08088405 + 1
 		s.k2 = zipCRC32Step(s.k2, byte(s.k1>>24))
 	}
 	return s
@@ -297,7 +298,7 @@ func (s *zipCryptoState) keyStreamByte() byte {
 func (s *zipCryptoState) decryptByte(c byte) byte {
 	plain := c ^ s.keyStreamByte()
 	s.k0 = zipCRC32Step(s.k0, plain)
-	s.k1 = (s.k1 + (s.k0 & 0xFF)) * 0x08088405 + 1
+	s.k1 = (s.k1+(s.k0&0xFF))*0x08088405 + 1
 	s.k2 = zipCRC32Step(s.k2, byte(s.k1>>24))
 	return plain
 }

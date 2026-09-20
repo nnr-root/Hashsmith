@@ -22,14 +22,14 @@ const (
 
 // KDBX dynamic header field IDs (KDBX 3/4).
 const (
-	kdbxHdrEnd            = 0
-	kdbxHdrCipherID       = 2
-	kdbxHdrMasterSeed     = 4
-	kdbxHdrTransformSeed  = 5
+	kdbxHdrEnd             = 0
+	kdbxHdrCipherID        = 2
+	kdbxHdrMasterSeed      = 4
+	kdbxHdrTransformSeed   = 5
 	kdbxHdrTransformRounds = 6
-	kdbxHdrEncryptionIV   = 7
-	kdbxHdrStreamStart    = 9
-	kdbxHdrKdfParameters  = 11
+	kdbxHdrEncryptionIV    = 7
+	kdbxHdrStreamStart     = 9
+	kdbxHdrKdfParameters   = 11
 )
 
 // AES256-CBC cipher UUID used by KDBX AES databases.

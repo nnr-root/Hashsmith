@@ -102,4 +102,3 @@ func outputResult(result, outFile string, copyResult bool) error {
 	}
 	return nil
 }
-
