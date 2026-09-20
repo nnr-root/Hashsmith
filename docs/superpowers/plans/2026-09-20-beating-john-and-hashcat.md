@@ -1,8 +1,8 @@
 # Beating John and Hashcat: Measured Gap Analysis and Roadmap
 
 **Date:** 2026-09-20
-**Status:** Phases 0 and 1 complete. Phase 2 complete except for unimplemented
-modes. Phase 3 partly done. Phases 4-7 not started.
+**Status:** Phases 0, 1 and 3 complete. Phase 2 complete except for the 83
+unimplemented modes. Phase 4 substantially done. Phases 5-7 not started.
 **Machine:** Apple M2 (4P+4E), 16 GB, darwin/arm64, Go 1.26.3
 **Comparators:** `hashcat` v7.1.2, `john` 1.9.0-jumbo-1 (ASIMD, MD4:2 MD5:2 interleaving)
 **Binary under test:** built from `d91a400` (`go build ./cmd/hashsmith`)
@@ -363,25 +363,28 @@ With Phase 1 as the scoreboard, in strict value order:
 
 **Acceptance:** CRACKED >= 500/538 (93%). State the residue and why.
 
-### Phase 3 — Ship something a stranger can install `[M]` — **PARTLY DONE** (fa731b4)
+### Phase 3 — Ship something a stranger can install `[M]` — **DONE** (fa731b4, 0a3f730)
 
 Nothing above reaches a user while every install path is broken or stale.
 
 - [x] Fix `setup.cfg` `package_data` and `MANIFEST.in`
-- [ ] Release workflow producing static binaries for linux/darwin × amd64/arm64
+- [x] Release workflow producing static binaries for linux/darwin × amd64/arm64
       and windows/amd64, plus GPU-enabled macOS builds
-- [ ] npm and Homebrew consume the release binaries instead of building from source
-- [ ] Dockerfile, shell completions, `--version` wired to the tag
+- [x] npm and Homebrew consume the release binaries instead of building from source
+- [x] Dockerfile, shell completions, `--version` wired to the tag
 
 **Acceptance:** on a clean machine with no Go toolchain, all three install paths
 yield a binary whose `--version` matches the current tag.
 
-### Phase 4 — Candidate quality `[M]`
+### Phase 4 — Candidate quality `[M]` — **MOSTLY DONE** (44116fd, b89036d)
 
-- [ ] Replace `common.txt` with a real password list, or fetch one on first run
-- [ ] Ship rule files, and `--rules` names resolve without a path
-- [ ] Implement John's rule dialect: reject flags, `*`/`@` references, character classes
-- [ ] Auto-discovery finds wordlists where john and hashcat install them
+- [~] Not replaced. Discovery now finds the real lists john and hashcat ship,
+      which covers the machines this tool actually runs on; the embedded
+      fallback is still an English dictionary
+- [x] Ship rule files, and `--rules` names resolve without a path
+- [~] John's dialect reads 30.6% of its corpus, up from ~2%, and matches
+      john candidate-for-candidate on its flagship Wordlist ruleset
+- [x] Auto-discovery finds wordlists where john and hashcat install them
 
 **Acceptance:** John's `[List.Rules:Wordlist]` loads at ≥ 95%; the default
 wordlist cracks a representative leaked-hash sample at a rate comparable to
@@ -467,6 +470,9 @@ resolves a 3-layer nested payload unaided.
 | aa4ecd2 | Candidate-shape guards, PostgreSQL, Werkzeug | 449 |
 | 5ba8465 | Ansible, Bitwarden, Blockchain record shapes | 452 |
 | ed5a332 | NSEC3, RAR5, iTunes | **455 (84.6%)** |
+| fa731b4, 0a3f730 | Phase 3: packaging, release, Docker, completions | 455 |
+| 44116fd | Phase 4: wordlist discovery, bundled rulesets | 455 |
+| b89036d | Phase 4: John's rule dialect | 455 |
 
 Figures include the 13-14 VeraCrypt modes the harness classifies TIMEOUT under
 its 20-second bound, which crack when unbounded.
@@ -522,3 +528,49 @@ stays green through exactly the bugs it exists to catch.
 tags compile. All four cross-compile targets build. `selftest -slow` passes with
 461 of 461 crackable formats carrying a vector. The pip wheel unpacks to a Go
 tree that compiles.
+
+### Phase 3 and 4, what landed
+
+**Distribution.** A release workflow builds static CGO_ENABLED=0 binaries for
+five platform pairs plus separate Metal and OpenCL macOS builds, checksums them
+into the GitHub Release, and refuses to ship a binary that cannot pass its own
+known-answer vectors. A scratch-based Docker image carries one 14 MB static
+binary. npm downloads the release binary and verifies it against SHA256SUMS
+before running it, falling back to a source build; `npm install
+--ignore-scripts`, which used to leave the command permanently broken, now just
+defers the work to first run. A Homebrew formula installs a prebuilt binary and
+its test block runs the binary's own vectors rather than checking it starts.
+`hashsmith completion bash|zsh|fish` generates from the live registries, so a
+format added tomorrow completes without anyone editing a script.
+
+**Candidates.** Wordlist discovery was two filenames, rockyou.txt and
+rockyou.txt.gz. The people who run this tool usually have john or hashcat
+installed and both ship a real password list; neither was ever found. Discovery
+is now tiered — the file decides first, the directory decides among equals —
+and on this machine that is the difference between falling back to an
+alphabetical English dictionary and using john's 3,546-entry password.lst.
+Four rulesets are authored and embedded, resolvable by bare name.
+
+**John's rule dialect.** The engine was Hashcat-complete and could read
+essentially no John ruleset. It now reads 30.6% of John's 614-line corpus and
+reproduces john's candidate stream exactly on its flagship Wordlist ruleset.
+All 28 stock hashcat rule files are byte-identical before and after.
+
+Two claims in §4 were checked against the binaries and found **wrong**:
+
+- `M`, `Q`, `(`, `)` and `%NX` were listed as hashcat operators Hashsmith
+  lacked. hashcat v7.1.2 answers "No valid rules left." for a `-r` file
+  containing any of them. They are documented but not accepted, so they are
+  John-only here.
+- The dialect cannot be detected from marker syntax. `-8` is a valid hashcat
+  rule and a valid John flag; `@?d` means different things in each. Two
+  heuristics each read a real hashcat file as John and silently dropped every
+  candidate. The dialect is chosen by compiling both ways instead.
+
+### Still open
+
+- 83 unimplemented hashcat modes.
+- 69% of John's rule corpus, dominated by its `a` command (262 lines).
+- The embedded fallback wordlist is still an English dictionary.
+- Phases 5, 6 and 7: the 62 missing extractors, the GPU decision, and the
+  encoding/decoding work.
