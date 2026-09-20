@@ -11,6 +11,11 @@ recursive-exclude wordlists *
 recursive-include hashsmith/go_hashsmith *.go *.s go.mod go.sum
 recursive-include hashsmith/go_hashsmith *.txt
 
+# Rulesets embedded with go:embed. A missing one is not a missing feature at
+# run time — it is a BUILD failure ("pattern rules/*.rule: no matching files
+# found"), so the packaged tree has to carry them.
+recursive-include hashsmith/go_hashsmith *.rule
+
 # cgo sources for the optional GPU backends (-tags gpu / -tags opencl). The
 # default build never compiles these, but an sdist that drops them silently
 # removes the ability to make a GPU build from it.
