@@ -1,0 +1,183 @@
+name: Release
+
+# Nothing this project fixes reaches a user until a binary exists. Every
+# install path — pip, npm, Homebrew — previously compiled from source on the
+# user's machine and required a Go toolchain to be present, which is the
+# opposite of the "one static binary, no runtime deps" the README advertises.
+#
+# This workflow produces that binary. It runs on a version tag, and can be run
+# by hand against any ref to rehearse a release without tagging.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp into the binaries (no leading v)"
+        required: true
+        default: "0.0.0-rc"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64 }
+          - { goos: linux,   goarch: arm64 }
+          - { goos: darwin,  goarch: amd64 }
+          - { goos: darwin,  goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
+
+      - name: Resolve version
+        id: v
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V="${{ inputs.version }}"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      # CGO_ENABLED=0 is what makes these binaries dependency-free, and
+      # -trimpath keeps build paths out of the artifact so the same source
+      # produces the same bytes.
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          cd hashsmith/go_hashsmith
+          EXT=""; [ "$GOOS" = "windows" ] && EXT=".exe"
+          NAME="hashsmith-${{ steps.v.outputs.version }}-$GOOS-$GOARCH$EXT"
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${{ steps.v.outputs.version }} -X main.commit=${GITHUB_SHA::12} -X main.buildDate=${{ steps.v.outputs.date }}" \
+            -o "$GITHUB_WORKSPACE/$NAME" ./cmd/hashsmith
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+
+      # A binary that cannot pass its own known-answer vectors must not ship.
+      # This only runs for the host platform; the cross-built ones are covered
+      # by the same vectors in the ordinary CI test job.
+      - name: Self-test (native target only)
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: |
+          chmod +x "$NAME"
+          "./$NAME" -N selftest
+          "./$NAME" --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: ${{ env.NAME }}
+          if-no-files-found: error
+
+  # The GPU backends need cgo and Apple's frameworks, so they can only be built
+  # on a macOS runner and only for darwin. They ship separately and are clearly
+  # named, because they are NOT dependency-free the way the default builds are.
+  build-gpu:
+    name: darwin/arm64 (GPU)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
+      - name: Resolve version
+        id: v
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then V="${GITHUB_REF_NAME#v}"; else V="${{ inputs.version }}"; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      - name: Build Metal and OpenCL variants
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          cd hashsmith/go_hashsmith
+          for tag in gpu opencl; do
+            NAME="hashsmith-${{ steps.v.outputs.version }}-darwin-arm64-$tag"
+            go build -trimpath -tags "$tag" \
+              -ldflags "-s -w -X main.version=${{ steps.v.outputs.version }} -X main.commit=${GITHUB_SHA::12} -X main.buildDate=${{ steps.v.outputs.date }}" \
+              -o "$GITHUB_WORKSPACE/$NAME" ./cmd/hashsmith
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hashsmith-darwin-arm64-gpu
+          path: hashsmith-*-darwin-arm64-*
+          if-no-files-found: error
+
+  completions:
+    name: Shell completions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
+      - name: Generate and syntax-check
+        run: |
+          cd hashsmith/go_hashsmith
+          go build -o /tmp/hashsmith ./cmd/hashsmith
+          mkdir -p "$GITHUB_WORKSPACE/completions"
+          /tmp/hashsmith -N completion bash > "$GITHUB_WORKSPACE/completions/hashsmith.bash"
+          /tmp/hashsmith -N completion zsh  > "$GITHUB_WORKSPACE/completions/_hashsmith"
+          /tmp/hashsmith -N completion fish > "$GITHUB_WORKSPACE/completions/hashsmith.fish"
+          bash -n "$GITHUB_WORKSPACE/completions/hashsmith.bash"
+          zsh  -n "$GITHUB_WORKSPACE/completions/_hashsmith"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: completions
+          path: completions/
+          if-no-files-found: error
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then V="${GITHUB_REF_NAME#v}"; else V="${{ inputs.version }}"; fi
+          docker build \
+            --build-arg VERSION="$V" \
+            --build-arg COMMIT="${GITHUB_SHA::12}" \
+            --build-arg BUILD_DATE="$(date -u +%Y-%m-%d)" \
+            -t hashsmith:"$V" .
+          docker run --rm hashsmith:"$V" --version
+          docker run --rm hashsmith:"$V" -N selftest
+          docker run --rm hashsmith:"$V" -N identify 5f4dcc3b5aa765d61d8327deb882cf99
+
+  publish:
+    name: Publish release
+    needs: [build, build-gpu, completions, docker]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect and checksum
+        run: |
+          mkdir -p dist
+          find artifacts -type f -exec cp {} dist/ \;
+          cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

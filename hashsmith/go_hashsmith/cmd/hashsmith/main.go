@@ -132,6 +132,10 @@ func main() {
 		if err := runGPUInfo(rest); err != nil {
 			fail(err.Error())
 		}
+	case "completion":
+		if err := runCompletion(rest); err != nil {
+			fail(err.Error())
+		}
 	case "interactive":
 		if err := runInteractive(); err != nil {
 			fail(err.Error())
@@ -189,6 +193,7 @@ func printHelp() {
 	fmt.Println("                           show where an omitted -w looks for a wordlist (--scan searches the disk);")
 	fmt.Println("                           --set-default pins one permanently in ~/.hashsmith/config.json")
 	fmt.Println("  interactive   guided interactive mode")
+	fmt.Println("  completion    <bash|zsh|fish>   emit a shell completion script")
 	fmt.Println()
 	fmt.Println("Global flags:")
 	fmt.Println("  -N, --no-banner   suppress the banner")
