@@ -32,6 +32,10 @@ import (
 // johnClassMatch returns a predicate for a John character class, and whether
 // the name was recognised. An uppercase name is the complement of its
 // lowercase counterpart.
+// johnSymbolClass is John's ?s, exactly as john matches it: 23 characters,
+// with punctuation deliberately absent because that is ?p.
+const johnSymbolClass = "$%^&*()-_+=|\\<>[]{}#@/~"
+
 func johnClassMatch(name byte) (func(byte) bool, bool) {
 	lower := name | 0x20
 	var base func(byte) bool
@@ -45,9 +49,17 @@ func johnClassMatch(name byte) (func(byte) bool, bool) {
 	case 'p':
 		base = func(b byte) bool { return strings.IndexByte(".,:;'?!`\"", b) >= 0 }
 	case 's':
-		base = func(b byte) bool {
-			return b > 0x20 && b < 0x7f && !isASCIILetter(b) && !(b >= '0' && b <= '9')
-		}
+		// John's ?s is an explicit 23-character SET, not "everything that is
+		// not a letter or a digit". The nine characters of ?p — . , : ; ' ? !
+		// backtick and the double quote — are punctuation and are NOT symbols
+		// here, so ?s and ?p do not overlap and neither covers all the
+		// printable non-alphanumerics.
+		//
+		// Reading ?s as the broad complement made `s?s_` turn "P@ssw0rd!"
+		// into "P_ssw0rd_" where john leaves the "!" alone. The set below was
+		// read out of john itself, one character at a time, by substituting
+		// over a word containing every printable byte.
+		base = func(b byte) bool { return strings.IndexByte(johnSymbolClass, b) >= 0 }
 	case 'l':
 		base = func(b byte) bool { return b >= 'a' && b <= 'z' }
 	case 'u':
@@ -60,6 +72,23 @@ func johnClassMatch(name byte) (func(byte) bool, bool) {
 		base = func(b byte) bool { return isASCIILetter(b) || (b >= '0' && b <= '9') }
 	case 'z':
 		base = func(byte) bool { return true }
+	case 'o':
+		// Control characters: everything below space, plus DEL.
+		base = func(b byte) bool { return b < 0x20 || b == 0x7f }
+	case 'y':
+		// "Valid characters". John's own documentation says its rules engine
+		// has very limited understanding of UTF-8 and that classes work on
+		// ASCII even under --encoding=utf-8, so over bytes this is everything
+		// but NUL — which john cannot carry in a word in any case.
+		base = func(b byte) bool { return b != 0 }
+	case 'b':
+		// The 8th bit set. Verified against john with a UTF-8 "é", whose two
+		// bytes both matched, which is the byte-oriented reading.
+		base = func(b byte) bool { return b >= 0x80 }
+	case '?':
+		// ?? matches a literal '?', which is how a rule writes one where a
+		// class name would otherwise be read.
+		base = func(b byte) bool { return b == '?' }
 	default:
 		return nil, false
 	}

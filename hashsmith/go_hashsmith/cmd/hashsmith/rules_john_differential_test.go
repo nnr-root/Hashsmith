@@ -109,6 +109,12 @@ func TestJohnRuleCommandsMatchJohnItself(t *testing.T) {
 		"p", "P", "I", "Q", "M",
 		"$1", "^x", "D1", "x02", "i1z", "o0y",
 		"@?v", "/?d", "!?d", "(?a", ")?d", "%2s",
+		// The class form of substitute. Without it `s?d*` read '?' as the
+		// character to replace, and a rule whose next character happened to
+		// be a valid command would have compiled silently as something else.
+		// ?D is the negated-digit class, which makes these also a check that
+		// the class table itself is right.
+		"s?d*", "s?l#", "s?u-", "s?a.", "s?D*", "s?s_", "sa2",
 		"l Q R", "u Q L", "c M S Q", "V Q l",
 		"a0 W0", "b3 T0", "=1a l",
 
@@ -208,7 +214,7 @@ func dedupSorted(in []string) []string {
 // numeric variables (vVNM), its memory-substring command (XNMI), and its
 // single-crack word-pair selectors (1, 2, +).
 func TestJohnCorpusCoverageDoesNotRegress(t *testing.T) {
-	const floor = 0.84
+	const floor = 0.84 // 84.9% measured; the floor lags so a small corpus change cannot fail it
 
 	confPaths := []string{
 		"/opt/homebrew/share/john/john.conf",
@@ -270,5 +276,84 @@ func TestJohnCorpusCoverageDoesNotRegress(t *testing.T) {
 	if got < floor {
 		t.Errorf("john.conf coverage fell to %.1f%%, below the %.1f%% floor; still failing:\n  %s",
 			100*got, 100*floor, strings.Join(failed, "\n  "))
+	}
+}
+
+// TestJohnCharacterClassesMatchJohnItself compares the MEMBERSHIP of every
+// character class against john, one byte at a time, rather than spot-checking
+// a rule that happens to use one.
+//
+// Spot checks are what let ?s stay wrong. It was implemented as "printable,
+// not a letter, not a digit", which is a reasonable reading of the word
+// "symbols" and is not what john does: john's ?s is an explicit 23-character
+// set, and the nine characters of ?p are punctuation and deliberately outside
+// it. `s?s_` on "P@ssw0rd!" gave "P_ssw0rd_" here against john's
+// "P_ssw0rd!" — one character, in a class used by rules that rewrite
+// punctuation.
+//
+// Substituting a marker for every member over a word containing every
+// printable byte turns the whole table into one comparison, so a class cannot
+// be subtly wrong in a corner no rule in the test list happens to reach.
+func TestJohnCharacterClassesMatchJohnItself(t *testing.T) {
+	john, err := exec.LookPath("john")
+	if err != nil {
+		t.Skip("john is not installed here, so its classes cannot be compared against")
+	}
+	dir := t.TempDir()
+
+	// Every printable byte, in order. The marker is a byte NOT in the word so
+	// that "this position changed" is unambiguous — an in-word marker makes a
+	// character that is already the marker look like a match.
+	var word []byte
+	for c := 33; c < 127; c++ {
+		word = append(word, byte(c))
+	}
+	const marker = "\\x01"
+
+	for _, class := range []byte{'v', 'c', 'w', 'p', 's', 'l', 'u', 'd', 'a', 'x', 'z', 'o', 'y', 'b', '?'} {
+		t.Run(string(class), func(t *testing.T) {
+			rule := "s?" + string(class) + marker
+
+			conf := filepath.Join(dir, "cls.conf")
+			if err := os.WriteFile(conf, []byte("[List.Rules:Probe]\n"+rule+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			words := filepath.Join(dir, "cls.txt")
+			if err := os.WriteFile(words, append(word, '\n'), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(john, "--config="+conf, "--rules=Probe", "--wordlist="+words, "--stdout")
+			cmd.Env = append(os.Environ(), "HOME="+dir)
+			raw, err := cmd.Output()
+			if err != nil {
+				t.Skipf("this john did not run the class probe for ?%c: %v", class, err)
+			}
+			out := strings.TrimRight(string(raw), "\n")
+			if len(out) != len(word) {
+				t.Skipf("john returned %d bytes for a %d-byte word; the probe cannot be read",
+					len(out), len(word))
+			}
+			var johnSet []byte
+			for i := range word {
+				if out[i] != word[i] {
+					johnSet = append(johnSet, word[i])
+				}
+			}
+
+			match, ok := johnClassMatch(class)
+			if !ok {
+				t.Fatalf("Hashsmith has no class ?%c, but john matched %q", class, johnSet)
+			}
+			var ourSet []byte
+			for _, b := range word {
+				if match(b) {
+					ourSet = append(ourSet, b)
+				}
+			}
+			if string(ourSet) != string(johnSet) {
+				t.Errorf("class ?%c differs over printable bytes\n  hashsmith: %q\n  john:      %q",
+					class, ourSet, johnSet)
+			}
+		})
 	}
 }

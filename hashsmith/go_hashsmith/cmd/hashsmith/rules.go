@@ -373,6 +373,41 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 				return out, true
 			})
 		case 's':
+			// sXY replaces every X with Y. John also spells s?CY, replacing
+			// every character of CLASS C.
+			//
+			// The class form was not merely missing: without it `s?D*` read
+			// '?' as the character to replace and 'D' as its replacement,
+			// then met '*' as a command and failed. A rule whose next
+			// character happened to be a valid command — `s?dl`, say — would
+			// have compiled SILENTLY as "replace ? with d, then lowercase",
+			// which is not what the rule says and produces a different
+			// candidate stream with nothing to indicate it.
+			//
+			// It stays John-only for the reason @ and ( already are: in
+			// hashcat's dialect '?' is an ordinary character, and its own
+			// shipped rule files contain rules that mean it literally.
+			if match, isClass, err := classArg('s'); err != nil {
+				return ruleProgram{}, err
+			} else if isClass {
+				y, ok := arg()
+				if !ok {
+					return ruleProgram{}, errors.New("command 's?C' needs a replacement character")
+				}
+				yr := y
+				ops = append(ops, func(r []byte) ([]byte, bool) {
+					out := make([]byte, len(r))
+					for i, ch := range r {
+						if match(ch) {
+							out[i] = yr
+						} else {
+							out[i] = ch
+						}
+					}
+					return out, true
+				})
+				break
+			}
 			x, ok1 := arg()
 			y, ok2 := arg()
 			if !ok1 || !ok2 {
