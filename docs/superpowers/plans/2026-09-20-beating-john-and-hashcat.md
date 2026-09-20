@@ -1,9 +1,14 @@
 # Beating John and Hashcat: Measured Gap Analysis and Roadmap
 
 **Date:** 2026-09-20
-**Status:** Phases 0, 1 and 3 complete. Phase 2 complete except for the 83
-unimplemented modes. Phase 4 substantially done. Phase 6 resolved. Phases 5
-and 7 started.
+**Status:** Phases 0, 1, 3 and 6 complete. Phase 2 complete except for the 69
+modes still unimplemented, down from 83 — four of which were never hash
+algorithms. Phase 4 done, including the rule engine, which now reads 98.4% of
+john.conf against john itself. Phase 5 and 7 in progress.
+
+The figures below are the ORIGINAL measurements, kept as they were taken. §8's
+progress log carries the current ones and says what moved.
+
 **Machine:** Apple M2 (4P+4E), 16 GB, darwin/arm64, Go 1.26.3
 **Comparators:** `hashcat` v7.1.2, `john` 1.9.0-jumbo-1 (ASIMD, MD4:2 MD5:2 interleaving)
 **Binary under test:** built from `d91a400` (`go build ./cmd/hashsmith`)
@@ -979,6 +984,32 @@ The round trip now asserts the record's SHAPE as well as its behaviour, because
 a single known password cannot tell the two records apart, and a second test
 throws 2,000 wrong passwords at it — where the byte alone would accept about
 eight.
+
+### Sweeping every format for the same defect
+
+Two formats had now leaked the same way — a record that kept a short check and
+discarded what would have settled it — and neither was visible to a round trip
+over one known password, because both cracked the right password perfectly
+well. So every format was swept: **353 of them, up to 512 wrong passwords
+each. None accepted one.**
+
+A full sweep costs 136 seconds, which is most of a second test suite, so each
+format also gets a 100ms slice. That is not a compromise where it matters: the
+leaks this looks for live in RECORD parsing, and those verifiers are the cheap
+ones that finish all 512 tries well inside the slice. What gets truncated is
+the expensive KDFs, where a short check is not a shape the verifier can have
+because it compares a full digest. Fifty formats were truncated and the test
+NAMES them with their try counts, so a format that quietly stops being swept
+shows up in the log instead of passing for coverage. Total cost: 12.5 seconds.
+
+The limits are stated rather than implied. The sweep reliably catches a check
+of one or two bytes and cannot catch a four-byte one, so a clean run is the
+absence of the cheap mistake and not proof of exactness. And one case it can
+never reach is recorded in the test: the short `$zipaes128/192/256$` records
+keep WinZip's two-byte verifier and accept one wrong password in 65,536, which
+is a property of that record rather than a bug — the `winzip` type reads the
+authenticated `$zip2$` form instead, and the extractor emits it whenever the
+archive allows.
 
 ### Hashcat modes: nine more, and four that were never algorithms
 
