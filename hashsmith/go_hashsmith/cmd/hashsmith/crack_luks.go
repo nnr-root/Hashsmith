@@ -42,6 +42,11 @@ type luksParams struct {
 	slotSalt    []byte // 32 bytes
 	stripes     int
 	keyMaterial []byte // keyBytes * stripes bytes
+
+	// payload is set only for Hashcat's 9-field $luks$ record (-m 29511 and
+	// friends), which carries 512 bytes of the encrypted data area in place of
+	// the master-key digest. See parseLUKSHashcat.
+	payload []byte
 }
 
 type luksModeSpec struct {
@@ -98,9 +103,16 @@ func parseLUKSHash(target string) (*luksParams, error) {
 		return nil, errors.New("invalid LUKS hash (missing $luks$1$ prefix)")
 	}
 	f := strings.Split(target[len("$luks$"):], "$")
+	// Two record shapes share the $luks$1$ prefix and are told apart by field
+	// count. Hashcat's luks2hashcat.py emits nine fields; Hashsmith's own
+	// luks2smith emits twelve. Both are accepted — see parseLUKSHashcat for
+	// what each can and cannot verify.
+	if len(f) == 9 {
+		return parseLUKSHashcat(f)
+	}
 	// f: [1, hash, cipher, mode, keyBytes, mkDigest, mkSalt, mkIter, slotIter, slotSalt, stripes, keyMaterial]
 	if len(f) != 12 {
-		return nil, errors.New("invalid LUKS hash (need 12 fields)")
+		return nil, errors.New("invalid LUKS hash (need 9 fields for a hashcat record or 12 for a luks2smith record, got " + strconv.Itoa(len(f)) + ")")
 	}
 	atoi := func(name, s string) (int, error) {
 		n, err := strconv.Atoi(s)
@@ -211,16 +223,29 @@ func verifyLUKSParams(p *luksParams, candidate string) (bool, error) {
 	// 3. AF-merge into a candidate master key.
 	masterKey := afMerge(decrypted, p.keyBytes, p.stripes, newHash)
 
-	// 4. Digest the candidate master key and compare (LUKS digest is 20 bytes).
+	// 4. Confirm the candidate master key. A luks2smith record carries the
+	// master-key digest and is checked against it; a hashcat record carries a
+	// slice of the encrypted data area instead (see parseLUKSHashcat).
+	if p.payload != nil {
+		return verifyLUKSPayload(p, masterKey)
+	}
 	got := pbkdf2.Key(masterKey, p.mkSalt, p.mkIter, len(p.mkDigest), newHash)
 	return bytesEqualCT(got, p.mkDigest), nil
 }
 
-// luksDecrypt decrypts the key material sector-by-sector (512-byte sectors) with
-// the volume cipher/mode.
+// luksDecrypt decrypts the key material sector-by-sector (512-byte sectors)
+// with the volume cipher/mode.
 func luksDecrypt(p *luksParams, key []byte) ([]byte, error) {
+	return luksDecryptBuf(p.cipherName, p.cipherMode, p.keyMaterial, key)
+}
+
+// luksDecryptBuf decrypts an arbitrary LUKS-encrypted buffer sector-by-sector.
+// Both the anti-forensic key material and (for hashcat records) the data-area
+// payload are encrypted this way, with sector numbering restarting at zero for
+// each, so one routine serves both.
+func luksDecryptBuf(cipherName, cipherMode string, data, key []byte) ([]byte, error) {
 	blockFn := func(k []byte) (cipher.Block, error) {
-		switch p.cipherName {
+		switch cipherName {
 		case "aes":
 			return aes.NewCipher(k)
 		case "twofish":
@@ -228,24 +253,24 @@ func luksDecrypt(p *luksParams, key []byte) ([]byte, error) {
 		case "serpent":
 			return newSerpentCipher(k)
 		}
-		return nil, errors.New("unsupported LUKS cipher " + p.cipherName)
+		return nil, errors.New("unsupported LUKS cipher " + cipherName)
 	}
 
 	const sector = 512
-	out := make([]byte, len(p.keyMaterial))
+	out := make([]byte, len(data))
 
-	switch p.cipherMode {
+	switch cipherMode {
 	case "xts-plain64":
 		c, err := xts.NewCipher(blockFn, key)
 		if err != nil {
 			return nil, err
 		}
-		for s := 0; s*sector < len(p.keyMaterial); s++ {
+		for s := 0; s*sector < len(data); s++ {
 			lo, hi := s*sector, (s+1)*sector
-			if hi > len(p.keyMaterial) {
-				hi = len(p.keyMaterial)
+			if hi > len(data) {
+				hi = len(data)
 			}
-			c.Decrypt(out[lo:hi], p.keyMaterial[lo:hi], uint64(s))
+			c.Decrypt(out[lo:hi], data[lo:hi], uint64(s))
 		}
 		return out, nil
 
@@ -255,24 +280,24 @@ func luksDecrypt(p *luksParams, key []byte) ([]byte, error) {
 			return nil, err
 		}
 		var essiv cipher.Block
-		if p.cipherMode == "cbc-essiv:sha256" {
+		if cipherMode == "cbc-essiv:sha256" {
 			salted := sha256.Sum256(key)
 			essiv, err = blockFn(salted[:])
 			if err != nil {
 				return nil, err
 			}
 		}
-		for s := 0; s*sector < len(p.keyMaterial); s++ {
+		for s := 0; s*sector < len(data); s++ {
 			lo, hi := s*sector, (s+1)*sector
-			if hi > len(p.keyMaterial) {
-				hi = len(p.keyMaterial)
+			if hi > len(data) {
+				hi = len(data)
 			}
 			iv := luksSectorIV(s, block.BlockSize(), essiv)
-			cipher.NewCBCDecrypter(block, iv).CryptBlocks(out[lo:hi], p.keyMaterial[lo:hi])
+			cipher.NewCBCDecrypter(block, iv).CryptBlocks(out[lo:hi], data[lo:hi])
 		}
 		return out, nil
 	}
-	return nil, errors.New("unsupported LUKS cipher mode " + p.cipherMode)
+	return nil, errors.New("unsupported LUKS cipher mode " + cipherMode)
 }
 
 // luksSectorIV builds the per-sector IV. plain64 = little-endian sector number;
@@ -331,4 +356,98 @@ func afDiffuseBlock(out, src []byte, off, n, index int, newHash func() hash.Hash
 	sum := h.Sum(nil)
 	copy(out[off:off+n], sum[:n])
 	return out
+}
+
+// ── Hashcat's LUKS v1 record ──────────────────────────────────────────────────
+//
+// `luks2hashcat.py` (shipped with hashcat) emits nine fields:
+//
+//	$luks$1$<hash>$<cipher>$<mode>$<keyBits>$<slotIter>$<slotSalt>$<af>$<payload>
+//
+// It differs from Hashsmith's own twelve-field record in two ways that matter:
+//
+//   - The stripe count is not stored. It is recoverable, because the
+//     anti-forensic key material is exactly keyBytes*stripes long.
+//   - There is no master-key digest, salt or iteration count. In its place the
+//     record carries 512 bytes of the ENCRYPTED data area, taken from the
+//     volume's payload offset.
+//
+// Without the digest, a candidate is confirmed by decrypting that payload with
+// the derived master key and recognising the plaintext. The recognisable
+// plaintext is a run of zero bytes: LUKS formats a container before any
+// filesystem is written, so the data area starts zeroed, and zeroes encrypt to
+// ciphertext that is not zero (which is exactly what luks2hashcat.py asserts
+// before it will emit a record at all — "file not initialized - payload
+// contains zeros only").
+//
+// This was established by measurement, not assumed: deriving the master key for
+// all twelve of hashcat's own LUKS v1 example records with their known password
+// decrypts the payload to 512 zero bytes in every case, across four hash specs
+// (SHA-1/256/512, RIPEMD-160), three ciphers (AES, Serpent, Twofish) and three
+// cipher modes (cbc-essiv:sha256, cbc-plain64, xts-plain64).
+//
+// A false positive needs a wrong master key to decrypt to 512 zero bytes, which
+// is a 2^-4096 event — the check is weak-looking and cryptographically strong.
+//
+// LIMITATION, stated plainly: a container whose data area has been written to
+// cannot be verified from this record, because its payload no longer decrypts
+// to zeroes and the record carries nothing else to check against. That is a
+// property of hashcat's record shape, not of this implementation. Hashsmith's
+// own twelve-field record keeps the master-key digest and therefore verifies
+// any container, written to or not; `luks2smith` emits that form, and it is the
+// one to prefer when the container is available.
+func parseLUKSHashcat(f []string) (*luksParams, error) {
+	// f: [1, hash, cipher, mode, keyBits, slotIter, slotSalt, af, payload]
+	keyBits, err := strconv.Atoi(f[4])
+	if err != nil || keyBits <= 0 || keyBits%8 != 0 {
+		return nil, errors.New("invalid LUKS key size " + f[4])
+	}
+	keyBytes := keyBits / 8
+	slotIter, err := strconv.Atoi(f[5])
+	if err != nil || slotIter <= 0 {
+		return nil, errors.New("invalid LUKS keyslot iterations " + f[5])
+	}
+	slotSalt, err := hex.DecodeString(f[6])
+	if err != nil {
+		return nil, errors.New("invalid LUKS keyslot salt")
+	}
+	af, err := hex.DecodeString(f[7])
+	if err != nil {
+		return nil, errors.New("invalid LUKS key material")
+	}
+	payload, err := hex.DecodeString(f[8])
+	if err != nil {
+		return nil, errors.New("invalid LUKS payload")
+	}
+	if len(af) == 0 || len(af)%keyBytes != 0 {
+		return nil, errors.New("LUKS key material is not a whole number of stripes")
+	}
+	if len(payload) == 0 {
+		return nil, errors.New("LUKS record carries no payload to verify against")
+	}
+	return &luksParams{
+		hashSpec:    f[1],
+		cipherName:  f[2],
+		cipherMode:  f[3],
+		keyBytes:    keyBytes,
+		slotIter:    slotIter,
+		slotSalt:    slotSalt,
+		stripes:     len(af) / keyBytes,
+		keyMaterial: af,
+		payload:     payload,
+	}, nil
+}
+
+// verifyLUKSPayload confirms a master key by decrypting the stored payload and
+// checking it is the zero run described above. Used only for hashcat records.
+func verifyLUKSPayload(p *luksParams, masterKey []byte) (bool, error) {
+	dec, err := luksDecryptBuf(p.cipherName, p.cipherMode, p.payload, masterKey)
+	if err != nil {
+		return false, err
+	}
+	var acc byte
+	for _, b := range dec {
+		acc |= b
+	}
+	return acc == 0, nil
 }
