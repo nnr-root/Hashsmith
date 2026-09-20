@@ -19,9 +19,15 @@ func extractorFixture(t *testing.T, name string, data []byte) string {
 	return path
 }
 
+// The count is pinned so that ADDING an extractor is a deliberate act with a
+// test change attached, and so that one silently disappearing — a build tag, a
+// bad merge, an entry dropped while editing the table — cannot pass as a
+// smaller catalogue. Raise it when adding one; never lower it to make a change
+// pass.
 func TestExtractorRegistryIsUniqueAndRoutable(t *testing.T) {
-	if got := len(universalExtractorRegistry); got != 47 {
-		t.Fatalf("extractor registry has %d entries, want 47", got)
+	const wantExtractors = 48 // 47 + ecryptfs2smith
+	if got := len(universalExtractorRegistry); got != wantExtractors {
+		t.Fatalf("extractor registry has %d entries, want %d", got, wantExtractors)
 	}
 	seen := map[string]bool{}
 	for _, d := range universalExtractorRegistry {

@@ -73,6 +73,7 @@ var universalExtractorRegistry = []extractorDefinition{
 	{name: "signal2smith", input: "Signal SecureSMS preferences XML", formats: "Signal master-password verifier", run: runExtractSignal},
 	{name: "sip2smith", aliases: []string{"sipdump2smith"}, input: "SIPdump text", formats: "SIP digest authentication", run: runExtractSIP},
 	{name: "ssh2smith", input: "SSH/private key", formats: "OpenSSH/PEM/PKCS#8", run: runExtractSSH},
+	{name: "ecryptfs2smith", input: "eCryptfs wrapped-passphrase", formats: "eCryptfs passphrase signature, Hashcat 12200 (reads a .ecryptfsrc salt beside it when there is one)", run: runExtractECryptfs},
 	{name: "telegram2smith", input: "Telegram XML/map/key_datas or tdata", formats: "Android passcode + Desktop v1/v2", run: runExtractTelegram},
 	{name: "truecrypt2smith", input: "TrueCrypt volume", formats: "512-byte TrueCrypt volume header", run: runExtractTrueCrypt},
 	{name: "veracrypt2smith", input: "VeraCrypt volume", formats: "512-byte VeraCrypt volume header", run: runExtractVeraCrypt},
