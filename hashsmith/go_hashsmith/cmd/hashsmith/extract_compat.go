@@ -88,18 +88,16 @@ func extractITunesRecords(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	salt, okSalt := findITunesKeybagValue(b, "SALT")
-	iterRaw, okIter := findITunesKeybagValue(b, "ITER")
-	wpky, okWPKY := findITunesKeybagValue(b, "WPKY")
-	if !okSalt || !okIter || !okWPKY || len(salt) != 20 || len(iterRaw) != 4 || len(wpky) != 40 {
+	salt, iterRaw, wpky, ok := findITunesKeybagGroup(b)
+	if !ok || len(salt) != 20 || len(iterRaw) != 4 || len(wpky) != 40 {
 		return nil, errors.New("Manifest.plist lacks a valid SALT/ITER/WPKY backup keybag")
 	}
 	iterations := binary.BigEndian.Uint32(iterRaw)
 	if iterations == 0 {
 		return nil, errors.New("invalid zero iTunes backup iteration count")
 	}
-	dpicRaw, okDPIC := findITunesKeybagValue(b, "DPIC")
-	dpsl, okDPSL := findITunesKeybagValue(b, "DPSL")
+	dpicRaw, dpsl, okDP := findITunesDerivedPassGroup(b)
+	okDPIC, okDPSL := okDP, okDP
 	if okDPIC || okDPSL {
 		if !okDPIC || !okDPSL || len(dpicRaw) != 4 || len(dpsl) != 20 || binary.BigEndian.Uint32(dpicRaw) == 0 {
 			return nil, errors.New("incomplete or invalid iOS 10 DPIC/DPSL keybag fields")
@@ -107,6 +105,95 @@ func extractITunesRecords(path string) ([]string, error) {
 		return []string{fmt.Sprintf("$itunes_backup$*10*%x*%d*%x*%x*%d", wpky, iterations, salt, dpsl, binary.BigEndian.Uint32(dpicRaw))}, nil
 	}
 	return []string{fmt.Sprintf("$itunes_backup$*9*%x*%d*%x**", wpky, iterations, salt)}, nil
+}
+
+// findITunesKeybagGroup returns the SALT, ITER and WPKY of ONE key bag group.
+//
+// A backup key bag holds several such groups — one per protection class — and
+// taking the first SALT, the first ITER and the first WPKY found ANYWHERE can
+// draw them from different groups. That produces a record which is perfectly
+// well formed and cannot crack: the salt and iteration count are the backup's,
+// the wrapped key belongs to something else, and the user sees a long run end
+// in "not found" for the right password.
+//
+// It is not hypothetical. A key bag whose first WPKY precedes the backup group
+// — which is a legal layout — was extracted into exactly that record.
+//
+// So the three are required in ORDER and within a bounded distance of one
+// another, which is the same constraint itunes_backup2john applies and for the
+// same reason.
+func findITunesKeybagGroup(data []byte) (salt, iter, wpky []byte, ok bool) {
+	from := 0
+	for {
+		s := bytes.Index(data[from:], []byte("SALT"))
+		if s < 0 {
+			return nil, nil, nil, false
+		}
+		s += from
+		i := bytes.Index(data[s+1:], []byte("ITER"))
+		if i < 0 {
+			return nil, nil, nil, false
+		}
+		i += s + 1
+		w := bytes.Index(data[i+1:], []byte("WPKY"))
+		if w < 0 {
+			return nil, nil, nil, false
+		}
+		w += i + 1
+		if w-s < itunesMaxKeybagGroupSpan {
+			sv, ok1 := itunesTagValue(data, s)
+			iv, ok2 := itunesTagValue(data, i)
+			wv, ok3 := itunesTagValue(data, w)
+			if ok1 && ok2 && ok3 {
+				return sv, iv, wv, true
+			}
+		}
+		from = s + 1
+	}
+}
+
+// findITunesDerivedPassGroup returns the optional DPIC/DPSL pair that iOS 10.2
+// added, under the same ordering and proximity rule.
+func findITunesDerivedPassGroup(data []byte) (dpic, dpsl []byte, ok bool) {
+	from := 0
+	for {
+		c := bytes.Index(data[from:], []byte("DPIC"))
+		if c < 0 {
+			return nil, nil, false
+		}
+		c += from
+		s := bytes.Index(data[c+1:], []byte("DPSL"))
+		if s < 0 {
+			return nil, nil, false
+		}
+		s += c + 1
+		if s-c < itunesMaxKeybagGroupSpan {
+			cv, ok1 := itunesTagValue(data, c)
+			sv, ok2 := itunesTagValue(data, s)
+			if ok1 && ok2 {
+				return cv, sv, true
+			}
+		}
+		from = c + 1
+	}
+}
+
+// itunesMaxKeybagGroupSpan bounds how far apart one group's tags may sit. The
+// tags are small and adjacent in every key bag anyone writes; the bound exists
+// to stop a match being assembled across a gap that means the fields belong to
+// different groups.
+const itunesMaxKeybagGroupSpan = 256
+
+// itunesTagValue reads the length-prefixed value of the tag at idx.
+func itunesTagValue(data []byte, idx int) ([]byte, bool) {
+	if idx+8 > len(data) {
+		return nil, false
+	}
+	n := int(binary.BigEndian.Uint32(data[idx+4 : idx+8]))
+	if n < 0 || n > 1<<20 || idx+8+n > len(data) {
+		return nil, false
+	}
+	return append([]byte(nil), data[idx+8:idx+8+n]...), true
 }
 
 func findITunesKeybagValue(data []byte, tag string) ([]byte, bool) {
