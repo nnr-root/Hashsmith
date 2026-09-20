@@ -26,12 +26,16 @@ var commandHelpText = map[string]commandHelp{
 	"encode": {
 		usage: "hashsmith encode -t <type> [options] INPUT...",
 		about: "Encode each INPUT with the named codec. Run `hashsmith encodings` for the catalogue.",
-		extra: "INPUT is literal text, \"-\" for standard input, or a file path (one input per line).\nA payload beginning with '-' needs the flag terminator:  hashsmith encode -t base64 -- -hello",
+		extra: "INPUT is literal text, \"-\" for standard input, or a file path (one input per line).\n" +
+			"A payload beginning with '-' needs the flag terminator:  hashsmith encode -t base64 -- -hello\n" +
+			"Chain codecs with '+':  hashsmith encode -t hex+base64 \"text\"",
 	},
 	"decode": {
 		usage: "hashsmith decode -t <type> [options] INPUT...",
 		about: "Decode each INPUT with the named codec. Run `hashsmith encodings` for the catalogue.",
-		extra: "INPUT is literal text, \"-\" for standard input, or a file path (one input per line).\nA payload beginning with '-' needs the flag terminator:  hashsmith decode -t base64 -- -Zm9v",
+		extra: "INPUT is literal text, \"-\" for standard input, or a file path (one input per line).\n" +
+			"A payload beginning with '-' needs the flag terminator:  hashsmith decode -t base64 -- -Zm9v\n" +
+			"Chain codecs with '+', mirroring the encode order:  hashsmith decode -t base64+hex \"...\"",
 	},
 	"hash": {
 		usage: "hashsmith hash -t <type> [options] INPUT...",

@@ -37,7 +37,7 @@ func runDecode(args []string) error {
 	}
 	results := make([]string, 0, len(inputs))
 	for _, in := range inputs {
-		r, err := decodeText(in, *typ, *shift, *key, *rails)
+		r, err := decodeChain(in, *typ, *shift, *key, *rails)
 		if err != nil {
 			return err
 		}

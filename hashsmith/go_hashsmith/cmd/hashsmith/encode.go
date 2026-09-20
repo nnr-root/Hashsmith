@@ -39,7 +39,7 @@ func runEncode(args []string) error {
 	}
 	results := make([]string, 0, len(inputs))
 	for _, in := range inputs {
-		r, err := encodeText(in, *typ, *shift, *key, *rails)
+		r, err := encodeChain(in, *typ, *shift, *key, *rails)
 		if err != nil {
 			return err
 		}
