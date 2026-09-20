@@ -815,20 +815,35 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 				return ruleProgram{}, err
 			}
 			ops = append(ops, opAtPos(pn, func(b byte) byte { return b - 1 }))
-		case 'L':
-			// LN — bitwise shift the character at position N left.
+		case 'L', 'R':
+			// The two dialects disagree about this letter completely.
+			//
+			// hashcat's LN and RN take a position and shift THAT CHARACTER'S
+			// BITS left or right. John's L and R take no operand at all and
+			// move EVERY character one key left or right along the keyboard:
+			// "Crack96" -> "Xeaxj85" and "Vtsvl07".
+			//
+			// Reading John's form as hashcat's is not a near miss. `l Q [RL]`
+			// in john.conf became `l Q R` with `R` swallowing nothing, and the
+			// rule failed to compile; where a command did follow, it would
+			// have been eaten as a position and the rule would have run as
+			// something the author never wrote.
+			if john {
+				right := c == 'R'
+				ops = append(ops, func(r []byte) ([]byte, bool) {
+					return johnKeyboardShift(r, right), true
+				})
+				break
+			}
 			pn, err := posArg(c)
 			if err != nil {
 				return ruleProgram{}, err
 			}
-			ops = append(ops, opAtPos(pn, func(b byte) byte { return b << 1 }))
-		case 'R':
-			// RN — bitwise shift the character at position N right.
-			pn, err := posArg(c)
-			if err != nil {
-				return ruleProgram{}, err
+			if c == 'L' {
+				ops = append(ops, opAtPos(pn, func(b byte) byte { return b << 1 }))
+			} else {
+				ops = append(ops, opAtPos(pn, func(b byte) byte { return b >> 1 }))
 			}
-			ops = append(ops, opAtPos(pn, func(b byte) byte { return b >> 1 }))
 		case '.':
 			// .N — replace the character at N with the one that follows it.
 			pn, err := posArg(c)
@@ -898,10 +913,92 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 				return r, true
 			})
 		case 'S':
-			// InsidePro "SXY" case-sensitive replace. hashcat does not
-			// implement it either, so a file using it is skipped here to the
-			// same effect rather than refused outright.
+			// John's S shifts the whole word by keyboard: every character
+			// becomes what its key produces with Shift held, so letters
+			// case-toggle and digits become symbols. "Crack96" -> "cRACK(^".
+			//
+			// In hashcat's dialect the same letter is InsidePro's "SXY"
+			// case-sensitive replace, which hashcat does not implement either,
+			// so a file using it is still skipped to the same effect rather
+			// than refused outright.
+			if john {
+				ops = append(ops, func(r []byte) ([]byte, bool) { return johnShiftCase(r), true })
+				break
+			}
 			return ruleProgram{}, fmt.Errorf("command %q is not implemented: %w", string(c), errRuleRejectedByHashcatToo)
+		case 'V':
+			// V — lowercase the vowels, uppercase the consonants.
+			if !john {
+				return ruleProgram{}, fmt.Errorf("unknown rule command %q", string(c))
+			}
+			ops = append(ops, func(r []byte) ([]byte, bool) { return johnVowelsConsonants(r), true })
+		case 'W':
+			// WN — SHIFT-toggle the character at position N, which is not the
+			// same as case-toggling it. John documents W as a superset of T,
+			// and the superset is the part that matters: T leaves a digit or a
+			// symbol alone, while W gives what the same key produces with
+			// Shift held. Measured against john, `W1` turns "P@ssw0rd!" into
+			// "P2ssw0rd!", where a case-toggle returns the word unchanged.
+			if !john {
+				return ruleProgram{}, fmt.Errorf("unknown rule command %q", string(c))
+			}
+			pn, err := posArg(c)
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			ops = append(ops, opAtPos(pn, func(b byte) byte { return keyboardShift[b] }))
+		case '=':
+			// =NX / =N?C — reject unless the character at position N is X, or
+			// is in class C. The positional sibling of ( and ), which check
+			// the first and last characters.
+			if !john {
+				return ruleProgram{}, fmt.Errorf("unknown rule command %q", string(c))
+			}
+			pn, err := posArg(c)
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			match, isClass, err := classArg('=')
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			if isClass {
+				ops = append(ops, func(r []byte) ([]byte, bool) {
+					return r, pn < len(r) && match(r[pn])
+				})
+				break
+			}
+			x, ok := arg()
+			if !ok {
+				return ruleProgram{}, errors.New("command '=' needs a character")
+			}
+			xr := x
+			ops = append(ops, func(r []byte) ([]byte, bool) {
+				return r, pn < len(r) && r[pn] == xr
+			})
+		case 'a', 'b':
+			// aN / bN — reject unless the word would still fit the run's
+			// length limits after N characters are added (a) or removed (b).
+			//
+			// These are john's early-rejection commands: they let a rule throw
+			// a word away before the rest of it runs. See johnDefaultMinLength
+			// for which limits they check against and why that is the right
+			// answer rather than a placeholder.
+			if !john {
+				return ruleProgram{}, fmt.Errorf("unknown rule command %q", string(c))
+			}
+			pn, err := posArg(c)
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			delta := pn
+			if c == 'b' {
+				delta = -pn
+			}
+			ops = append(ops, func(r []byte) ([]byte, bool) {
+				got := len(r) + delta
+				return r, got >= johnDefaultMinLength && got <= johnDefaultMaxLength
+			})
 		default:
 			return ruleProgram{}, fmt.Errorf("unknown rule command %q", string(c))
 		}

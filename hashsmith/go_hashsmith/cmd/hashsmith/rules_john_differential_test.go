@@ -1,0 +1,255 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+)
+
+// The existing John test compares against a golden file captured from john
+// once. That catches a regression but cannot catch a rule whose semantics were
+// misread when the golden file was made: the file records what Hashsmith
+// believed john does, checked by hand at one moment.
+//
+// This runs john. Where the binary is installed, every rule below is executed
+// by both engines over the same words and the two candidate streams are
+// required to be identical — which is the only statement about compatibility
+// that does not depend on somebody having read the documentation correctly.
+//
+// It is a skip, not a failure, where john is absent, which is the normal case
+// in CI.
+
+// johnProbeWords are chosen to exercise the disagreements, not to look
+// realistic: mixed case, digits, punctuation, a word short enough for the
+// length rejections to bite, and one long enough that they do not.
+var johnProbeWords = []string{
+	// Shape coverage.
+	"Crack96", "password", "admin", "hi", "Crack", "a", "P@ssw0rd!", "MiXeD",
+	// Grammar-command branches, each of which john treats differently and
+	// several of which are case-SENSITIVE, so the uppercase twins are not
+	// redundant: walked and walking are already past and progressive,
+	// walking doubles its g before "ed", free and wife end in a lowercase e,
+	// WIFE and BED and DAY and TRY end in an uppercase one, boy takes "ied"
+	// after a vowel where pluralisation would not, and leaf, knife, glass,
+	// buzz, church and wish each take a different plural.
+	"walked", "walking", "walks", "glass", "buzz", "church", "wish",
+	"leaf", "knife", "boy", "free", "see", "try", "fly", "day", "sit", "bed",
+	"BED", "DAY", "TRY", "WIFE", "wife", "end", "ab", "abc", "abcd",
+}
+
+// runJohnRule returns the candidate stream john produces for one rule, or
+// skips when john cannot be run.
+func runJohnRule(t *testing.T, john, dir, rule string) []string {
+	t.Helper()
+	conf := filepath.Join(dir, "probe.conf")
+	if err := os.WriteFile(conf, []byte("[List.Rules:Probe]\n"+rule+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	words := filepath.Join(dir, "words.txt")
+	if err := os.WriteFile(words, []byte(strings.Join(johnProbeWords, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(john, "--config="+conf, "--rules=Probe", "--wordlist="+words, "--stdout")
+	cmd.Env = append(os.Environ(), "HOME="+dir)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("john failed on rule %q: %v", rule, err)
+	}
+	var got []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if line != "" {
+			got = append(got, line)
+		}
+	}
+	return got
+}
+
+func TestJohnRuleCommandsMatchJohnItself(t *testing.T) {
+	john, err := exec.LookPath("john")
+	if err != nil {
+		t.Skip("john is not installed here, so its answers cannot be compared against")
+	}
+	dir := t.TempDir()
+
+	// Not every john is a jumbo john, and the commands compared below are
+	// jumbo's. A core john refuses them, which would look like a Hashsmith
+	// failure rather than a missing feature of the reference, so the
+	// reference is checked once before anything is compared to it.
+	probe := filepath.Join(dir, "capability.conf")
+	if err := os.WriteFile(probe, []byte("[List.Rules:Probe]\nW0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	words := filepath.Join(dir, "capability.txt")
+	if err := os.WriteFile(words, []byte("Crack96\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check := exec.Command(john, "--config="+probe, "--rules=Probe", "--wordlist="+words, "--stdout")
+	check.Env = append(os.Environ(), "HOME="+dir)
+	if out, err := check.CombinedOutput(); err != nil {
+		t.Skipf("this john does not accept jumbo rule commands, so it cannot serve as the "+
+			"reference (a jumbo build is needed): %v\n%s", err, out)
+	}
+
+	// Every command added or corrected because john.conf's own rulesets used
+	// it, plus the ones already supported that share a letter with a hashcat
+	// command and so could regress silently.
+	rules := []string{
+		"S", "V", "R", "L",
+		"W0", "W1", "W2",
+		"=0C", "=1r", "=2a", "=0?d", "=1?a", "=3?l",
+		"a0", "a3", "b0", "b3", "b5",
+		// A bare "[" cannot appear in a john rule at all — it opens a
+		// preprocessor group — so the escaped form is what a real ruleset
+		// writes and what is compared here.
+		"l", "u", "c", "C", "t", "T0", "r", "d", "f", "{", "}", `\[`, "]",
+		"p", "P", "I", "Q", "M",
+		"$1", "^x", "D1", "x02", "i1z", "o0y",
+		"@?v", "/?d", "!?d", "(?a", ")?d", "%2s",
+		"l Q R", "u Q L", "c M S Q", "V Q l",
+		"a0 W0", "b3 T0", "=1a l",
+	}
+
+	for _, rule := range rules {
+		t.Run(rule, func(t *testing.T) {
+			// A rule file goes through the preprocessor before the compiler,
+			// so the test does too. Compiling the raw line instead would test
+			// a path no real run takes — and would have hidden the escape bug
+			// this test found, where `\[` resolved only when an unrelated
+			// bracket group appeared elsewhere on the line.
+			expanded, err := expandJohnRuleLine(rule)
+			if err != nil {
+				t.Fatalf("Hashsmith cannot expand %q, which john runs: %v", rule, err)
+			}
+			var got []string
+			for _, e := range expanded {
+				prog, err := compileRuleLineDialect(e, true)
+				if err != nil {
+					t.Fatalf("Hashsmith cannot compile %q (from %q), which john runs: %v", e, rule, err)
+				}
+				for _, w := range johnProbeWords {
+					if out, ok := prog.apply(w); ok {
+						got = append(got, out)
+					}
+				}
+			}
+			want := runJohnRule(t, john, dir, rule)
+
+			// john de-duplicates its own output stream, so compare as
+			// multisets after removing repeats from both sides; what is being
+			// checked is which candidates each engine can produce, not how
+			// many times it says them.
+			// john never prints an empty candidate; Hashsmith emits one,
+			// which is a real difference and a deliberate one — the empty
+			// password exists and costs a single hash to try. It is dropped
+			// here so that the comparison is about the rules rather than
+			// about that choice.
+			gotSet, wantSet := dedupSorted(dropEmpty(got)), dedupSorted(want)
+			if strings.Join(gotSet, "\n") != strings.Join(wantSet, "\n") {
+				t.Errorf("rule %q disagrees with john\n  hashsmith: %v\n  john:      %v",
+					rule, gotSet, wantSet)
+			}
+		})
+	}
+}
+
+func dropEmpty(in []string) []string {
+	out := in[:0:0]
+	for _, s := range in {
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func dedupSorted(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// TestJohnCorpusCoverageDoesNotRegress is a ratchet on how much of john's own
+// configuration Hashsmith can read.
+//
+// The number is a floor, not a target: raise it when coverage improves, never
+// lower it to make a change pass. It was 66.9% before the keyboard, case and
+// length commands landed and is 82.5% after. What remains is john's numeric
+// variables (vVNM), its memory-substring command (XNMI), its single-crack
+// word-pair selectors (1, 2, +), and several preprocessor back-reference
+// forms.
+func TestJohnCorpusCoverageDoesNotRegress(t *testing.T) {
+	const floor = 0.82
+
+	confPaths := []string{
+		"/opt/homebrew/share/john/john.conf",
+		"/usr/share/john/john.conf",
+		"/etc/john/john.conf",
+	}
+	var data []byte
+	var used string
+	for _, p := range confPaths {
+		if b, err := os.ReadFile(p); err == nil {
+			data, used = b, p
+			break
+		}
+	}
+	if data == nil {
+		t.Skip("john.conf is not installed here, so corpus coverage cannot be measured")
+	}
+
+	inRules := false
+	total, ok := 0, 0
+	var failed []string
+	for _, ln := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(ln)
+		if strings.HasPrefix(trimmed, "[") {
+			inRules = strings.HasPrefix(strings.ToLower(trimmed), "[list.rules:")
+			continue
+		}
+		// A blank line, a comment, a !! pragma and a .include are all part of
+		// the file's structure rather than rules, so counting them as rules
+		// would make coverage a measure of how much of john.conf is rules.
+		if !inRules || trimmed == "" || strings.HasPrefix(trimmed, "#") ||
+			strings.HasPrefix(trimmed, "!") || strings.HasPrefix(trimmed, ".include") {
+			continue
+		}
+		total++
+		expanded, err := expandJohnRuleLine(ln)
+		if err != nil {
+			expanded = []string{ln}
+		}
+		good := true
+		for _, e := range expanded {
+			if _, err := compileRuleLineDialect(e, true); err != nil {
+				good = false
+				if len(failed) < 15 {
+					failed = append(failed, fmt.Sprintf("%s  (%v)", ln, err))
+				}
+				break
+			}
+		}
+		if good {
+			ok++
+		}
+	}
+	if total == 0 {
+		t.Skipf("%s contains no rule lines", used)
+	}
+	got := float64(ok) / float64(total)
+	t.Logf("%s: %d of %d rule lines compile (%.1f%%)", used, ok, total, 100*got)
+	if got < floor {
+		t.Errorf("john.conf coverage fell to %.1f%%, below the %.1f%% floor; still failing:\n  %s",
+			100*got, 100*floor, strings.Join(failed, "\n  "))
+	}
+}

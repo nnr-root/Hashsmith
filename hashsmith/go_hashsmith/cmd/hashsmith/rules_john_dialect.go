@@ -141,27 +141,41 @@ func johnLengthValue(c byte) (int, bool) {
 
 // johnPluralize appends an English plural suffix, John's `p` command.
 func johnPluralize(r []byte) []byte {
-	s := string(r)
-	if s == "" {
-		return r
+	// john's grammar commands are LOWERCASE ONLY, which its documentation
+	// says in three words and which matters more than it sounds. Every suffix
+	// test below is case-SENSITIVE, so "WIFE" pluralises to "WIFEs" and not
+	// "WIVes", and "TRY" to "TRYs" and not "TRies". Hashsmith used to lower
+	// the word before testing, which produced a different candidate for every
+	// capitalised word ending in y, f, fe, s, x, z, ch or sh — and those are
+	// exactly the words a ruleset reaches after a `c` or a `u`.
+	//
+	// Measured against john, not inferred: BED->BEDs, DAY->DAYs, TRY->TRYs,
+	// WIFE->WIFEs, walks->walkses, leaf->leaves, knife->knives, boy->boys.
+	if len(r) < 2 {
+		return r // john leaves a one-character word alone
 	}
+	s := string(r)
 	last := s[len(s)-1]
-	lower := strings.ToLower(s)
 	switch {
-	case strings.HasSuffix(lower, "s"), strings.HasSuffix(lower, "x"),
-		strings.HasSuffix(lower, "z"), strings.HasSuffix(lower, "ch"),
-		strings.HasSuffix(lower, "sh"):
+	case last == 's' || last == 'x' || last == 'z' ||
+		strings.HasSuffix(s, "ch") || strings.HasSuffix(s, "sh"):
 		return append(r, 'e', 's')
+	case strings.HasSuffix(s, "fe"):
+		return append(r[:len(r)-2], 'v', 'e', 's')
 	case last == 'f':
 		return append(r[:len(r)-1], 'v', 'e', 's')
-	case strings.HasSuffix(lower, "fe"):
-		return append(r[:len(r)-2], 'v', 'e', 's')
-	case strings.HasSuffix(lower, "y") && len(s) >= 2 && !isVowel(s[len(s)-2]):
+	case last == 'y' && !isVowel(s[len(s)-2]):
 		return append(r[:len(r)-1], 'i', 'e', 's')
 	default:
 		return append(r, 's')
 	}
 }
+
+// johnBGP reports whether b is one of the three consonants john doubles before
+// "ed". The set is exactly "bgp" in john's own source, which is why "walking"
+// becomes "walkingged" while "buzz" becomes "buzzed" and "sit" becomes
+// "sited" — measured, and surprising enough that it would never be guessed.
+func johnBGP(b byte) bool { return b == 'b' || b == 'g' || b == 'p' }
 
 func isVowel(b byte) bool { return strings.IndexByte("aeiouAEIOU", b|0x20) >= 0 }
 
@@ -237,28 +251,45 @@ func isRulePosChar(c byte) bool {
 // johnPastTense is John's `P` command. Verified against john itself:
 // password->passworded, try->tried, box->boxed, lady->ladied, wife->wifed.
 func johnPastTense(r []byte) []byte {
-	if len(r) == 0 {
+	// Measured against john across every branch: walked->walked (already
+	// past, left alone), bed->bed, boy->boied (y becomes i with NO check on
+	// what precedes it, unlike pluralisation), free->freed and wife->wifed (a
+	// lowercase trailing e takes only a d), WIFE->WIFEed and BED->BEDed (an
+	// uppercase one does not, because the test is case-sensitive),
+	// walking->walkingged (a trailing b, g or p doubles unless the character
+	// before it is also one), and sit->sited, buzz->buzzed, abcd->abcded.
+	if len(r) < 3 {
 		return r
 	}
-	last := r[len(r)-1] | 0x20
+	last := r[len(r)-1]
+	if last == 'd' && r[len(r)-2] == 'e' {
+		return r // already ends in "ed"
+	}
 	switch {
+	case last == 'y':
+		return append(r[:len(r)-1], 'i', 'e', 'd')
 	case last == 'e':
 		return append(r, 'd')
-	case last == 'y' && len(r) >= 2 && !isVowel(r[len(r)-2]):
-		return append(r[:len(r)-1], 'i', 'e', 'd')
+	case johnBGP(last) && !johnBGP(r[len(r)-2]):
+		return append(r, last, 'e', 'd')
 	default:
 		return append(r, 'e', 'd')
 	}
 }
 
-// johnProgressive is John's `I` command. Verified against john itself:
-// password->passwording, try->trying, box->boxing, lady->ladying,
-// wife->wifing (the trailing 'e' is dropped).
+// johnProgressive is John's `I` command. Measured against john:
+// walking->walking (already progressive, left alone), walked->walkeding,
+// free->freing and wife->wifing (a lowercase trailing e is dropped),
+// WIFE->WIFEing (an uppercase one is not), boy->boying, try->trying,
+// hi->hi and a->a (too short), and no consonant doubling, unlike `P`.
 func johnProgressive(r []byte) []byte {
-	if len(r) == 0 {
+	if len(r) < 3 {
 		return r
 	}
-	if r[len(r)-1]|0x20 == 'e' {
+	if r[len(r)-3] == 'i' && r[len(r)-2] == 'n' && r[len(r)-1] == 'g' {
+		return r // already ends in "ing"
+	}
+	if r[len(r)-1] == 'e' {
 		return append(r[:len(r)-1], 'i', 'n', 'g')
 	}
 	return append(r, 'i', 'n', 'g')
@@ -297,3 +328,123 @@ func countClass(r []byte, match func(byte) bool) int {
 	}
 	return n
 }
+
+// ── Keyboard-shift and case-conversion commands ───────────────────────────────
+//
+// John's `R`, `L` and `S` move a character by where it SITS ON A KEYBOARD, not
+// by where it sits in the alphabet, so each needs the layout as data. The
+// layout below is US QWERTY, which is john's own default and the one its
+// documented examples are written against: "Crack96" -> "Vtsvl07" under `R`,
+// "Xeaxj85" under `L`, and "cRACK(^" under `S`.
+//
+// Hashcat has `R` and `L` too and they mean something else entirely — a
+// bitwise shift of the character at a given position, taking an operand John's
+// forms do not. That is why these live behind the John dialect rather than
+// beside their hashcat namesakes, and why `R` in a John rule must NOT be read
+// as hashcat's `RN`: doing so consumed the following command as a position and
+// silently changed the rule.
+var (
+	// qwertyRows pairs each unshifted row with its shifted row, in physical
+	// order. A character's left and right neighbours come from its own row, so
+	// the rows must not be concatenated.
+	qwertyRows = [][2]string{
+		{"`1234567890-=", "~!@#$%^&*()_+"},
+		{"qwertyuiop[]\\", "QWERTYUIOP{}|"},
+		{"asdfghjkl;'", "ASDFGHJKL:\""},
+		{"zxcvbnm,./", "ZXCVBNM<>?"},
+	}
+	keyboardRight [256]byte
+	keyboardLeft  [256]byte
+	keyboardShift [256]byte
+)
+
+func init() {
+	for i := 0; i < 256; i++ {
+		keyboardRight[i] = byte(i)
+		keyboardLeft[i] = byte(i)
+		keyboardShift[i] = byte(i)
+	}
+	for _, row := range qwertyRows {
+		for _, line := range row {
+			for j := 0; j < len(line); j++ {
+				if j+1 < len(line) {
+					keyboardRight[line[j]] = line[j+1]
+				}
+				if j > 0 {
+					keyboardLeft[line[j]] = line[j-1]
+				}
+			}
+		}
+		// Shift maps each position to the same position on the other row, in
+		// both directions, so `S` is its own inverse.
+		lower, upper := row[0], row[1]
+		for j := 0; j < len(lower) && j < len(upper); j++ {
+			keyboardShift[lower[j]] = upper[j]
+			keyboardShift[upper[j]] = lower[j]
+		}
+	}
+}
+
+// johnShiftCase implements `S`: every character becomes what the same key
+// produces with Shift held, so letters case-toggle and digits and punctuation
+// become their shifted symbols. "Crack96" -> "cRACK(^".
+func johnShiftCase(r []byte) []byte {
+	out := make([]byte, len(r))
+	for i, b := range r {
+		out[i] = keyboardShift[b]
+	}
+	return out
+}
+
+// johnKeyboardShift implements `R` and `L`: each character moves one key
+// right or left along its own keyboard row. A character at the end of its row,
+// or not on the layout at all, is left alone — which is john's behaviour, not
+// a simplification.
+func johnKeyboardShift(r []byte, right bool) []byte {
+	table := &keyboardLeft
+	if right {
+		table = &keyboardRight
+	}
+	out := make([]byte, len(r))
+	for i, b := range r {
+		out[i] = table[b]
+	}
+	return out
+}
+
+// johnVowelsConsonants implements `V`: lowercase the vowels, uppercase the
+// consonants, leave everything else. "Crack96" -> "CRaCK96".
+func johnVowelsConsonants(r []byte) []byte {
+	out := make([]byte, len(r))
+	for i, b := range r {
+		switch {
+		case !isASCIILetter(b):
+			out[i] = b
+		case isVowel(b):
+			out[i] = toLowerByte(b)
+		default:
+			out[i] = toUpperByte(b)
+		}
+	}
+	return out
+}
+
+// johnDefaultMinLength and johnDefaultMaxLength are the bounds `aN` and `bN`
+// check against.
+//
+// Those two commands reject a word unless it would still fit the run's
+// min/max length limits after N characters are added or removed. They are an
+// EARLY-REJECTION optimisation: john uses them to throw a word away before
+// spending work on the rest of the rule, and the candidate stream is the same
+// either way when the limits are the defaults. Hashsmith has no per-run rule
+// length limits to consult, so the defaults are what these compile against —
+// which is exactly john's behaviour when a run sets neither -min-length nor
+// -max-length, the ordinary case.
+//
+// This is not a no-op even so. With a minimum of zero, `b5` still rejects
+// every word shorter than five characters, and john.conf's toggle-case
+// rulesets lean on precisely that.
+const (
+	johnDefaultMinLength = 0
+	johnDefaultMaxLength = johnMaxLength
+)

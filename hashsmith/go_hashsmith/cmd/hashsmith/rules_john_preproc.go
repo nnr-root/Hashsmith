@@ -49,7 +49,21 @@ func expandJohnRuleLine(line string) ([]string, error) {
 		return nil, err
 	}
 	if len(groups) == 0 {
-		return []string{line}, nil
+		// A line with no bracket group still went through the preprocessor,
+		// and the preprocessor is where a backslash escape is resolved — so
+		// returning the RAW line here left `\[` as two characters and the
+		// compiler answered `unknown rule command "\"`.
+		//
+		// The bug was not that escapes were unsupported. They worked: `[ab]\[`
+		// expanded to `a[` and `b[` correctly. They worked only when some
+		// UNRELATED group happened to appear on the same line, so whether a
+		// rule compiled depended on a part of it that had nothing to do with
+		// the escape. john.conf's own `>9 \[` hit exactly that.
+		var b strings.Builder
+		for _, s := range segs {
+			b.WriteString(s.literal)
+		}
+		return []string{b.String()}, nil
 	}
 
 	// Only independent groups multiply; linked ones follow their target.
