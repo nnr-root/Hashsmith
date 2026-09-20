@@ -130,6 +130,45 @@ const johnOnlyRejectFlags = "cspov:<>"
 // one John would have run silently shrinks the ruleset and loses passwords.
 // The one exception is a length flag (-<N, ->N), whose argument is consumed
 // along with it so it cannot be mistaken for a command.
+// johnRuleRequiresWordPairs reports whether a line carries John's -p reject
+// flag, which means "reject this rule unless word pair commands are currently
+// allowed".
+//
+// Word pairs are a SINGLE-CRACK mode idea: the candidate source there is a
+// user's GECOS field, so a rule can act on the first name, the second, or
+// their concatenation. A wordlist run has no pairs, and john skips every such
+// rule — `-p 1 l` through `john --wordlist --stdout` prints nothing at all,
+// while the same rule without the flag is a hard error there ("Unallowed
+// command").
+//
+// So these nine lines of john.conf are not a gap in what Hashsmith can read.
+// They are rules that do not apply, and reporting them as broken told a user
+// their ruleset was malformed when john was quietly skipping them too.
+func johnRuleRequiresWordPairs(line string) bool {
+	i := 0
+	for i < len(line) {
+		if line[i] == ' ' || line[i] == '\t' {
+			i++
+			continue
+		}
+		if line[i] != '-' || i+1 >= len(line) {
+			return false
+		}
+		f := line[i+1]
+		if strings.IndexByte(johnRejectFlags, f) < 0 {
+			return false // -N is the decrement command, not a flag
+		}
+		if f == 'p' {
+			return true
+		}
+		i += 2
+		if (f == '<' || f == '>') && i < len(line) {
+			i++
+		}
+	}
+	return false
+}
+
 func stripJohnRejectFlags(line string) string {
 	i := 0
 	for i < len(line) {

@@ -73,11 +73,18 @@ func expandJohnRuleLine(line string) ([]string, error) {
 		if g.link == 0 {
 			indep = append(indep, i)
 			total *= len(g.chars)
-			if total > maxJohnPreprocessorExpansion {
-				return nil, fmt.Errorf("rule %q expands to more than %d rules",
-					line, maxJohnPreprocessorExpansion)
-			}
 		}
+	}
+	if total > maxJohnPreprocessorExpansion {
+		// John generates its expansions lazily — its documentation says it
+		// never keeps them all in memory — while Hashsmith materialises them
+		// so that a program can be compiled once and reused. That is the
+		// right trade for the rules people write and the wrong one for the
+		// handful john.conf contains that stand for millions, so those are
+		// refused with their actual size rather than capped silently.
+		return nil, fmt.Errorf("rule %q expands to %d rules, past the %d Hashsmith will "+
+			"materialise (John generates its expansions lazily and never holds them all)",
+			line, total, maxJohnPreprocessorExpansion)
 	}
 	if total == 0 {
 		return nil, fmt.Errorf("rule %q has an empty bracket group", line)

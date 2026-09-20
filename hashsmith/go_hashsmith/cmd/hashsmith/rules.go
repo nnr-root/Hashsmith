@@ -90,6 +90,13 @@ var errRuleLengthIsRuntime = errors.New("rule length resolves at run time")
 // stock rulesets that hashcat handles.
 var errRuleRejectedByHashcatToo = errors.New("rule form hashcat also rejects")
 
+// errRuleNotApplicable marks a rule that is well-formed but does not apply to
+// the run at hand, so it is skipped without being counted against the file.
+// John's -p flag is the case: it asks for word-pair commands, which exist only
+// in single-crack mode, and john itself silently produces nothing for such a
+// rule during a wordlist run.
+var errRuleNotApplicable = errors.New("rule does not apply to this attack mode")
+
 type ruleOp func([]byte) ([]byte, bool)
 
 type ruleProgram struct {
@@ -368,6 +375,10 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 	var runtimeAt map[int]runtimeOp
 	var findsAt map[int]findOp
 	if john {
+		if johnRuleRequiresWordPairs(line) {
+			return ruleProgram{}, fmt.Errorf("rule needs John's word-pair commands (-p), which "+
+				"belong to single-crack mode: %w", errRuleNotApplicable)
+		}
 		line = stripJohnRejectFlags(line)
 	}
 	i, n := 0, len(line)
@@ -1788,7 +1799,7 @@ func compileRuleLinesAs(lines []string, john bool) ([]ruleProgram, int) {
 			}
 			p, err := compileRuleLineDialect(one, john)
 			if err != nil {
-				if !errors.Is(err, errRuleRejectedByHashcatToo) {
+				if !errors.Is(err, errRuleRejectedByHashcatToo) && !errors.Is(err, errRuleNotApplicable) {
 					lineBad = true
 				}
 				continue

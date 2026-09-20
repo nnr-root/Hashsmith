@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -224,12 +225,18 @@ func dedupSorted(in []string) []string {
 //
 // The number is a floor, not a target: raise it when coverage improves, never
 // lower it to make a change pass. It was 66.9% before the keyboard, case and
-// length commands landed, 82.5% after them, and 84.1% once the preprocessor
-// learned back-references and range de-duplication. What remains is john's
-// numeric variables (vVNM), its memory-substring command (XNMI), and its
-// single-crack word-pair selectors (1, 2, +).
+// length commands landed, 82.5% after them, 84.1% once the preprocessor learned
+// back-references and range de-duplication, 84.9% with the character classes
+// read out of john, 87.3% with XNMI, 94.8% with numeric variables and `p`, and
+// 98.4% once word-pair rules were recognised as not applying rather than
+// reported as broken.
+//
+// The remaining four lines are not a gap that can close. They expand to
+// 2,030,625 and 857,375,000 rules; john generates its expansions lazily and
+// never holds them all, while Hashsmith materialises them so a program can be
+// compiled once and reused. Those four are refused with their actual size.
 func TestJohnCorpusCoverageDoesNotRegress(t *testing.T) {
-	const floor = 0.94 // 94.8% measured; the floor lags so a small corpus change cannot fail it
+	const floor = 0.98 // 98.4% measured; the floor lags so a small corpus change cannot fail it
 
 	confPaths := []string{
 		"/opt/homebrew/share/john/john.conf",
@@ -272,6 +279,13 @@ func TestJohnCorpusCoverageDoesNotRegress(t *testing.T) {
 		good := true
 		for _, e := range expanded {
 			if _, err := compileRuleLineDialect(e, true); err != nil {
+				// A rule that asks for single-crack word pairs is READ
+				// correctly and correctly found not to apply to a wordlist
+				// run — which is what john does with it too, silently. It
+				// counts as handled, not as a gap.
+				if errors.Is(err, errRuleNotApplicable) {
+					continue
+				}
 				good = false
 				if len(failed) < 15 {
 					failed = append(failed, fmt.Sprintf("%s  (%v)", ln, err))
