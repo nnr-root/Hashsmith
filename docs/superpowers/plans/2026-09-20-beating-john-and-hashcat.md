@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-20
 **Status:** Phases 0, 1 and 3 complete. Phase 2 complete except for the 83
-unimplemented modes. Phase 4 substantially done. Phases 5-7 not started.
+unimplemented modes. Phase 4 substantially done. Phase 6 resolved. Phase 7
+started. Phase 5 not started.
 **Machine:** Apple M2 (4P+4E), 16 GB, darwin/arm64, Go 1.26.3
 **Comparators:** `hashcat` v7.1.2, `john` 1.9.0-jumbo-1 (ASIMD, MD4:2 MD5:2 interleaving)
 **Binary under test:** built from `d91a400` (`go build ./cmd/hashsmith`)
@@ -403,7 +404,7 @@ Java `keystore`/`bks` → `DPAPImk` → wallets and password managers.
 **Acceptance:** every extractor round-trips a real file in CI; parity with John
 on the Kerberos, capture and key families.
 
-### Phase 6 — The GPU decision `[XL, or drop]`
+### Phase 6 — The GPU decision `[XL, or drop]` — **RESOLVED** (a42697f)
 
 §3.2 is the evidence. Hashsmith's GPU buys 1.6x over its own CPU while Hashcat's
 buys 17x. Three honest options:
@@ -419,15 +420,15 @@ buys 17x. Three honest options:
 on GPU throughput and that call still looks right. But the backends now exist and
 work; leaving the faster one unselected and unshipped wastes work already done.
 
-### Phase 7 — Win where neither competitor is trying `[M-L]`
+### Phase 7 — Win where neither competitor is trying `[M-L]` — **STARTED** (d2947ca, 6ca46a5)
 
 This is where "best encoding/decoding toolkit" is actually earned. Phase 0 fixes
 six of this area's blockers for free; the rest is additive.
 
-- [ ] Known-answer vectors and fuzz targets for every codec, to the standard hashes
-      are already held to
-- [ ] Recursive magic decode — peel layers until the output stops looking encoded
-- [ ] Chained pipeline syntax so a recipe is one invocation
+- [x] A round-trip property test over every codec, to the standard hashes are
+      held to. Fuzz targets still outstanding
+- [x] Recursive magic decode — and it hands off to the identification engine
+- [x] Chained pipeline syntax so a recipe is one invocation
 - [ ] Custom alphabets for every base-N codec; the internals are already parameterised
 - [ ] Hex-dump output formats, brotli/zstd/xz/bzip2, Punycode/IDNA, the missing
       classical ciphers
@@ -574,3 +575,28 @@ Two claims in §4 were checked against the binaries and found **wrong**:
 - The embedded fallback wordlist is still an English dictionary.
 - Phases 5, 6 and 7: the 62 missing extractors, the GPU decision, and the
   encoding/decoding work.
+
+### Phase 6 and 7, what landed
+
+**The GPU decision resolved as option 2, plus two correctness fixes that turned
+out to matter more than the performance question.** `--gpu` with a salt hashed
+the bare candidate and reported "Not found" for a password the CPU path
+recovers in the same command; a failed kernel dispatch was converted into the
+same answer. Both now decline the GPU and say why. On the backend question the
+measurement corrects the gap report: on in-kernel brute — the cracking path —
+OpenCL's median exceeds Metal's best over six runs each, but the factor is
+nearer 1.5x than the reported 1.8x, and on bulk dispatch Metal is slightly
+ahead. The build tags are left alone; the release workflow ships both.
+
+**Codecs now meet the standard hashes are held to.** A round-trip property test
+over all 60 entries, with payloads chosen to be the shapes that broke in
+practice, found four defects at once: Ascii85 silently dropped the final
+partial group so "hello" decoded to "hell"; brainf*ck corrupted every non-ASCII
+input; five catalogue entries were labels rather than usable `-t` names; and
+file substitution was silent, so on a case-insensitive filesystem
+`encode -t base85 Hashsmith` encoded a 20 MB binary instead of nine characters.
+
+**`hashsmith magic`** peels encoding layers automatically and hands what it
+finds to the identification engine, so a chain can end at "identified as:
+bcrypt" rather than at bytes. Neither competitor has anything comparable.
+`-t a+b` replays a chain in one invocation, mirroring magic's output.
