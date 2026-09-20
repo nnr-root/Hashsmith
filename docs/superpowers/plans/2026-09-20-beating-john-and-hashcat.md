@@ -625,16 +625,86 @@ runs both halves, the second being that a WRONG password is rejected, because
 an extractor that drops an authentication tag reports a wrong password as
 correct and a one-sided test would pass anyway.
 
-ZipCrypto, WinZip AES, OpenSSH keys and PKCS#12 pass both halves. 7-Zip fails
-both on every archive 7z writes, and now refuses rather than emitting a record
-that cannot crack — the reason being that verification needs the decrypted
-payload's CRC and unpacked size, which live inside a nested next-header the
-extractor does not parse. Refusing is the larger feature: a user handed an
-uncrackable record runs a long attack and concludes their wordlist is wrong.
+ZipCrypto, WinZip AES, OpenSSH keys and PKCS#12 pass both halves. 7-Zip failed
+both on every archive 7z writes, and was made to refuse rather than emit a
+record that cannot crack — verification needs the decrypted payload's CRC and
+unpacked size, which live inside a nested next-header the extractor did not
+parse. Refusing was the larger feature: a user handed an uncrackable record
+runs a long attack and concludes their wordlist is wrong.
+
+### 7-Zip, closed
+
+The next-header parser now exists, so 7-Zip gets the same round trip as every
+other container and the refusal test is gone. The header is a nested,
+self-describing structure of variable-length integers where every count read
+from the file decides how many more reads follow, which is why every count is
+read through a capped accessor and why the parser has its own fuzz target —
+658,000 executions, clean.
+
+Parsing it produced a finding that changed the design. A folder holding exactly
+one file records that file's CRC in SubStreamsInfo, NOT in the folder, so the
+two archives that looked CRC-less at the UnPackInfo level both had one. Picking
+it up is the difference between a record that can prove a password right and
+one that can only fail to prove it wrong.
+
+Which check a record carries is a property of the archive:
+
+| Archive | Chain | Record |
+|---|---|---|
+| `7z a -mhe=on` | AES alone | `$7z$0$…`, CRC-checked |
+| `7z a -m0=Copy` | AES then Copy, the identity coder | `$7z$0$…`, CRC-checked |
+| `7z a` (default) | AES then LZMA2 | padding-checked |
+
+The first two are hashcat's own records, and `hashcat -m 11600` cracks the ones
+Hashsmith writes — confirmed against v7.1.2, and pinned by a test that runs
+hashcat, because Hashsmith cracking its own record proves only that its
+extractor and verifier agree, which they would even if both were wrong.
+
+The third cannot be. A compressing chain means the recorded CRC covers
+DECOMPRESSED bytes, so checking it per candidate would mean running LZMA.
+7-Zip zero-pads the AES stream to a block boundary instead, and those padding
+bytes are a complete test on their own: a wrong key leaves each one random, so
+even the four-byte minimum is one false positive in four billion. Hashcat's own
+compressed form was tried against v7.1.2 across every field layout that would
+load — data types 1, 2, 128, 129 and 130, both unpacked-size conventions, four
+coder-attribute encodings — and none cracked, so Hashsmith writes its own
+record and puts the padding length where hashcat keeps a codec id. A test pins
+that hashcat REFUSES it: a wrong-but-loadable record would silently never
+crack, which is the exact failure the refusal was built to prevent.
+
+### A timing ratchet that could not be measured where it ran
+
+The bcrypt speedup ratchet failed at 1.10x during a full-suite run, with its
+reference side measuring 3.27ms — its normal quiet-machine cost, so the
+existing load guard saw nothing wrong. The two sides do not degrade together:
+under load the four-lane side ran at 2.59ms per candidate against a quiet 1.72,
+while the single-lane reference sat at its quiet value, so the ratio collapsed
+with nothing actually slower.
+
+Interleaving the samples was the first fix and is a real improvement — the two
+sides now alternate, so bursty load hits both — but it does not save a
+sustained case, and a rerun under sustained load still read 1.29x. Two probes
+were then tried and neither separates load from a regression. A cache-footprint
+probe cannot see the pressure: an M2 performance core has 128 KiB of L1 data
+cache, so four Blowfish S-box sets are nowhere near it, and the probe read
+between 1.00 and 1.35 on an idle machine. A parallel-efficiency probe reads
+about 1.0 loaded and quiet alike, because the single-goroutine baseline it
+divides by degrades along with everything else. Guarding on the lane side's own
+absolute cost fails worse: at the multiplier needed to catch the 1.5x inflation
+seen under load, a genuine 1.5x regression would skip instead of fail.
+
+So the requirement is exclusivity, stated rather than inferred.
+`HASHSMITH_TIMING_RATCHET` gates the test the way `HASHSMITH_REQUIRE_AVX2`
+already gates the AVX2 cores, the skip says in as many words that the floor was
+NOT checked on that run, and CI measures it in the bench job, which has its
+runner to itself.
+
+The recorded failure is worth keeping in view: a ratchet that flakes gets
+lowered, and a floor lowered to silence a measurement artefact is a floor that
+no longer ratchets anything.
 
 ### Still open
 
 - 83 unimplemented hashcat modes, and 62 missing extractors.
-- 7-Zip's next-header parser, which the refusal message and its test specify.
 - 69% of John's rule corpus, dominated by its `a` command.
 - The embedded fallback wordlist is still an English dictionary.
