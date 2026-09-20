@@ -804,6 +804,45 @@ existing golden-file test, which recorded what Hashsmith believed john does.
 CI now installs john and runs the comparison, so the claim is checked rather
 than asserted.
 
+### The preprocessor, and a rule the documentation does not state
+
+Coverage moved again, to **84.1%**, on three preprocessor features — and on a
+fourth thing that was not missing but wrong.
+
+`\0` through `\9` are BACK-REFERENCES to an earlier range. Unlike `\pN` they
+carry no bracket and add no group: they emit whatever character the referenced
+range is currently substituting. Hashsmith had no case for them, so they fell
+through to "a backslash escapes the next character" and a digit was appended
+literally — `$[12]$\0` produced `$1$0` and `$2$0` where john produces `$1$1`
+and `$2$2`. `\p0` was the same story, expanding to a literal `p0` and
+multiplying a range that should not have multiplied.
+
+The fourth is the interesting one. **John's ranges collapse duplicates**, which
+its documentation mentions once in passing — `[aeioua-z]` is "vowels followed
+by all other letters" and the preprocessor "is smart enough not to produce
+duplicate rules". Hashsmith expanded ranges literally, so `[aabbcc]` became six
+rules where john makes three, and every such range produced duplicate
+candidates for the whole run.
+
+The `\r` escape turns that off, and what it actually does had to be measured,
+because the documentation describes it only in terms of parallel ranges:
+
+| range | plain | with `\r` |
+|---|---|---|
+| `[abca]` | abc | abca |
+| `[a-ca-c]` | abc | abcabc |
+| `[aab]` | ab | ab |
+| `[1-9A-ZZ]` | 35 chars | 35 chars |
+
+The last two are the tell: **adjacent duplicates collapse whether or not `\r`
+is present**, and `\r` suppresses only the global pass. john.conf's own
+`->\r[1-9A-ZZ]` is that fourth row, so reading `\r` as "keep everything"
+would have given it 36 branches against john's 35 — a difference of one
+candidate, in a line that looks like it was written to test exactly this.
+
+The live differential now runs 76 rules through john and compares streams,
+including every case in that table.
+
 ### Hashcat modes: nine more, and four that were never algorithms
 
 Before implementing anything, every unsupported mode's published record was run
@@ -948,6 +987,5 @@ are ruled out.
 ### Still open
 
 - 69 unimplemented hashcat modes, and 62 missing extractors.
-- 17.5% of John's rule corpus: numeric variables (`vVNM`), the memory-substring
-  command (`XNMI`), single-crack word-pair selectors (`1`, `2`, `+`), and
-  several preprocessor back-reference forms.
+- 15.9% of John's rule corpus: numeric variables (`vVNM`), the memory-substring
+  command (`XNMI`), and single-crack word-pair selectors (`1`, `2`, `+`).
