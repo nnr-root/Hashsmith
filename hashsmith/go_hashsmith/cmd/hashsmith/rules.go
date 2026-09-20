@@ -74,6 +74,12 @@ func rulePos(c byte) (int, bool) {
 	}
 }
 
+// errRuleLengthIsRuntime is not a failure. posArg returns it when a John
+// length argument resolves from the original word (`l`, `m`) rather than from
+// a constant: the command has been recorded in lengthRefAt and the caller only
+// has to leave a placeholder op so the indices line up.
+var errRuleLengthIsRuntime = errors.New("rule length resolves at run time")
+
 // errRuleRejectedByHashcatToo marks a rule line that hashcat's own compiler
 // also refuses. hashcat ships rule files containing such lines — bare "z"/"Z"
 // with no position operand, and the InsidePro-era "SXY" — and answers them
@@ -89,6 +95,18 @@ type ruleOp func([]byte) ([]byte, bool)
 type ruleProgram struct {
 	src string
 	ops []ruleOp
+	// lengthRefAt marks the ops whose length argument is not a constant but
+	// the ORIGINAL word's length: John writes that as `l`, and `m` for one
+	// less. `l d 'l` therefore duplicates the word and truncates it back to
+	// what it was. Like memoryAt these cannot be ordinary closures, because
+	// the value is only known once a word is being processed.
+	lengthRefAt map[int]lengthRef
+	// memoryAt marks the ops that are M (memorise) or Q (reject unless
+	// changed). They cannot be ordinary closures: a program is compiled once
+	// and then run concurrently by every worker, so a captured memory
+	// variable would be shared across goroutines and race. The state belongs
+	// to one execution, so apply owns it and handles these indices itself.
+	memoryAt map[int]byte
 }
 
 // maxRuleCandidate is the largest candidate a rule may build. hashcat carries
@@ -102,9 +120,55 @@ const maxRuleCandidate = 256
 // apply runs every op in order; a rejecting op aborts the rule (no candidate).
 // An op whose result would reach maxRuleCandidate bytes is skipped, and the
 // word carries on unchanged into the next op.
+// lengthRef is a length argument resolved from the original word.
+type lengthRef struct {
+	cmd    byte // ' < > or _
+	offset int  // 0 for `l`, -1 for `m`
+}
+
 func (p ruleProgram) apply(word string) (string, bool) {
 	r := []byte(word)
-	for _, op := range p.ops {
+	origLen := len(word)
+	// Q with no preceding M compares against the original word, which is what
+	// both John and Hashcat do.
+	var memo []byte
+	if len(p.memoryAt) > 0 {
+		memo = []byte(word)
+	}
+	for idx, op := range p.ops {
+		if ref, isLen := p.lengthRefAt[idx]; isLen {
+			want := origLen + ref.offset
+			if want < 0 {
+				want = 0
+			}
+			switch ref.cmd {
+			case '\'':
+				if len(r) > want {
+					r = r[:want]
+				}
+			case '<':
+				if !(len(r) < want) {
+					return "", false
+				}
+			case '>':
+				if !(len(r) > want) {
+					return "", false
+				}
+			case '_':
+				if len(r) != want {
+					return "", false
+				}
+			}
+			continue
+		}
+		if kind, isMem := p.memoryAt[idx]; isMem {
+			if kind == 'M' {
+				memo = append(memo[:0], r...)
+			} else if bytesEqual(r, memo) {
+				return "", false
+			}
+			continue
+		}
 		next, ok := op(r)
 		if !ok {
 			return "", false
@@ -118,9 +182,48 @@ func (p ruleProgram) apply(word string) (string, bool) {
 }
 
 // compileRuleLine parses one rule line into an executable program.
+// compileRuleLine compiles one rule in HASHCAT's dialect, which is the
+// default and the one every existing caller means.
 func compileRuleLine(line string) (ruleProgram, error) {
+	return compileRuleLineDialect(line, false)
+}
+
+// compileRuleLineDialect compiles one rule. When john is true, John's
+// additions are accepted: character classes, leading reject flags, its length
+// characters, and its meaning for `p`. See rules_john_dialect.go for why the
+// two are kept apart rather than merged.
+func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 	var ops []ruleOp
+	var memoryAt map[int]byte
+	var lengthRefAt map[int]lengthRef
+	if john {
+		line = stripJohnRejectFlags(line)
+	}
 	i, n := 0, len(line)
+
+	// classArg reads a `?X` class argument when one is present, for the
+	// commands that accept either a literal character or a class.
+	classArg := func(cmd byte) (func(byte) bool, bool, error) {
+		if i >= n || line[i] != '?' {
+			return nil, false, nil
+		}
+		if !john {
+			// In Hashcat's dialect '?' is just a character: `@?` purges a
+			// literal '?', and its own d3ad0ne.rule contains exactly that.
+			// Reporting a class here made a valid Hashcat rule unparseable.
+			return nil, false, nil
+		}
+		if i+1 >= n {
+			return nil, false, fmt.Errorf("command %q: '?' needs a class name", string(cmd))
+		}
+		name := line[i+1]
+		match, ok := johnClassMatch(name)
+		if !ok {
+			return nil, false, fmt.Errorf("command %q: unknown character class %q", string(cmd), string(name))
+		}
+		i += 2
+		return match, true, nil
+	}
 
 	// arg reads the immediate next byte (used for literal/position operands, so
 	// that e.g. `$ ` correctly appends a space rather than skipping it).
@@ -142,6 +245,34 @@ func compileRuleLine(line string) (ruleProgram, error) {
 		}
 		p, ok := rulePos(c)
 		if !ok {
+			// John writes a length as '*' (the maximum), '-' (one less) or
+			// '+' (one more). Hashcat has no equivalent, so these are only
+			// accepted in John's dialect.
+			if john {
+				if v, isLen := johnLengthValue(c); isLen {
+					return v, nil
+				}
+				// `l` is the ORIGINAL word's length and `m` one less, so the
+				// value is only known at run time. Measured against john
+				// itself: `l d 'l` on "admin" returns "admin", not
+				// "adminadmin". Only the length commands accept them.
+				if off, isRef := johnLengthRefOffset(c); isRef {
+					switch cmd {
+					case '\'', '<', '>', '_':
+						if lengthRefAt == nil {
+							lengthRefAt = map[int]lengthRef{}
+						}
+						lengthRefAt[len(ops)] = lengthRef{cmd: cmd, offset: off}
+						return 0, errRuleLengthIsRuntime
+					}
+				}
+				// John clamps a position character it does not recognise to
+				// the maximum length rather than rejecting the rule. Measured,
+				// not assumed: `'l` applied to a 130-character word through
+				// john itself returns 125 characters, John's maximum, where a
+				// continued a=36..z=61 scheme would have returned 47.
+				return johnMaxLength, nil
+			}
 			return 0, fmt.Errorf("command %q: bad position %q", string(cmd), string(c))
 		}
 		return p, nil
@@ -213,6 +344,20 @@ func compileRuleLine(line string) (ruleProgram, error) {
 				return append([]byte{xr}, r...), true
 			})
 		case '@':
+			if match, isClass, err := classArg('@'); err != nil {
+				return ruleProgram{}, err
+			} else if isClass {
+				ops = append(ops, func(r []byte) ([]byte, bool) {
+					out := r[:0:0]
+					for _, ch := range r {
+						if !match(ch) {
+							out = append(out, ch)
+						}
+					}
+					return out, true
+				})
+				break
+			}
 			x, ok := arg()
 			if !ok {
 				return ruleProgram{}, errors.New("dangling '@' (purge) with no character")
@@ -322,7 +467,98 @@ func compileRuleLine(line string) (ruleProgram, error) {
 				}
 				return append(append([]byte{}, r...), r[len(r)-p:]...), true
 			})
+		case '%':
+			// %NX — reject unless the word contains at least N instances of
+			// X. John only.
+			//
+			// hashcat DOCUMENTS %NX, (X and )X as rule operators, and an
+			// earlier gap report counted them against Hashsmith on that
+			// basis. Its v7.1.2 compiler rejects all three from a -r rule
+			// file — "No valid rules left." — so implementing them in
+			// hashcat's dialect would mean reading rules hashcat itself will
+			// not. Checked against the binary rather than the documentation.
+			//
+			// Semantics verified against john: "%2s" keeps "password" and
+			// drops "AdMiN"; the comparison is case-sensitive.
+			if !john {
+				return ruleProgram{}, fmt.Errorf("unknown rule command %q", string(c))
+			}
+			cnt, err := posArg(c)
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			match, isClass, err := classArg('%')
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			if isClass {
+				ops = append(ops, func(r []byte) ([]byte, bool) {
+					return r, countClass(r, match) >= cnt
+				})
+				break
+			}
+			x, ok := arg()
+			if !ok {
+				return ruleProgram{}, errors.New("command '%' needs a character (%NX)")
+			}
+			xr := x
+			ops = append(ops, func(r []byte) ([]byte, bool) {
+				return r, countByte(r, xr) >= cnt
+			})
+		case 'A':
+			// AN"str" — insert a string at position N. John only; hashcat has
+			// the single-character iNX instead. The character after the
+			// position is the delimiter, so A2'-' works as well as A2"-".
+			if !john {
+				return ruleProgram{}, fmt.Errorf("unknown rule command %q", string(c))
+			}
+			at, err := posArg(c)
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			delim, ok := arg()
+			if !ok {
+				return ruleProgram{}, errors.New(`command 'A' needs a delimited string (AN"str")`)
+			}
+			start := i
+			for i < n && line[i] != delim {
+				i++
+			}
+			if i >= n {
+				return ruleProgram{}, fmt.Errorf("command 'A': unterminated string in %q", line)
+			}
+			ins := []byte(line[start:i])
+			i++ // past the closing delimiter
+			ops = append(ops, func(r []byte) ([]byte, bool) {
+				if at > len(r) {
+					return r, true // hashcat-style: skip rather than reject
+				}
+				out := make([]byte, 0, len(r)+len(ins))
+				out = append(out, r[:at]...)
+				out = append(out, ins...)
+				return append(out, r[at:]...), true
+			})
+		case 'P':
+			if !john {
+				// Hashcat has no P; fall in with every other unknown command
+				// so the file's error count means the same thing either way.
+				return ruleProgram{}, fmt.Errorf("unknown rule command %q", string(c))
+			}
+			ops = append(ops, func(r []byte) ([]byte, bool) { return johnPastTense(r), true })
+		case 'I':
+			if !john {
+				return ruleProgram{}, fmt.Errorf("unknown rule command %q", string(c))
+			}
+			ops = append(ops, func(r []byte) ([]byte, bool) { return johnProgressive(r), true })
 		case 'p':
+			// The dialects disagree: hashcat's pN duplicates the word N times,
+			// John's bare p pluralises it. In John's dialect a following
+			// position digit still means hashcat's form, because John has no
+			// pN and the two cannot collide.
+			if john && (i >= n || !isRulePosChar(line[i])) {
+				ops = append(ops, func(r []byte) ([]byte, bool) { return johnPluralize(r), true })
+				break
+			}
 			p, err := posArg(c)
 			if err != nil {
 				return ruleProgram{}, err
@@ -337,6 +573,11 @@ func compileRuleLine(line string) (ruleProgram, error) {
 		case '\'':
 			p, err := posArg(c)
 			if err != nil {
+				if errors.Is(err, errRuleLengthIsRuntime) {
+					// Placeholder: apply resolves this against the original word.
+					ops = append(ops, func(r []byte) ([]byte, bool) { return r, true })
+					break
+				}
 				return ruleProgram{}, err
 			}
 			ops = append(ops, func(r []byte) ([]byte, bool) {
@@ -419,22 +660,109 @@ func compileRuleLine(line string) (ruleProgram, error) {
 		case '<':
 			p, err := posArg(c)
 			if err != nil {
+				if errors.Is(err, errRuleLengthIsRuntime) {
+					// Placeholder: apply resolves this against the original word.
+					ops = append(ops, func(r []byte) ([]byte, bool) { return r, true })
+					break
+				}
 				return ruleProgram{}, err
 			}
 			ops = append(ops, func(r []byte) ([]byte, bool) { return r, len(r) < p })
 		case '>':
 			p, err := posArg(c)
 			if err != nil {
+				if errors.Is(err, errRuleLengthIsRuntime) {
+					// Placeholder: apply resolves this against the original word.
+					ops = append(ops, func(r []byte) ([]byte, bool) { return r, true })
+					break
+				}
 				return ruleProgram{}, err
 			}
 			ops = append(ops, func(r []byte) ([]byte, bool) { return r, len(r) > p })
 		case '_':
 			p, err := posArg(c)
 			if err != nil {
+				if errors.Is(err, errRuleLengthIsRuntime) {
+					// Placeholder: apply resolves this against the original word.
+					ops = append(ops, func(r []byte) ([]byte, bool) { return r, true })
+					break
+				}
 				return ruleProgram{}, err
 			}
 			ops = append(ops, func(r []byte) ([]byte, bool) { return r, len(r) == p })
+		case 'M', 'Q':
+			// Memorise / reject-unless-changed, John only.
+			//
+			// An earlier gap report listed these as "hashcat memory rules
+			// Hashsmith is missing". They are not: hashcat v7.1.2 answers
+			// "No valid rules left." for a file containing M, Q or both, so
+			// accepting them in its dialect would have made Hashsmith read
+			// rules hashcat refuses. Verified rather than assumed.
+			//
+			// They are marked by index rather than compiled into a closure —
+			// see ruleProgram.memoryAt for why.
+			if !john {
+				return ruleProgram{}, fmt.Errorf("unknown rule command %q", string(c))
+			}
+			if memoryAt == nil {
+				memoryAt = map[int]byte{}
+			}
+			memoryAt[len(ops)] = c
+			ops = append(ops, func(r []byte) ([]byte, bool) { return r, true })
+		case '(':
+			// hashcat documents ( and ) but v7.1.2's compiler rejects them,
+			// so they are John-dialect only here for the same reason M and Q
+			// are: reading rules hashcat refuses would not be compatibility.
+			if !john {
+				return ruleProgram{}, fmt.Errorf("unknown rule command %q", string(c))
+			}
+			match, isClass, err := classArg('(')
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			if isClass {
+				ops = append(ops, func(r []byte) ([]byte, bool) {
+					return r, len(r) > 0 && match(r[0])
+				})
+				break
+			}
+			x, ok := arg()
+			if !ok {
+				return ruleProgram{}, errors.New("command '(' needs a character")
+			}
+			xr := x
+			ops = append(ops, func(r []byte) ([]byte, bool) { return r, len(r) > 0 && r[0] == xr })
+		case ')':
+			if !john {
+				return ruleProgram{}, fmt.Errorf("unknown rule command %q", string(c))
+			}
+			match, isClass, err := classArg(')')
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			if isClass {
+				ops = append(ops, func(r []byte) ([]byte, bool) {
+					return r, len(r) > 0 && match(r[len(r)-1])
+				})
+				break
+			}
+			x, ok := arg()
+			if !ok {
+				return ruleProgram{}, errors.New("command ')' needs a character")
+			}
+			xr := x
+			ops = append(ops, func(r []byte) ([]byte, bool) {
+				return r, len(r) > 0 && r[len(r)-1] == xr
+			})
 		case '!':
+			match, isClass, err := classArg('!')
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			if isClass {
+				ops = append(ops, func(r []byte) ([]byte, bool) { return r, !containsClass(r, match) })
+				break
+			}
 			x, ok := arg()
 			if !ok {
 				return ruleProgram{}, errors.New("command '!' needs a character (!X)")
@@ -442,6 +770,14 @@ func compileRuleLine(line string) (ruleProgram, error) {
 			xr := x
 			ops = append(ops, func(r []byte) ([]byte, bool) { return r, !containsByte(r, xr) })
 		case '/':
+			match, isClass, err := classArg('/')
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			if isClass {
+				ops = append(ops, func(r []byte) ([]byte, bool) { return r, containsClass(r, match) })
+				break
+			}
 			x, ok := arg()
 			if !ok {
 				return ruleProgram{}, errors.New("command '/' needs a character (/X)")
@@ -573,7 +909,7 @@ func compileRuleLine(line string) (ruleProgram, error) {
 	if len(ops) == 0 {
 		return ruleProgram{}, errors.New("empty rule")
 	}
-	return ruleProgram{src: line, ops: ops}, nil
+	return ruleProgram{src: line, ops: ops, memoryAt: memoryAt, lengthRefAt: lengthRefAt}, nil
 }
 
 // opAtPos builds an op that rewrites the single byte at position p with f,
@@ -855,28 +1191,96 @@ func compileRuleFileLines(path string) ([]ruleProgram, int, error) {
 	if c, ok := src.(io.Closer); ok {
 		defer c.Close()
 	}
-	var programs []ruleProgram
-	bad := 0 // rules only Hashsmith fails to parse — a real gap
+
+	var lines []string
 	sc := bufio.NewScanner(src)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
 		line := strings.TrimRight(sc.Text(), "\r\n")
-		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		p, err := compileRuleLine(line)
-		if err != nil {
-			if !errors.Is(err, errRuleRejectedByHashcatToo) {
-				bad++
-			}
-			continue
-		}
-		programs = append(programs, p)
+		lines = append(lines, line)
 	}
 	if err := sc.Err(); err != nil {
-		return nil, bad, err
+		return nil, 0, err
 	}
-	return programs, bad, nil
+	return compileRuleLines(lines)
+}
+
+// compileRuleLines compiles a whole ruleset, choosing its dialect first.
+//
+// The dialect is decided for the FILE, not per line: a file is one ruleset,
+// and compiling half of it as Hashcat and half as John would produce
+// candidates neither tool would.
+//
+// It is decided by COMPILING BOTH WAYS and keeping the better fit, rather than
+// by looking for marker syntax. Marker syntax does not work, because the
+// dialects genuinely overlap: hashcat's `-N` decrements the character at
+// position N and its positions include 8, C and P, so `-8` is both a valid
+// hashcat rule and a valid John reject flag; `@?d` is "purge '?', duplicate"
+// in hashcat and "purge digits" in John. Two separate attempts at a marker
+// heuristic each read a real hashcat file as John and silently dropped every
+// candidate it produced — specific.rule on the first attempt, d3ad0ne.rule and
+// dive.rule on the second.
+//
+// Compiling twice cannot make that mistake: a valid Hashcat file compiles
+// cleanly as Hashcat, so it can never lose to the John attempt. Ties go to
+// Hashcat, which is the dialect every existing caller means.
+func compileRuleLines(lines []string) ([]ruleProgram, int, error) {
+	hcPrograms, hcBad := compileRuleLinesAs(lines, false)
+
+	// Only pay for the second attempt when the first one struggled. A file
+	// that compiles cleanly as Hashcat is Hashcat.
+	if hcBad == 0 {
+		return hcPrograms, hcBad, nil
+	}
+	johnPrograms, johnBad := compileRuleLinesAs(lines, true)
+	if johnBad < hcBad {
+		return johnPrograms, johnBad, nil
+	}
+	return hcPrograms, hcBad, nil
+}
+
+// compileRuleLinesAs compiles every line in one dialect, expanding John's
+// preprocessor when that is the dialect asked for.
+func compileRuleLinesAs(lines []string, john bool) ([]ruleProgram, int) {
+	var programs []ruleProgram
+	bad := 0 // rules only Hashsmith fails to parse — a real gap
+
+	for _, line := range lines {
+		expanded := []string{line}
+		if john {
+			exp, err := expandJohnRuleLine(line)
+			if err != nil {
+				bad++
+				continue
+			}
+			expanded = exp
+		}
+		lineBad := false
+		for _, one := range expanded {
+			if strings.TrimSpace(one) == "" {
+				continue
+			}
+			p, err := compileRuleLineDialect(one, john)
+			if err != nil {
+				if !errors.Is(err, errRuleRejectedByHashcatToo) {
+					lineBad = true
+				}
+				continue
+			}
+			programs = append(programs, p)
+		}
+		// One bad LINE, however many rules it expanded to: the two dialects
+		// expand differently, so counting expanded rules would compare
+		// quantities that are not the same kind of thing.
+		if lineBad {
+			bad++
+		}
+	}
+	return programs, bad
 }
 
 // loadRuleFile compiles a single rule file, skipping blank lines and '#'

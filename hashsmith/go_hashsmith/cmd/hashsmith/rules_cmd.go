@@ -54,34 +54,62 @@ func runRules(args []string) error {
 	accentPrintln(fmt.Sprintf("Rule preview for %s  (base word: %q)", label, word))
 	fmt.Println()
 
+	var lines []string
 	sc := bufio.NewScanner(src)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
-	lineNo, valid, invalid := 0, 0, 0
 	for sc.Scan() {
-		lineNo++
 		line := strings.TrimRight(sc.Text(), "\r\n")
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		p, err := compileRuleLine(line)
-		if err != nil {
-			invalid++
-			clrRed.Fprintf(os.Stderr, "  line %d: %-16s  ✗ %v\n", lineNo, line, err)
-			continue
-		}
-		valid++
-		cand, ok := p.apply(word)
-		if !ok {
-			fmt.Printf("  %-16s  →  %s\n", line, clrYellow.Sprint("(rejected)"))
-		} else {
-			fmt.Printf("  %-16s  →  %s\n", line, accentSprint(cand))
-		}
+		lines = append(lines, line)
 	}
 	if err := sc.Err(); err != nil {
 		return err
 	}
+
+	// The preview must agree with what an attack would do, so the dialect is
+	// chosen exactly as compileRuleLines chooses it — for the file, from the
+	// whole file — and each line is expanded through the same preprocessor.
+	john := detectJohnDialect(lines)
+	if john {
+		fmt.Println("  (read as John the Ripper rules)")
+		fmt.Println()
+	}
+	valid, invalid, expandedTotal := 0, 0, 0
+	for lineNo, line := range lines {
+		expanded := []string{line}
+		if john {
+			exp, err := expandJohnRuleLine(line)
+			if err != nil {
+				invalid++
+				clrRed.Fprintf(os.Stderr, "  line %d: %-16s  ✗ %v\n", lineNo+1, line, err)
+				continue
+			}
+			expanded = exp
+		}
+		expandedTotal += len(expanded)
+		for _, one := range expanded {
+			p, err := compileRuleLineDialect(one, john)
+			if err != nil {
+				invalid++
+				clrRed.Fprintf(os.Stderr, "  line %d: %-16s  ✗ %v\n", lineNo+1, one, err)
+				continue
+			}
+			valid++
+			cand, ok := p.apply(word)
+			if !ok {
+				fmt.Printf("  %-16s  →  %s\n", one, clrYellow.Sprint("(rejected)"))
+			} else {
+				fmt.Printf("  %-16s  →  %s\n", one, accentSprint(cand))
+			}
+		}
+	}
 	fmt.Println()
+	if john && expandedTotal != len(lines) {
+		fmt.Printf("%d line(s) expanded to %d rule(s).\n", len(lines), expandedTotal)
+	}
 	fmt.Printf("%d valid rule(s), %d invalid.\n", valid, invalid)
 	return nil
 }
