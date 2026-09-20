@@ -313,6 +313,20 @@ func compatibilityHashAliasSeed() map[string]string {
 		// ── Hashcat: documents / archives / key material ──────────────────────────
 		"9400": "office", "9500": "office", "9600": "office", "25300": "office2016-sheet",
 		"9700": "office-old-md5", "9800": "office-old-sha1",
+		// The "collider #2" modes carry the SAME record as 9700/9800/10400
+		// and ask for the document password, which is what these formats
+		// recover, so the numbers map straight through.
+		//
+		// Their "#1" siblings — 9710, 9810 and 10410 — deliberately do NOT.
+		// Those ask for an intermediate RC4 key rather than a password:
+		// hashcat's own example answer for 9710 is $HEX[91b2e062b9], not
+		// "hashcat". Pointing them at a password cracker would answer a
+		// different question from the one the mode asks, and would report a
+		// mode as supported while never returning what its user wants.
+		// Hashsmith needs no two-stage collider here — it recovers the
+		// password from the record directly — so the #2 number is the one to
+		// use, and the #1 numbers stay unsupported and say so.
+		"9720": "office-old-md5", "9820": "office-old-sha1", "10420": "pdf",
 		"17010": "gpg", "17020": "gpg", "17030": "gpg", "17040": "gpg",
 		"22911": "ssh", "22921": "ssh", "22931": "ssh", "22941": "ssh", "22951": "ssh",
 		"10400": "pdf", "10500": "pdf", "10510": "pdf", "10600": "pdf-r6", "10700": "pdf-r6",
@@ -322,7 +336,13 @@ func compatibilityHashAliasSeed() map[string]string {
 		"15500": "jks-private-key", "27400": "vmware-vmx",
 		"27500": "virtualbox-aes128", "27600": "virtualbox-aes256",
 		"13300": "axcrypt-sha1",
-		"pfx":   "pfx", "p12": "pfx", "pkcs12": "pfx",
+		// Telegram Desktop's two KDF generations differ only by the iteration
+		// count and hash inside the record, which the format already reads,
+		// so both of hashcat's numbers resolve to it.
+		"22600": "telegram-desktop", "24500": "telegram-desktop",
+		"23100": "macos-keychain",
+		"99999": "plaintext", "12200": "ecryptfs",
+		"pfx": "pfx", "p12": "pfx", "pkcs12": "pfx",
 		"5200": "pwsafe", "pwsafe": "pwsafe",
 
 		// ── John the Ripper: raw digests ──────────────────────────────────────────

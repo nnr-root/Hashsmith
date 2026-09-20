@@ -115,6 +115,8 @@ func officePrototypes() []hashid.Prototype {
 			},
 			Prevalence: 15, Rationale: "Telegram Desktop's tdata local-storage encryption has protected the local session by default since Telegram Desktop's release, making it the more commonly recovered of the two Telegram record shapes here",
 		},
+		hasPrefixProto("$ecryptfs$", "eCryptfs passphrase signature", 12,
+			"eCryptfs guarded per-user home directories on Ubuntu by default until 18.04 replaced it with LUKS, so its signatures turn up in forensics of older installs rather than current ones", "ecryptfs"),
 		hasPrefixProto("$signal$", "Signal local master password", 15,
 			"Signal is one of the most widely used end-to-end-encrypted messengers, so its stored local master password recurs in messaging-app forensic work", "signal"),
 		hasPrefixProto("$keychain$*", "macOS login keychain", 25,

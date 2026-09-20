@@ -90,6 +90,26 @@ func TestRecognitionAccuracy(t *testing.T) {
 //     -t keepass-keyfile or -m 29700.
 const detectableFloor = 196
 
+// undetectableByDesign names types that must NEVER be reachable from
+// auto-detection, and so are excluded from the count above rather than
+// raising it.
+//
+// The distinction matters. The floor covers formats whose records are
+// ambiguous — a bare hex digest that could be any of six constructions — and
+// every one of those is a gap that could in principle close. These cannot
+// close, because a prototype for them would match input that is not theirs:
+//
+//   - plaintext (Hashcat 99999). Its "record" is the password itself, so any
+//     text at all is a valid one. A detection prototype would claim every
+//     input Hashsmith is ever given, which would make identify useless. It is
+//     reachable with -t plaintext or -m 99999 and only ever deliberately.
+//
+// Counting these in the floor would quietly buy room for a real detection gap
+// to appear later without failing anything.
+var undetectableByDesign = map[string]bool{
+	"plaintext": true,
+}
+
 // Every vector must at least be CRACKABLE by auto-detection, which is a weaker
 // and more important property than being confidently named. This test only
 // guarantees that the count of vectors failing that property has not grown
@@ -97,7 +117,7 @@ const detectableFloor = 196
 func TestEveryVectorIsDetectableForCracking(t *testing.T) {
 	var missing []string
 	for _, v := range universalHashRegistry.vectors {
-		if v.target == "" {
+		if v.target == "" || undetectableByDesign[v.typ] {
 			continue
 		}
 		found := false

@@ -509,6 +509,10 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"macos-keychain", "Legacy macOS Keychain database (use keychain2smith)"},
 			{"monero", "Monero .keys wallet CryptoNight v0 + ChaCha8/20 (use monero2smith)"},
 		}},
+		{"Utility", [][2]string{
+			{"ecryptfs", "eCryptfs passphrase signature, Hashcat 12200"},
+			{"plaintext", "The target IS the password, Hashcat 99999 — for exercising a wordlist or ruleset"},
+		}},
 	}
 }
 

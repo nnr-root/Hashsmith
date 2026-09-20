@@ -446,8 +446,35 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		}
 		return fmt.Sprintf("scrypt$%d$%d$%d$%s$%s", n, r, p, hex.EncodeToString(saltBytes), hex.EncodeToString(key)), nil
 	default:
+		if why, ok := hashcatNonAlgorithmMode(algorithm); ok {
+			return "", errors.New(why)
+		}
 		return "", fmt.Errorf("unsupported hash algorithm: %s", algorithm)
 	}
+}
+
+// hashcatNonAlgorithmMode explains the hashcat -m numbers that are not hash
+// algorithms at all.
+//
+// Four of hashcat's published example records are not password hashes, and
+// counting them as missing formats overstates the gap: 2000 is hashcat's
+// candidate-printing mode, and 72000, 73000 and 74000 hand the hashing to an
+// external Python or Rust program chosen by the user at run time, so there is
+// no algorithm here to implement. A user who passes one of these numbers has
+// made a reasonable mistake, and "unsupported hash algorithm" would send them
+// looking for a format that does not exist.
+func hashcatNonAlgorithmMode(name string) (string, bool) {
+	switch strings.TrimSpace(name) {
+	case "2000":
+		return "hashcat -m 2000 is STDOUT: it prints candidates instead of cracking anything, " +
+			"so there is no hash to match. Hashsmith spells that --stdout, e.g. " +
+			"`hashsmith crack --stdout -M mask --mask ?l?l?l?l`", true
+	case "72000", "73000", "74000":
+		return "hashcat -m " + strings.TrimSpace(name) + " is a bridge mode: the hashing is done " +
+			"by a Python or Rust program you supply at run time, so it names no algorithm " +
+			"Hashsmith could implement. Use the format your program actually computes", true
+	}
+	return "", false
 }
 
 // nestedHex computes digest(hex(digest(text))) — a password hashed, hex-encoded,

@@ -564,6 +564,13 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"telegram-desktop", "openwall123", "", telegramDesktopPublishedRecord, srcPublished},
 		{"vnc", "123", "", "$vnc$*7963F9BB7BA6A42A085763808156F570*475B10D05648E4110D77F03916106F98", srcPublished},
 
+		// Hashcat's -m 99999 example, where the record IS the password. The
+		// vector looks trivial and still earns its place: it is the only one
+		// that fails if verifyCandidate stops routing a type at all, with no
+		// cryptography in the way to fail first for some other reason.
+		{"plaintext", "hashcat", "", "hashcat", srcPublished},
+		{"ecryptfs", "hashcat", "", "$ecryptfs$0$1$4207883745556753$567daa975114206c", srcPublished},
+
 		// ── Hashcat OpenPGP protected secret-key records ──────────────────────
 		{"gpg", "hashcat", "", gpgHashcat17010Vector, srcPublished},
 		{"gpg", "hashcat", "", gpgHashcat17020Vector, srcPublished},

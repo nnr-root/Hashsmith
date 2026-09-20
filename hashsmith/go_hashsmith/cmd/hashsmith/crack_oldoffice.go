@@ -15,18 +15,22 @@ import (
 //	$oldoffice$0/1*salt*encryptedVerifier*encryptedMD5
 //	$oldoffice$3/4*salt*encryptedVerifier*encryptedSHA1[*secondBlock]
 func verifyOldOffice(targetHash, candidate, expectedFamily string) (bool, error) {
+	targetHash, collider, err := splitColliderAnswer(targetHash)
+	if err != nil {
+		return false, err
+	}
 	parts := strings.Split(targetHash, "*")
 	if len(parts) < 4 || len(parts) > 5 || !strings.HasPrefix(parts[0], "$oldoffice$") {
 		return false, errors.New("invalid oldoffice hash format")
 	}
 	version := strings.TrimPrefix(parts[0], "$oldoffice$")
-	salt, err := decodeOldOfficeField("salt", parts[1], 16)
-	if err != nil {
-		return false, err
+	salt, err2 := decodeOldOfficeField("salt", parts[1], 16)
+	if err2 != nil {
+		return false, err2
 	}
-	encVerifier, err := decodeOldOfficeField("encrypted verifier", parts[2], 16)
-	if err != nil {
-		return false, err
+	encVerifier, err2 := decodeOldOfficeField("encrypted verifier", parts[2], 16)
+	if err2 != nil {
+		return false, err2
 	}
 
 	switch version {
@@ -41,7 +45,7 @@ func verifyOldOffice(targetHash, candidate, expectedFamily string) (bool, error)
 		if err != nil {
 			return false, err
 		}
-		return verifyOldOfficeMD5(candidate, salt, encVerifier, encHash)
+		return verifyOldOfficeMD5(candidate, salt, encVerifier, encHash, collider)
 
 	case "3", "4":
 		if expectedFamily == "md5" {
@@ -61,7 +65,7 @@ func verifyOldOffice(targetHash, candidate, expectedFamily string) (bool, error)
 				return false, err
 			}
 		}
-		return verifyOldOfficeSHA1(candidate, salt, encVerifier, encHash, secondBlock, version == "3")
+		return verifyOldOfficeSHA1(candidate, salt, encVerifier, encHash, secondBlock, version == "3", collider)
 	}
 
 	return false, errors.New("unsupported oldoffice version")
@@ -75,7 +79,7 @@ func decodeOldOfficeField(name, value string, size int) ([]byte, error) {
 	return b, nil
 }
 
-func verifyOldOfficeMD5(candidate string, salt, encVerifier, encHash []byte) (bool, error) {
+func verifyOldOfficeMD5(candidate string, salt, encVerifier, encHash, collider []byte) (bool, error) {
 	first := md5.Sum(utf16le(candidate))
 	seed := first[:5]
 	repeated := make([]byte, 0, 16*(len(seed)+len(salt)))
@@ -84,6 +88,13 @@ func verifyOldOfficeMD5(candidate string, salt, encVerifier, encHash []byte) (bo
 		repeated = append(repeated, salt...)
 	}
 	second := md5.Sum(repeated)
+	// Hashcat's -m 9710 recovers exactly these five bytes, and -m 9720 then
+	// searches for a password that produces them. When a record carries that
+	// answer, checking it here settles the candidate after two MD5s instead of
+	// three plus an RC4 stream — the same shortcut, for the same reason.
+	if len(collider) > 0 && !equalConst(second[:len(collider)], collider) {
+		return false, nil
+	}
 	keyInput := append(append([]byte{}, second[:5]...), 0, 0, 0, 0)
 	key := md5.Sum(keyInput)
 
@@ -97,13 +108,19 @@ func verifyOldOfficeMD5(candidate string, salt, encVerifier, encHash []byte) (bo
 	return equalConst(want[:], verifierHash), nil
 }
 
-func verifyOldOfficeSHA1(candidate string, salt, encVerifier, encHash, secondBlock []byte, version3 bool) (bool, error) {
+func verifyOldOfficeSHA1(candidate string, salt, encVerifier, encHash, secondBlock []byte, version3 bool, collider []byte) (bool, error) {
 	h := sha1.New()
 	h.Write(salt)
 	h.Write(utf16le(candidate))
 	base := h.Sum(nil)
 
 	key := oldOfficeSHA1Key(base, 0, version3)
+	// The SHA-1 collider's answer is the RC4 key itself, not the value one
+	// step earlier as in the MD5 form — measured against hashcat's own
+	// examples rather than assumed symmetric.
+	if len(collider) > 0 && !equalConst(key[:len(collider)], collider) {
+		return false, nil
+	}
 	plain, err := oldOfficeRC4(key, append(append([]byte{}, encVerifier...), encHash...))
 	if err != nil {
 		return false, err
@@ -154,4 +171,41 @@ func oldOfficeRC4(key, input []byte) ([]byte, error) {
 	out := make([]byte, len(input))
 	c.XORKeyStream(out, input)
 	return out, nil
+}
+
+// splitColliderAnswer separates a record from the trailing answer that
+// hashcat's "collider #1" modes produce. It lives here beside the MS Office
+// verifier but serves the PDF one too, because hashcat spells the split the
+// same way in both.
+//
+// Hashcat splits this format in two. -m 9710 and -m 9810 recover a five-byte
+// intermediate — for MD5 the value one step before the RC4 key, for SHA-1 the
+// RC4 key itself — and -m 9720 and -m 9820 take that answer, appended to the
+// record after a colon, and find the password behind it.
+//
+// Hashsmith does not need the two stages: it recovers the password from the
+// bare record in one pass, which is why 9710 and 9810 are not offered as modes
+// at all rather than being pointed at a password cracker that would answer a
+// different question. What it does accept is the RECORD those modes produce,
+// so a 9720 or 9820 record from an existing hashcat workflow runs here
+// unchanged — and the appended answer is not discarded but used, as the
+// cheap pre-filter it is.
+func splitColliderAnswer(target string) (string, []byte, error) {
+	i := strings.LastIndexByte(target, ':')
+	if i < 0 {
+		return target, nil, nil
+	}
+	tail := target[i+1:]
+	// Five bytes is what both collider modes emit. Anything else after a
+	// colon is not a collider answer — a username prefix would come BEFORE
+	// the record, not after it — so the record is left whole and fails its
+	// own field checks with a message about the field, not about colliders.
+	if len(tail) != 10 {
+		return target, nil, nil
+	}
+	b, err := hex.DecodeString(tail)
+	if err != nil {
+		return target, nil, nil
+	}
+	return target[:i], b, nil
 }

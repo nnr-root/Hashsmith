@@ -2651,6 +2651,19 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyRAR4(targetHash, candidate)
 	case "rar5":
 		return verifyRAR5(targetHash, candidate)
+	case "ecryptfs":
+		return verifyECryptfs(targetHash, candidate)
+	case "plaintext":
+		// Hashcat's -m 99999. The target is the password itself, so a match
+		// is a string comparison.
+		//
+		// It looks like a joke and is not one. It is how you test a wordlist,
+		// a rule file or a mask against a known answer without a hash in the
+		// way: every other mode mixes "did the candidate generator produce
+		// this string" with "did the verifier agree", and this one removes the
+		// second half. Constant-time comparison anyway, because nothing here
+		// should be the one place that leaks timing.
+		return equalConst([]byte(candidate), []byte(targetHash)), nil
 	case "pdf":
 		return verifyPDF(targetHash, candidate)
 	case "ssh":
@@ -3388,6 +3401,18 @@ func pdfComputeKey(password string, oKey []byte, p int32, docID []byte, revision
 // $pdf$<V>*<R>*<keyBits>*<P>*<encryptMetadata>*<idLen>*<id>*<uLen>*<U>*<oLen>*<O>
 // Hashsmith's earlier dollar-delimited short form remains accepted.
 func verifyPDF(targetHash, candidate string) (bool, error) {
+	// A -m 10420 record is a -m 10400 record with the answer to -m 10410
+	// appended after a colon: the five-byte RC4 key. Hashsmith recovers the
+	// password from the bare record in one pass and so does not offer the
+	// first stage as a mode, but it accepts the record the stage produces and
+	// uses the answer, which settles a candidate at the key derivation
+	// instead of after an RC4 stream. See splitColliderAnswer, which the
+	// MS Office form of the same two-stage split goes through.
+	targetHash, collider, err := splitColliderAnswer(targetHash)
+	if err != nil {
+		return false, err
+	}
+
 	var rField, keyField, pField, idHex, uHex, oHex string
 	encryptMetadata := true
 	if strings.HasPrefix(targetHash, "$pdf$") && strings.Contains(targetHash, "*") {
@@ -3446,6 +3471,11 @@ func verifyPDF(targetHash, candidate string) (bool, error) {
 	}
 
 	key := pdfComputeKey(candidate, O, P, docID, R, keySize, encryptMetadata)
+	if len(collider) > 0 {
+		if len(key) < len(collider) || !equalConst(key[:len(collider)], collider) {
+			return false, nil
+		}
+	}
 
 	switch R {
 	case 2:
