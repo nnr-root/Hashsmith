@@ -28,11 +28,12 @@ func runEncode(args []string) error {
 	shift := fs.Int("s", 3, "shift")
 	key := fs.String("k", "", "key")
 	rails := fs.Int("r", 2, "rails")
+	literalIn := fs.Bool("string", false, "treat INPUT as literal text even if it names a file")
 	splitSep := fs.String("split", "", "split each INPUT on this separator (e.g. --split ,)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
-	inputs, err := gatherInputsOpts(fs.Args(), withSplit(payloadInputOpts(), *splitSep))
+	inputs, err := gatherInputsOpts(fs.Args(), withLiteral(withSplit(payloadInputOpts(), *splitSep), *literalIn))
 	if err != nil {
 		return err
 	}
@@ -399,11 +400,18 @@ func reverse(text string) string {
 	return string(runes)
 }
 
+// brainfuckEncode emits the cell arithmetic that prints text.
+//
+// It walks BYTES, not runes. A brainfuck cell holds one byte, so a rune above
+// U+00FF has no cell value: encoding "naïve" by code point emitted 239 '+' for
+// the 'ï' and the decoder wrote back the single byte 0xEF, which is not valid
+// UTF-8 and is not what went in. Walking bytes makes the round trip exact for
+// any input.
 func brainfuckEncode(text string) string {
 	cur := 0
 	var out strings.Builder
-	for _, ch := range text {
-		t := int(ch)
+	for i := 0; i < len(text); i++ {
+		t := int(text[i])
 		delta := t - cur
 		if delta > 0 {
 			out.WriteString(strings.Repeat("+", delta))

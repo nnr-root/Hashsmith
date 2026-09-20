@@ -26,11 +26,12 @@ func runDecode(args []string) error {
 	shift := fs.Int("s", 3, "shift")
 	key := fs.String("k", "", "key")
 	rails := fs.Int("r", 2, "rails")
+	literalIn := fs.Bool("string", false, "treat INPUT as literal text even if it names a file")
 	splitSep := fs.String("split", "", "split each INPUT on this separator (e.g. --split ,)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
-	inputs, err := gatherInputsOpts(fs.Args(), withSplit(payloadInputOpts(), *splitSep))
+	inputs, err := gatherInputsOpts(fs.Args(), withLiteral(withSplit(payloadInputOpts(), *splitSep), *literalIn))
 	if err != nil {
 		return err
 	}
@@ -107,9 +108,19 @@ func decodeText(text string, typ string, shift int, key string, rails int) (stri
 		if strings.HasPrefix(value, "<~") && strings.HasSuffix(value, "~>") {
 			value = value[2 : len(value)-2]
 		}
-		dst := make([]byte, len(value))
-		n, _, err := ascii85.Decode(dst, []byte(value), true)
+		// The destination needs room for a whole 4-byte group beyond what the
+		// decoder will actually write, and it reports NO error when it runs
+		// short — it just writes less. Sizing it at len(value), as this did,
+		// silently dropped the final partial group: "hello" encodes to
+		// "BOu!rDZ" and decoded back to "hell", and a single byte decoded to
+		// nothing at all. Anything whose encoded length was not a multiple of
+		// five lost data with no warning.
+		dst := make([]byte, len(value)+8)
+		n, nsrc, err := ascii85.Decode(dst, []byte(value), true)
 		if err != nil {
+			return "", errors.New("invalid Base85 format provided")
+		}
+		if nsrc != len(value) {
 			return "", errors.New("invalid Base85 format provided")
 		}
 		return string(dst[:n]), nil

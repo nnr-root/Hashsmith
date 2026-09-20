@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -103,9 +104,21 @@ func collectInputsOpts(arg string, opts inputOpts) ([]string, error) {
 		return readInputLinesFrom(os.Stdin, "standard input")
 	}
 	// A readable file → one input per non-empty, non-comment line.
+	//
+	// This substitution is SAID OUT LOUD, because it is silent otherwise and
+	// the failure it causes is not obvious. macOS matches filenames without
+	// regard to case, so `encode -t base85 Hashsmith`, run in a directory
+	// holding a binary called "hashsmith", encoded twenty megabytes of
+	// executable instead of the nine characters the user typed — and printed
+	// twenty-five million characters with no indication why. Someone encoding
+	// a secret deserves to know their argument became a file.
 	if !opts.noFile {
 		if info, err := os.Stat(arg); err == nil && !info.IsDir() {
-			return readInputLines(arg)
+			lines, rerr := readInputLines(arg)
+			if rerr == nil {
+				noteFileSubstitution(arg, info.Size(), len(lines))
+			}
+			return lines, rerr
 		}
 	}
 	// Opt-in separator splitting.
@@ -181,6 +194,15 @@ func readInputLinesFrom(r io.Reader, label string) ([]string, error) {
 	return lines, nil
 }
 
+// withLiteral turns off file substitution, so an argument that happens to
+// name an existing file is still taken as the text the user typed.
+func withLiteral(o inputOpts, literal bool) inputOpts {
+	if literal {
+		o.noFile = true
+	}
+	return o
+}
+
 // withSplit turns on separator splitting when sep is non-empty. It is the
 // plumbing behind the --split flag, which restores the old comma-list
 // convenience for callers that actually want it.
@@ -189,4 +211,35 @@ func withSplit(o inputOpts, sep string) inputOpts {
 		o.split, o.sep = true, sep
 	}
 	return o
+}
+
+// fileSubstitutionNotice is where the "read as a file" notice goes. It is a
+// var so tests can capture it without touching os.Stderr.
+var fileSubstitutionNotice io.Writer = os.Stderr
+
+// noteFileSubstitution tells the user that a positional argument was read as a
+// file rather than taken as literal text.
+func noteFileSubstitution(path string, size int64, lines int) {
+	if fileSubstitutionNotice == nil {
+		return
+	}
+	word := "inputs"
+	if lines == 1 {
+		word = "input"
+	}
+	fmt.Fprintf(fileSubstitutionNotice,
+		"Reading %s as a file (%s, %d %s) — pass --string to use it as literal text\n",
+		path, humanSizeShort(size), lines, word)
+}
+
+// humanSizeShort renders a byte count compactly for that notice.
+func humanSizeShort(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KiB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
 }

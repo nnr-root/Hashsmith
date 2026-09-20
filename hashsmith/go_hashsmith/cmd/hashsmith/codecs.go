@@ -115,6 +115,11 @@ func canonicalCodecType(typ string) string {
 	}
 }
 
+// Every entry here must be a single, valid `-t` name. Five entries used to
+// collapse several codecs into one label ("gzip / zlib", "rot5 / rot13 /
+// rot18 / rot47"), which made `hashsmith encodings` print names that encode
+// then rejected — a menu listing dishes the kitchen will not make.
+// TestEveryListedCodecEncodes holds this.
 var codecCatalogue = []typeGroup{
 	{"Binary-to-text encodings", [][2]string{
 		{"hex", "Hexadecimal (aliases: base16, b16)"},
@@ -141,8 +146,10 @@ var codecCatalogue = []typeGroup{
 		{"base91", "basE91 compact binary-to-text encoding"},
 		{"uu", "UUencoding"},
 		{"pem", "PEM DATA block"},
-		{"bech32 / bech32m", "Checksummed Bech32 encoding (HRP from -k)"},
-		{"gzip / zlib", "Compressed data with Base64 transport"},
+		{"bech32", "Checksummed Bech32 encoding (HRP from -k)"},
+		{"bech32m", "Bech32m, the revised checksum constant"},
+		{"gzip", "gzip-compressed data with Base64 transport"},
+		{"zlib", "zlib-compressed data with Base64 transport"},
 		{"bubblebabble", "Pronounceable Bubble Babble binary encoding"},
 	}},
 	{"Escaping and character encodings", [][2]string{
@@ -153,8 +160,10 @@ var codecCatalogue = []typeGroup{
 		{"quoted-printable", "MIME quoted-printable"},
 		{"hex-escape", "C-style \\xNN byte escapes"},
 		{"unicode", "Unicode \\uXXXX escapes (surrogate-pair aware)"},
-		{"utf16le / utf16be", "UTF-16 represented as hexadecimal bytes"},
-		{"utf32le / utf32be", "UTF-32 represented as hexadecimal bytes"},
+		{"utf16le", "UTF-16LE represented as hexadecimal bytes"},
+		{"utf16be", "UTF-16BE represented as hexadecimal bytes"},
+		{"utf32le", "UTF-32LE represented as hexadecimal bytes"},
+		{"utf32be", "UTF-32BE represented as hexadecimal bytes"},
 	}},
 	{"Numeric and human-readable encodings", [][2]string{
 		{"binary", "8-bit binary byte groups"},
@@ -166,7 +175,10 @@ var codecCatalogue = []typeGroup{
 	}},
 	{"Classical ciphers and transforms", [][2]string{
 		{"caesar", "Caesar shift (use -s)"},
-		{"rot5 / rot13 / rot18 / rot47", "Fixed rotation ciphers"},
+		{"rot5", "ROT5, digits only"},
+		{"rot13", "ROT13, letters only"},
+		{"rot18", "ROT18, letters and digits"},
+		{"rot47", "ROT47 over printable ASCII"},
 		{"vigenere", "Vigenere cipher (use -k)"},
 		{"xor", "Repeating-key XOR, hex transport (use -k)"},
 		{"atbash", "Atbash substitution"},

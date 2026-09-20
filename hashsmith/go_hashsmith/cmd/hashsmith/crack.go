@@ -575,6 +575,7 @@ func runCrack(args []string) error {
 	single := fs.Bool("single", false, "single-crack mode: before the main attack, try candidates derived from each account's own username (via --username), tried only against that account's hash — with --rules/-r applied; requires --username")
 	force := fs.Bool("force", false, "start an attack even when the feasibility guard estimates it cannot finish (the ETA is still measured and printed)")
 	passwdPath := fs.String("passwd", "", "optional /etc/passwd-format file for --single: also derive candidates from each account's GECOS/real-name field (\"John Smith\" -> jsmith, johns, smithj, john.smith, ...), tried only against that account's hash; unused without --single")
+	literalIn := fs.Bool("string", false, "treat TARGET as literal text even if it names a file")
 	splitSep := fs.String("split", "", "split each TARGET on this separator (e.g. --split ,)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
@@ -673,7 +674,7 @@ func runCrack(args []string) error {
 		return err
 	}
 
-	rawInputs, err := gatherInputsOpts(fs.Args(), withSplit(targetInputOpts(), *splitSep))
+	rawInputs, err := gatherInputsOpts(fs.Args(), withLiteral(withSplit(targetInputOpts(), *splitSep), *literalIn))
 	if err != nil {
 		return err
 	}

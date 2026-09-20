@@ -40,6 +40,7 @@ func runHash(args []string) error {
 	salt := fs.String("s", "", "salt")
 	saltMode := fs.String("S", "prefix", "salt mode")
 	outEncoding := fs.String("e", "hex", "output encoding")
+	literalIn := fs.Bool("string", false, "treat INPUT as literal text even if it names a file")
 	splitSep := fs.String("split", "", "split each INPUT on this separator (e.g. --split ,)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
@@ -47,7 +48,7 @@ func runHash(args []string) error {
 	if err := checkSaltMode(*saltMode); err != nil {
 		return err
 	}
-	inputs, err := gatherInputsOpts(fs.Args(), withSplit(payloadInputOpts(), *splitSep))
+	inputs, err := gatherInputsOpts(fs.Args(), withLiteral(withSplit(payloadInputOpts(), *splitSep), *literalIn))
 	if err != nil {
 		return err
 	}
