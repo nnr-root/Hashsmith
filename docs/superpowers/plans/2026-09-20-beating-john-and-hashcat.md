@@ -921,6 +921,65 @@ for one.
 Corpus coverage: **94.8%**, and the live differential now runs 105 rules
 through john.
 
+### Nine rules that were never broken, and four that cannot be read
+
+The last two buckets turned out not to be missing features at all.
+
+**Nine lines carry John's `-p` flag**, which means "reject this rule unless
+word-pair commands are allowed". Word pairs are a single-crack idea: the
+candidate source there is a user's GECOS field, so a rule can act on the first
+name, the second, or their concatenation. A wordlist run has no pairs, and john
+skips every such rule — `-p 1 l` through `john --wordlist --stdout` prints
+nothing, while the same rule WITHOUT the flag is a hard error there ("Unallowed
+command"). Hashsmith stripped the flag and then reported the leftover `1` as an
+unknown command, telling a user their ruleset was malformed while john was
+quietly skipping it. They are now recognised as not applicable, skipped, and
+not counted against the file.
+
+**Four lines cannot be read, and that is the correct answer.** They expand to
+2,030,625 and 857,375,000 rules. John generates its expansions lazily and its
+documentation says it never keeps them all in memory; Hashsmith materialises
+them so a program is compiled once and reused, which is the right trade for
+every rule anyone writes and the wrong one for these. They are refused with
+their ACTUAL size rather than capped silently, so the message says what the
+line asks for instead of just that it is too big.
+
+Corpus coverage: **98.4%**. The remaining 1.6% is those four lines.
+
+### ZipCrypto, found by a test that had been failing at 1 in 256
+
+A full-suite run failed on `TestZipCryptoRoundTrip`: a wrong password was
+accepted. Twelve reruns passed, which was the answer — ZipCrypto's encryption
+header offers ONE check byte, so one wrong password in 256 passes it, and the
+test builds a fresh archive each run against a fixed wrong password. It had
+been failing roughly one run in 256 the whole time, and the obvious reading of
+such a flake is "ignore it".
+
+It was not noise. Every ZipCrypto record Hashsmith produced accepted one wrong
+password in 256, so a rockyou-sized run reported thousands of passwords that do
+not open the archive, with nothing to distinguish them from the real one.
+
+The entry itself settles it. Its CRC-32 and its payload now go into the record,
+and the check byte becomes a cheap gate in front of an exact test: decrypt,
+inflate, checksum. The expensive half runs on about one candidate in 256
+because the gate rejects the rest, so it costs roughly a 256th of doing it
+every time. Measured over 20,000 wrong passwords: **0 accepted**, against the
+~78 the byte alone would have let through.
+
+Getting that for the COMMON case needed one more thing. Bit 3 of an entry's
+flags means the local header holds zeroes where the CRC and sizes belong, with
+the real values in a trailing descriptor that cannot be found without already
+knowing the size. Info-ZIP's `zip` — the most common producer of ZipCrypto
+archives there is — sets that bit on every entry, so reading only local headers
+would have given the exact check to 7-Zip's archives and left `zip`'s on the
+weak one. The central directory has what the local header withholds, so it is
+read.
+
+The round trip now asserts the record's SHAPE as well as its behaviour, because
+a single known password cannot tell the two records apart, and a second test
+throws 2,000 wrong passwords at it — where the byte alone would accept about
+eight.
+
 ### Hashcat modes: nine more, and four that were never algorithms
 
 Before implementing anything, every unsupported mode's published record was run
@@ -1065,6 +1124,5 @@ are ruled out.
 ### Still open
 
 - 69 unimplemented hashcat modes, and 62 missing extractors.
-- 5.2% of John's rule corpus: the single-crack word-pair selectors `1`, `2`
-  and `+` (9 lines), which only apply to a wordlist of name pairs and so need
-  single-crack mode rather than the rule engine, and 4 lines beyond them.
+- John's rule corpus reads at 98.4%. The four lines left expand to millions of
+  rules each and are refused by design, so this item is closed.
