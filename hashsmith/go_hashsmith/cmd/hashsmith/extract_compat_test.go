@@ -54,7 +54,12 @@ func TestExtractorStructuredFormats(t *testing.T) {
 	t.Run("ansible", func(t *testing.T) {
 		path := extractorFixture(t, "vault.yml", []byte("$ANSIBLE_VAULT;1.1;AES256\n30300a31310a3232\n"))
 		got, err := extractAnsibleRecords(path)
-		if err != nil || len(got) != 1 || got[0] != "$ansible$0*0*00*11*22" {
+		// salt, CIPHERTEXT, HMAC. The vault file stores salt, HMAC,
+		// ciphertext (the "11" then "22" of the fixture), and this extractor
+		// used to pass that raw order straight through — producing a record
+		// neither john's ansible2john nor hashcat's -m 16900 could read, and
+		// which only Hashsmith's own equally-non-standard parser accepted.
+		if err != nil || len(got) != 1 || got[0] != "$ansible$0*0*00*22*11" {
 			t.Fatalf("got %v, %v", got, err)
 		}
 	})

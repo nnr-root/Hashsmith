@@ -209,7 +209,10 @@ func extractAnsibleRecords(path string) ([]string, error) {
 	if len(parts) != 3 || len(parts[0]) == 0 || len(parts[1]) == 0 || len(parts[2]) == 0 {
 		return nil, errors.New("invalid Ansible Vault salt/HMAC/ciphertext envelope")
 	}
-	return []string{fmt.Sprintf("$ansible$0*0*%s*%s*%s", parts[0], parts[1], parts[2])}, nil
+	// salt, CIPHERTEXT, HMAC — the order john's ansible2john and hashcat's
+	// -m 16900 both use. The vault file itself stores salt, HMAC, ciphertext,
+	// and emitting that raw order produced a record neither tool could read.
+	return []string{fmt.Sprintf("$ansible$0*0*%s*%s*%s", parts[0], parts[2], parts[1])}, nil
 }
 
 func runExtractEthereum(args []string) error {

@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Several formats are spelled one way by John (and by Hashsmith's own
 // extractors) and another way by hashcat. Each case below is a record shape
@@ -139,5 +142,75 @@ func TestWerkzeugLegacyHMACMethods(t *testing.T) {
 	}
 	if _, err := parseWerkzeugHash("nonsense$salt$0000000000000000000000000000000000000000000000000000000000000000"); err == nil {
 		t.Error("an unknown method was accepted")
+	}
+}
+
+// Records whose field order or field count differs between the tools.
+func TestRecordShapeVariants(t *testing.T) {
+	for _, c := range []struct {
+		mode   string
+		verify func(hash, candidate string) (bool, error)
+		was    string
+	}{
+		{"16900", verifyAnsible,
+			"an Ansible Vault file stores salt, HMAC, ciphertext; john and hashcat both reorder to salt, ciphertext, HMAC"},
+		{"23400", verifyBitwarden,
+			"hashcat carries the second PBKDF2 round count in a fifth field; the four-field form leaves it implicit at 1"},
+		{"12700", verifyBlockchain,
+			"the original wallet record is $blockchain$<len>$<data> with the iteration count implicit at 10"},
+	} {
+		c := c
+		t.Run("m"+c.mode, func(t *testing.T) {
+			rec, pass := hashcatExampleRecord(t, c.mode)
+			ok, err := c.verify(rec, pass)
+			if err != nil {
+				t.Fatalf("%s\n  verify: %v", c.was, err)
+			}
+			if !ok {
+				t.Errorf("%s\n  hashcat's own password did not verify", c.was)
+			}
+			if bad, _ := c.verify(rec, pass+"x"); bad {
+				t.Error("a wrong password verified")
+			}
+		})
+	}
+}
+
+// The older Ansible spelling must keep working: widening a parser to accept a
+// second field order must not drop the first. The HMAC's fixed 32-byte length
+// is what tells them apart.
+func TestAnsibleReadsBothFieldOrders(t *testing.T) {
+	rec, pass := hashcatExampleRecord(t, "16900")
+	f := strings.Split(rec[len("$ansible$"):], "*")
+	if len(f) != 5 {
+		t.Fatalf("expected 5 fields, got %d", len(f))
+	}
+	legacy := "$ansible$" + f[0] + "*" + f[1] + "*" + f[2] + "*" + f[4] + "*" + f[3]
+	ok, err := verifyAnsible(legacy, pass)
+	if err != nil {
+		t.Fatalf("legacy order: %v", err)
+	}
+	if !ok {
+		t.Error("the pre-existing salt*hmac*ciphertext order stopped working")
+	}
+}
+
+// Bitwarden's four-field spelling leaves the second round count implicit at 1
+// and must keep working alongside hashcat's explicit five-field one.
+func TestBitwardenReadsBothFieldCounts(t *testing.T) {
+	rec, pass := hashcatExampleRecord(t, "23400")
+	f := strings.Split(rec[len("$bitwarden$"):], "*")
+	if len(f) != 5 {
+		t.Fatalf("expected 5 fields, got %d", len(f))
+	}
+	// The five-field record states 2 rounds, so the four-field reading of the
+	// same fields (which assumes 1) must NOT verify — that is the whole point
+	// of the field existing.
+	four := "$bitwarden$" + f[0] + "*" + f[1] + "*" + f[3] + "*" + f[4]
+	if ok, _ := verifyBitwarden(four, pass); ok {
+		t.Error("the four-field reading verified a record that specifies 2 rounds")
+	}
+	if _, err := verifyBitwarden(four, pass); err != nil {
+		t.Errorf("the four-field spelling should still parse: %v", err)
 	}
 }

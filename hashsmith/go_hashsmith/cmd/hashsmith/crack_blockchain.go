@@ -22,16 +22,35 @@ import (
 )
 
 func verifyBlockchain(targetHash, candidate string) (bool, error) {
-	if !strings.HasPrefix(targetHash, "$blockchain$v2$") {
-		return false, errors.New("invalid Blockchain hash (missing $blockchain$v2$ prefix)")
+	if !strings.HasPrefix(targetHash, "$blockchain$") {
+		return false, errors.New("invalid Blockchain hash (missing $blockchain$ prefix)")
 	}
-	f := strings.Split(targetHash[len("$blockchain$v2$"):], "$")
-	if len(f) != 3 {
-		return false, errors.New("invalid Blockchain hash (need iter$len$data)")
-	}
-	iter, err := strconv.Atoi(f[0])
-	if err != nil || iter < 1 {
-		return false, errors.New("invalid Blockchain iteration count")
+	// Two record shapes, distinguished by the "v2$" marker:
+	//
+	//   $blockchain$v2$<iter>$<len>$<data>   the later wallet format
+	//   $blockchain$<len>$<data>             the original, which hashcat
+	//                                        -m 12700 still publishes
+	//
+	// The original leaves the iteration count implicit at 10; only the later
+	// format made it configurable. Requiring the v2 marker rejected every
+	// -m 12700 record outright, though the crypto for both is the same.
+	var f []string
+	iter := 10
+	if rest, ok := strings.CutPrefix(targetHash, "$blockchain$v2$"); ok {
+		f = strings.Split(rest, "$")
+		if len(f) != 3 {
+			return false, errors.New("invalid Blockchain v2 hash (need iter$len$data)")
+		}
+		var err error
+		if iter, err = strconv.Atoi(f[0]); err != nil || iter < 1 || iter > maxKDFIterations {
+			return false, errors.New("invalid Blockchain iteration count")
+		}
+	} else {
+		parts := strings.Split(targetHash[len("$blockchain$"):], "$")
+		if len(parts) != 2 {
+			return false, errors.New("invalid Blockchain hash (need len$data)")
+		}
+		f = []string{"10", parts[0], parts[1]}
 	}
 	data, err := hex.DecodeString(f[2])
 	if err != nil || len(data) < 32 || (len(data)-16)%16 != 0 {

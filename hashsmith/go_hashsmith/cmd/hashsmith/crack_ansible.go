@@ -24,19 +24,35 @@ func verifyAnsible(targetHash, candidate string) (bool, error) {
 	}
 	f := strings.Split(targetHash[len("$ansible$"):], "*")
 	if len(f) != 5 {
-		return false, errors.New("invalid Ansible Vault hash (need type*cipher*salt*hmac*data)")
+		return false, errors.New("invalid Ansible Vault hash (need type*cipher*salt*ciphertext*hmac)")
 	}
 	salt, err := hex.DecodeString(f[2])
 	if err != nil {
 		return false, errors.New("invalid Ansible salt")
 	}
-	want, err := hex.DecodeString(f[3])
-	if err != nil || len(want) != 32 {
-		return false, errors.New("invalid Ansible HMAC")
+	a, errA := hex.DecodeString(f[3])
+	b, errB := hex.DecodeString(f[4])
+	if errA != nil || errB != nil {
+		return false, errors.New("invalid Ansible ciphertext or HMAC")
 	}
-	data, err := hex.DecodeString(f[4])
-	if err != nil {
-		return false, errors.New("invalid Ansible ciphertext")
+
+	// Two field orders exist for the same record, and the HMAC's fixed
+	// 32-byte length tells them apart.
+	//
+	// An Ansible Vault file stores salt, HMAC, ciphertext in that order, and
+	// Hashsmith used to pass them straight through. Both john's ansible2john
+	// and hashcat's -m 16900 REORDER them to salt, ciphertext, HMAC — so
+	// Hashsmith's records were readable by neither tool, and neither tool's
+	// records were readable by Hashsmith.
+	//
+	// The portable order wins for anything Hashsmith now emits, and the older
+	// spelling is still read so existing records do not break.
+	data, want := a, b
+	if len(b) != sha256.Size && len(a) == sha256.Size {
+		data, want = b, a // the old salt*hmac*ciphertext spelling
+	}
+	if len(want) != sha256.Size {
+		return false, errors.New("invalid Ansible HMAC (need 32 bytes)")
 	}
 	dk := pbkdf2.Key([]byte(candidate), salt, 10000, 80, sha256.New)
 	mac := hmac.New(sha256.New, dk[32:64])
