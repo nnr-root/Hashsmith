@@ -105,7 +105,11 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"peoplesoft", "hashsmith", "", "2uCd2T/LX41DjVEwFi9KoRahpX4=", srcCrosschecked},
 		{"episerver", "hashsmith", "", "$episerver$*0*MjEwNDE5NzcyNg==*aKdKfczl/7l2BtCK8vtVQ0sZoMQ=", srcCrosschecked},
 		{"episerver", "hashsmith", "", "$episerver$*1*MjEwNDE5NzcyNg==*2AS3xW1AuqiQczMED1VAxsUwuUzlgR0pRikE3r09tKI=", srcCrosschecked},
-		{"azuresync", "hashsmith", "", "v1;PPH1_MD4,10920c8b4d1f2a3b,100,112751a58105737a61461ec5c0ea567c068b154e5e89e723b1f2b80997557f16", srcCrosschecked},
+		// hashcat's own -m 12800 example record and password. The vector this
+		// replaced was produced by Hashsmith against its own derivation, which
+		// used the raw NT hash as the PBKDF2 password instead of the uppercase
+		// hex of it encoded UTF-16LE — so it pinned the bug in place.
+		{"azuresync", "hashcat", "", "v1;PPH1_MD4,54188415275183448824,100,55b530f052a9af79a7ba9c466dddcb8b116f8babf6c3873a51a3898fb008e123", srcPublished},
 		{"hmailserver", "hashsmith", "", "aB3xY9f7e20052c00664fe2b773123e52b8cdd393bcb09518b63ea390fe30eefa11688", srcCrosschecked},
 
 		// ── Containers ──────────────────────────────────────────────────────────
@@ -127,6 +131,8 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"sha256-salt-pass-salt", "hashsmith", "Zx9", "e96b01deda9eee797d01383bb9e611f755cdc2f35cbe0778e5d0e69f3a47aafb", srcCrosschecked},
 		{"sha256-salt-uppersha1pass", "hashsmith", "Zx9", "1a93033337810e3624427730236f76fcd3ecbb91123711401d58b54b8b2b38ec", srcCrosschecked},
 		{"sha256-salt-utf16lepass", "hashsmith", "Zx9", "7debd89b3b350568a11e74d36e26b85b7cc395483a273f30e3b67f3e5cfc1ac4", srcCrosschecked},
+		{"sha256-utf16lepass-salt", "hashsmith", "Zx9", "dcdda1e5ef82d2610cdfa216d185623ac3efae3a23e05d87bfb648ff041de5a4", srcCrosschecked},
+		{"sha256-utf16lepass-hexsalt", "hashsmith", "5a7839ab", "4160e19679942328b8a3773c9658229910abfa4168e04f964518d2019ef55c86", srcCrosschecked},
 		{"md5-sha1pass-md5pass-sha1pass", "hashsmith", "Zx9", "743aaa6545dc3fec867bd2d9eaed4823", srcCrosschecked},
 		{"sha512-sha512binpass", "hashsmith", "", "67744bf0ad8a06ccc73359acf47a469430958dc95ea59dc92651466fd5708740077b21d59dad321aa61f7feafe2a92c75521745a4ee2fedcc7912b7e3ccf6c67", srcCrosschecked},
 
@@ -161,6 +167,10 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"itunes", "hashcat", "", "$itunes_backup$*9*b8e3f3a970239b22ac199b622293fe4237b9d16e74bad2c3c3568cd1bd3c471615a6c4f867265642*10000*4542263740587424862267232255853830404566**", srcPublished},
 		{"jwt", "hashsmith", "", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJzbWl0aCIsImFkbWluIjp0cnVlfQ.FnpR61iqT7rqJqNFIrEz9AkzR8LySOtfK-koWIhz1ZY", srcCrosschecked},
 		{"keepass", "hashsmith", "", "$keepass$*4*d*14*67108864*2*19*7264517c7aa1a76af9eaaf503768d2a51e5844430388731829035994b06a7618*a449a3fb4f23e8ffe80051c585e348a78be1dee3801bd6b93dd919d43ae8bc66*03d9a29a67fb4bb500000400021000000031c1f2e6bf714350be5805216afc5aff0304000000010000000420000000a449a3fb4f23e8ffe80051c585e348a78be1dee3801bd6b93dd919d43ae8bc6607100000005b6a190d99560c00cb0e09ae31bf9d3b0b8b00000000014205000000245555494410000000ef636ddf8c29444b91f7a9a403e30a0c050100000049080000000e0000000000000005010000004d0800000000000004000000000401000000500400000002000000420100000053200000007264517c7aa1a76af9eaaf503768d2a51e5844430388731829035994b06a761804010000005604000000130000000000040000000d0a0d0a*85bb3e19b1c5ac2e1ffb9ebdbdf1b549e42e5de2776668ea29a26ff428d60422", srcCrosschecked},
+		// hashcat's own -m 29700 example: a KDBX 2/3 database whose only
+		// credential is its keyfile. The "password" is that keyfile's 32-byte
+		// key in hex, which the verifier decodes before hashing.
+		{"keepass-keyfile", "127e6fbfe24a750e72930c220a8e138275656b8e5d8f48a98c3c92df2caba935", "", "$keepass$*2*60000*0*02078d460c3c837003f22ee2ba42b3ac2a9ad9e913efb61349b3f91aacd0b004*c901781373cb6806df4b4c7b427ba698440f9e9dd68101e6a198e4a95cb10098*c602f182f8b03671c944a5af357eede7*135443633e6d2b6dba314dee0a1e2b5d0c025ca5fcaf692a20d77fb62cc44f63*51b0b2d19d82c88a0d1a646151be0b68c5e3c841a7a21b4abb2e9be14f298ed1", srcPublished},
 		{"krb5asrep", "hashcat", "", "$krb5asrep$23$user@domain.com:3e156ada591263b8aab0965f5aebd837$007497cb51b6c8116d6407a782ea0e1c5402b17db7afa6b05a6d30ed164a9933c754d720e279c6c573679bd27128fe77e5fea1f72334c1193c8ff0b370fadc6368bf2d49bbfdba4c5dccab95e8c8ebfdc75f438a0797dbfb2f8a1a5f4c423f9bfc1fea483342a11bd56a216f4d5158ccc4b224b52894fadfba3957dfe4b6b8f5f9f9fe422811a314768673e0c924340b8ccb84775ce9defaa3baa0910b676ad0036d13032b0dd94e3b13903cc738a7b6d00b0b3c210d1f972a6c7cae9bd3c959acf7565be528fc179118f28c679f6deeee1456f0781eb8154e18e49cb27b64bf74cd7112a0ebae2102ac", srcPublished},
 		{"ldap", "hashsmith", "", "{CRYPT}$1$abcdefgh$t4yIjTehTKVzyLza7AROx.", srcCrosschecked},
 		{"mongodb", "hashsmith", "", "$mongodb-scram$0$admin$10000$ABEiM0RVZnc=$LQB5XFSjMV1evSGM1T44f917wkM=", srcCrosschecked},

@@ -71,7 +71,24 @@ func TestRecognitionAccuracy(t *testing.T) {
 // before that fix, because C1 only removes non-hash candidates (base32,
 // morse, nato, ...) that were never a self-test vector's own type to begin
 // with.
-const detectableFloor = 194
+// Raised from 194 to 196 on 2026-09-20, for three formats added that day.
+// Each addition is structural, not a regression in detection:
+//
+//   - sha256-utf16lepass-salt and sha256-utf16lepass-hexsalt (the latter is
+//     Hashcat 13800). This test feeds each vector's BARE digest, and a bare
+//     64-character hex string carries nothing that could attribute it to one
+//     salted construction over another. In the shape a user actually pastes —
+//     digest:salt — both ARE reached, and identify labels the hex-salt one
+//     -m 13800.
+//
+//   - keepass-keyfile (Hashcat 29700). Its record is byte-identical in shape
+//     to a keyfile-less KDBX 2/3 record, so nothing in the record can choose
+//     between the two readings; only the mode number can. It is deliberately
+//     NOT offered by auto-detection: doing so would run a second expensive
+//     AES-KDF on every KeePass target, to cover a mode that applies only when
+//     a database's sole credential is its keyfile. It is reachable with
+//     -t keepass-keyfile or -m 29700.
+const detectableFloor = 196
 
 // Every vector must at least be CRACKABLE by auto-detection, which is a weaker
 // and more important property than being confidently named. This test only

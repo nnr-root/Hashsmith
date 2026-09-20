@@ -35,11 +35,20 @@ const (
 	partSalt = iota
 	partPass
 	partPassUTF16
+	partSaltHex
 	partDigest
 )
 
 func cSalt() compositePart { return compositePart{kind: partSalt} }
-func cPass() compositePart { return compositePart{kind: partPass} }
+
+// cHexSalt splices the salt after hex-decoding it. A few formats carry a
+// BINARY salt through a text record and therefore hex-encode it in transport;
+// Windows Phone 8+ (Hashcat 13800) is one, with a 128-byte salt written as 256
+// hex characters. Splicing those characters literally hashes the transport
+// encoding instead of the salt, which is a different hash that silently never
+// matches.
+func cHexSalt() compositePart { return compositePart{kind: partSaltHex} }
+func cPass() compositePart    { return compositePart{kind: partPass} }
 
 // cUTF16Pass splices the password as UTF-16LE, the encoding Windows-derived
 // formats hash rather than the raw bytes.
@@ -78,6 +87,12 @@ func evalComposite(parts []compositePart, pass, salt string) ([]byte, error) {
 		switch p.kind {
 		case partSalt:
 			out = append(out, salt...)
+		case partSaltHex:
+			raw, err := hex.DecodeString(salt)
+			if err != nil {
+				return nil, errors.New("salt must be hexadecimal for this construction")
+			}
+			out = append(out, raw...)
 		case partPass:
 			out = append(out, pass...)
 		case partPassUTF16:
@@ -228,7 +243,17 @@ var compositeConstructions = map[string]compositeSpec{
 	"sha256-salt-uppersha1pass": {"sha256", []compositePart{cSalt(), cUpper("sha1", cPass())},
 		"sha256($salt.uppercase(sha1($pass))), Hashcat 12600 / ColdFusion 10+"},
 	"sha256-salt-utf16lepass": {"sha256", []compositePart{cSalt(), cUTF16Pass()},
-		"sha256($salt.utf16le($pass)), Hashcat 13800 / Windows Phone 8+"},
+		"sha256($salt.utf16le($pass))"},
+	// Windows Phone 8+ appends the salt, it does not prepend it. Hashcat 13800
+	// was mapped to the salt-first construction above, so every -m 13800 target
+	// ran to completion and reported the correct password as not found.
+	// Confirmed against hashcat's own example record.
+	"sha256-utf16lepass-salt": {"sha256", []compositePart{cUTF16Pass(), cSalt()},
+		"sha256(utf16le($pass).$salt)"},
+	// Hashcat 13800's salt is 128 BINARY bytes carried as 256 hex characters,
+	// so it is decoded before hashing.
+	"sha256-utf16lepass-hexsalt": {"sha256", []compositePart{cUTF16Pass(), cHexSalt()},
+		"sha256(utf16le($pass).hex_decode($salt)), Hashcat 13800 / Windows Phone 8+"},
 }
 
 // hashComposite renders one construction for a password/salt pair.
@@ -253,7 +278,12 @@ func compositeNeedsSalt(spec compositeSpec) bool {
 	var walk func([]compositePart) bool
 	walk = func(parts []compositePart) bool {
 		for _, p := range parts {
-			if p.kind == partSalt {
+			// partSaltHex is a salt too. Omitting it here made
+			// compositeNeedsSalt report false for the hex-salt constructions,
+			// so verifyComposite never split their hash:salt target and the
+			// salt reached the hasher empty — the hash was right and the input
+			// was not, which surfaces as a silent "not found".
+			if p.kind == partSalt || p.kind == partSaltHex {
 				return true
 			}
 			if p.kind == partDigest && walk(p.inner) {

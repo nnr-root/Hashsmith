@@ -57,10 +57,21 @@ func verifyOffice(targetHash, candidate string) (bool, error) {
 	switch version {
 	case 2013:
 		// Agile encryption: SHA-512 + AES-256-CBC. Field 2 is the spin count.
-		return officeAgileVerify(candidate, salt, encVerifier, encVerifierHash, atoiDefault(parts[2], 100000), keyLen)
+		return officeAgileVerify(sha512.New, candidate, salt, encVerifier, encVerifierHash, atoiDefault(parts[2], 100000), keyLen)
 	case 2010:
-		// Standard encryption, 100000 SHA-1 iterations (field 2).
-		return officeStandardVerify(candidate, salt, encVerifier, encVerifierHash, atoiDefault(parts[2], 100000), keyLen)
+		// Office 2010 is AGILE too, with SHA-1 and AES-128 rather than 2013's
+		// SHA-512 and AES-256 — it derives two keys from the iterated hash
+		// under the same two block keys (0xfea7d2763b4b9e79 for the verifier
+		// input, 0xd7aa0f6d3061344e for its hash) and decrypts in CBC with the
+		// salt as IV.
+		//
+		// It was routed to the ECMA-376 STANDARD scheme instead, which derives
+		// one key through the 0x36/0x5C pad construction and decrypts in ECB.
+		// Both run to completion and produce a wrong verifier, so every
+		// -m 9500 target reported the correct password as not found. Confirmed
+		// against hashcat's own m09500-pure.cl, which uses the agile block
+		// keys, and against its example record.
+		return officeAgileVerify(sha1.New, candidate, salt, encVerifier, encVerifierHash, atoiDefault(parts[2], 100000), keyLen)
 	case 2007:
 		// Standard encryption, fixed 50000 iterations (field 2 is verifier size).
 		return officeStandardVerify(candidate, salt, encVerifier, encVerifierHash, 50000, keyLen)
@@ -68,12 +79,15 @@ func verifyOffice(targetHash, candidate string) (bool, error) {
 	return false, errors.New("unsupported office version (want 2007/2010/2013)")
 }
 
-// officeAgileVerify implements the 2013 agile scheme (SHA-512 + AES-256-CBC).
-func officeAgileVerify(password string, salt, encVerifier, encVerifierHash []byte, spinCount, keyLen int) (bool, error) {
-	h := officeIteratedHash(sha512.New, salt, password, spinCount)
+// officeAgileVerify implements the agile scheme. Office 2013 instantiates it
+// with SHA-512 and a 32-byte key; Office 2010 with SHA-1 and a 16-byte key.
+// The structure is identical, which is why the hash constructor is a parameter
+// rather than the two being separate functions.
+func officeAgileVerify(newHash func() hash.Hash, password string, salt, encVerifier, encVerifierHash []byte, spinCount, keyLen int) (bool, error) {
+	h := officeIteratedHash(newHash, salt, password, spinCount)
 
-	keyIn := officeDeriveKey(sha512.New, h, officeBlockVerifierInput, keyLen)
-	keyVal := officeDeriveKey(sha512.New, h, officeBlockVerifierValue, keyLen)
+	keyIn := officeDeriveKey(newHash, h, officeBlockVerifierInput, keyLen)
+	keyVal := officeDeriveKey(newHash, h, officeBlockVerifierValue, keyLen)
 
 	verifier, err := aesCBCDecrypt(keyIn, salt, encVerifier)
 	if err != nil {
@@ -84,7 +98,9 @@ func officeAgileVerify(password string, salt, encVerifier, encVerifierHash []byt
 		return false, err
 	}
 
-	sum := sha512.Sum512(verifier)
+	hv := newHash()
+	_, _ = hv.Write(verifier)
+	sum := hv.Sum(nil)
 	n := len(verifierHash)
 	if n > len(sum) {
 		n = len(sum)

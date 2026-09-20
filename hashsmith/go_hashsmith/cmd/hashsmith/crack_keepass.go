@@ -27,6 +27,32 @@ import (
 // Verified against known KeePass KDBX example hashes.
 
 func verifyKeePass(targetHash, candidate string) (bool, error) {
+	return verifyKeePassMode(targetHash, candidate, false)
+}
+
+// verifyKeePassKeyfile is the keyfile-only variant (Hashcat 29700), where the
+// credential being recovered is the keyfile's own 32-byte key rather than a
+// password.
+//
+// The candidate is the key's HEXADECIMAL spelling and is decoded to bytes
+// before hashing — hashcat marks this mode's plaintext as hex, and the
+// composite is SHA256 of the raw key, not of the 64 characters that spell it.
+// Confirmed against hashcat's own example record: hashing the hex text, or
+// double-hashing either form, all decrypt to the wrong stream-start bytes,
+// and only SHA256 of the decoded key reproduces them.
+//
+// A candidate that is not valid hex simply cannot be this credential, so it is
+// rejected rather than raised as an error — a wordlist is expected to contain
+// entries that do not fit.
+func verifyKeePassKeyfile(targetHash, candidate string) (bool, error) {
+	raw, err := hex.DecodeString(strings.TrimSpace(candidate))
+	if err != nil {
+		return false, nil
+	}
+	return verifyKeePassMode(targetHash, string(raw), true)
+}
+
+func verifyKeePassMode(targetHash, candidate string, keyfileOnly bool) (bool, error) {
 	p := strings.Split(targetHash, "*")
 	if len(p) < 8 || p[0] != "$keepass$" {
 		return false, errors.New("invalid keepass hash format")
@@ -35,11 +61,59 @@ func verifyKeePass(targetHash, candidate string) (bool, error) {
 	case "1":
 		return verifyKeePass1(p, candidate)
 	case "2":
-		return verifyKeePass2(p, candidate)
+		return verifyKeePass2(p, candidate, keyfileOnly)
 	case "4":
 		return verifyKeePass4(p, candidate)
 	}
 	return false, errors.New("unsupported keepass version (want 1, 2 or 4)")
+}
+
+// keepassComposite builds the KDBX composite key, which is what the AES-KDF
+// then transforms.
+//
+// KeePass composes its key from the credentials actually present, and the
+// composition CHANGES shape depending on which are there. Getting this wrong
+// costs nothing at parse time and everything at verification time: the KDF
+// still runs to completion and simply produces the wrong master key, so the
+// correct password is reported as not found.
+//
+//   - password only      SHA256(SHA256(password))
+//   - password + keyfile SHA256(SHA256(password) || keyfileKey)   — note that
+//     the outer wrap of the password-only form is NOT applied as well; the
+//     keyfile concatenation replaces it
+//   - keyfile only       SHA256(keyfileKey)
+//
+// Taken from hashcat's m13400-pure.cl and m29700-pure.cl, whose init kernels
+// branch on keyfile_len in exactly this way.
+func keepassComposite(candidate string, keyfile []byte, keyfileOnly bool) []byte {
+	inner := sha256.Sum256([]byte(candidate))
+	if keyfileOnly {
+		return inner[:]
+	}
+	if len(keyfile) > 0 {
+		h := sha256.New()
+		h.Write(inner[:])
+		h.Write(keyfile)
+		return h.Sum(nil)
+	}
+	outer := sha256.Sum256(inner[:])
+	return outer[:]
+}
+
+// keepassKeyfileFromRecord reads the optional inline keyfile a KDBX 2/3 record
+// may carry after its verification fields: *<inline flag>*<hex length>*<hex>.
+func keepassKeyfileFromRecord(p []string) ([]byte, error) {
+	if len(p) < 12 {
+		return nil, nil
+	}
+	if p[9] != "1" {
+		return nil, nil // not an inline keyfile
+	}
+	kf, err := hex.DecodeString(p[11])
+	if err != nil {
+		return nil, errors.New("invalid keepass inline keyfile")
+	}
+	return kf, nil
 }
 
 // keepassMasterKey performs the AES-KDF: transform the composite key with
@@ -171,8 +245,9 @@ func verifyKeePass4(p []string, candidate string) (bool, error) {
 
 // verifyKeePass2 decrypts the first block and compares it to the expected
 // stream-start bytes.
-func verifyKeePass2(p []string, candidate string) (bool, error) {
+func verifyKeePass2(p []string, candidate string, keyfileOnly bool) (bool, error) {
 	// $keepass$*2*rounds*?*masterSeed*transformSeed*encIV*expectedStart*firstEnc
+	//           [*<inline>*<len>*<keyfile hex>]
 	if len(p) < 9 {
 		return false, errors.New("invalid keepass2 hash format")
 	}
@@ -189,10 +264,12 @@ func verifyKeePass2(p []string, candidate string) (bool, error) {
 		return false, errors.New("keepass2 first block not aligned")
 	}
 
-	// KDBX2 password-only composite key = SHA256(SHA256(password)).
-	inner := sha256.Sum256([]byte(candidate))
-	composite := sha256.Sum256(inner[:])
-	master, err := keepassMasterKey(composite[:], transformSeed, masterSeed, rounds)
+	keyfile, err := keepassKeyfileFromRecord(p)
+	if err != nil {
+		return false, err
+	}
+	composite := keepassComposite(candidate, keyfile, keyfileOnly)
+	master, err := keepassMasterKey(composite, transformSeed, masterSeed, rounds)
 	if err != nil {
 		return false, err
 	}

@@ -108,10 +108,20 @@ func isEpiserver(s string) bool {
 
 // verifyAzureSync checks an MS-AzureSync password blob (Hashcat 12800):
 //
-//	PBKDF2-HMAC-SHA256(MD4(utf16le($pass)), $salt, $iter, 32)
+//	PBKDF2-HMAC-SHA256(utf16le(UPPERCASE_HEX(MD4(utf16le($pass)))), $salt, $iter, 32)
 //
-// The PBKDF2 password is the raw 16-byte NT hash, which is why an attacker who
-// already holds the NT hash does not need the cleartext at all.
+// The PBKDF2 password is NOT the raw 16-byte NT hash. Azure AD Connect renders
+// that hash as 32 uppercase hexadecimal characters and then encodes THAT as
+// UTF-16LE — a 64-byte key — before handing it to PBKDF2. Using the raw digest
+// instead produced a different derived key for every candidate, so every
+// -m 12800 target ran the full KDF and reported the correct password as not
+// found. Confirmed against hashcat's own example record, where the raw form,
+// both plain-ASCII hex forms and the lowercase UTF-16LE form all disagree with
+// the published digest and this one reproduces it exactly.
+//
+// The security consequence is unchanged: the input is still a deterministic
+// function of the NT hash alone, so an attacker holding the NT hash does not
+// need the cleartext.
 //
 // Record: v1;PPH1_MD4,<hex salt>,<iterations>,<hex digest>
 func verifyAzureSync(targetHash, candidate string) (bool, error) {
@@ -121,7 +131,8 @@ func verifyAzureSync(targetHash, candidate string) (bool, error) {
 	}
 	nt := md4.New()
 	_, _ = nt.Write(utf16le(candidate))
-	got := pbkdf2.Key(nt.Sum(nil), salt, iter, len(want), sha256.New)
+	key := utf16le(strings.ToUpper(hex.EncodeToString(nt.Sum(nil))))
+	got := pbkdf2.Key(key, salt, iter, len(want), sha256.New)
 	return bytesEqualCT(got, want), nil
 }
 

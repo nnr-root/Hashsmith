@@ -2650,6 +2650,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyOldOffice(targetHash, candidate, "sha1")
 	case "keepass":
 		return verifyKeePass(targetHash, candidate)
+	case "keepass-keyfile":
+		return verifyKeePassKeyfile(targetHash, candidate)
 	case "wpa":
 		return verifyWPA(targetHash, candidate)
 	case "ethereum":
