@@ -516,6 +516,45 @@ This is the strongest argument in the document for §6's Phase 1: a self-test
 built from your own output measures self-consistency, not correctness, and it
 stays green through exactly the bugs it exists to catch.
 
+### BSDi extended DES crypt, and a vector that could not catch the bug
+
+`-m 12400` is implemented. It extends traditional DES crypt three ways, and all
+three matter to a verifier: the iteration count is per hash instead of fixed at
+25, the salt is 24 bits instead of 12, and a password longer than eight
+characters contributes ALL of itself rather than being truncated.
+
+That last one is where this went wrong, twice. Hashcat's published vector uses
+the password "hashcat" — seven characters — so it never enters the folding loop
+at all, and two different readings of that loop reproduced the vector exactly.
+The fix was to generate records here for longer passwords and hand them to
+**john**, which cracked "hashcat" and "abcdefgh" and refused every longer one:
+the precise signature of a correct first block and a wrong fold. The right
+answer is that the key is encrypted UNDER ITSELF and the next eight characters
+XORed into the result.
+
+John then cracked all six, including a 20-character password and one with
+spaces, and those records are now vectors — evidence about the format rather
+than a transcript of this implementation. The tests also check that a password
+truncated to eight characters does NOT verify, which is the classic way to get
+this wrong, and that two records with different iteration counts produce
+different answers, which a verifier hard-coding descrypt's 25 rounds would fail.
+
+### A mode NOT implemented, twice over
+
+ODF (`-m 18400` and `-m 18600`) was attempted and abandoned, on the same
+principle as MultiBit. The record is fully parameterised — cipher, checksum,
+iterations, key size, salt, IV — and the obvious reading does not reproduce
+either vector. Ruled out, against both published vectors: start key SHA-1 and
+SHA-256, PBKDF2 PRF SHA-1 and SHA-256, key length 16 and 20, Blowfish in CFB-64,
+CFB-8 and CBC, AES-256-CBC, and the checksum over the full plaintext and over
+its first 1024 bytes. None of the resulting plaintexts looks like the DEFLATE
+stream ODF stores, which says the key derivation is wrong rather than the
+cipher framing.
+
+Shipping the most plausible reading would have produced a verifier that parses
+every record and rejects every password. Two modes left honestly unsupported
+beat two that claim support and waste a run.
+
 ### Still open
 
 - **83 unimplemented modes.** Largest coherent families: PKZIP/SecureZIP (10),
@@ -1154,6 +1193,7 @@ are ruled out.
 
 ### Still open
 
-- 69 unimplemented hashcat modes, and 62 missing extractors.
+- 68 unimplemented hashcat modes, and 62 missing extractors. Conformance is
+  452 of 538 (84.0%).
 - John's rule corpus reads at 98.4%. The four lines left expand to millions of
   rules each and are refused by design, so this item is closed.
