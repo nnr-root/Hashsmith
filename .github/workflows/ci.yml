@@ -37,6 +37,22 @@ jobs:
           HASHSMITH_REQUIRE_AVX2: "1"
         run: cd hashsmith/go_hashsmith && go test -timeout 5m ./...
 
+      # Surfaces the hashcat conformance numbers in the log even when the
+      # ratchet passes, so coverage is a figure you can watch rather than a
+      # silent assertion. The test itself already ran above as part of ./... —
+      # this re-runs only that one test, with -v, purely for the log line.
+      #
+      # It drives the real binary against hashcat's own published example
+      # records. That is the boundary `selftest` cannot see: the 502-vector
+      # self-test asserts at the library layer, and on 2026-09-20 it reported
+      # 356/356 green while `crack -t descrypt` rejected hashcat's canonical
+      # descrypt record. Coverage claims rest on THIS number, not that one.
+      - name: Hashcat conformance (coverage ratchet)
+        run: |
+          cd hashsmith/go_hashsmith
+          go test -timeout 5m -run TestHashcatConformance -v ./cmd/hashsmith \
+            | grep -E 'conformance over|CRACKED|REJECTED|NO-SUCH-MODE|NOT-FOUND|WRONG-PLAIN|--- (PASS|FAIL)'
+
   test-arm64:
     # ubuntu-24.04-arm is GitHub's hosted arm64 runner. This is the only job
     # in this workflow that actually EXECUTES the NEON assembly: the `test`
