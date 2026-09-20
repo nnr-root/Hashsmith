@@ -30,7 +30,11 @@ type extractorDefinition struct {
 
 var universalExtractorRegistry = []extractorDefinition{
 	{name: "1password2smith", input: "1Password Agile Keychain", formats: "Agile Keychain encryptionKeys.js", run: runExtractOnePassword},
-	{name: "7z2smith", input: ".7z archive", formats: "7-Zip AES-256", run: runExtract7z},
+	// 7-Zip is listed but does not yet produce a verifiable record: see
+	// extractArchive7z for what is missing and why refusing beats emitting
+	// something that cannot crack. Saying so here means a user reading
+	// `hashsmith extractors` learns it before spending an archive on it.
+	{name: "7z2smith", input: ".7z archive", formats: "7-Zip AES-256 (reads the AES parameters; cannot yet build a verifiable record — use hashcat -m 11600)", run: runExtract7z},
 	{name: "aix2smith", input: "AIX /etc/security/passwd", formats: "AIX smd5/ssha1/ssha256/ssha512", run: runExtractAIX},
 	{name: "androidbackup2smith", aliases: []string{"ab2smith"}, input: "Android .ab backup", formats: "Android Backup AES-256 (v1-v5)", run: runExtractAndroidBackup},
 	{name: "ansible2smith", input: "Ansible Vault", formats: "Ansible Vault 1.x/2.x AES-256", run: runExtractAnsible},

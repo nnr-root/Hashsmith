@@ -335,20 +335,37 @@ func extract7z(path string) (*zipHashResult, error) {
 	crcBuf := make([]byte, 4)
 	binary.BigEndian.PutUint32(crcBuf, nextHeaderCRC)
 
-	hash := fmt.Sprintf("$7z$%d$%s$%s$%s$%d$%s",
-		numCyclesPower,
-		hex.EncodeToString(salt),
-		hex.EncodeToString(ivPadded),
-		hex.EncodeToString(crcBuf),
-		nextHeaderOffset,
-		hex.EncodeToString(encSnap))
-
-	return &zipHashResult{
-		hashType: "7z",
-		hash:     hash,
-		filename: path,
-		encLabel: fmt.Sprintf("7-Zip AES-256 (2^%d KDF rounds)", numCyclesPower),
-	}, nil
+	// REFUSED, deliberately. The record this used to build could never be
+	// cracked — not for a header-encrypted archive, and not for a data-only
+	// one. A round-trip test that builds a real archive with 7z, extracts,
+	// and cracks with the password it was built with fails on both.
+	//
+	// Why: verification needs the CRC32 of the DECRYPTED payload together
+	// with its unpacked size, and neither is available here. nextHeaderCRC is
+	// the CRC of the bytes as STORED — for -mhe=on that is the plaintext
+	// EncodedHeader descriptor, not the header it decrypts to. The 32-byte
+	// snapshot from offset 32 carries no length or checksum either, so the
+	// verifier fell back to a structural guess (an LZMA2 control byte, and a
+	// zero-padded second block) that holds only for a narrow shape of archive
+	// and not for the ones 7z actually writes.
+	//
+	// What a correct implementation needs, which this does not do: parse the
+	// next-header properly — a nested, VINT-encoded property stream — to
+	// reach the folder's coder chain, its unpacked size and its CRC, then
+	// emit verify7z's CANONICAL twelve-field form so verification is a real
+	// CRC check rather than a heuristic. The AES parameters gathered above
+	// (numCyclesPower, salt, ivPadded) are the part that is already correct.
+	//
+	// Emitting the old record is the worse option, and not by a little: a
+	// user runs a long attack against something that cannot match and
+	// concludes their wordlist does not contain the password. Refusing costs
+	// them the same archive and none of the time.
+	return nil, fmt.Errorf("7z2smith cannot yet produce a verifiable record for %s: "+
+		"7-Zip verification needs the decrypted payload's CRC and unpacked size, "+
+		"which requires parsing the archive's nested next-header (AES-256, "+
+		"numCyclesPower=%d, %d-byte salt were read successfully). "+
+		"For this archive use hashcat -m 11600 with a 7z2john record",
+		filepath.Base(path), numCyclesPower, len(salt))
 }
 
 // ── RAR extraction ────────────────────────────────────────────────────────────
