@@ -539,6 +539,35 @@ truncated to eight characters does NOT verify, which is the classic way to get
 this wrong, and that two records with different iteration counts produce
 different answers, which a verifier hard-coding descrypt's 25 rounds would fail.
 
+### GOST R 34.11-94, where fetching the specification was the whole job
+
+`-m 6900` is implemented, and the route there is the point. Two reconstructions
+from memory produced self-consistent digests that matched nothing. Fetching
+RFC 5831 settled it in one step: the transposition P, the shift A, the mixing
+psi and the round structure were already right, and exactly one thing was
+wrong — the constant C3, which the RFC spells out as a bit pattern and which I
+had guessed at two words of.
+
+Fixing the constant exposed a second bug, of a completely different kind. The
+S-box tables fold the cipher's 11-bit rotation in at build time, and for the
+top table the shift is 11 + 24 = 35. **In Go a `uint32` shifted by 35 is
+zero**, so a quarter of the substitution silently vanished and every digest was
+wrong in a way no amount of reading the specification would have explained. One
+`% 32` fixed it.
+
+Then the published vectors landed exactly: `""` gives
+`ce85b99c…` under the standard's test parameters and `981e5f3c…` under
+CryptoPro's, both matching the values in circulation.
+
+**And that pair turned out to be the format's identity, not a footnote.** The
+standard does NOT fix the S-box. Hashcat's own example settles which one mode
+6900 means: "hashcat" hashes to `df226c2c…` under the test parameters and
+`256f021a…` under CryptoPro. Both are implemented — `gost` for hashcat's, and
+`gost-cryptopro` for what a Russian PKI deployment means by the same name —
+because a bare 64-character digest cannot say which it is, and offering only
+one would miss half the format. Auto-detection proposes both, which is the same
+treatment Streebog already gets in that family.
+
 ### A mode NOT implemented, twice over
 
 ODF (`-m 18400` and `-m 18600`) was attempted and abandoned, on the same
@@ -1193,7 +1222,7 @@ are ruled out.
 
 ### Still open
 
-- 68 unimplemented hashcat modes, and 62 missing extractors. Conformance is
-  452 of 538 (84.0%).
+- 67 unimplemented hashcat modes, and 62 missing extractors. Conformance is
+  453 of 538 (84.2%).
 - John's rule corpus reads at 98.4%. The four lines left expand to millions of
   rules each and are refused by design, so this item is closed.
