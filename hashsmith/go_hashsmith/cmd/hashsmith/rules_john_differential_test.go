@@ -117,6 +117,12 @@ func TestJohnRuleCommandsMatchJohnItself(t *testing.T) {
 		"s?d*", "s?l#", "s?u-", "s?a.", "s?D*", "s?s_", "sa2",
 		"l Q R", "u Q L", "c M S Q", "V Q l",
 		"a0 W0", "b3 T0", "=1a l",
+		// XNMI, the memory-substring command. Each of these is one of john's
+		// own documented examples, and dX0zz is the one that pins WHICH word
+		// the memory holds: three copies, not four, because the memory is
+		// the word as it was before `d` doubled it.
+		"X0z0", "X011", "Xm1z", "dX0zz", "<4X011X113X215",
+		"X002", "X1z0", "X0zz", "X099", "l M u X0z0", "M l X0zz",
 
 		// Preprocessor. These are the reason the corpus figure moved, and
 		// every one of them is a shape john.conf itself writes.

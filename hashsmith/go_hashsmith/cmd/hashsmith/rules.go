@@ -107,7 +107,29 @@ type ruleProgram struct {
 	// variable would be shared across goroutines and race. The state belongs
 	// to one execution, so apply owns it and handles these indices itself.
 	memoryAt map[int]byte
+	// extractAt marks the XNMI ops: take a substring of the MEMORISED word
+	// and insert it into the current one. Like memoryAt these read state that
+	// belongs to a single execution, so apply owns them rather than a
+	// closure.
+	extractAt map[int]xExtract
 }
+
+// xExtract is one XNMI command: take up to length characters of the memorised
+// word starting at start, and insert them into the current word at insert.
+type xExtract struct {
+	start  int
+	length int
+	insert int
+}
+
+// xMemLast is the start value for John's `m`, the last character position of
+// the memorised word. It cannot be a constant because the memorised word's
+// length is only known while a word is being processed.
+const xMemLast = -1
+
+// xToEnd stands for John's `z`, "infinite" position or length. Any value past
+// the word's length behaves the same way, so one large sentinel covers it.
+const xToEnd = 1 << 20
 
 // maxRuleCandidate is the largest candidate a rule may build. hashcat carries
 // a fixed password buffer (RP_PASSWORD_SIZE, 256) and skips any command whose
@@ -132,7 +154,7 @@ func (p ruleProgram) apply(word string) (string, bool) {
 	// Q with no preceding M compares against the original word, which is what
 	// both John and Hashcat do.
 	var memo []byte
-	if len(p.memoryAt) > 0 {
+	if len(p.memoryAt) > 0 || len(p.extractAt) > 0 {
 		memo = []byte(word)
 	}
 	for idx, op := range p.ops {
@@ -158,6 +180,35 @@ func (p ruleProgram) apply(word string) (string, bool) {
 				if len(r) != want {
 					return "", false
 				}
+			}
+			continue
+		}
+		if x, isExtract := p.extractAt[idx]; isExtract {
+			start := x.start
+			if start == xMemLast {
+				start = len(memo) - 1
+				if start < 0 {
+					start = 0
+				}
+			}
+			if start > len(memo) {
+				start = len(memo)
+			}
+			end := len(memo)
+			if x.length < xToEnd && start+x.length < end {
+				end = start + x.length
+			}
+			piece := memo[start:end]
+			if len(piece) > 0 {
+				at := x.insert
+				if at > len(r) {
+					at = len(r) // John appends rather than rejecting
+				}
+				out := make([]byte, 0, len(r)+len(piece))
+				out = append(out, r[:at]...)
+				out = append(out, piece...)
+				out = append(out, r[at:]...)
+				r = out
 			}
 			continue
 		}
@@ -196,6 +247,7 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 	var ops []ruleOp
 	var memoryAt map[int]byte
 	var lengthRefAt map[int]lengthRef
+	var extractAt map[int]xExtract
 	if john {
 		line = stripJohnRejectFlags(line)
 	}
@@ -276,6 +328,31 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 			return 0, fmt.Errorf("command %q: bad position %q", string(cmd), string(c))
 		}
 		return p, nil
+	}
+
+	// xArg reads one operand of the X command. It is deliberately stricter
+	// than posArg: X refuses an operand it cannot resolve rather than
+	// clamping it, because a clamped START silently extracts nothing.
+	xArg := func(what string) (int, error) {
+		ch, ok := arg()
+		if !ok {
+			return 0, fmt.Errorf("command 'X' is missing its %s", what)
+		}
+		if v, isPos := rulePos(ch); isPos {
+			return v, nil
+		}
+		switch ch {
+		case 'z':
+			return xToEnd, nil
+		case 'm':
+			return xMemLast, nil
+		}
+		if v, isLen := johnLengthValue(ch); isLen {
+			return v, nil
+		}
+		return 0, fmt.Errorf("command 'X': %s %q resolves from run-time state Hashsmith does not "+
+			"track (John's 'p' is the position of the last character found by / or %%); "+
+			"the rule is refused rather than read as a position past the end", what, string(ch))
 	}
 
 	for i < n {
@@ -961,6 +1038,47 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 				break
 			}
 			return ruleProgram{}, fmt.Errorf("command %q is not implemented: %w", string(c), errRuleRejectedByHashcatToo)
+		case 'X':
+			// XNMI — take up to M characters of the MEMORISED word starting
+			// at N, and insert them into the current word at position I.
+			//
+			// John's own examples, each verified here against john rather
+			// than transcribed: X011 duplicates the first character, Xm1z the
+			// last, dX0zz triplicates the word, and X0z0 — the form john.conf
+			// actually uses, six times — prefixes the word with its
+			// memorised self. The memory is the word as it was at the last M,
+			// or the original word when there has been none, which is why
+			// `dX0zz` gives three copies and not four.
+			//
+			// The operands do NOT go through posArg. posArg clamps a position
+			// character it does not recognise to the maximum length, which is
+			// right for a length and silently wrong for a start: `Xp…` would
+			// become "start past the end", extract nothing, and leave the
+			// word unchanged with no indication. X refuses what it cannot
+			// resolve instead.
+			if !john {
+				return ruleProgram{}, fmt.Errorf("unknown rule command %q", string(c))
+			}
+			start, err := xArg("start")
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			length, err := xArg("length")
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			insert, err := xArg("insert position")
+			if err != nil {
+				return ruleProgram{}, err
+			}
+			if start == xMemLast && length == xMemLast {
+				return ruleProgram{}, errors.New("command 'X': a length cannot be 'm'")
+			}
+			if extractAt == nil {
+				extractAt = map[int]xExtract{}
+			}
+			extractAt[len(ops)] = xExtract{start: start, length: length, insert: insert}
+			ops = append(ops, func(r []byte) ([]byte, bool) { return r, true })
 		case 'V':
 			// V — lowercase the vowels, uppercase the consonants.
 			if !john {
@@ -1041,7 +1159,7 @@ func compileRuleLineDialect(line string, john bool) (ruleProgram, error) {
 	if len(ops) == 0 {
 		return ruleProgram{}, errors.New("empty rule")
 	}
-	return ruleProgram{src: line, ops: ops, memoryAt: memoryAt, lengthRefAt: lengthRefAt}, nil
+	return ruleProgram{src: line, ops: ops, memoryAt: memoryAt, lengthRefAt: lengthRefAt, extractAt: extractAt}, nil
 }
 
 // opAtPos builds an op that rewrites the single byte at position p with f,
