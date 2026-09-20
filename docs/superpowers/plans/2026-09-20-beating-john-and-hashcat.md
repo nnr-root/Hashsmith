@@ -852,6 +852,44 @@ record and puts the padding length where hashcat keeps a codec id. A test pins
 that hashcat REFUSES it: a wrong-but-loadable record would silently never
 crack, which is the exact failure the refusal was built to prevent.
 
+### CORRECTION: the timing-ratchet story below was wrong, and self-inflicted
+
+**The two sections that follow are kept as written, and both are wrong about
+the cause.** They are left in place because the reasoning in them is exactly
+the reasoning that needs to be visible when it turns out to be mistaken.
+
+While investigating the first bcrypt failure, a probe spawned eight infinite
+busy-loop shells to simulate machine load. The cleanup `kill` did not reach
+them — they were orphaned to init — and they ran for **four hours and
+seventeen minutes**, saturating all eight cores of the measuring machine. Every
+"under sustained load" reading in the next two sections came from that.
+
+Measured after killing them:
+
+| condition | speedup |
+|---|---|
+| quiet machine | 2.19x, 1.90x, 2.11x |
+| WHILE a full `go test ./cmd/hashsmith` ran alongside | 1.89x, 2.12x, 2.14x |
+
+All clear of the 1.63x floor. The reference side read 1.84ms against the 3.27ms
+recorded during the contaminated period, and the full suite now takes 122
+seconds where the "normal" baseline had been 180 — so even the runs treated as
+clean were contaminated.
+
+**What changed as a result.** The exclusivity gate is reverted: the ratchet runs
+in the default suite again, where a ratchet belongs, because the premise that
+it could not be measured there was false. What stayed is the part that was a
+genuine improvement either way — the two sides are measured in alternation
+rather than in separate blocks, and a reading below the floor is re-measured
+before it fails. The same applies to the batch-feasibility retry: the fix is
+sound and its sibling test already used that pattern, but the failure it was
+written for was almost certainly the same eight processes.
+
+The lesson is not about ratchets. A measurement that disagrees with every
+expectation deserves a look at what else is running before it gets an
+explanation — and a background process spawned by a probe is the experimenter's
+responsibility to account for and to clean up.
+
 ### A timing ratchet that could not be measured where it ran
 
 The bcrypt speedup ratchet failed at 1.10x during a full-suite run, with its
