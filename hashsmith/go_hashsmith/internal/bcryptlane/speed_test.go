@@ -1,7 +1,6 @@
 package bcryptlane
 
 import (
-	"os"
 	"testing"
 
 	"golang.org/x/crypto/bcrypt"
@@ -68,42 +67,33 @@ func bestOfNInterleaved(n int, a, b func(*testing.B)) (int64, int64) {
 	return bestA, bestB
 }
 
-// HASHSMITH_TIMING_RATCHET makes this test the declared gate for the bcrypt
-// lane speedup, the same way HASHSMITH_REQUIRE_AVX2 declares the amd64 CI job
-// the gate for the AVX2 cores.
+// This ratchet runs in the ordinary test suite, and the story of why it
+// briefly did not is worth keeping.
 //
-// It exists because a wall-clock RATIO cannot be measured on a machine that is
-// doing something else, and this ratchet kept failing inside `go test ./...`
-// for that reason rather than for a regression. The two sides do not degrade
-// together: under a loaded full-suite run the four-lane side measured 2.59ms
-// per candidate against a quiet-machine 1.72ms, while the x/crypto reference
-// measured 3.34ms — its ordinary quiet cost — so the ratio collapsed to 1.29x
-// with nothing actually slower.
+// It failed at 1.10x during a full-suite run, and again at 1.29x on a rerun,
+// which looked like proof that a wall-clock RATIO cannot be measured on a
+// machine that is doing something else. It was gated behind an environment
+// variable on that reasoning, so that only a dedicated CI job would run it.
 //
-// The obvious answer, a probe that detects the contention and skips, was
-// tried and does not work. A cache-footprint probe cannot see the pressure
-// (an M2 P-core has 128 KiB of L1 data cache, so four Blowfish S-box sets are
-// nowhere near it), and a parallel-efficiency probe measures ~1.0 loaded and
-// quiet alike, because the single-goroutine baseline it divides by degrades
-// with everything else. Guarding on the lane side's own absolute cost fails
-// for a worse reason: at the multiplier needed to catch the 1.5x inflation
-// seen under load, a genuine 1.5x regression would skip instead of fail,
-// which is the one thing a ratchet must never do.
+// The reasoning was wrong, and the cause was self-inflicted: eight runaway
+// busy-loop processes, orphaned by a botched cleanup in an unrelated
+// experiment, had been saturating all eight cores of the measuring machine for
+// over four hours. Every "loaded" reading came from that.
 //
-// So the requirement is exclusivity, stated rather than inferred. CI runs this
-// in the bench job, which has its runner to itself. Locally:
+// With them gone, measured here: 2.19x, 1.90x and 2.11x on a quiet machine,
+// and 1.89x, 2.12x and 2.14x WHILE a full `go test ./cmd/hashsmith` ran
+// alongside — all clear of the 1.63x floor. The reference side read 1.84ms
+// against the 3.27ms recorded during the contaminated period, so that machine
+// had been running at roughly half speed.
 //
-//	HASHSMITH_TIMING_RATCHET=1 go test -run TestSpeedupOverXCrypto ./internal/bcryptlane
+// So the gate is gone and the test is back in the default suite, where a
+// ratchet belongs. What stayed is the part that was a real improvement
+// regardless: the two sides are measured in ALTERNATION rather than in two
+// separate blocks, and a reading below the floor is re-measured before it
+// fails.
 func TestSpeedupOverXCrypto(t *testing.T) {
 	if testing.Short() {
 		t.Skip("timing test; run without -short")
-	}
-	if os.Getenv("HASHSMITH_TIMING_RATCHET") == "" {
-		t.Skip("SKIPPING speedup ratchet: it needs a machine to itself, and a plain " +
-			"`go test ./...` runs sibling package binaries alongside it. This SKIP means " +
-			"the ratchet was NOT MEASURED on this run — it is not evidence the floor was " +
-			"met. Measure it with: HASHSMITH_TIMING_RATCHET=1 go test -run " +
-			"TestSpeedupOverXCrypto ./internal/bcryptlane")
 	}
 	crypt, err := bcrypt.GenerateFromPassword([]byte("ratchet"), 5)
 	if err != nil {

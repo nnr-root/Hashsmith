@@ -324,22 +324,6 @@ jobs:
           grep -m1 -E '^(model name|Model)' /proc/cpuinfo || true
           grep -o -m1 -E '\b(avx512[a-z]*|avx2|avx|asimd|neon)\b' /proc/cpuinfo | sort -u | tr '\n' ' ' || true
           echo
-      # The bcrypt lane speedup ratchet. It lives here, not in the `test` job,
-      # because it is a wall-clock RATIO and `go test ./...` runs sibling
-      # package binaries on the same machine — which slows the four-lane side
-      # far more than the single-lane x/crypto reference and collapses the
-      # ratio with nothing actually slower. HASHSMITH_TIMING_RATCHET is what
-      # turns the test from a loud skip into the assertion; see the comment on
-      # TestSpeedupOverXCrypto for the probes that were tried instead and why
-      # each one failed. This job has its runner to itself, which is the only
-      # condition under which the number means anything.
-      - name: bcrypt lane speedup ratchet
-        env:
-          HASHSMITH_TIMING_RATCHET: "1"
-        run: |
-          cd hashsmith/go_hashsmith
-          go test -v -run TestSpeedupOverXCrypto ./internal/bcryptlane
-
       - name: Vector core benchmarks (best-of-5, same invocation)
         run: |
           cd hashsmith/go_hashsmith
