@@ -1403,19 +1403,27 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			layout = bruteLayout(charset, minLen, maxLen)
 		}
 		var pw string
-		if cc != nil && cc.useGPU && gpuBounded {
+		// A salt is not passed to any GPU kernel, and the kernels hash the
+		// bare candidate. Running one anyway produced digests for the wrong
+		// input and reported "Not found" for a password the CPU path
+		// recovers — verified against md5($pass.$salt). The GPU is declined
+		// rather than silently answering the wrong question.
+		gpuUsable := gpuBounded && salt == ""
+		if cc != nil && cc.useGPU && gpuUsable {
 			if gp, _, usedGPU := gpuBruteHash(targetHash, typ, charset, minLen, maxLen, &atomicAttempts); usedGPU {
 				pw = gp
 			} else {
-				_, reason := activeGPUBackend()
+				reasonText := gpuFallbackReason(typ)
 				clrYellow.Fprintf(os.Stderr,
-					"GPU brute unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
+					"GPU brute unavailable for this run (%s) — using CPU\n", reasonText)
 				pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
 					sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, saltMode, targetHash, verifyFn)
 			}
 		} else {
 			if cc != nil && cc.useGPU && !gpuBounded {
 				clrYellow.Fprintf(os.Stderr, "GPU brute does not support --skip/--limit yet — using CPU\n")
+			} else if cc != nil && cc.useGPU && salt != "" {
+				clrYellow.Fprintf(os.Stderr, "GPU brute does not support a salt yet — using CPU\n")
 			}
 			pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
 				sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, saltMode, targetHash, verifyFn)
@@ -1441,19 +1449,22 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			}
 		}
 		var pw string
-		if cc != nil && cc.useGPU && gpuBounded {
+		gpuUsable := gpuBounded && salt == "" // see the brute case above
+		if cc != nil && cc.useGPU && gpuUsable {
 			if gp, _, usedGPU := gpuMaskHash(targetHash, typ, mc, &atomicAttempts); usedGPU {
 				pw = gp
 			} else {
-				_, reason := activeGPUBackend()
+				reasonText := gpuFallbackReason(typ)
 				clrYellow.Fprintf(os.Stderr,
-					"GPU mask unavailable for this run (%s) — using CPU\n", gpuReasonOrType(reason, typ))
+					"GPU mask unavailable for this run (%s) — using CPU\n", reasonText)
 				pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
 					sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, saltMode, targetHash, verifyFn)
 			}
 		} else {
 			if cc != nil && cc.useGPU && !gpuBounded {
 				clrYellow.Fprintf(os.Stderr, "GPU mask does not support --skip/--limit yet — using CPU\n")
+			} else if cc != nil && cc.useGPU && salt != "" {
+				clrYellow.Fprintf(os.Stderr, "GPU mask does not support a salt yet — using CPU\n")
 			}
 			pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
 				sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, saltMode, targetHash, verifyFn)

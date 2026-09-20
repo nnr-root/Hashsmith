@@ -216,7 +216,13 @@ func gpuBruteHash(targetHex, typ, charset string, minLen, maxLen int, atomicAtte
 			}
 			idx, ok, e := fn(sets, target, done, uint32(cnt))
 			if e != nil {
-				return "", false, true
+				// usedGPU=false, so the caller falls back to the CPU and says
+				// so. Returning true here meant a failed dispatch — a driver
+				// error, a lost device, an out-of-memory — was reported to the
+				// user as "Not found", which is indistinguishable from an
+				// exhausted keyspace and is the worst answer available.
+				recordGPUDispatchFailure(e)
+				return "", false, false
 			}
 			atomic.AddInt64(atomicAttempts, int64(cnt))
 			done += cnt
@@ -263,6 +269,7 @@ func gpuMaskHash(targetHex, typ string, mc *maskConfig, atomicAttempts *int64) (
 			}
 			idx, ok, e := fn(sets, target, done, uint32(cnt))
 			if e != nil {
+				recordGPUDispatchFailure(e)
 				return "", false
 			}
 			atomic.AddInt64(atomicAttempts, int64(cnt))
@@ -276,6 +283,9 @@ func gpuMaskHash(targetHex, typ string, mc *maskConfig, atomicAttempts *int64) (
 
 	if !mc.increment {
 		p, ok := search(fullSets)
+		if gpuDispatchFailed() {
+			return "", false, false
+		}
 		return p, ok, true
 	}
 	lo := mc.incMin
@@ -285,6 +295,9 @@ func gpuMaskHash(targetHex, typ string, mc *maskConfig, atomicAttempts *int64) (
 	for l := lo; l <= len(fullSets); l++ {
 		if p, ok := search(fullSets[:l]); ok {
 			return p, true, true
+		}
+		if gpuDispatchFailed() {
+			return "", false, false
 		}
 	}
 	return "", false, true
@@ -642,4 +655,60 @@ func gpuReasonOrType(reason, typ string) string {
 		return reason
 	}
 	return "GPU acceleration supports -t md5/md4/ntlm/sha1/sha256, got " + typ
+}
+
+// ── GPU dispatch failures ─────────────────────────────────────────────────────
+//
+// A kernel dispatch can fail for reasons that have nothing to do with the
+// password: a driver error, a device lost to a reset, an allocation refused.
+// Reporting that as "Not found" is indistinguishable from an exhausted
+// keyspace and is the worst answer available — the user stops looking.
+//
+// A failure is recorded here, the GPU path reports that it did NOT run, and
+// the caller falls back to the CPU and says why.
+
+// A plain mutex, not an atomic.Value: atomic.Value panics on a nil store, and
+// clearing the record is the common case. Nothing here is on a hot path —
+// recordGPUDispatchFailure runs only when a dispatch actually failed, and the
+// readers run once per attack, not once per chunk.
+var (
+	gpuDispatchMu  sync.Mutex
+	gpuDispatchErr error
+)
+
+func recordGPUDispatchFailure(err error) {
+	if err == nil {
+		return
+	}
+	gpuDispatchMu.Lock()
+	gpuDispatchErr = err
+	gpuDispatchMu.Unlock()
+}
+
+// gpuDispatchFailed reports whether a dispatch failed, WITHOUT clearing the
+// record — the caller still needs the error for its fallback message.
+func gpuDispatchFailed() bool {
+	gpuDispatchMu.Lock()
+	defer gpuDispatchMu.Unlock()
+	return gpuDispatchErr != nil
+}
+
+// takeGPUDispatchError returns and clears the last dispatch error, for the
+// message the caller prints when it falls back.
+func takeGPUDispatchError() error {
+	gpuDispatchMu.Lock()
+	defer gpuDispatchMu.Unlock()
+	err := gpuDispatchErr
+	gpuDispatchErr = nil
+	return err
+}
+
+// gpuFallbackReason explains why the GPU path declined, preferring a real
+// dispatch error over the generic backend reason when one was recorded.
+func gpuFallbackReason(typ string) string {
+	if err := takeGPUDispatchError(); err != nil {
+		return "GPU dispatch failed: " + err.Error()
+	}
+	_, reason := activeGPUBackend()
+	return gpuReasonOrType(reason, typ)
 }
