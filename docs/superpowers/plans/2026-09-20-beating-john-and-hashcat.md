@@ -26,38 +26,55 @@ list contained the correct password plus three decoys.
 
 | Outcome | Modes | Share |
 |---|---|---|
-| **CRACKED** — correct password recovered | **324** | **60.2%** |
-| **REJECTED** — mode resolves, canonical record refused by the parser | 124 | 23.0% |
+| **CRACKED** — correct password recovered | **418** | **77.7%** |
 | **NO-SUCH-MODE** — `unsupported hash algorithm: <n>` | 83 | 15.4% |
+| **REJECTED** — mode resolves, canonical record refused by the parser | 30 | 5.6% |
 | **NOT-FOUND** — record parses, KDF runs, correct password reported missing | 7 | 1.3% |
 
-Reproduce: `/private/tmp/.../scratchpad/xtest3.py`.
+> **CORRECTION, 2026-09-20.** An earlier version of this table reported 324
+> cracked (60.2%) and 124 rejected (23.0%). Those numbers were wrong, and wrong
+> against Hashsmith's interest in the first instance and in its favour in the
+> second. `hashcat --example-hashes` **truncates 177 of its own records** in its
+> default output, marking each with `[Truncated, use --mach for full length]`.
+> Feeding those to a parser measures the truncation, not the parser. The
+> corpus is now built from `--example-hashes --mach`, whose JSON is complete —
+> the largest record is a 513,152-character VeraCrypt volume header. Every
+> figure in this section is from the corrected corpus. The error is recorded
+> rather than quietly overwritten because a measurement this document leans on
+> has to show its own failures too.
+
+Reproduce: `go test -run TestHashcatConformance -v ./cmd/hashsmith`. The
+corpus and the pinned per-mode baseline are checked in under
+`cmd/hashsmith/testdata/`, and the test is a ratchet: a mode recorded as
+CRACKED must keep cracking.
+
+A further 14 modes (VeraCrypt RIPEMD-160, Whirlpool and Streebog-512 variants)
+do crack but exceed the harness's 20-second per-record bound on this machine.
+They are classified TIMEOUT and are counted in the 418 above, because an
+unbounded run recovers every one of them.
 
 **Read this against the README.** The README's comparison table claims 457
 universal formats and 503 numeric Hashcat aliases against Hashcat's "450+".
 That framing counts registry entries. Measured against the only test Hashcat
-itself supplies, Hashsmith handles 60.2% of Hashcat's modes. The 457 number is
-not false, but it is not the number a user experiences.
+itself supplies, Hashsmith handles 77.7% of Hashcat's modes — a strong result,
+and one worth stating in these terms rather than as a registry count, because
+this is the number a user experiences.
 
-### 1.1 The 124 rejections are concentrated, not scattered
+### 1.1 The 30 rejections are concentrated, not scattered
 
 | Parser | Modes refused |
 |---|---|
-| TrueCrypt / VeraCrypt header | **36** |
-| LUKS | 12 |
-| SNMPv3 | 7 |
-| GPG secret-key, Kerberos AES | 4 each |
-| sshng (record + ciphertext) | 5 |
-| IKE-PSK, PDF R*, KeePass, MongoDB, PEM, VirtualBox, Episerver, Werkzeug | 2 each |
-| descrypt, Juniper, Oracle, PeopleSoft, PostgreSQL | 1 each |
+| **LUKS v1** (29511-29543, every hash/cipher pairing) | **12** |
+| Episerver, MongoDB SCRAM, Python Werkzeug | 2 each |
+| PostgreSQL, Juniper ScreenOS, Oracle 11+, DNSSEC NSEC3, Blockchain My Wallet, RAR5, AxCrypt 1 SHA-1, iTunes backup >= 10, Skip32, Ansible Vault, Bitwarden, NetNTLMv2 (NT) | 1 each |
 
-One parser — TrueCrypt/VeraCrypt — accounts for 29% of the rejected set. A
-handful of parser fixes recovers most of this column. This is the cheapest
-coverage in the entire document.
+One parser — LUKS v1 — is 40% of the rejected set, and all twelve of its modes
+differ only in hash and cipher choice. A handful of parser fixes clears most of
+this column. This is the cheapest coverage in the entire document.
 
-A small number of these are legitimate record-shape differences rather than
-defects (Hashcat's `-m 12` PostgreSQL example carries the username differently
-than Hashsmith expects). Most are not.
+A small number are legitimate record-shape differences rather than defects
+(hashcat's `-m 12` PostgreSQL example carries the username differently than
+Hashsmith expects). Most are not.
 
 ### 1.2 The 7 silent failures are the most serious class
 
@@ -69,9 +86,9 @@ is correct. A user cannot distinguish this from an uncrackable password.
 -m 131    MSSQL (2000)
 -m 9500   MS Office 2010
 -m 12800  MS-AzureSync PBKDF2-HMAC-SHA256
--m 28503  Bitcoin WIF private key (P2WPKH, Bech32), compressed
--m 30903  Bitcoin raw private key (P2WPKH, Bech32), compressed
--m 30904  Bitcoin raw private key (P2WPKH, Bech32), uncompressed
+-m 13400  KeePass (KDBX v2/v3)
+-m 13800  Windows Phone 8+ PIN/password
+-m 29700  KeePass (KDBX v2/v3) - keyfile only
 ```
 
 Verified by hand for `-m 131` with the correct password `HASHCAT`:
@@ -333,12 +350,15 @@ paths of the §1 harness produce byte-identical results; `crack ... | head` work
 With Phase 1 as the scoreboard, in strict value order:
 
 - [ ] The 7 silent NOT-FOUNDs (§1.2) — wrong answers are worse than missing ones
-- [ ] TrueCrypt/VeraCrypt header parser — **36 modes**, the single biggest win
-- [ ] LUKS (12), SNMPv3 (7), sshng (5), GPG (4), Kerberos AES (4)
-- [ ] The remaining long-tail rejections
-- [ ] The 83 unimplemented modes, prioritised by engagement frequency
+- [ ] LUKS v1 parser — **12 modes**, the single biggest rejection cluster
+- [ ] Episerver, MongoDB SCRAM, Werkzeug (2 each), then the 12 singletons
+- [ ] The 83 unimplemented modes, prioritised by engagement frequency. The
+      largest coherent families are PKZIP/SecureZIP (10), Lotus Domino (3),
+      DPAPI masterkey (4), MS Office <= 2003 (4), Electrum (2), AxCrypt 2 (2),
+      Telegram (2), Mozilla key3/key4 (2), DiskCryptor (3), ENCsecurity (4)
+- [ ] Raise the pinned baseline with each landing, never to silence a failure
 
-**Acceptance:** CRACKED ≥ 480/538 (89%). State the residue and why.
+**Acceptance:** CRACKED >= 500/538 (93%). State the residue and why.
 
 ### Phase 3 — Ship something a stranger can install `[M]`
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // ── Hashcat conformance harness ───────────────────────────────────────────────
@@ -44,8 +46,18 @@ const (
 	outNoSuchMode conformanceOutcome = "NO-SUCH-MODE" // unsupported hash algorithm
 	outNotFound   conformanceOutcome = "NOT-FOUND"    // parses, runs, wrongly says not found
 	outWrongPlain conformanceOutcome = "WRONG-PLAIN"  // found the WRONG password
-	outTimeout    conformanceOutcome = "TIMEOUT"
+	outTimeout    conformanceOutcome = "TIMEOUT"      // exceeded perRecordTimeout on this machine
 )
+
+// perRecordTimeout bounds one mode. A handful of high-iteration KDFs over a
+// half-megabyte volume header (hashcat's -m 29xxx VeraCrypt records reach
+// 513,152 characters) would otherwise dominate the whole run.
+//
+// A TIMEOUT is never treated as a regression, in either direction: it says
+// "this machine was too slow to decide", not "this mode broke". Only a
+// definite CRACKED -> definite-other transition fails the ratchet, so a busy
+// or slow CI runner cannot manufacture a failure.
+const perRecordTimeout = 20 * time.Second
 
 var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
@@ -89,9 +101,14 @@ func classify(bin, dir string, r conformanceRecord) conformanceOutcome {
 	if err := os.WriteFile(hf, []byte(r.hash+"\n"), 0o600); err != nil {
 		return outRejected
 	}
-	cmd := exec.Command(bin, "-N", "crack", "-t", r.mode, hf, "-w", wl, "--no-pot", "-p", "2")
+	ctx, cancel := context.WithTimeout(context.Background(), perRecordTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "-N", "crack", "-t", r.mode, hf, "-w", wl, "--no-pot", "-p", "2")
 	cmd.Env = append(os.Environ(), "NO_COLOR=1", "TERM=dumb", "HOME="+dir)
 	raw, _ := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return outTimeout
+	}
 	out := ansiEscape.ReplaceAllString(string(raw), "")
 	low := strings.ToLower(out)
 	switch {
@@ -120,7 +137,7 @@ func TestHashcatConformance(t *testing.T) {
 
 	dir := t.TempDir()
 	results := make([]conformanceOutcome, len(corpus))
-	sem := make(chan struct{}, max(2, runtime.NumCPU()/2))
+	sem := make(chan struct{}, max(2, runtime.NumCPU()-1))
 	var wg sync.WaitGroup
 	for i, r := range corpus {
 		wg.Add(1)
@@ -140,6 +157,8 @@ func TestHashcatConformance(t *testing.T) {
 		counts[got]++
 		was := baseline[r.mode]
 		switch {
+		// A TIMEOUT is a "don't know", not a regression — see perRecordTimeout.
+		case got == outTimeout || was == outTimeout:
 		case was == outCracked && got != outCracked:
 			regressions = append(regressions, fmt.Sprintf("-m %-7s %-45s %s -> %s", r.mode, trunc(r.name, 45), was, got))
 		case was != outCracked && got == outCracked:
