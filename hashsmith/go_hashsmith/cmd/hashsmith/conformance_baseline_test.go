@@ -52,15 +52,43 @@ func loadConformanceBaseline(t *testing.T) map[string]conformanceOutcome {
 	return out
 }
 
+// writeConformanceBaseline rewrites the pinned baseline, with one rule that
+// keeps a regeneration from quietly weakening it.
+//
+// A TIMEOUT means "this machine was too slow to decide", not "this mode
+// broke" — which is why the ratchet ignores it in both directions. But a
+// regeneration WRITES it, and a mode pinned CRACKED that is rewritten as
+// TIMEOUT stops being held to anything: the next real break in it passes.
+// Regenerating on a busy laptop would silently unpin whichever slow KDFs
+// happened to run while something else had the CPU, and nothing in the diff
+// would say so beyond one line among hundreds.
+//
+// This happened. A run that added six modes also rewrote -m 29441 from CRACKED
+// to TIMEOUT, on a machine that was compiling at the time.
+//
+// So a mode already pinned CRACKED keeps that pin through a TIMEOUT. Nothing
+// else is preserved: a CRACKED that becomes NOT-FOUND or REJECTED is a real
+// regression and must show up in the diff as one.
 func writeConformanceBaseline(t *testing.T, corpus []conformanceRecord, results []conformanceOutcome) {
 	t.Helper()
+	previous := loadConformanceBaseline(t)
 	type row struct {
 		mode string
 		out  conformanceOutcome
 	}
 	rows := make([]row, 0, len(corpus))
+	kept := 0
 	for i, r := range corpus {
-		rows = append(rows, row{r.mode, results[i]})
+		got := results[i]
+		if got == outTimeout && previous[r.mode] == outCracked {
+			got = outCracked
+			kept++
+		}
+		rows = append(rows, row{r.mode, got})
+	}
+	if kept > 0 {
+		t.Logf("kept %d mode(s) pinned CRACKED that timed out on this machine; a timeout says "+
+			"the machine was too slow to decide, not that the mode broke", kept)
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		a, _ := strconv.Atoi(rows[i].mode)
