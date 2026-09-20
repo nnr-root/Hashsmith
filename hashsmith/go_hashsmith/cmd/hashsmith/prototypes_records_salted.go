@@ -56,6 +56,14 @@ func saltedPrototypes() []hashid.Prototype {
 				if isHexPair(t, 32, 32) {
 					generic = append([]string{"aes128-ecb-nokdf", "aes192-ecb-nokdf", "aes256-ecb-nokdf"}, generic...)
 				}
+				// Skype shares this shape exactly — md5:username — with no
+				// distinguishing prefix, so it is APPENDED rather than
+				// prepended: it belongs in the candidate list crack will try,
+				// but it must not displace the far commoner generic salted
+				// readings of the same bytes.
+				if f := strings.SplitN(t, ":", 2); len(f) == 2 && len(f[0]) == 32 && isHex(f[0]) && f[1] != "" {
+					generic = append(generic, "skype")
+				}
 				// This isHexPair(t, 16, 16) prepend is dead code, inherited
 				// verbatim from the legacy cascade: detectCompatSaltedTypes only
 				// returns non-nil when compatSaltedHashParts finds a digest
@@ -173,6 +181,21 @@ func saltedPrototypes() []hashid.Prototype {
 		// with reMSSQL2012 above (disjoint literal prefixes), so unlike the
 		// legacy cascade this branch no longer needs to exclude "0x0200"
 		// itself.
+		// The 94-char 0x0100 record is SQL Server 2000's, which stores the
+		// case-sensitive AND case-insensitive digests. It shares its tag with
+		// the 54-char 2005 record below but is disjoint from it by length, so
+		// both can be TierSignature without colliding.
+		{
+			Types: []string{"mssql2000"}, Display: "SQL Server 2000 password hash (both digests)",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if reMSSQL2000.MatchString(in.Normalized) {
+					return "record prefix 0x0100 (case-insensitive) with a fixed 94-char total length", true
+				}
+				return "", false
+			},
+			Prevalence: 12, Rationale: "SQL Server 2000 master..sysxlogins dumps still surface in legacy estates, and their case-insensitive digest is the weaker of the two",
+		},
 		{
 			Types: []string{"mssql2005"}, Display: "SQL Server 2000/2005 password hash",
 			Tier: hashid.TierSignature, Exclusive: true,

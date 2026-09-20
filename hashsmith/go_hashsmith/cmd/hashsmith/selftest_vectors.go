@@ -465,7 +465,13 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		// are regression-only: a pass shows the build still agrees with itself.
 		{"bcrypt", "password", "", "$2a$05$bvIG6Nmid91Mu9RcmmWZfO5HJIMCT8riNW0hEp8f6/FuA2/mHZFpe", srcPublished},
 		{"postgres", "secretpw", "testuser", "md51798e3a2215a571e6f8d2b4bf2db9db5", srcCrosschecked},
-		{"mssql2000", "secretpw", "", "503402E1C64BD514F4CFE4082E4BA1B06B5A939F", srcRegression},
+		// hashcat's own -m 131 example record and password. The vector this
+		// replaced was a bare SHA-1 of the UTF-16LE password with no salt,
+		// produced by Hashsmith itself (srcRegression) — it proved only that
+		// the code still did what it had always done, which was not MSSQL 2000.
+		{"mssql2000", "HASHCAT", "77888386", "0x0100778883860000000000000000000000000000000000000000eda3604e067a06f2732b05b9cb90b8a710996939", srcPublished},
+		// hashcat's own -m 23 example record and password.
+		{"skype", "hashcat", "0675841", "d04d74780881019341915c70d914db29:0675841", srcPublished},
 		{"mssql2005", "hashcat", "", "0x010045083578bf13a6e30ca29c40e540813772754d54a5ffd325", srcPublished},
 		{"mssql2012", "hashcat", "", "0x02003788006711b2e74e7d8cb4be96b1d187c962c5591a02d5a6ae81b3a4a094b26b7877958b26733e45016d929a756ed30d0a5ee65d3ce1970f9b7bf946e705c595f07625b1", srcPublished},
 		{"streebog512", "secretpw", "", "5ba3ca7887326884b55f8f422ac1f0f0921af86b79724755a8e60c1c2a25e77471bef28a205176a1ade88922c2c636f457298b93d3d9390e266a3f2d0a691080", srcRegression},

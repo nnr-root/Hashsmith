@@ -20,6 +20,8 @@ func TestHashcatRecordDialects(t *testing.T) {
 		{"13300", verifyAxCryptSHA1, "hashcat truncates the in-memory SHA-1 to 16 bytes"},
 		{"24100", verifyMongoDB, "hashcat uses '*' separators and always means the ServerKey"},
 		{"24200", verifyMongoDB, "hashcat uses '*' separators and always means the ServerKey"},
+		{"23", verifySkype, "Skype is md5(user + \"\\nskyper\\n\" + pass), not the generic md5(salt+pass)"},
+		{"131", verifyMSSQL2000, "SQL Server 2000 keeps two digests; -m 131 cracks the case-insensitive one"},
 	}
 	for _, c := range cases {
 		c := c
@@ -34,6 +36,8 @@ func TestHashcatRecordDialects(t *testing.T) {
 			}
 			// A near-miss must still be rejected: accepting the record shape
 			// must not have loosened the comparison itself.
+			// MSSQL 2000's case-insensitive digest is correct up to case by
+			// design, so the near-miss must differ by more than case.
 			bad, err := c.verify(rec, pass+"x")
 			if err != nil {
 				t.Fatalf("verify (wrong password): %v", err)

@@ -141,7 +141,7 @@ func compatibilityHashAliasSeed() map[string]string {
 		"8400":  "sha1-salt-sha1saltsha1pass", // Woltlab Burning Board 3
 		"13900": "sha1-salt-sha1saltsha1pass", // OpenCart
 		"21":    "md5-salt-pass",              // osCommerce / xt:Commerce
-		"23":    "md5-salt-pass",              // Skype
+		"23":    "skype",
 
 		// ── Hashcat: nested digests ───────────────────────────────────────────────
 		"2600": "md5-md5", "3500": "md5-md5-md5", "4300": "md5-upper-md5",

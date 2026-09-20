@@ -31,6 +31,11 @@ var (
 	reMySQL41   = regexp.MustCompile(`^\*[0-9a-fA-F]{40}$`)
 	reMSSQLNew  = regexp.MustCompile(`(?i)^0x0100[0-9a-fA-F]{48}$`)
 	reMSSQL2012 = regexp.MustCompile(`(?i)^0x0200[0-9a-fA-F]{136}$`)
+	// SQL Server 2000 keeps BOTH digests (case-sensitive and case-insensitive),
+	// so its record is 0x0100 + 4-byte salt + two 20-byte SHA-1s = 94 chars.
+	// That is disjoint by length from reMSSQLNew's 54-char 2005 record, so the
+	// two signatures cannot collide despite sharing the 0x0100 tag.
+	reMSSQL2000 = regexp.MustCompile(`(?i)^0x0100[0-9a-fA-F]{88}$`)
 	reURLEnc    = regexp.MustCompile(`%[0-9a-fA-F]{2}`)
 	reJSONEsc   = regexp.MustCompile(`\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})`)
 	reHexEsc    = regexp.MustCompile(`(?:\\[xX][0-9a-fA-F]{2})`)

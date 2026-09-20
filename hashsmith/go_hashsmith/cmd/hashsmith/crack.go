@@ -2610,6 +2610,10 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyArgon2(targetHash, candidate), nil
 	case "scrypt":
 		return verifyScrypt(targetHash, candidate)
+	case "mssql2000":
+		return verifyMSSQL2000(targetHash, candidate)
+	case "skype":
+		return verifySkype(targetHash, candidate)
 	case "mssql2005":
 		return verifyMSSQL2005(targetHash, candidate)
 	case "mssql2012":
@@ -3349,4 +3353,53 @@ func verifyPDF(targetHash, candidate string) (bool, error) {
 	}
 
 	return false, fmt.Errorf("unsupported PDF revision %d (only R=2,3,4 supported)", R)
+}
+
+// verifyMSSQL2000 checks a SQL Server 2000 record.
+//
+// The record is 0x0100 + a 4-byte salt + TWO SHA-1 digests: the first over the
+// password as typed, the second over its uppercase form. SQL Server 2000 kept
+// both so it could answer case-insensitive logins, and that second digest is
+// the weak one — it reduces the search space to the uppercase alphabet, which
+// is why hashcat gives it its own mode (-m 131) and why its own example record
+// zeroes the case-sensitive half entirely.
+//
+// Verification therefore targets the case-insensitive digest. A recovered
+// password is correct up to case: "hashcat" and "HASHCAT" both satisfy this
+// record, which is a property of the format, not of this check.
+//
+// Before this existed, `-t mssql2000` fell through to a bare SHA-1 of the
+// UTF-16LE password with no salt and no uppercasing, so hashcat's own -m 131
+// example reported "Not found" for the password hashcat states is correct.
+func verifyMSSQL2000(targetHash, candidate string) (bool, error) {
+	v := strings.TrimSpace(targetHash)
+	if !strings.HasPrefix(strings.ToLower(v), "0x0100") || len(v) != 94 {
+		return false, errors.New("invalid MSSQL 2000 hash format (need 0x0100 + 4-byte salt + two SHA-1 digests)")
+	}
+	saltBytes, err := hex.DecodeString(v[6:14])
+	if err != nil {
+		return false, err
+	}
+	digest := sha1.Sum(append(utf16le(strings.ToUpper(candidate)), saltBytes...))
+	return strings.EqualFold(v[54:94], hex.EncodeToString(digest[:])), nil
+}
+
+// verifySkype checks a Skype record, which is md5(username + "\nskyper\n" +
+// password) with the username carried as the salt field.
+//
+// `-t 23` previously resolved to the generic md5-salt-pass construction —
+// md5(salt + password) — which is a different hash entirely, so every -m 23
+// target reported "Not found" rather than an error.
+func verifySkype(targetHash, candidate string) (bool, error) {
+	v := strings.TrimSpace(targetHash)
+	i := strings.LastIndexByte(v, ':')
+	if i < 0 {
+		return false, errors.New("invalid Skype hash (need <md5>:<username>)")
+	}
+	want, user := v[:i], v[i+1:]
+	if len(want) != 32 || !isHex(want) || user == "" {
+		return false, errors.New("invalid Skype hash (need <md5>:<username>)")
+	}
+	got := md5.Sum([]byte(user + "\nskyper\n" + candidate))
+	return strings.EqualFold(hex.EncodeToString(got[:]), want), nil
 }

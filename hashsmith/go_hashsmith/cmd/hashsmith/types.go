@@ -249,6 +249,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"mysql41", "MySQL 4.1+ / SHA-1 based"},
 			{"mysql8", "MySQL 8 caching_sha2_password ($A$, binary-safe transport)"},
 			{"mysql-cram", "MySQL CRAM-SHA1 authentication response, Hashcat 11200"},
+			{"skype", "Skype md5(username + \"\\nskyper\\n\" + password), Hashcat 23"},
 			{"postgres", "PostgreSQL MD5 (username as salt)"},
 			{"postgres-cram", "PostgreSQL challenge-response MD5, Hashcat 11100 / John postgres"},
 			{"mssql2000", "MSSQL 2000"},

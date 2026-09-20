@@ -72,6 +72,10 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		"bcrypt": true, "argon2": true, "scrypt": true, "postgres": true,
 		"mysql8": true, "ldap-pbkdf2": true,
 		"mssql2000": true, "mssql2005": true, "mssql2012": true,
+		// Skype places the username inside the hashed string
+		// (user + "\nskyper\n" + password), so the generic prefix/suffix
+		// concatenation must not pre-apply it.
+		"skype": true,
 		// Nested-digest types ignore the salt, so the generic prefix/suffix
 		// concatenation must not touch them.
 		"md5-md5": true, "sha1-sha1": true, "sha256-sha256": true,
@@ -343,15 +347,47 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		}
 		return encodeRedHat389PBKDF2(text, saltBytes, 8192)
 	case "mssql2000":
-		h := sha1.Sum(utf16le(text))
-		return strings.ToUpper(hex.EncodeToString(h[:])), nil
-	case "mssql2005", "mssql2012":
+		// SQL Server 2000 stores BOTH digests: the case-sensitive one over the
+		// password as typed, and a case-insensitive one over its uppercase
+		// form. hashcat -m 131 cracks the second. Emitting a bare SHA-1 of the
+		// password, as this did, was not an MSSQL record at all.
 		saltBytes, err := parseSaltBytes(salt, 4)
 		if err != nil {
 			return "", err
 		}
-		digest := sha1.Sum(append(saltBytes, utf16le(text)...))
+		sensitive := sha1.Sum(append(utf16le(text), saltBytes...))
+		insensitive := sha1.Sum(append(utf16le(strings.ToUpper(text)), saltBytes...))
+		return fmt.Sprintf("0x0100%s%s%s", hex.EncodeToString(saltBytes),
+			strings.ToUpper(hex.EncodeToString(sensitive[:])),
+			strings.ToUpper(hex.EncodeToString(insensitive[:]))), nil
+	case "mssql2005":
+		saltBytes, err := parseSaltBytes(salt, 4)
+		if err != nil {
+			return "", err
+		}
+		// Operand order is password-then-salt, matching verifyMSSQL2005. The
+		// reverse order emitted a record this tool's own crack side rejected.
+		digest := sha1.Sum(append(utf16le(text), saltBytes...))
 		return fmt.Sprintf("0x0100%s%s", hex.EncodeToString(saltBytes), strings.ToUpper(hex.EncodeToString(digest[:]))), nil
+	case "mssql2012":
+		saltBytes, err := parseSaltBytes(salt, 4)
+		if err != nil {
+			return "", err
+		}
+		// SQL Server 2012+ is SHA-512 under an 0x0200 tag, not SHA-1 under
+		// 0x0100. The old generator emitted the 2005 record, which
+		// verifyMSSQL2012 rejected outright as a bad format.
+		digest := sha512.Sum512(append(utf16le(text), saltBytes...))
+		return fmt.Sprintf("0x0200%s%s", hex.EncodeToString(saltBytes), strings.ToUpper(hex.EncodeToString(digest[:]))), nil
+	case "skype":
+		if salt == "" {
+			return "", errors.New("skype requires the username as salt")
+		}
+		// Emit the whole record, not just the digest: hashcat -m 23 spells a
+		// Skype hash <md5>:<username>, and a `hash` output that its own
+		// `crack` side cannot read is not a useful record.
+		h := md5.Sum([]byte(salt + "\nskyper\n" + text))
+		return hex.EncodeToString(h[:]) + ":" + salt, nil
 	case "postgres":
 		if salt == "" {
 			return "", errors.New("postgres requires a username as salt")
