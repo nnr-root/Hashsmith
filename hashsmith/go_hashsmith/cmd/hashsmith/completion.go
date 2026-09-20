@@ -39,6 +39,7 @@ func completionCommands() [][2]string {
 		{"sessions", "Manage saved resumable sessions"},
 		{"wordlists", "Show and pin the default wordlist"},
 		{"interactive", "Guided interactive mode"},
+		{"magic", "Peel encoding layers automatically"},
 		{"completion", "Emit a shell completion script"},
 		{"version", "Print the version"},
 	}

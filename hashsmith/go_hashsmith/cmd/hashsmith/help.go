@@ -56,6 +56,7 @@ var commandHelpText = map[string]commandHelp{
 	"wordlists":  {usage: "hashsmith wordlists [--scan] [--set-default <path>]", about: "Show, search for, and pin the wordlist an omitted -w resolves to."},
 	"sessions":   {usage: "hashsmith sessions list | rm <name> | clear", about: "Manage saved resumable sessions."},
 	"gpu":        {usage: "hashsmith gpu", about: "Show GPU acceleration status for this build."},
+	"magic":      {usage: "hashsmith magic [--depth N] [--all] INPUT...", about: "Peel encoding layers automatically and identify what is underneath."},
 	"completion": {usage: "hashsmith completion <bash|zsh|fish>", about: "Write a shell completion script to stdout."},
 	"extractors": {usage: "hashsmith extractors", about: "List every integrated *2smith extractor and the formats it produces."},
 }
