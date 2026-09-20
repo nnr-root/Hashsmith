@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -139,7 +140,75 @@ func TestZipCryptoRoundTrip(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Skipf("zip could not build a ZipCrypto archive: %v\n%s", err, out)
 	}
+
+	// The record must be the CRC-verified form. ZipCrypto's encryption header
+	// offers ONE check byte, so a record carrying only that accepts one wrong
+	// password in 256 — and this very test used to fail intermittently
+	// because a fresh archive plus one fixed wrong password lands on that
+	// 1-in-256 every so often.
+	//
+	// Info-ZIP's zip, which built this archive, sets bit 3 of the entry's
+	// flags, so its local header holds zeroes where the CRC and sizes belong.
+	// Reaching the central directory for them is what makes the exact check
+	// possible HERE rather than only for archives 7-Zip wrote, so asserting
+	// the shape is asserting that the common case is the checked one.
+	recs := extractRecords(t, bin, "zip2smith", archive)
+	if n := strings.Count(recs[0], "$"); n < 6 {
+		t.Errorf("zip2smith produced a check-byte-only ZipCrypto record; the archive's CRC was "+
+			"available and would have made it exact:\n%s", recs[0])
+	}
+
 	assertRoundTrip(t, bin, "zip2smith", archive, password)
+}
+
+// TestZipCryptoRejectsWrongPasswordsInBulk is the reason the record grew.
+//
+// One check byte accepts one wrong password in 256. Over a rockyou-sized run
+// that is thousands of reported passwords that do not open the archive, with
+// nothing to tell them apart from the real one, and a round trip over a single
+// wrong password cannot see it — it either gets unlucky and fails for reasons
+// that look like a bug, or gets lucky and says nothing.
+//
+// Several hundred wrong passwords make the difference unmissable: the check
+// byte alone would accept one or two of them, and the CRC accepts none.
+func TestZipCryptoRejectsWrongPasswordsInBulk(t *testing.T) {
+	zipBin := requireTool(t, "zip")
+	bin := buildTestBinary(t)
+	dir := t.TempDir()
+
+	payload := filepath.Join(dir, "secret.txt")
+	if err := os.WriteFile(payload, []byte(strings.Repeat("bulk payload. ", 64)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(dir, "bulk.zip")
+	const password = "correct horse"
+	if out, err := exec.Command(zipBin, "-j", "-P", password, archive, payload).CombinedOutput(); err != nil {
+		t.Skipf("zip could not build a ZipCrypto archive: %v\n%s", err, out)
+	}
+	record := extractRecords(t, bin, "zip2smith", archive)[0]
+
+	const tries = 2000
+	accepted := 0
+	for i := 0; i < tries; i++ {
+		ok, err := verifyCandidate(fmt.Sprintf("wrongpw-%d", i), record, "zipcrypto", "", "")
+		if err != nil {
+			t.Fatalf("verifier errored on a wrong password: %v", err)
+		}
+		if ok {
+			accepted++
+		}
+	}
+	if accepted > 0 {
+		t.Errorf("%d of %d wrong passwords were accepted; with only the one-byte check that is "+
+			"the expected ~%d, so the CRC is not being checked", accepted, tries, tries/256)
+	}
+
+	// And the right password must still be found, so a verifier that rejects
+	// everything cannot pass the test above.
+	ok, err := verifyCandidate(password, record, "zipcrypto", "", "")
+	if err != nil || !ok {
+		t.Errorf("the correct password was rejected (ok=%v err=%v)", ok, err)
+	}
 }
 
 func TestZipAESRoundTrip(t *testing.T) {

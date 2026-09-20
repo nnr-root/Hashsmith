@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/flate"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
@@ -2886,10 +2887,27 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 // depending on how the hash was extracted).
 //
 // Hash format: $zipcrypto$<check_byte_hex>$<12_byte_enc_header_hex>
+// verifyZipCrypto checks a legacy ZIP (ZipCrypto / PKWARE) password.
+//
+// Two record shapes:
+//
+//	$zipcrypto$<check>$<12-byte header>
+//	$zipcrypto$<check>$<12-byte header>$<method>$<crc32>$<payload>
+//
+// The short form is all the PKWARE encryption header offers: one check byte,
+// which accepts ONE WRONG PASSWORD IN 256. Over a rockyou-sized run that is
+// thousands of reported passwords that do not open the archive, with nothing
+// to tell them apart from the real one — and it is not theoretical, it is what
+// made this extractor's own round-trip test fail intermittently.
+//
+// The long form carries the entry's CRC-32 and its encrypted payload, which
+// settles the question exactly. The check byte stays in front of it as a gate,
+// so the decrypt-and-inflate runs on about one candidate in 256 and the
+// amortised cost is a 256th of doing it every time.
 func verifyZipCrypto(targetHash, candidate string) (bool, error) {
 	parts := strings.Split(targetHash, "$")
 	// "$zipcrypto$XX$YYYYYY..." splits to ["", "zipcrypto", "XX", "YYY..."]
-	if len(parts) != 4 || parts[1] != "zipcrypto" {
+	if (len(parts) != 4 && len(parts) != 7) || parts[1] != "zipcrypto" {
 		return false, errors.New("invalid zipcrypto hash format")
 	}
 	checkBytes, err := hex.DecodeString(parts[2])
@@ -2900,9 +2918,64 @@ func verifyZipCrypto(targetHash, candidate string) (bool, error) {
 	if err != nil || len(encHeader) != 12 {
 		return false, errors.New("invalid encryption header in zipcrypto hash")
 	}
-	decrypted := decryptZipCryptoHeader(encHeader, candidate)
-	return decrypted[11] == checkBytes[0], nil
+
+	state := newZipCryptoState(candidate)
+	header := make([]byte, len(encHeader))
+	for i, b := range encHeader {
+		header[i] = state.decryptByte(b)
+	}
+	if header[11] != checkBytes[0] {
+		return false, nil
+	}
+	if len(parts) == 4 {
+		return true, nil
+	}
+
+	method, err := strconv.Atoi(parts[4])
+	if err != nil {
+		return false, errors.New("invalid zipcrypto compression method")
+	}
+	wantCRC, err := strconv.ParseUint(parts[5], 16, 32)
+	if err != nil {
+		return false, errors.New("invalid zipcrypto CRC")
+	}
+	payload, err := hex.DecodeString(parts[6])
+	if err != nil {
+		return false, errors.New("invalid zipcrypto payload")
+	}
+
+	// The keystream continues from the header, so this decrypt must use the
+	// same state rather than a fresh one.
+	plain := make([]byte, len(payload))
+	for i, b := range payload {
+		plain[i] = state.decryptByte(b)
+	}
+
+	switch method {
+	case 0: // stored: the payload IS the file
+	case 8: // deflate
+		zr := flate.NewReader(bytes.NewReader(plain))
+		out, err := io.ReadAll(io.LimitReader(zr, maxZipCryptoInflated))
+		zr.Close()
+		if err != nil {
+			// A wrong password that passed the check byte produces noise, and
+			// noise does not inflate. That is the common case here and is a
+			// rejection, not an error.
+			return false, nil
+		}
+		plain = out
+	default:
+		// An unusual compression method cannot be checked without a decoder
+		// for it. Fall back to the check byte, which is what the short record
+		// would have given anyway.
+		return true, nil
+	}
+	return uint64(crc32.ChecksumIEEE(plain)) == wantCRC, nil
 }
+
+// maxZipCryptoInflated bounds what a record's payload may inflate to, so a
+// crafted record cannot turn one candidate into gigabytes of allocation.
+const maxZipCryptoInflated = 64 << 20
 
 // verifyZipAES checks a WinZip AES password by re-deriving the PBKDF2 key
 // with the stored salt and comparing the last two derived bytes (the password

@@ -205,6 +205,11 @@ func aesKeySaltLen(strength uint8) (keyLen, saltLen int, err error) {
 // record is a line in a hash file, and a WinZip entry can be gigabytes.
 const maxWinZipEmbeddedData = 1 << 20
 
+// maxZipCryptoEmbeddedData bounds the ZipCrypto payload a record carries, for
+// the same reason: the record is a line in a hash file and a ZIP entry can be
+// gigabytes.
+const maxZipCryptoEmbeddedData = 1 << 20
+
 // parseWinZipAES reads a WinZip AES entry and builds the strongest record the
 // entry actually supports.
 //
@@ -310,7 +315,7 @@ func parseWinZipAES(r io.Reader, filename string, ae *aesExtraField, lh localFil
 // Verification byte selection (PKWARE APPNOTE §6.1.5):
 //   - Bit 3 of flags set (data descriptor present): use high byte of ModTime.
 //   - Bit 3 clear: use high byte of CRC-32.
-func parseZipCrypto(r io.Reader, lh localFileHeader, filename string) (*zipHashResult, error) {
+func parseZipCrypto(r io.ReadSeeker, lh localFileHeader, filename string) (*zipHashResult, error) {
 	encHeader := make([]byte, 12)
 	if _, err := io.ReadFull(r, encHeader); err != nil {
 		return nil, fmt.Errorf("cannot read ZipCrypto encryption header: %w", err)
@@ -321,6 +326,52 @@ func parseZipCrypto(r io.Reader, lh localFileHeader, filename string) (*zipHashR
 		checkByte = byte(lh.ModTime >> 8) // high byte of 16-bit ModTime
 	} else {
 		checkByte = byte(lh.CRC32 >> 24) // high byte of 32-bit CRC-32
+	}
+
+	// The check byte is ONE byte, so it accepts one wrong password in 256.
+	// That is not a rounding error: a rockyou-sized run reports thousands of
+	// passwords that do not open the archive, and nothing distinguishes them
+	// from the real one. The entry itself carries what settles it — its
+	// CRC-32 and its payload — so when the local header declares a size and
+	// the payload is small enough to carry, both go into the record and the
+	// check byte becomes the cheap gate in front of an exact test.
+	//
+	// The cost of that exact test is paid on one candidate in 256, because
+	// the gate rejects the rest, so the amortised cost of decrypting and
+	// inflating is about a 256th of doing it every time.
+	// Sizes and CRC come from the local header when it has them, and from the
+	// central directory when bit 3 says it does not.
+	crc, compressed, method := lh.CRC32, uint64(lh.CompressedSize), lh.ComprMethod
+	haveSizes := lh.Flags&0x08 == 0
+	if !haveSizes {
+		if ce, ok := lookupZipCentralEntry(r, filename); ok {
+			crc, compressed, method = ce.crc32, ce.compressedSize, ce.method
+			haveSizes = true
+			// The check byte for a bit-3 entry is the high byte of ModTime,
+			// not of the CRC, and that stays true: the archive was WRITTEN
+			// that way, so the encrypted header contains the ModTime byte
+			// whatever the central directory later reveals.
+		}
+	}
+
+	overhead := int64(len(encHeader))
+	if haveSizes && int64(compressed) > overhead {
+		dataLen := int64(compressed) - overhead
+		if dataLen <= maxZipCryptoEmbeddedData {
+			data := make([]byte, dataLen)
+			if _, err := io.ReadFull(r, data); err != nil {
+				return nil, fmt.Errorf("cannot read ZipCrypto payload: %w", err)
+			}
+			hash := fmt.Sprintf("$zipcrypto$%02x$%s$%d$%08x$%s",
+				checkByte, hex.EncodeToString(encHeader),
+				method, crc, hex.EncodeToString(data))
+			return &zipHashResult{
+				hashType: "zipcrypto",
+				hash:     hash,
+				filename: filename,
+				encLabel: "ZipCrypto (CRC-verified)",
+			}, nil
+		}
 	}
 
 	hash := fmt.Sprintf("$zipcrypto$%02x$%s", checkByte, hex.EncodeToString(encHeader))
@@ -384,3 +435,111 @@ func decryptZipCryptoHeader(encHeader []byte, password string) []byte {
 	}
 	return out
 }
+
+// ── Central directory lookup ─────────────────────────────────────────────────
+
+// zipCentralSig and zipEOCDSig are the central-directory and end-of-central-
+// directory record signatures.
+const (
+	zipCentralSig = 0x02014b50
+	zipEOCDSig    = 0x06054b50
+)
+
+// zipCentralEntry is the size and checksum metadata for one entry, read from
+// the central directory rather than from its local header.
+type zipCentralEntry struct {
+	crc32          uint32
+	compressedSize uint64
+	method         uint16
+}
+
+// lookupZipCentralEntry finds an entry's CRC-32 and compressed size in the
+// archive's central directory, and restores the reader's position.
+//
+// It exists because of bit 3 of an entry's flags. When that bit is set the
+// local header carries ZEROES for the CRC and both sizes, and the real values
+// follow the compressed data in a trailing descriptor — which cannot be found
+// without already knowing the size. Info-ZIP's `zip`, the single most common
+// producer of ZipCrypto archives, sets that bit on every entry.
+//
+// Without this, exactly the common case fell back to the one-byte check and
+// its one-false-accept-in-256, while archives from 7-Zip (which clears the
+// bit) got the exact check. The central directory has what the local header
+// withholds, so it is read.
+func lookupZipCentralEntry(r io.ReadSeeker, name string) (zipCentralEntry, bool) {
+	var out zipCentralEntry
+	here, err := r.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return out, false
+	}
+	defer func() { _, _ = r.Seek(here, io.SeekStart) }()
+
+	size, err := r.Seek(0, io.SeekEnd)
+	if err != nil || size < 22 {
+		return out, false
+	}
+	// The end-of-central-directory record is last, but a ZIP comment may
+	// follow it, so scan back over the largest comment the format allows.
+	tailLen := int64(22 + 65535)
+	if tailLen > size {
+		tailLen = size
+	}
+	if _, err := r.Seek(size-tailLen, io.SeekStart); err != nil {
+		return out, false
+	}
+	tail := make([]byte, tailLen)
+	if _, err := io.ReadFull(r, tail); err != nil {
+		return out, false
+	}
+	eocd := -1
+	for i := len(tail) - 22; i >= 0; i-- {
+		if binary.LittleEndian.Uint32(tail[i:]) == zipEOCDSig {
+			eocd = i
+			break
+		}
+	}
+	if eocd < 0 {
+		return out, false
+	}
+	cdOffset := int64(binary.LittleEndian.Uint32(tail[eocd+16:]))
+	entries := int(binary.LittleEndian.Uint16(tail[eocd+10:]))
+	if cdOffset < 0 || cdOffset >= size {
+		return out, false
+	}
+	if _, err := r.Seek(cdOffset, io.SeekStart); err != nil {
+		return out, false
+	}
+
+	hdr := make([]byte, 46)
+	for i := 0; i < entries && i < maxZipCentralEntries; i++ {
+		if _, err := io.ReadFull(r, hdr); err != nil {
+			return out, false
+		}
+		if binary.LittleEndian.Uint32(hdr) != zipCentralSig {
+			return out, false
+		}
+		nameLen := int(binary.LittleEndian.Uint16(hdr[28:]))
+		extraLen := int(binary.LittleEndian.Uint16(hdr[30:]))
+		commentLen := int(binary.LittleEndian.Uint16(hdr[32:]))
+		nameBuf := make([]byte, nameLen)
+		if _, err := io.ReadFull(r, nameBuf); err != nil {
+			return out, false
+		}
+		if _, err := r.Seek(int64(extraLen+commentLen), io.SeekCurrent); err != nil {
+			return out, false
+		}
+		if string(nameBuf) != name {
+			continue
+		}
+		return zipCentralEntry{
+			method:         binary.LittleEndian.Uint16(hdr[10:]),
+			crc32:          binary.LittleEndian.Uint32(hdr[16:]),
+			compressedSize: uint64(binary.LittleEndian.Uint32(hdr[20:])),
+		}, true
+	}
+	return out, false
+}
+
+// maxZipCentralEntries bounds the central-directory walk, so a crafted archive
+// claiming a huge entry count cannot spin here.
+const maxZipCentralEntries = 1 << 16
