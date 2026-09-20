@@ -785,12 +785,12 @@ existing golden-file test, which recorded what Hashsmith believed john does.
 CI now installs john and runs the comparison, so the claim is checked rather
 than asserted.
 
-### Hashcat modes: six more, and four that were never algorithms
+### Hashcat modes: nine more, and four that were never algorithms
 
 Before implementing anything, every unsupported mode's published record was run
 through Hashsmith's own auto-detection. Six cracked already — the format was
-there and only the `-m` number was unmapped. Conformance is now **446 of 538
-(82.9%)**, up from 441.
+there and only the `-m` number was unmapped. Three more were implemented.
+Conformance is now **449 of 538 (83.5%)**, up from 441.
 
 Three were the **collider #2** modes. Hashcat splits MS Office 97-2003 and PDF
 revision 2 into two stages: `-m 9710`, `-m 9810` and `-m 10410` recover a
@@ -829,6 +829,35 @@ passphrase, then 65,536 more SHA-512 rounds over the digest — 65,537
 invocations, not 65,536, which is exactly the sort of off-by-one a
 specification sentence hides and a vector settles in one run.
 
+**WinZip (`-m 13600`) is implemented**, and it is not only a mode number. Its
+`$zip2$` record from zip2john names its key size in a field rather than in its
+tag, so one type covers AES-128, 192 and 256 where the existing `$zipaes*$`
+short form needs three — and the salt length is tied to that field, 8, 12 or 16
+bytes, which the published vector settled rather than a reading of the spec.
+
+More to the point, the record carries an **authentication code** the short form
+has no room for: ten bytes of HMAC-SHA1 over the encrypted data. The two-byte
+verifier alone accepts one wrong password in 65,536 — over a rockyou-sized run,
+several thousand "cracked" passwords that do not open the archive. Checking the
+authentication code closes that to one in 2^80. A test corrupts only the code,
+leaving the verifier intact, because a verifier-only implementation passes
+every happy-path test there is.
+
+**`zip2smith` now writes that record too**, which matters more than the mode
+number. It had been emitting the short `$zipaes256$` form, keeping the salt and
+the verifier and discarding the ciphertext and the authentication code that sit
+right behind them in the same entry — so every WinZip record Hashsmith produced
+carried a 1-in-65,536 false-accept rate that the archive itself had the data to
+eliminate. When the entry's size is known and its ciphertext fits, the record is
+now the authenticated one, and `hashcat -m 13600` cracks it: verified against a
+real `7z -mem=AES256` archive, and pinned by a test that runs hashcat.
+
+The two fallbacks say why rather than failing: an entry whose local header
+declares no size, because bit 3 of its flags puts the sizes in a trailing data
+descriptor, and an entry too large to embed. Both still produce a working
+record and both now state the false-accept rate in the label, where it used to
+go unmentioned.
+
 Adding these turned up a distinction the detectability ratchet did not draw.
 That ratchet counts vectors whose own type auto-detection does not offer, and
 every one it covered was an ambiguous record that could in principle become
@@ -854,7 +883,7 @@ NOT-FOUND or REJECTED is a real regression and still shows up as one.
 
 ### Still open
 
-- 77 unimplemented hashcat modes, and 62 missing extractors.
+- 70 unimplemented hashcat modes, and 62 missing extractors.
 - 17.5% of John's rule corpus: numeric variables (`vVNM`), the memory-substring
   command (`XNMI`), single-crack word-pair selectors (`1`, `2`, `+`), and
   several preprocessor back-reference forms.
