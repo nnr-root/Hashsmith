@@ -183,6 +183,17 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		h := newWhirlpool()
 		_, _ = h.Write([]byte(text))
 		return hex.EncodeToString(h.Sum(nil)), nil
+	case "gost":
+		// GOST R 34.11-94 with the standard's TEST parameters, which is what
+		// hashcat -m 6900 means. See gost94.go for why the parameter set is
+		// part of the format's identity rather than a tuning knob.
+		h := newGOST94()
+		_, _ = h.Write([]byte(text))
+		return hex.EncodeToString(h.Sum(nil)), nil
+	case "gost-cryptopro":
+		h := newGOST94CryptoPro()
+		_, _ = h.Write([]byte(text))
+		return hex.EncodeToString(h.Sum(nil)), nil
 	case "streebog256", "gost2012-256":
 		h := newStreebog256()
 		_, _ = h.Write([]byte(text))

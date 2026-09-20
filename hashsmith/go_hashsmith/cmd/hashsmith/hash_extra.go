@@ -71,7 +71,7 @@ func compatibilityHashAliasSeed() map[string]string {
 		"6000": "ripemd160", "6100": "whirlpool",
 		// RIPEMD-128/256 have no Hashcat mode; John names them directly.
 		"ripemd-128": "ripemd128", "ripemd-256": "ripemd256", "ripemd-320": "ripemd320",
-		"11700": "streebog256", "11800": "streebog512", "31100": "sm3", "33600": "ripemd320",
+		"6900": "gost", "11700": "streebog256", "11800": "streebog512", "31100": "sm3", "33600": "ripemd320",
 		"17300": "sha3_224", "17400": "sha3_256", "17500": "sha3_384", "17600": "sha3_512",
 		"17700": "keccak224", "17800": "keccak256", "17900": "keccak384", "18000": "keccak512",
 		"5100": "half-md5",

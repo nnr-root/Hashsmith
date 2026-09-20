@@ -571,6 +571,14 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"plaintext", "hashcat", "", "hashcat", srcPublished},
 		{"ecryptfs", "hashcat", "", "$ecryptfs$0$1$4207883745556753$567daa975114206c", srcPublished},
 		{"bsdicrypt", "hashcat", "", "_GW..8841inaTltazRsQ", srcPublished},
+		// GOST R 34.11-94, both parameter sets, each against its OWN published
+		// empty-string and "a" vectors — the pair is what proves the two are
+		// different functions rather than one with a typo.
+		{"gost", "hashcat", "", "df226c2c6dcb1d995c0299a33a084b201544293c31fc3d279530121d36bbcea9", srcPublished},
+		{"gost", "", "", "ce85b99cc46752fffee35cab9a7b0278abb4c2d2055cff685af4912c49490f8d", srcPublished},
+		{"gost", "a", "", "d42c539e367c66e9c88a801f6649349c21871b4344c6a573f849fdce62f314dd", srcPublished},
+		{"gost-cryptopro", "", "", "981e5f3ca30c841487830f84fb433e13ac1101569b9c13584ac483234cd656c0", srcPublished},
+		{"gost-cryptopro", "a", "", "e74c52dd282183bf37af0079c9f78055715a103f17e3133ceff1aacf2f403011", srcPublished},
 		// Long passwords, which the published vector cannot reach: its own is
 		// seven characters and never enters the folding loop. These records
 		// were generated here and then CRACKED BY JOHN, which is what makes

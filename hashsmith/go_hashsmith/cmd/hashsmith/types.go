@@ -54,6 +54,8 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"shake256-512", "SHAKE256 with 512-bit output"},
 			{"half-md5", "Half-MD5 (first 8 bytes of MD5)"},
 			{"whirlpool", "Whirlpool-512"},
+			{"gost", "GOST R 34.11-94, standard test parameters, Hashcat 6900"},
+			{"gost-cryptopro", "GOST R 34.11-94, CryptoPro parameters (RFC 4357) — a different hash from the above"},
 			{"streebog256", "Streebog / GOST R 34.11-2012 (256-bit)"},
 			{"streebog512", "Streebog / GOST R 34.11-2012 (512-bit)"},
 			{"ntlm", "NTLM (UTF-16LE MD4)"},

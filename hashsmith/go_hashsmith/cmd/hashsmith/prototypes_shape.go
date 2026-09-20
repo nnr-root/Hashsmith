@@ -76,6 +76,13 @@ func shapePrototypes() []hashid.Prototype {
 		hexShapeProto(64, "BLAKE2s", 10,
 			"BLAKE2s targets 8- to 32-bit platforms per the BLAKE2 specification; general-purpose password-hashing software defaults to BLAKE2b (its 64-bit sibling) or SHA-2 instead", nil, "blake2s"),
 		hexShapeProto(64, "Streebog-256", 10, "Russian national standard; regionally concentrated", nil, "streebog256"),
+		// GOST R 34.11-94 is Streebog's predecessor with the identical
+		// footprint, so it belongs in this family for the same reason
+		// Streebog does. Both parameter sets are offered because nothing in a
+		// bare digest can choose between them — they are different functions
+		// that produce the same shape, and a run that tried only one would
+		// miss half the format.
+		hexShapeProto(64, "GOST R 34.11-94", 6, "superseded by Streebog in 2012, so it appears in older Russian-standard deployments rather than current ones", nil, "gost", "gost-cryptopro"),
 		hexShapeProto(64, "SHA-512/256", 10, "rare truncated variant", nil, "sha512_256"),
 		hexShapeProto(64, "Keccak-256", 20, "common in Ethereum tooling", nil, "keccak256"),
 		hexShapeProto(64, "SHAKE128-256", 5, "rare XOF output", nil, "shake128-256"),
