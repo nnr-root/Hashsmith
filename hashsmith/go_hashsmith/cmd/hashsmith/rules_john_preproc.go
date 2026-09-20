@@ -147,14 +147,27 @@ func parseJohnPreprocessor(line string) ([]johnPPSegment, []johnPPGroup, error) 
 	for i := 0; i < len(line); {
 		c := line[i]
 
-		// \pN[...] — a group linked to the N-th group. \p[...] links to the
-		// group immediately before it.
+		// \pN[...] — a group linked to the N-th group. \p[...] and \p0[...]
+		// both link to the group immediately before it. An optional \r may
+		// follow, marking the range as allowed to repeat characters; see
+		// dedupeRangeChars.
 		if c == '\\' && i+1 < len(line) && (line[i+1] == 'p' || line[i+1] == 'P') {
 			j := i + 2
 			link := len(groups) // default: the group just before this one
-			if j < len(line) && line[j] >= '1' && line[j] <= '9' {
-				link = int(line[j] - '0')
+			if j < len(line) && line[j] >= '0' && line[j] <= '9' {
+				// \p0 is documented as "parallel with the immediately
+				// preceding range", which is the same as bare \p — so it
+				// keeps the default rather than linking to a group zero that
+				// does not exist.
+				if line[j] != '0' {
+					link = int(line[j] - '0')
+				}
 				j++
+			}
+			repeats := false
+			if j+1 < len(line) && line[j] == '\\' && line[j+1] == 'r' {
+				repeats = true
+				j += 2
 			}
 			if j < len(line) && line[j] == '[' {
 				chars, next, err := parseJohnBracket(line, j)
@@ -165,12 +178,50 @@ func parseJohnPreprocessor(line string) ([]johnPPSegment, []johnPPGroup, error) 
 					return nil, nil, fmt.Errorf("rule %q: \\p has no preceding group", line)
 				}
 				flushLiteral()
-				groups = append(groups, johnPPGroup{chars: chars, link: link})
+				groups = append(groups, johnPPGroup{chars: dedupeRangeChars(chars, repeats), link: link})
 				segs = append(segs, johnPPSegment{group: len(groups)})
 				i = next
 				continue
 			}
 			// Not a group reference: fall through and treat as literal.
+		}
+
+		// \N — a BACK-REFERENCE to an earlier range. Unlike \pN it has no
+		// bracket of its own and adds no group: it emits whatever character
+		// the referenced range is currently substituting. \0 refers to the
+		// range immediately before it, \1 through \9 to ranges counted from
+		// the left.
+		//
+		// Without this, `$[12]$\0` produced "$1$0" and "$2$0" — the escape
+		// fell through to the "backslash escapes the next character" branch
+		// below and a digit was appended literally. john produces "$1$1" and
+		// "$2$2".
+		if c == '\\' && i+1 < len(line) && line[i+1] >= '0' && line[i+1] <= '9' {
+			ref := int(line[i+1] - '0')
+			if ref == 0 {
+				ref = len(groups)
+			}
+			if ref == 0 || ref > len(groups) {
+				return nil, nil, fmt.Errorf("rule %q: \\%c refers to a range that does not exist",
+					line, line[i+1])
+			}
+			flushLiteral()
+			segs = append(segs, johnPPSegment{group: ref})
+			i += 2
+			continue
+		}
+
+		// \r[...] — a range allowed to repeat characters.
+		if c == '\\' && i+2 < len(line) && line[i+1] == 'r' && line[i+2] == '[' {
+			chars, next, err := parseJohnBracket(line, i+2)
+			if err != nil {
+				return nil, nil, err
+			}
+			flushLiteral()
+			groups = append(groups, johnPPGroup{chars: dedupeRangeChars(chars, true)})
+			segs = append(segs, johnPPSegment{group: len(groups)})
+			i = next
+			continue
 		}
 
 		// A backslash escapes the next character, so a literal '[' is writable.
@@ -186,7 +237,7 @@ func parseJohnPreprocessor(line string) ([]johnPPSegment, []johnPPGroup, error) 
 				return nil, nil, err
 			}
 			flushLiteral()
-			groups = append(groups, johnPPGroup{chars: chars})
+			groups = append(groups, johnPPGroup{chars: dedupeRangeChars(chars, false)})
 			segs = append(segs, johnPPSegment{group: len(groups)})
 			i = next
 			continue
@@ -241,4 +292,47 @@ func parseJohnBracket(line string, start int) ([]byte, int, error) {
 		return nil, 0, fmt.Errorf("empty bracket group in %q", line)
 	}
 	return chars, i + 1, nil
+}
+
+// dedupeRangeChars applies John's duplicate rules to one range's characters.
+//
+// John does not expand a range literally. `[aeioua-z]` is documented as "vowels
+// followed by all other letters", and the documentation says outright that the
+// preprocessor "is smart enough not to produce duplicate rules in such cases".
+// Hashsmith expanded it literally and so produced a duplicate candidate for
+// every character a range repeated — `[aabbcc]` became six rules where john
+// makes three.
+//
+// The \r escape turns that off, and the exact rule was measured against john
+// rather than inferred, because the documentation's sentence about \r covers
+// only the parallel-range case:
+//
+//	[abca]      -> abc      \r[abca]      -> abca
+//	[a-ca-c]    -> abc      \r[a-ca-c]    -> abcabc
+//	[aab]       -> ab       \r[aab]       -> ab
+//	[1-9A-ZZ]   -> 35 chars \r[1-9A-ZZ]   -> 35 chars
+//
+// The last two are the tell: ADJACENT duplicates collapse whether or not \r
+// is present, and \r suppresses only the global pass. john.conf's own
+// `->\r[1-9A-ZZ]` is the fourth line, and reading \r as "keep everything"
+// would have given it 36 branches against john's 35.
+func dedupeRangeChars(chars []byte, repeats bool) []byte {
+	if len(chars) < 2 {
+		return chars
+	}
+	out := make([]byte, 0, len(chars))
+	var seen [256]bool
+	for i, c := range chars {
+		if i > 0 && chars[i-1] == c {
+			continue // adjacent duplicate: dropped either way
+		}
+		if !repeats {
+			if seen[c] {
+				continue
+			}
+			seen[c] = true
+		}
+		out = append(out, c)
+	}
+	return out
 }

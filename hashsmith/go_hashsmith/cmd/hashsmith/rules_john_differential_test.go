@@ -111,6 +111,25 @@ func TestJohnRuleCommandsMatchJohnItself(t *testing.T) {
 		"@?v", "/?d", "!?d", "(?a", ")?d", "%2s",
 		"l Q R", "u Q L", "c M S Q", "V Q l",
 		"a0 W0", "b3 T0", "=1a l",
+
+		// Preprocessor. These are the reason the corpus figure moved, and
+		// every one of them is a shape john.conf itself writes.
+		//
+		// The duplicate cases are not padding. John's ranges collapse
+		// duplicates, so `$[aeioua-c]` is seven rules and not eight, and the
+		// \r escape turns only the global pass off while adjacent duplicates
+		// collapse either way. That asymmetry is invisible in the
+		// documentation and was measured; these lines are what hold it.
+		`:$[abc]`, `:$[aeioua-c]`, `:$[aabbcc]`, `:$[abca]`, `:$[aab]`,
+		`:$\r[abca]`, `:$\r[a-ca-c]`, `:$\r[aab]`, `:$[1-9A-ZZ]`, `:$\r[1-9A-ZZ]`,
+		// Back-references: no bracket of their own, and they emit whatever
+		// the range they point at is currently substituting.
+		`:$[12]$\0`, `:$[12]$\1`, `:$[ab]$[12]$\1$\2`, `:^[ab]$\1`,
+		// Linked ranges, which do not multiply.
+		`:$[12]$\p[ab]`, `:$[12]$\p0[ab]`, `:$[abc]$\p\r[abc]`,
+		`-[:c] (?a \p1[lc] [{}]`,
+		// Escapes that are not group syntax.
+		`>9 \[`, `:$\[`, `:$\]`,
 	}
 
 	for _, rule := range rules {
@@ -184,12 +203,12 @@ func dedupSorted(in []string) []string {
 //
 // The number is a floor, not a target: raise it when coverage improves, never
 // lower it to make a change pass. It was 66.9% before the keyboard, case and
-// length commands landed and is 82.5% after. What remains is john's numeric
-// variables (vVNM), its memory-substring command (XNMI), its single-crack
-// word-pair selectors (1, 2, +), and several preprocessor back-reference
-// forms.
+// length commands landed, 82.5% after them, and 84.1% once the preprocessor
+// learned back-references and range de-duplication. What remains is john's
+// numeric variables (vVNM), its memory-substring command (XNMI), and its
+// single-crack word-pair selectors (1, 2, +).
 func TestJohnCorpusCoverageDoesNotRegress(t *testing.T) {
-	const floor = 0.82
+	const floor = 0.84
 
 	confPaths := []string{
 		"/opt/homebrew/share/john/john.conf",
