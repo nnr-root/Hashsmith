@@ -336,7 +336,11 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"zipaes128", "hashsmith", "", "$zipaes128$0011223344556677$9dd0", srcCrosschecked},
 		{"zipaes192", "hashsmith", "", "$zipaes192$00112233445566778899aabb$0440", srcCrosschecked},
 		{"zipaes256", "hashsmith", "", "$zipaes256$00112233445566778899aabbccddeeff$c0f8", srcCrosschecked},
-		{"rar5", "hashsmith", "", "$rar5$00112233445566778899aabbccddeeff$10$e4adeef53c4424e1", srcCrosschecked},
+		// hashcat's own -m 13000 example record and password. The vector this
+		// replaced was produced by Hashsmith against its own derivation — which
+		// took the tail of a 40-byte PBKDF2 output instead of RAR5's snapshot
+		// and fold — so it agreed with the bug and could never have caught it.
+		{"rar5", "hashcat", "", "$rar5$16$38466361001011015181344360681307$15$00000000000000000000000000000000$8$cc7a30583e62676a", srcPublished},
 		{"pkcs8", "hashsmith", "", "$pkcs8$sha256$1000$16$aes-128-cbc$00112233445566778899aabbccddeeff$0f0e0d0c0b0a09080706050403020100$a9f524b4c4b310e82eabf9366debf45b", srcCrosschecked},
 		{"gpg", "hashsmith", "", "$gpg$3$8$9$35651584$371594bf6a100751$3dc4991bb4427e05866d563b9de98688c46f065d69d847d34df6252200ba402c0109682bf68ad41bb3880cc4a7db97982ea409a53466f9399a8a8c0270f13e0afa7ae0363a26bf8dd0b09da0ca78833f72099ced6ac29212deb79eb0ae9d175ddfc7", srcCrosschecked},
 		{"ssh", "hashsmith", "", "$ssh$openssh$aes256-ctr$24$74f3bbf19dece46fd08931e117709df5$fe874351b1518b6eb47cd1e2a3a8dad1", srcCrosschecked},

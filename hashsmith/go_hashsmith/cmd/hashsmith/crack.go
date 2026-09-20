@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/md5"
 	"crypto/rc4"
 	"crypto/sha1"
@@ -3193,33 +3194,90 @@ func verifyRAR4(targetHash, candidate string) (bool, error) {
 
 // ── RAR5 verification ─────────────────────────────────────────────────────────
 
-// verifyRAR5 checks a RAR5 password using PBKDF2-HMAC-SHA256 and the stored
-// password-check value. The KDF derives 40 bytes: 32 for the AES key and 8 for
-// the check value (stored in the hash during extraction).
+// verifyRAR5 checks a RAR5 password against the stored 8-byte password-check
+// value.
 //
-// Hash format: $rar5$<salt_hex>$<lgcount>$<checkval_hex>
+// RAR5 does NOT simply take the tail of a longer PBKDF2 output. It runs ONE
+// PBKDF2-HMAC-SHA256 chain over salt||INT(1) and snapshots the running XOR
+// three times — at `count`, at `count+16` and at `count+32` — giving the AES
+// key, a hash key, and the password-check value in turn. The stored 8-byte
+// check is then the 32-byte check value folded onto itself: check[i] is the
+// XOR of bytes i, i+8, i+16 and i+24.
+//
+// The previous implementation derived 40 bytes in one PBKDF2 call and compared
+// bytes 32..40. That is a different value entirely, so no RAR5 password could
+// ever verify. Confirmed against hashcat's own -m 13000 example record, which
+// this now reproduces exactly.
+//
+// Two record shapes, told apart by field count:
+//
+//	$rar5$<salt>$<lgcount>$<checkval>                            (rar2smith)
+//	$rar5$<saltlen>$<salt>$<lgcount>$<iv>$<checklen>$<checkval>  (hashcat -m 13000)
+//
+// The archive IV hashcat carries is not needed here: the check value comes
+// from the KDF alone.
 func verifyRAR5(targetHash, candidate string) (bool, error) {
 	parts := strings.Split(targetHash, "$")
-	if len(parts) != 5 || parts[1] != "rar5" {
-		return false, errors.New("invalid rar5 hash format")
+	if (len(parts) != 5 && len(parts) != 8) || parts[1] != "rar5" {
+		return false, errors.New("invalid rar5 hash format (need 3 fields, or hashcat's 6)")
 	}
-	salt, err := hex.DecodeString(parts[2])
+	saltField, lgField, checkField := 2, 3, 4
+	if len(parts) == 8 {
+		saltField, lgField, checkField = 3, 4, 7
+	}
+	salt, err := hex.DecodeString(parts[saltField])
 	if err != nil {
-		return false, err
+		return false, errors.New("invalid rar5 salt")
 	}
-	lgCount, err := strconv.Atoi(parts[3])
+	lgCount, err := strconv.Atoi(parts[lgField])
 	if err != nil || lgCount < 0 || lgCount > 24 {
 		return false, errors.New("invalid rar5 lgCount")
 	}
-	checkVal, err := hex.DecodeString(parts[4])
+	checkVal, err := hex.DecodeString(parts[checkField])
 	if err != nil || len(checkVal) < 8 {
 		return false, errors.New("invalid rar5 check value (need 8 bytes)")
 	}
+	got := rar5PswCheck([]byte(candidate), salt, 1<<uint(lgCount))
+	return bytes.Equal(got, checkVal[:8]), nil
+}
 
-	iterations := 1 << uint(lgCount)
-	// Derive 32 (key) + 8 (check) = 40 bytes with PBKDF2-HMAC-SHA256.
-	dk := pbkdf2.Key([]byte(candidate), salt, iterations, 40, sha256.New)
-	return bytes.Equal(dk[32:40], checkVal[:8]), nil
+// rar5PswCheck reproduces RAR5's password-check derivation (see verifyRAR5).
+func rar5PswCheck(password, salt []byte, count int) []byte {
+	var idx [4]byte
+	binary.BigEndian.PutUint32(idx[:], 1)
+
+	u := hmacSHA256(password, append(append([]byte{}, salt...), idx[:]...))
+	acc := make([]byte, sha256.Size)
+	copy(acc, u)
+
+	var pswCheckValue []byte
+	for i := 1; i < count+32; i++ {
+		u = hmacSHA256(password, u)
+		for k := range acc {
+			acc[k] ^= u[k]
+		}
+		if i+1 == count+32 {
+			pswCheckValue = append([]byte{}, acc...)
+		}
+	}
+	if pswCheckValue == nil { // count+32 <= 1; not reachable for a real record
+		pswCheckValue = acc
+	}
+
+	check := make([]byte, 8)
+	for i := 0; i < 8; i++ {
+		for j := i; j < sha256.Size; j += 8 {
+			check[i] ^= pswCheckValue[j]
+		}
+	}
+	return check
+}
+
+// hmacSHA256 is a one-shot HMAC-SHA-256 helper for the RAR5 chain above.
+func hmacSHA256(key, msg []byte) []byte {
+	m := hmac.New(sha256.New, key)
+	_, _ = m.Write(msg)
+	return m.Sum(nil)
 }
 
 // ── PDF verification ──────────────────────────────────────────────────────────

@@ -214,3 +214,109 @@ func TestBitwardenReadsBothFieldCounts(t *testing.T) {
 		t.Errorf("the four-field spelling should still parse: %v", err)
 	}
 }
+
+// stripShadowUsername pulls the hash out of a "user:hash" line. Its
+// prefix-less descrypt reading is ambiguous — a bare 13-character
+// crypt-base64 string has nothing to anchor on — and it was destroying
+// hashcat's -m 8300 NSEC3 records, whose second field ".fnmlbsik.net" is 13
+// characters drawn entirely from that alphabet.
+func TestShadowStripDoesNotEatOtherRecords(t *testing.T) {
+	const descrypt = "24leDr0hHfb3A" // hashcat's own -m 1500 example
+	nsec3, _ := hashcatExampleRecord(t, "8300")
+
+	for _, c := range []struct {
+		in, want, why string
+	}{
+		{nsec3, nsec3,
+			"an NSEC3 record must survive: its 2nd field is 13 crypt-base64 characters by coincidence"},
+		{"root:" + descrypt, descrypt,
+			"the two-field shadow shape must still strip"},
+		{"root:" + descrypt + ":19000:0:99999:7:::", descrypt,
+			"a full /etc/shadow line must still strip"},
+		{"root:" + descrypt + ":1:2", "root:" + descrypt + ":1:2",
+			"a four-field line is not a shadow shape and must not be split on a bare descrypt reading"},
+		{"root:$6$saltstring$svn8UoSVapNtMuq1ukKS4tPQd8iKwSMHWjl/O817G3uBnIFNjnQJuesI68u4OTLiBFdcbYEdFCoEOfaS35inz1:1:2",
+			"$6$saltstring$svn8UoSVapNtMuq1ukKS4tPQd8iKwSMHWjl/O817G3uBnIFNjnQJuesI68u4OTLiBFdcbYEdFCoEOfaS35inz1",
+			"a $-prefixed crypt identifier is unambiguous and strips at any field count"},
+	} {
+		if got := stripShadowUsername(c.in); got != c.want {
+			t.Errorf("%s\n  stripShadowUsername(%.50q)\n   = %.60q\n  want %.60q", c.why, c.in, got, c.want)
+		}
+	}
+
+	// End to end: the NSEC3 record must actually crack.
+	rec, pass := hashcatExampleRecord(t, "8300")
+	if ok, err := verifyCandidate(pass, rec, "8300", "", "prefix"); err != nil || !ok {
+		t.Errorf("-m 8300 did not verify: ok=%v err=%v", ok, err)
+	}
+}
+
+// RAR5's password check is not the tail of a longer PBKDF2 output. It is one
+// PBKDF2-HMAC-SHA256 chain snapshotted at count+32, folded onto itself eight
+// bytes wide. The old implementation compared bytes 32..40 of a 40-byte
+// derivation, so no RAR5 password could ever verify.
+func TestRAR5PasswordCheckDerivation(t *testing.T) {
+	rec, pass := hashcatExampleRecord(t, "13000")
+	ok, err := verifyRAR5(rec, pass)
+	if err != nil {
+		t.Fatalf("verifyRAR5: %v", err)
+	}
+	if !ok {
+		t.Error("hashcat's own -m 13000 password did not verify")
+	}
+	if bad, _ := verifyRAR5(rec, pass+"x"); bad {
+		t.Error("a wrong password verified")
+	}
+
+	// The shorter rar2smith spelling must keep parsing: only hashcat's record
+	// interleaves explicit lengths and the archive IV.
+	p := strings.Split(rec, "$")
+	if len(p) != 8 {
+		t.Fatalf("expected hashcat's 8-part record, got %d parts", len(p))
+	}
+	short := "$rar5$" + p[3] + "$" + p[4] + "$" + p[7]
+	ok2, err2 := verifyRAR5(short, pass)
+	if err2 != nil {
+		t.Fatalf("short spelling: %v", err2)
+	}
+	if !ok2 {
+		t.Error("the same parameters in rar2smith's spelling did not verify")
+	}
+}
+
+// iTunes backups >= 10 carry an outer PBKDF2-SHA256 pass parameterised by a
+// salt and an iteration count, and the two tools order those two fields
+// differently. They are told apart by shape: the salt is 20 bytes of hex, the
+// count a small decimal.
+func TestITunesBackupFieldOrderVariants(t *testing.T) {
+	for _, mode := range []string{"14700", "14800"} {
+		mode := mode
+		t.Run("m"+mode, func(t *testing.T) {
+			rec, pass := hashcatExampleRecord(t, mode)
+			ok, err := verifyITunesBackup(rec, pass)
+			if err != nil {
+				t.Fatalf("verifyITunesBackup: %v", err)
+			}
+			if !ok {
+				t.Error("hashcat's own password did not verify")
+			}
+			if bad, _ := verifyITunesBackup(rec, pass+"x"); bad {
+				t.Error("a wrong password verified")
+			}
+		})
+	}
+	// The reversed (dpsl, dpic) spelling must still be read.
+	rec, pass := hashcatExampleRecord(t, "14800")
+	f := strings.Split(rec, "*")
+	if len(f) != 7 {
+		t.Fatalf("expected 7 fields, got %d", len(f))
+	}
+	swapped := strings.Join([]string{f[0], f[1], f[2], f[3], f[4], f[6], f[5]}, "*")
+	ok, err := verifyITunesBackup(swapped, pass)
+	if err != nil {
+		t.Fatalf("reversed order: %v", err)
+	}
+	if !ok {
+		t.Error("the pre-existing dpsl-then-dpic order stopped working")
+	}
+}

@@ -89,13 +89,23 @@ func verifyITunesBackup(targetHash, candidate string) (bool, error) {
 	}
 
 	pw := []byte(candidate)
-	// version 10 adds an outer PBKDF2-SHA256 pass.
+	// version 10 adds an outer PBKDF2-SHA256 pass, parameterised by a salt
+	// (dpsl) and an iteration count (dpic) — and the two tools order them
+	// differently. hashcat -m 14800 writes *<dpic>*<dpsl>; this record shape
+	// wrote *<dpsl>*<dpic>. They are told apart without ambiguity because the
+	// salt is 20 bytes of hex and the count is a small decimal.
 	if f[5] != "" && f[6] != "" {
-		dpsl, err := hex.DecodeString(f[5])
+		dpslField, dpicField := 5, 6
+		if _, err := strconv.Atoi(f[5]); err == nil {
+			if _, hexErr := hex.DecodeString(f[6]); hexErr == nil && len(f[6]) > 8 {
+				dpslField, dpicField = 6, 5 // hashcat's order
+			}
+		}
+		dpsl, err := hex.DecodeString(f[dpslField])
 		if err != nil {
 			return false, errors.New("invalid iTunes dpsl")
 		}
-		dpic, err := strconv.Atoi(f[6])
+		dpic, err := strconv.Atoi(f[dpicField])
 		if err != nil || dpic < 1 {
 			return false, errors.New("invalid iTunes dpic")
 		}

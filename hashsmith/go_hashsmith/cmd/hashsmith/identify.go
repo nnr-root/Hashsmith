@@ -513,6 +513,13 @@ func isUUStr(s string) bool {
 // looksLikeCryptHash reports whether s is a bare Unix crypt(3) shadow hash:
 // a $-tagged scheme ($1$/$apr1$/$5$/$6$ or bcrypt $2[aby]$) or a 13-char
 // descrypt.
+// looksLikeBareDescryptOnly reports whether s is recognised ONLY by the
+// prefix-less descrypt shape, which is the reading that collides with ordinary
+// text. A string carrying a $-prefixed crypt identifier is not ambiguous.
+func looksLikeBareDescryptOnly(s string) bool {
+	return !strings.HasPrefix(s, "$") && looksLikeDescrypt(s)
+}
+
 func looksLikeCryptHash(s string) bool {
 	if strings.HasPrefix(s, "$1$") || strings.HasPrefix(s, "$apr1$") || strings.HasPrefix(s, "$5$") ||
 		strings.HasPrefix(s, "$6$") || reBcrypt.MatchString(s) {
@@ -530,7 +537,20 @@ func stripShadowUsername(s string) string {
 		return s
 	}
 	fields := strings.Split(s, ":")
-	if len(fields) >= 2 && looksLikeCryptHash(fields[1]) {
+	// The descrypt reading is the ambiguous one: a bare 13-character
+	// crypt-base64 string has no prefix to anchor on, and plenty of things
+	// that are not hashes look exactly like one. Hashcat's -m 8300 NSEC3
+	// record is a live example — ".fnmlbsik.net" is 13 characters drawn
+	// entirely from the crypt-base64 alphabet, so every NSEC3 target was being
+	// read as "username:descrypt-hash" and destroyed.
+	//
+	// So that reading is allowed only where a shadow line actually has that
+	// shape: exactly two fields (shadow2smith's output, and a hand-made
+	// user:hash line) or a full /etc/shadow entry, which has nine. The
+	// prefixed forms ($1$, $5$, $6$, $apr1$, bcrypt) are unambiguous and are
+	// still accepted at any field count.
+	if len(fields) >= 2 && looksLikeCryptHash(fields[1]) &&
+		(!looksLikeBareDescryptOnly(fields[1]) || len(fields) == 2 || len(fields) >= 7) {
 		// Don't strip when the first field is itself an md5/sha1 hash — that is a
 		// vBulletin/DCC/Redmine "hash:salt", not a "user:crypthash" shadow line.
 		if isHex(fields[0]) && (len(fields[0]) == 32 || len(fields[0]) == 40) {
