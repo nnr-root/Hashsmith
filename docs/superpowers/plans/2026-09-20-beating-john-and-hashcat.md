@@ -2,8 +2,8 @@
 
 **Date:** 2026-09-20
 **Status:** Phases 0, 1 and 3 complete. Phase 2 complete except for the 83
-unimplemented modes. Phase 4 substantially done. Phase 6 resolved. Phase 7
-started. Phase 5 not started.
+unimplemented modes. Phase 4 substantially done. Phase 6 resolved. Phases 5
+and 7 started.
 **Machine:** Apple M2 (4P+4E), 16 GB, darwin/arm64, Go 1.26.3
 **Comparators:** `hashcat` v7.1.2, `john` 1.9.0-jumbo-1 (ASIMD, MD4:2 MD5:2 interleaving)
 **Binary under test:** built from `d91a400` (`go build ./cmd/hashsmith`)
@@ -391,15 +391,14 @@ yield a binary whose `--version` matches the current tag.
 wordlist cracks a representative leaked-hash sample at a rate comparable to
 rockyou's first 250k lines.
 
-### Phase 5 — Extractors `[L]`
+### Phase 5 — Extractors `[L]` — **STARTED** (e3477d6)
 
 The 62 in §2.6, ordered by how often an engagement produces that file:
 Kerberos (`krb`/`kirbi`/`ccache`) → `pcap`/`wpapcap` → `putty`/`openssl`/`pem` →
 Java `keystore`/`bks` → `DPAPImk` → wallets and password managers.
 
-- [ ] Before adding any, add the round-trip test that is missing: generate a real
-      container, extract, crack with the known password. The zip/7z/pdf leads in
-      §4 exist because no such test runs.
+- [x] The round-trip test now exists, and it runs BOTH halves: crack with the
+      right password, and assert a wrong one is rejected
 
 **Acceptance:** every extractor round-trips a real file in CI; parity with John
 on the Kerberos, capture and key families.
@@ -425,8 +424,8 @@ work; leaving the faster one unselected and unshipped wastes work already done.
 This is where "best encoding/decoding toolkit" is actually earned. Phase 0 fixes
 six of this area's blockers for free; the rest is additive.
 
-- [x] A round-trip property test over every codec, to the standard hashes are
-      held to. Fuzz targets still outstanding
+- [x] A round-trip property test over every codec, and six fuzz targets over
+      the verifiers, identification, decoders, magic, rules and the input layer
 - [x] Recursive magic decode — and it hands off to the identification engine
 - [x] Chained pipeline syntax so a recipe is one invocation
 - [ ] Custom alphabets for every base-N codec; the internals are already parameterised
@@ -600,3 +599,42 @@ file substitution was silent, so on a case-insensitive filesystem
 finds to the identification engine, so a chain can end at "identified as:
 bcrypt" rather than at bytes. Neither competitor has anything comparable.
 `-t a+b` replays a chain in one invocation, mirroring magic's output.
+
+### Fuzzing, and Phase 5's prerequisite
+
+**231 verify\* functions across 70 files had no fuzz coverage**, and every one
+of them parses data an attacker supplied. Six targets now cover them, seeded
+from the hashcat conformance corpus so the fuzzer starts inside the field
+parsing rather than at the "is this even a record" gate. The contract each
+asserts is deliberately weak — never panic — because that is the one contract
+that holds for every parser at once.
+
+Two findings in the first two minutes. A three-character argument crashed the
+process: in `<~>` the opening and closing Ascii85 delimiters are the same three
+characters, so stripping two from each end asked for `value[2:1]`. And `magic`
+inflated 64 MiB per search node to discard it, because the ceiling that bounds
+decompression work is the one on the RESULT — 180 MB of resident set down to
+24 MB at the same wall clock. Everything else held: 2.8 million executions of
+the verifier target across 37 formats each, about 104 million calls, no panic.
+
+**Phase 5's prerequisite is done.** No test had ever taken a real container,
+extracted from it, and cracked the result with the password the file was built
+with — every extractor test used a hand-written fixture, which checks the
+parser against what its author believed the format to be. The round trip now
+runs both halves, the second being that a WRONG password is rejected, because
+an extractor that drops an authentication tag reports a wrong password as
+correct and a one-sided test would pass anyway.
+
+ZipCrypto, WinZip AES, OpenSSH keys and PKCS#12 pass both halves. 7-Zip fails
+both on every archive 7z writes, and now refuses rather than emitting a record
+that cannot crack — the reason being that verification needs the decrypted
+payload's CRC and unpacked size, which live inside a nested next-header the
+extractor does not parse. Refusing is the larger feature: a user handed an
+uncrackable record runs a long attack and concludes their wordlist is wrong.
+
+### Still open
+
+- 83 unimplemented hashcat modes, and 62 missing extractors.
+- 7-Zip's next-header parser, which the refusal message and its test specify.
+- 69% of John's rule corpus, dominated by its `a` command.
+- The embedded fallback wordlist is still an English dictionary.
