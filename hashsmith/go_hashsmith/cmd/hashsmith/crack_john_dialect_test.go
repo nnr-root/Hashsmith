@@ -218,3 +218,28 @@ func TestRACFKDFAESJohnSpelling(t *testing.T) {
 		t.Errorf("detectHashTypes for a legacy RACF record = %v; want racf first", types)
 	}
 }
+
+// TestDjangoScryptBothLayouts pins that both "scrypt$" layouts are read.
+//
+// Django core writes scrypt$<n>$<salt>$<r>$<p>$<digest>; the third-party
+// django-scrypt package writes scrypt$<salt>$<log2 n>$<r>$<p>$<dklen>$<digest>.
+// They share a prefix and nothing else, so reading only one refused the
+// other as malformed rather than trying it.
+func TestDjangoScryptBothLayouts(t *testing.T) {
+	// django-scrypt package layout, John's vector.
+	const pkg = "scrypt$NBGmaGIXijJW$14$8$1$64$achPt01SbytSt+F3CcCFgEPr96+/j9iCTdejFdAARZ8mzfejrP64TJ5XBJa3gYwuCKOEGlw2E/lWCWS7LeS6CA=="
+	ok, err := verifyDjango(pkg, "notastrongpassword")
+	if err != nil || !ok {
+		t.Errorf("django-scrypt package layout rejected: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyDjango(pkg, "notastrongpassword!"); bad {
+		t.Error("django-scrypt package layout accepted a wrong password")
+	}
+	if !isDjangoHash(pkg) {
+		t.Error("the package layout is not recognised as a Django record")
+	}
+	// And detection must prefer Django over the bare scrypt reading.
+	if types := detectHashTypes(pkg); len(types) == 0 || types[0] != "django" {
+		t.Errorf("detectHashTypes = %v; want django first", types)
+	}
+}

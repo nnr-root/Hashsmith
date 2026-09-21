@@ -95,7 +95,21 @@ func verifyDjangoPBKDF2(parts []string, candidate string, newHash func() hash.Ha
 	return bytesEqualCT(got, want), nil
 }
 
+// verifyDjangoScrypt covers BOTH scrypt layouts that begin "scrypt$".
+//
+// Django core writes "scrypt$<n>$<salt>$<r>$<p>$<digest>" with n as the work
+// factor itself and a fixed 64-byte digest. The third-party django-scrypt
+// package — which is what John calls "django-scrypt" — writes
+// "scrypt$<salt>$<log2 n>$<r>$<p>$<dklen>$<digest>": salt first, the work
+// factor as its logarithm, and an explicit output length.
+//
+// They share a prefix and nothing else, so the field count decides. Reading
+// only one of them meant a record from the other was refused as malformed
+// rather than tried.
 func verifyDjangoScrypt(parts []string, candidate string) (bool, error) {
+	if len(parts) == 7 {
+		return verifyDjangoScryptPackage(parts, candidate)
+	}
 	if len(parts) != 6 || parts[2] == "" || len(parts[2]) > maxKDFFieldSize {
 		return false, errors.New("invalid Django scrypt hash")
 	}
@@ -117,6 +131,37 @@ func verifyDjangoScrypt(parts []string, candidate string) (bool, error) {
 	return bytesEqualCT(got, want), nil
 }
 
+// verifyDjangoScryptPackage reads the django-scrypt package's layout:
+// scrypt$<salt>$<log2 n>$<r>$<p>$<dklen>$<digest>.
+func verifyDjangoScryptPackage(parts []string, candidate string) (bool, error) {
+	salt := parts[1]
+	if salt == "" || len(salt) > maxKDFFieldSize {
+		return false, errors.New("invalid django-scrypt salt")
+	}
+	logN, errN := strconv.Atoi(parts[2])
+	r, errR := strconv.Atoi(parts[3])
+	p, errP := strconv.Atoi(parts[4])
+	dkLen, errD := strconv.Atoi(parts[5])
+	if errN != nil || errR != nil || errP != nil || errD != nil ||
+		logN < 1 || logN > 30 || r < 1 || p < 1 || r > 1<<20 || p > 1<<20 ||
+		dkLen < 1 || dkLen > maxKDFFieldSize {
+		return false, errors.New("invalid django-scrypt parameters")
+	}
+	n := 1 << uint(logN)
+	if uint64(132)*uint64(n)*uint64(r)*uint64(p) > maxScryptMemory {
+		return false, errors.New("unsafe django-scrypt parameters")
+	}
+	want, err := base64.StdEncoding.DecodeString(parts[6])
+	if err != nil || len(want) != dkLen {
+		return false, errors.New("invalid django-scrypt digest")
+	}
+	got, err := scrypt.Key([]byte(candidate), []byte(salt), n, r, p, dkLen)
+	if err != nil {
+		return false, err
+	}
+	return bytesEqualCT(got, want), nil
+}
+
 // isDjangoHash reports whether s has a supported Django envelope and passes
 // cheap structural validation. Verification still performs the cost checks.
 func isDjangoHash(s string) bool {
@@ -128,7 +173,9 @@ func isDjangoHash(s string) bool {
 	case "pbkdf2_sha256", "pbkdf2_sha1":
 		return len(parts) == 4
 	case "scrypt":
-		return len(parts) == 6
+		// Six fields is Django core's layout, seven the django-scrypt
+		// package's; both begin "scrypt$".
+		return len(parts) == 6 || len(parts) == 7
 	case "argon2":
 		return len(parts) == 6 && strings.HasPrefix(s, "argon2$argon2")
 	case "bcrypt_sha256", "bcrypt":
