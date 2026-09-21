@@ -284,6 +284,15 @@ func webFrameworkPrototypes() []hashid.Prototype {
 		// A DiskCryptor header does not say how many ciphers are cascaded, so
 		// detection offers all three widths; the wider ones also test the
 		// narrower layouts, exactly as Hashcat's kernels do.
+		hasPrefixProto("$fvde$", "Apple FileVault 2 / APFS volume", 20,
+			"FileVault 2 and APFS are the default full-disk encryption on every modern Mac, so their headers turn up in any macOS forensic image",
+			"fvde"),
+		// Both ENCsecurity prefixes resolve to one type; the record says which
+		// key derivation it uses, so there is nothing for the caller to pick.
+		hasPrefixProto("$encdv$", "ENCsecurity Datavault (MD5 key)", 6,
+			"ENCsecurity Datavault ships on a small number of OEM encrypted USB drives", "encdatavault"),
+		hasPrefixProto("$encdv-pbkdf2$", "ENCsecurity Datavault (PBKDF2 key)", 6,
+			"ENCsecurity Datavault ships on a small number of OEM encrypted USB drives", "encdatavault"),
 		hasPrefixProto("$diskcryptor$", "DiskCryptor volume", 8,
 			"DiskCryptor is an abandoned Windows full-disk encryption tool with a small installed base",
 			"diskcryptor-xts512", "diskcryptor-xts1024", "diskcryptor-xts1536"),

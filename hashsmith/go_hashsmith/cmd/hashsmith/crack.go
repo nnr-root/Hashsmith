@@ -2679,6 +2679,10 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyDiskCryptor(targetHash, candidate, 2)
 	case "diskcryptor-xts1536":
 		return verifyDiskCryptor(targetHash, candidate, 3)
+	case "fvde":
+		return verifyFVDE(targetHash, candidate)
+	case "encdatavault":
+		return verifyENCDataVault(targetHash, candidate)
 	case "bsdicrypt":
 		return verifyBSDiCrypt(targetHash, candidate)
 	case "ecryptfs":
