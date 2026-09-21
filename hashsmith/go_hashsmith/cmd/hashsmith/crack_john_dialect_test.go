@@ -314,3 +314,32 @@ func TestKerberosJohnSpellings(t *testing.T) {
 		t.Errorf("John's AS-REP spelling is not detected as krb5asrep: %v", types)
 	}
 }
+
+// TestAS400JohnSpellings pins John's two AS/400 envelopes. The DES one keeps
+// hashcat's body and only renames the envelope; the SSHA1 one also writes the
+// digest BEFORE the profile name, the reverse of hashcat's order.
+func TestAS400JohnSpellings(t *testing.T) {
+	// The wrong password must differ within the first EIGHT characters: AS/400
+	// DES is a DES key schedule over the EBCDIC password, so it truncates
+	// there and "AAAAAAAA" and "AAAAAAAAx" are genuinely the same hash. That
+	// is the format, not a weak check.
+	for _, tc := range []struct{ name, record, password, wrong, typ string }{
+		{"des", "$as400des$AAAAAAA*CA2E330B2FD1820E", "AAAAAAAA", "BBBBBBBB", "as400-des"},
+		{"ssha1", "$as400ssha1$4C106E52CA196986E1C52C7FCD02AF046B76C73C$ROB", "banaan", "banaanx", "as400-ssha1"},
+	} {
+		if types := detectHashTypes(tc.record); !containsString(types, tc.typ) {
+			t.Errorf("%s: detectHashTypes = %v, want %q", tc.name, types, tc.typ)
+		}
+		ok, err := verifyCandidate(tc.password, tc.record, tc.typ, "", "prefix")
+		if err != nil || !ok {
+			t.Errorf("%s: rejected the right password: ok=%v err=%v", tc.name, ok, err)
+		}
+		if bad, _ := verifyCandidate(tc.wrong, tc.record, tc.typ, "", "prefix"); bad {
+			t.Errorf("%s: accepted a wrong password", tc.name)
+		}
+	}
+	// hashcat's spellings must keep working.
+	if ok, err := verifyAS400DES("$as400$des$*OPEN3*EC76FC0DEF5B0A83", "SYS1"); err != nil || !ok {
+		t.Errorf("hashcat's AS/400 DES record regressed: ok=%v err=%v", ok, err)
+	}
+}

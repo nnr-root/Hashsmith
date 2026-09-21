@@ -98,6 +98,12 @@ func archivePrototypes() []hashid.Prototype {
 		hasPrefixProto("$racf$*", "IBM RACF (z/OS) userid", 8,
 			"RACF secures most mainframe z/OS installations, so its hashes appear wherever mainframe credentials are audited",
 			"racf", "racf-kdfaes"),
+		// John's spellings of the same two records: "$as400des$" keeps the
+		// body unchanged, "$as400ssha1$" also swaps the field order.
+		hasPrefixProto("$as400des$", "AS/400 (IBM i) user profile (DES, John envelope)", 6,
+			"John names the format in one token where hashcat splits it; both spellings reach the same verifier", "as400-des"),
+		hasPrefixProto("$as400ssha1$", "AS/400 (IBM i) user profile (SSHA1, John envelope)", 5,
+			"John writes the digest before the profile name, the reverse of hashcat's order", "as400-ssha1"),
 		hasPrefixProto("$as400$des$*", "AS/400 (IBM i) user profile (DES)", 8,
 			"IBM i remains in wide production use in finance and logistics, but its password hashes reach a cracking tool only through dedicated audit workflows", "as400-des"),
 		hasPrefixProto("3u+UR6n8", "Juniper IVE / Pulse Connect Secure", 10,

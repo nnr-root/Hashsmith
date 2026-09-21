@@ -180,10 +180,23 @@ func isNetIQPBKDF2(target string) bool {
 
 func verifyAS400SSHA1(target, candidate string) (bool, error) {
 	const prefix = "$as400$ssha1$*"
-	if !strings.HasPrefix(target, prefix) {
+	const johnPrefix = "$as400ssha1$"
+	var parts []string
+	switch {
+	case strings.HasPrefix(target, prefix):
+		parts = strings.Split(strings.TrimPrefix(target, prefix), "*")
+	case strings.HasPrefix(target, johnPrefix):
+		// John writes "<digest>$<user>" — the fields in the opposite order
+		// from hashcat's "<user>*<digest>", and separated by '$'. Reorder
+		// rather than duplicate the verification below.
+		f := strings.Split(strings.TrimPrefix(target, johnPrefix), "$")
+		if len(f) != 2 {
+			return false, errors.New("invalid AS/400 SSHA1 record")
+		}
+		parts = []string{f[1], f[0]}
+	default:
 		return false, errors.New("invalid AS/400 SSHA1 record")
 	}
-	parts := strings.Split(strings.TrimPrefix(target, prefix), "*")
 	if len(parts) != 2 || parts[0] == "" || len([]rune(parts[0])) > 10 ||
 		len(parts[1]) != 40 || !isHex(parts[1]) {
 		return false, errors.New("invalid AS/400 username or checksum")

@@ -28,8 +28,8 @@ andOTP $andotp$	NOT-DETECTED
 ansible $ansible$	CRACKED
 argon2 $argon2d$	CRACKED
 argon2 $argon2i$	CRACKED
-as400-des $as400des$	NOT-DETECTED
-as400-ssha1 $as400ssha1$	NOT-DETECTED
+as400-des $as400des$	CRACKED
+as400-ssha1 $as400ssha1$	CRACKED
 as400-ssha1 $dynamic_1590$	NOT-DETECTED
 asa-md5 $dynamic_20$	NOT-DETECTED
 AxCrypt $axcrypt$	CRACKED

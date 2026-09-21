@@ -90,10 +90,18 @@ func as400HostPermute(l, r uint32) (uint32, uint32) {
 
 func verifyAS400DES(target, candidate string) (bool, error) {
 	t := strings.TrimSpace(target)
-	if !strings.HasPrefix(t, as400Prefix) {
+	// John spells the envelope "$as400des$" and keeps the same
+	// "<profile>*<digest>" body; hashcat writes "$as400$des$*".
+	const johnPrefix = "$as400des$"
+	var rest string
+	switch {
+	case strings.HasPrefix(t, as400Prefix):
+		rest = strings.TrimPrefix(t, as400Prefix)
+	case strings.HasPrefix(t, johnPrefix):
+		rest = strings.TrimPrefix(t, johnPrefix)
+	default:
 		return false, errors.New("not an AS/400 DES record")
 	}
-	rest := strings.TrimPrefix(t, as400Prefix)
 	i := strings.LastIndex(rest, "*")
 	if i < 0 {
 		return false, errors.New("AS/400 record must be $as400$des$*<profile>*<digest>")
