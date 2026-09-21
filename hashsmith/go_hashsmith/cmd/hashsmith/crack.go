@@ -2705,6 +2705,12 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyStuffit5(targetHash, candidate)
 	case "sqlcipher":
 		return verifySQLCipher(targetHash, candidate)
+	case "cryptoapi":
+		return verifyCryptoAPI(targetHash, candidate)
+	case "pdf-user-owner":
+		return verifyPDFUserOrOwner(targetHash, candidate)
+	case "rar3p":
+		return verifyRAR3p(targetHash, candidate)
 	case "multibit":
 		return verifyMultiBit(targetHash, candidate)
 	case "multibit-hd":
@@ -3410,6 +3416,35 @@ func verify7z(targetHash, candidate string) (bool, error) {
 
 // ── RAR4 verification ─────────────────────────────────────────────────────────
 
+// rar3DeriveKeyIV runs RAR3's key derivation: one SHA-1 context fed 262,144
+// times with password_utf16le || salt || the round number as three
+// little-endian bytes, snapshotting one byte of the running digest every
+// 16,384 rounds to build the IV.
+//
+// Shared by the -hp header check (verifyRAR4) and the -p file check
+// (verifyRAR3p); they differ only in what they do with the result.
+func rar3DeriveKeyIV(candidate string, salt []byte) (key, iv []byte) {
+	pwBytes := utf16le(candidate)
+	h := sha1.New()
+	iv = make([]byte, 0, aes.BlockSize)
+	for i := 0; i < 0x40000; i++ {
+		h.Write(pwBytes)
+		h.Write(salt)
+		h.Write([]byte{byte(i), byte(i >> 8), byte(i >> 16)})
+		if i&0x3fff == 0 {
+			iv = append(iv, h.Sum(nil)[19])
+		}
+	}
+	digest := h.Sum(nil)
+
+	// RAR stores the SHA-1 state as four little-endian words for its AES key.
+	key = make([]byte, 16)
+	for i := 0; i < 16; i += 4 {
+		key[i], key[i+1], key[i+2], key[i+3] = digest[i+3], digest[i+2], digest[i+1], digest[i]
+	}
+	return key, iv
+}
+
 // verifyRAR4 checks a RAR4 (-hp) password using the RAR3 SHA-1 rolling KDF
 // (0x40000 fixed rounds, password as UTF-16LE) and AES-128-CBC decryption.
 // Verification checks that the decrypted archive-header type byte (offset 2)
@@ -3443,27 +3478,7 @@ func verifyRAR4(targetHash, candidate string) (bool, error) {
 		return false, errors.New("invalid rar3 encrypted data (need ≥16 bytes)")
 	}
 
-	// RAR3 KDF: single SHA-1 context, 262144 (0x40000) rounds.
-	// Each round feeds: password_utf16le || salt(8B) || i(3B little-endian).
-	pwBytes := utf16le(candidate)
-	h := sha1.New()
-	iv := make([]byte, 0, aes.BlockSize)
-	for i := 0; i < 0x40000; i++ {
-		h.Write(pwBytes)
-		h.Write(salt)
-		h.Write([]byte{byte(i), byte(i >> 8), byte(i >> 16)})
-		if i&0x3fff == 0 {
-			iv = append(iv, h.Sum(nil)[19])
-		}
-	}
-	digest := h.Sum(nil) // 20 bytes
-
-	// RAR stores the SHA-1 state as four little-endian words for its AES key.
-	key := make([]byte, 16)
-	for i := 0; i < 16; i += 4 {
-		key[i], key[i+1], key[i+2], key[i+3] = digest[i+3], digest[i+2], digest[i+1], digest[i]
-	}
-
+	key, iv := rar3DeriveKeyIV(candidate, salt)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return false, err

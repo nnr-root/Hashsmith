@@ -31,7 +31,7 @@ func archivePrototypes() []hashid.Prototype {
 		// here so the coverage-case count tracks the single cascade branch it
 		// replaces, rather than splitting it into two for no behavioral reason.
 		{
-			Types: []string{"rar4"}, Display: "RAR 3.x/4.x archive",
+			Types: []string{"rar4", "rar3p"}, Display: "RAR 3.x/4.x archive",
 			Tier: hashid.TierSignature, Exclusive: true,
 			Match: func(in hashid.Input) (hashid.Evidence, bool) {
 				if strings.HasPrefix(in.Normalized, "$rar3$") || strings.HasPrefix(in.Normalized, "$RAR3$") {
@@ -39,6 +39,10 @@ func archivePrototypes() []hashid.Prototype {
 				}
 				return "", false
 			},
+			// Both readings are offered because the record's second field
+			// decides which applies — *0* is the -hp header form and *1* the
+			// -p file form — and each verifier refuses the other's records
+			// outright, so the wrong one costs a parse and nothing more.
 			Prevalence: 20, Rationale: "RAR 3.x/4.x's older fixed-parameter hash is still found in older archives even though RAR5 has been the default since 2017",
 		},
 		hasPrefixProto("$rar5$", "RAR5 archive", 30,
@@ -71,6 +75,8 @@ func archivePrototypes() []hashid.Prototype {
 		hasPrefixProto("SQLCIPHER*", "SQLCipher database", 12,
 			"SQLCipher backs many mobile applications' local databases, so it turns up throughout mobile forensics",
 			"sqlcipher"),
+		hasPrefixProto("$cryptoapi$", "Linux Kernel Crypto API volume", 5,
+			"a 2.4-era loop-AES construction; effectively only seen on very old Linux images", "cryptoapi"),
 		hasPrefixProto("$zip3$", "PKWARE SecureZIP (AES)", 8,
 			"SecureZIP is PKWARE's commercial archiver and its AES records appear mainly in enterprise settings",
 			"securezip"),

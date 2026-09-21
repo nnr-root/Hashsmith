@@ -114,7 +114,14 @@ func TestRecognitionAccuracy(t *testing.T) {
 //     that path on every bare MD5 to cover a legacy Domino deployment. The
 //     same trade as wbb4, decided the same way. It is reachable with -t
 //     domino5 or -m 8600.
-const detectableFloor = 199
+//
+//   - pdf-user-owner (Hashcat 25400). Its record is an ordinary $pdf$ record,
+//     already claimed by "pdf", which recovers the USER password from it.
+//     Offering this type alongside would make auto-detection redo that user
+//     check before trying the owner one, doubling the work on every PDF to
+//     reach a credential most callers are not asking for. It is reachable
+//     with -t pdf-user-owner or -m 25400.
+const detectableFloor = 200
 
 // undetectableByDesign names types that must NEVER be reachable from
 // auto-detection, and so are excluded from the count above rather than
