@@ -365,7 +365,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"itunes", "iTunes backup (PBKDF2 + AES key-unwrap)"},
 			{"1password", "1Password Agile Keychain (PBKDF2-SHA1 + AES)"},
 			{"apple-secure-notes", "Apple Secure Notes wrapped-key verifier, Hashcat 16200"},
-			{"mozilla-nss", "Mozilla/NSS key3.db master password, John mozilla"},
+			{"mozilla-nss", "Firefox/Thunderbird master password: key3.db (3DES) or key4.db (AES), John mozilla and Hashcat 26000/26100"},
 			{"stellar-wallet", "Stargazer Stellar wallet XLM, Hashcat 25500"},
 			{"metamask", "MetaMask vault AES-256-GCM, Hashcat 26600"},
 			{"metamask-short", "MetaMask short vault verifier, Hashcat 26610"},
@@ -512,6 +512,14 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"dmg", "Apple encrypted DMG v1/v2 (use dmg2smith)"},
 			{"macos-keychain", "Legacy macOS Keychain database (use keychain2smith)"},
 			{"monero", "Monero .keys wallet CryptoNight v0 + ChaCha8/20 (use monero2smith)"},
+		}},
+		{"Cloud storage", [][2]string{
+			{"mega", "mega.nz password-protected link, PBKDF2-HMAC-SHA512 + HMAC-SHA256, Hashcat 33400"},
+		}},
+		{"Browser and file encryption", [][2]string{
+			{"axcrypt1", "AxCrypt 1 file, SHA-1 + iterated AES key unwrap, Hashcat 13200"},
+			{"axcrypt2-128", "AxCrypt 2 AES-128 file, PBKDF2-HMAC-SHA512 + AES key unwrap, Hashcat 23500"},
+			{"axcrypt2-256", "AxCrypt 2 AES-256 file, PBKDF2-HMAC-SHA512 + AES key unwrap, Hashcat 23600"},
 		}},
 		{"Utility", [][2]string{
 			{"ecryptfs", "eCryptfs passphrase signature, Hashcat 12200"},

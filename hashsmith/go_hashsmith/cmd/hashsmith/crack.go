@@ -2439,7 +2439,7 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 	case "encfs":
 		return verifyEncFS(targetHash, candidate)
 	case "mozilla-nss":
-		return verifyMozillaNSS(targetHash, candidate)
+		return verifyMozilla(targetHash, candidate)
 	case "md5-salt1-pass-salt2":
 		return verifyMD5DualSalt(targetHash, candidate)
 	case "blockchain-legacy":
@@ -2665,6 +2665,14 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyRAR5(targetHash, candidate)
 	case "wbb4":
 		return verifyWBB4(targetHash, candidate)
+	case "mega":
+		return verifyMegaLink(targetHash, candidate)
+	case "axcrypt1":
+		return verifyAxCrypt1(targetHash, candidate)
+	case "axcrypt2-128":
+		return verifyAxCrypt2(targetHash, candidate, 16)
+	case "axcrypt2-256":
+		return verifyAxCrypt2(targetHash, candidate, 32)
 	case "bsdicrypt":
 		return verifyBSDiCrypt(targetHash, candidate)
 	case "ecryptfs":

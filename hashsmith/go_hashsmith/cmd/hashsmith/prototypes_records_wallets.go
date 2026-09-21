@@ -271,6 +271,19 @@ func webFrameworkPrototypes() []hashid.Prototype {
 			25, "caching_sha2_password has been MySQL's default authentication plugin since MySQL 8.0 (2018), so this record recurs wherever a current MySQL/MariaDB user table is dumped", "mysql8"),
 		hasPrefixProto("$axcrypt_sha1$", "AxCrypt SHA-1", 8,
 			"AxCrypt is a single-vendor Windows file-encryption tool with a modest user base compared to general-purpose archive/disk encryption tools", "axcrypt-sha1"),
+		hasPrefixProto("$axcrypt$*1*", "AxCrypt 1 file", 8,
+			"AxCrypt is a single-vendor Windows file-encryption tool with a modest user base compared to general-purpose archive/disk encryption tools", "axcrypt1"),
+		// An AxCrypt 2 record does not say whether the file is AES-128 or
+		// AES-256 — Hashcat splits that across two modes and decides by which
+		// one the user picked. Detection cannot, so it offers both and lets
+		// the cracker try each; they differ only in the unwrap, so a wrong
+		// guess costs one pass, not a wrong answer.
+		hasPrefixProto("$axcrypt$*2*", "AxCrypt 2 file", 8,
+			"AxCrypt is a single-vendor Windows file-encryption tool with a modest user base compared to general-purpose archive/disk encryption tools",
+			"axcrypt2-128", "axcrypt2-256"),
+		predicateProto(looksLikeMegaLink, "mega.nz protected link", hashid.TierSignature,
+			"P! prefix over a base64url blob of the right length with algorithm 2", 10,
+			"mega.nz password-protected links are shared publicly and turn up in link dumps", "mega"),
 		hasPrefixProto("$mongodb-scram$", "MongoDB SCRAM-SHA-1", 12,
 			"MongoDB's SCRAM-SHA-1 stored credential record recurs wherever a MongoDB server's own credential database is extracted, though MongoDB is one of several popular document databases", "mongodb"),
 		hasPrefixProto("$solarwinds$", "SolarWinds Orion credential vault", 5,
