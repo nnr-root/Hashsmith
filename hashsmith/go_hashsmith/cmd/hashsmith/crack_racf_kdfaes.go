@@ -96,6 +96,9 @@ func racfEBCDICPad(s string, n int) []byte {
 
 func verifyRACFKDFAES(target, candidate string) (bool, error) {
 	t := strings.TrimSpace(target)
+	if u, p, s, d, ok := johnRACFKDFAESFields(t); ok {
+		return verifyRACFKDFAESFields(u, p, s, d, candidate)
+	}
 	if !strings.HasPrefix(t, racfKDFAESPrefix) {
 		return false, errors.New("not a RACF KDFAES record")
 	}
@@ -103,19 +106,43 @@ func verifyRACFKDFAES(target, candidate string) (bool, error) {
 	if len(f) != 4 {
 		return false, errors.New("RACF KDFAES record must be $racf-kdfaes$*<userid>*<params>*<salt>*<digest>")
 	}
-	userID := f[0]
+	return verifyRACFKDFAESFields(f[0], f[1], f[2], f[3], candidate)
+}
+
+// johnRACFKDFAESFields reads John's spelling of the same record.
+//
+// John writes "$racf$*<userid>*<96 hex>" — the same prefix as the legacy DES
+// format, with the parameters, salt and digest run together into one field —
+// where hashcat writes "$racf-kdfaes$*<userid>*<params>*<salt>*<digest>". The
+// three 32-character fields are in the same order, so the split is positional
+// and nothing else changes.
+func johnRACFKDFAESFields(target string) (user, params, salt, digest string, ok bool) {
+	const prefix = "$racf$*"
+	t := strings.TrimSpace(target)
+	if !strings.HasPrefix(t, prefix) {
+		return "", "", "", "", false
+	}
+	f := strings.Split(strings.TrimPrefix(t, prefix), "*")
+	if len(f) != 2 || f[0] == "" || len(f[1]) != 96 {
+		return "", "", "", "", false
+	}
+	return f[0], f[1][:32], f[1][32:64], f[1][64:], true
+}
+
+// verifyRACFKDFAESFields is the verifier proper, taking the four fields both
+// spellings resolve to.
+func verifyRACFKDFAESFields(userID, params, saltHex, digestHex, candidate string) (bool, error) {
 	if userID == "" || len(userID) > racfKDFAESUserMax {
 		return false, errors.New("RACF KDFAES userid must be 1 to 8 characters")
 	}
-	params := f[1]
 	if len(params) != racfKDFAESParamLen {
 		return false, errors.New("RACF KDFAES parameter field must be 32 hex digits")
 	}
-	salt, err := hex.DecodeString(f[2])
+	salt, err := hex.DecodeString(saltHex)
 	if err != nil || len(salt) != 16 {
 		return false, errors.New("RACF KDFAES salt must be 16 hex-encoded bytes")
 	}
-	digest, err := hex.DecodeString(f[3])
+	digest, err := hex.DecodeString(digestHex)
 	if err != nil || len(digest) != aes.BlockSize {
 		return false, errors.New("RACF KDFAES digest must be 16 hex-encoded bytes")
 	}

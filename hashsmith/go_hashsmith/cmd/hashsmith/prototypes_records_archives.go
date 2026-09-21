@@ -89,8 +89,15 @@ func archivePrototypes() []hashid.Prototype {
 		// only the legacy DES hash buried inside KDFAES.
 		hasPrefixProto("$racf-kdfaes$*", "IBM RACF KDFAES userid", 6,
 			"KDFAES is the modern RACF password format on supported z/OS levels, so it is displacing the bare DES hash in current audits", "racf-kdfaes"),
+		// Both readings are offered because John writes KDFAES under the SAME
+		// $racf$* prefix as the legacy DES format, with the parameters, salt
+		// and digest run together into one 96-character field. The record's
+		// own shape decides: each verifier refuses the other's lengths, so
+		// the wrong one costs a parse and nothing more, and the legacy DES
+		// reading is tried first because it is the cheap one.
 		hasPrefixProto("$racf$*", "IBM RACF (z/OS) userid", 8,
-			"RACF secures most mainframe z/OS installations, so its hashes appear wherever mainframe credentials are audited", "racf"),
+			"RACF secures most mainframe z/OS installations, so its hashes appear wherever mainframe credentials are audited",
+			"racf", "racf-kdfaes"),
 		hasPrefixProto("$as400$des$*", "AS/400 (IBM i) user profile (DES)", 8,
 			"IBM i remains in wide production use in finance and logistics, but its password hashes reach a cracking tool only through dedicated audit workflows", "as400-des"),
 		hasPrefixProto("3u+UR6n8", "Juniper IVE / Pulse Connect Secure", 10,

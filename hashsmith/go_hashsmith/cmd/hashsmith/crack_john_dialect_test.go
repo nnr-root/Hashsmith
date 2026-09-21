@@ -194,3 +194,27 @@ func TestPBKDF2HMACRecordSeparators(t *testing.T) {
 		t.Error("an unknown algorithm was claimed as a PBKDF2-HMAC record")
 	}
 }
+
+// TestRACFKDFAESJohnSpelling pins that John's envelope resolves to the same
+// four fields hashcat's does. John writes KDFAES under the SAME "$racf$*"
+// prefix as the legacy DES format, with parameters, salt and digest run
+// together into one 96-character field.
+func TestRACFKDFAESJohnSpelling(t *testing.T) {
+	const record = "$racf$*USER123*E7D7E66D00018000001000340010001054FDAABCDEF012345674A0F58EE6137D3B3AD9EC21E371BE67D5A75BE0E892B8"
+	user, params, salt, digest, ok := johnRACFKDFAESFields(record)
+	if !ok {
+		t.Fatal("John's RACF KDFAES record was not recognised")
+	}
+	if user != "USER123" || len(params) != 32 || len(salt) != 32 || len(digest) != 32 {
+		t.Fatalf("fields split wrongly: %q %q %q %q", user, params, salt, digest)
+	}
+	// A legacy DES record under the same prefix must NOT be claimed here.
+	if _, _, _, _, ok := johnRACFKDFAESFields("$racf$*8481*6095E8FCA59F8E3E"); ok {
+		t.Error("a legacy RACF DES record was read as KDFAES")
+	}
+	// And detection must still offer the cheap legacy reading first.
+	types := detectHashTypes("$racf$*8481*6095E8FCA59F8E3E")
+	if len(types) == 0 || types[0] != "racf" {
+		t.Errorf("detectHashTypes for a legacy RACF record = %v; want racf first", types)
+	}
+}
