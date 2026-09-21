@@ -1689,3 +1689,114 @@ the only question is time.
   still over the per-record timeout.
 - John's rule corpus reads at 98.4%. The four lines left expand to millions of
   rules each and are refused by design, so this item is closed.
+
+## Where this actually landed: 527 of 538
+
+The section above is superseded. Every category it listed as blocked or
+expensive is now implemented, except two modes and a family that was never in
+scope. Conformance is **527 of 538 (97.9%)** with every format verified
+against hashcat's own published record, in both directions where the format
+permits it.
+
+Closed since that section was written: the thirteen "ordinary work" modes; all
+seven that needed a primitive Go lacks (Electrum ×2 via the secp256k1 helpers
+already here, MD6, Kremlin/NewDES, BestCrypt v3, RACF and AS/400 via a
+transcription of hashcat's libdes tables); LUKS v2, whose resource question is
+answered below; both ODF modes; and all four DPAPI modes.
+
+### Three methodological corrections, which mattered more than any single format
+
+**1. Sweeping cannot find a construction outside the space being swept.**
+
+DPAPI was recorded above as "roughly 250 combinations tried, none matched; the
+next step is instrumenting hashcat". Both halves were wrong. The failure was
+not a parameter, it was the algorithm: DPAPI's key derivation is not PBKDF2.
+RFC 2898 hashes the previous block and XORs into an accumulator; DPAPI feeds
+the accumulator back into the PRF. In hashcat's loop kernel that is one
+identifier — `w0[0] = out[0]` where every other mode writes `dgst[0]`. No
+amount of parameter search finds it, because every point in that search space
+computes a correct PBKDF2. Reading the kernel that defines the algorithm took
+minutes. Four modes fell out at once.
+
+**2. "It decrypts to noise" is not evidence the key is wrong.**
+
+ODF was recorded as four failed attempts, with the note that decryption
+"yields noise, so the key is wrong before the cipher". The decryption had been
+correct all along. ODF deflate-compresses each part and encrypts the compressed
+bytes, so a correct key produces a DEFLATE stream — no readable header, nothing
+that looks like a document. Every attempt had decrypted successfully and then
+rejected the result by eye. Both modes matched on the first try once the stored
+checksum was used as the test instead. When a format ships a checksum, that is
+the test; plausibility of the plaintext is not.
+
+**3. hashcat's AES helpers come in two spellings that differ only in swaps.**
+
+`AES128_set_encrypt_key` swaps and then calls `aes128_set_encrypt_key`, which
+swaps again, so they cancel; `aes128_encrypt` swaps once. The result is that a
+single mode can be genuinely mixed-endian — iPhone passcode (26500) has a
+natural-order UID key, group-reversed loop blocks, a group-reversed derived
+key, and natural-order class-key blocks. Reading the capitalisation as
+decoration rather than as meaning produces a verifier that is wrong in a way no
+single test vector explains.
+
+A practical note that unblocked all of the above: **hashcat cannot build any
+kernel on this machine through Metal** — Metal compiles from an in-memory
+source string and cannot resolve the `#include` of `inc_vendor.h`. Modes that
+appear to work are served from a kernel cache built earlier.
+`--backend-ignore-metal` forces OpenCL and builds correctly, and is required
+for any fresh verification. That is what made "generate a record from my model
+and ask hashcat" available as a bisection tool.
+
+### The resource decision, answered
+
+LUKS v2 asks for a gibibyte of Argon2 per candidate at the parameters real
+headers use. Workers defaulted to the CPU count, so the default run would have
+asked for ten gibibytes at once on this machine and spent its time swapping.
+The worker count is now capped by memory as well as by cores, computed from
+the cost the record itself declares, with system RAM read per platform and a
+conservative fallback. An explicit `-p` always wins. The cap keys on the
+RECORD, not the type name, so an operator who does not pass `-t` still gets it.
+
+### What is left, precisely
+
+**Not password verification, and out of scope by design (4).** 9710, 9810 and
+10410 are collider modes: they recover an RC4 key, not a password. 20510 is
+PKZIP master-key recovery. None is expressible as `verify(target, candidate)`,
+which is the contract every type here satisfies.
+
+**BestCrypt v4, mode 24000 (1).** Shares only the `$bcve$` prefix with v3.
+Needs scrypt, Keccak, and a choice of Twofish, Serpent or Camellia. x/crypto
+has scrypt, sha3 and twofish; Serpent and Camellia would each be a table-heavy
+port from scratch. This is the largest single remaining build.
+
+**RACF KDFAES, mode 14200 (1).** Structure fully mapped, so the next attempt
+should start here rather than from the kernel:
+
+- Parameters live in field 2's hex, read as 16-bit little-endian values from
+  its characters: chars 16-19 give n, and `mem_fac = 2^n / 32` (n=8 → 8);
+  chars 20-23 give `rep_fac` (50), and every PBKDF2 stage runs
+  `rep_fac * 100` iterations (5000). `salt_iter = mem_fac`,
+  `salt_iter2 = rep_fac*100 - 1`.
+- Stage 0: the legacy RACF DES hash of the encoded username under the
+  EBCDIC-transformed password, via `_des_crypt_encrypt` — STANDARD DES with IP
+  and FP, not the `_racf` variant this repo already implements for 8500/8501.
+  Eight bytes out, used as an 8-byte PBKDF2 password.
+- Stage 1, `mem_fac` times: PBKDF2-SHA256(key, salt, rep_fac*100) → 32 bytes;
+  the new salt becomes `U(iteration-1)`'s first 16 bytes followed by those 32,
+  48 bytes total; each result is appended to a memory buffer. The first salt is
+  the 16-byte record salt followed by `mem_fac` as a big-endian word, 20 bytes.
+- Stage 2, `mem_fac` times: `n = key[7] mod mem_fac` selects a 32-byte block
+  from the buffer; `key = PBKDF2-SHA256(key, thatBlock, 1)`; the result
+  overwrites buffer slot i. Stage 2's starting key is stage 1's last output.
+- Stage 3: PBKDF2-SHA256(key, first `(mem_fac-1)*32` bytes of the buffer,
+  rep_fac*100) → the 32-byte AES key.
+- Check: AES-256-ECB encrypt of the 16-byte encoded username equals the digest.
+
+Two things are still unread and are where the next attempt should look first:
+where `salt_buf_pc` — the 16-byte "encoded username" used as both the DES block
+and the AES plaintext — is actually populated, since `module_hash_decode` calls
+no EBCDIC conversion and no `generic_salt_decode`; and the byte order of the
+salt words between `hex_decode`, the esalt, and the non-swapping
+`sha256_hmac_update_vector`. Build a forward generator with `mem_fac` and
+`rep_fac` at their minimum, emit a record, and let hashcat bisect it — that
+technique is what closed DPAPI and it applies directly here.
