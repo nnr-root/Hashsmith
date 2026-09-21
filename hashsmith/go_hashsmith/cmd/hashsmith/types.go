@@ -548,6 +548,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"rar3p", "RAR3 with -p (file data encrypted, stored method only), Hashcat 23700"},
 			{"android-fde", "Android full-disk encryption (crypto footer, <= 4.3), Hashcat 8800"},
 			{"android-fde-samsung", "Samsung Android FDE, PBKDF2-HMAC-SHA256 + HMAC, Hashcat 12900"},
+			{"iphone-passcode", "iPhone passcode, UID-key loop + RFC 3394 class-key unwrap, Hashcat 26500"},
 			{"pkzip-masterkey", "PKZIP/ZipCrypto 96-bit master key state, Hashcat 20500 (a bare 24-hex record, so -t is required)"},
 			{"plaintext", "The target IS the password, Hashcat 99999 — for exercising a wordlist or ruleset"},
 		}},

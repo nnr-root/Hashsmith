@@ -2709,6 +2709,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifySQLCipher(targetHash, candidate)
 	case "cryptoapi":
 		return verifyCryptoAPI(targetHash, candidate)
+	case "iphone-passcode":
+		return verifyIPhonePasscode(targetHash, candidate)
 	case "pdf-user-owner":
 		return verifyPDFUserOrOwner(targetHash, candidate)
 	case "rar3p":
