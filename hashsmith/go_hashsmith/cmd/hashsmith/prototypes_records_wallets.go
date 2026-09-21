@@ -409,6 +409,14 @@ func webFrameworkPrototypes() []hashid.Prototype {
 		},
 		hasPrefixProto("$bitlocker$", "Windows BitLocker", 20,
 			"BitLocker is Windows' built-in full-disk encryption, enabled by default on many modern Windows installs, making its recovery-password/password verifier a routine target in Windows disk-forensics casework", "bitlocker"),
+		// Salt types 4 and 5 are a different construction from 1-3 — an
+		// elliptic-curve step rather than a plain hash — so they get their own
+		// type. Listed before the general $electrum$ prototype so the more
+		// specific reading wins on records that carry the salt type.
+		hasPrefixProto("$electrum$4*", "Electrum Bitcoin wallet (salt-type 4)", 6,
+			"Electrum's salt-type 4 wallets come from the 3.x line and still turn up in cryptocurrency casework", "electrum-ec"),
+		hasPrefixProto("$electrum$5*", "Electrum Bitcoin wallet (salt-type 5)", 6,
+			"Electrum's salt-type 5 is the current wallet encryption and so the one most likely to be seized today", "electrum-ec"),
 		hasPrefixProto("$electrum$", "Electrum Bitcoin wallet", 10,
 			"Electrum is a long-standing lightweight Bitcoin wallet with a smaller user base than exchange-integrated wallets like MetaMask, so its encrypted wallet file recurs less often in cryptocurrency casework", "electrum"),
 		// isPhpassHash is nested in the legacy cascade: a record additionally

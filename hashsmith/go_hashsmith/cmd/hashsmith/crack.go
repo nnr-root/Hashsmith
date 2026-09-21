@@ -2713,6 +2713,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyIPhonePasscode(targetHash, candidate)
 	case "windows-hello":
 		return verifyWindowsHello(targetHash, candidate)
+	case "kremlin":
+		return verifyKremlin(targetHash, candidate)
 	case "racf":
 		return verifyRACF(targetHash, candidate)
 	case "as400-des":
@@ -2802,6 +2804,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyVeraCryptMode(targetHash, candidate, "sha256")
 	case "bitlocker":
 		return verifyBitLocker(targetHash, candidate)
+	case "electrum-ec":
+		return verifyElectrumEC(targetHash, candidate)
 	case "electrum":
 		return verifyElectrum(targetHash, candidate)
 	case "phpass":

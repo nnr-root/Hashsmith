@@ -79,6 +79,8 @@ func archivePrototypes() []hashid.Prototype {
 			"Android's pre-5.0 crypto footer is a standard artefact in mobile forensics on older devices", "android-fde"),
 		hasPrefixProto("$WINHELLO$*", "Windows Hello PIN/password", 12,
 			"Windows Hello is the default sign-in on current Windows, so its PIN protector is a routine target in modern Windows forensics", "windows-hello"),
+		hasPrefixProto("$kgb$", "Kremlin Encrypt 3.0 archive", 3,
+			"Kremlin Encrypt was a 1990s Windows file-encryption product with no current user base; its records appear mainly in old evidence images", "kremlin"),
 		hasPrefixProto("$racf$*", "IBM RACF (z/OS) userid", 8,
 			"RACF secures most mainframe z/OS installations, so its hashes appear wherever mainframe credentials are audited", "racf"),
 		hasPrefixProto("$as400$des$*", "AS/400 (IBM i) user profile (DES)", 8,
