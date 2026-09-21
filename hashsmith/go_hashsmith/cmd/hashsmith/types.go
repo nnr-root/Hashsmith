@@ -507,7 +507,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"office-old-md5", "MS Office 97-2003 $0/$1, MD5 + RC4, Hashcat 9700"},
 			{"office-old-sha1", "MS Office 97-2003 $3/$4, SHA-1 + RC4, Hashcat 9800"},
 			{"office2016-sheet", "MS Office 2016 sheet protection, Hashcat 25300"},
-			{"keepass", "KeePass KDBX"},
+			{"keepass", "KeePass KDBX 1/2/3 (AES-KDF) and KDBX 4 (Argon2), Hashcat 13400 and 34300"},
 			{"keepass-keyfile", "KeePass KDBX v2/v3 keyfile-only credential, Hashcat 29700"},
 			{"dmg", "Apple encrypted DMG v1/v2 (use dmg2smith)"},
 			{"macos-keychain", "Legacy macOS Keychain database (use keychain2smith)"},
@@ -517,6 +517,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"mega", "mega.nz password-protected link, PBKDF2-HMAC-SHA512 + HMAC-SHA256, Hashcat 33400"},
 			{"metamask-mobile", "MetaMask Mobile wallet, PBKDF2-HMAC-SHA512 + AES-256-CBC, Hashcat 31900"},
 			{"dogechain", "Dogechain.info wallet, PBKDF2 over base64(SHA-256(pass)) + AES-256-CBC, Hashcat 32500"},
+			{"1password-cloud", "1Password cloud keychain, PBKDF2-HMAC-SHA512 + HMAC-SHA256, Hashcat 8200"},
 		}},
 		{"Browser and file encryption", [][2]string{
 			{"axcrypt1", "AxCrypt 1 file, SHA-1 + iterated AES key unwrap, Hashcat 13200"},

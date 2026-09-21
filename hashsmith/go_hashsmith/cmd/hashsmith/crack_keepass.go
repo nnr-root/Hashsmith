@@ -188,17 +188,69 @@ func verifyKeePass1(p []string, candidate string) (bool, error) {
 
 // verifyKeePass4 derives the Argon2 transformed key and checks the KDBX4 header
 // HMAC — no payload decryption required.
+// keepass4Params reads the Argon2 parameters out of a KDBX4 record.
+//
+// There are two serialisations in circulation and they are NOT compatible:
+// keepass2smith names the variant in a letter and puts parallelism before the
+// Argon2 version, while Hashcat's 34300 writes the iteration count first,
+// identifies the variant by the KDBX KDF UUID, and puts the version before
+// parallelism. Both are eleven fields, so length cannot tell them apart.
+//
+// What can is field 2: a letter in one, a number in the other. Reading the
+// wrong layout is silent — the KDF still completes and simply yields the wrong
+// master key, so a correct password is reported as not found — which is why
+// the two are separated here rather than guessed at.
+//
+// The UUIDs are KeePass's own: Argon2d is EF636DDF-8C29-444B-91F7-A9A403E30A0C
+// and Argon2id is 9E298B19-56DB-4773-B23D-FC3EC6F0A1E6, and Hashcat writes the
+// first four bytes of whichever applies.
+//
+// The two also disagree about the last thing anyone would check: Hashcat
+// writes the MASTER SEED first and the Argon2 salt second, keepass2smith the
+// other way round. Both are 32 bytes of hex, so nothing about the record
+// betrays the swap — it shows up only as a password that will not verify.
+type keepass4Layout struct {
+	argon            string
+	t, memBytes, par int
+	saltIdx, seedIdx int
+}
+
+func keepass4Params(p []string) (keepass4Layout, error) {
+	switch p[2] {
+	case "d", "id":
+		return keepass4Layout{
+			argon: p[2], t: atoiDefault(p[3], 0), memBytes: atoiDefault(p[4], 0),
+			par: atoiDefault(p[5], 0), saltIdx: 7, seedIdx: 8,
+		}, nil
+	}
+	var argon string
+	switch strings.ToLower(p[3]) {
+	case "ef636ddf":
+		argon = "d"
+	case "9e298b19":
+		argon = "id"
+	default:
+		return keepass4Layout{}, errors.New("unrecognised keepass4 KDF identifier")
+	}
+	return keepass4Layout{
+		argon: argon, t: atoiDefault(p[2], 0), memBytes: atoiDefault(p[4], 0),
+		par: atoiDefault(p[6], 0), saltIdx: 8, seedIdx: 7,
+	}, nil
+}
+
 func verifyKeePass4(p []string, candidate string) (bool, error) {
-	// $keepass$*4*<argon>*<t>*<m_bytes>*<p>*<v>*<salt>*<masterSeed>*<header>*<headerHMAC>
+	// keepass2smith: $keepass$*4*<argon>*<t>*<m_bytes>*<p>*<v>*<salt>*<masterSeed>*<header>*<headerHMAC>
+	// Hashcat 34300: $keepass$*4*<t>*<kdf uuid>*<m_bytes>*<v>*<p>*<salt>*<masterSeed>*<header>*<headerHMAC>
 	if len(p) < 11 {
 		return false, errors.New("invalid keepass4 hash format")
 	}
-	argon := p[2]
-	t := atoiDefault(p[3], 0)
-	memBytes := atoiDefault(p[4], 0)
-	par := atoiDefault(p[5], 0)
-	salt, e1 := hex.DecodeString(p[7])
-	masterSeed, e2 := hex.DecodeString(p[8])
+	lay, err := keepass4Params(p)
+	if err != nil {
+		return false, err
+	}
+	argon, t, memBytes, par := lay.argon, lay.t, lay.memBytes, lay.par
+	salt, e1 := hex.DecodeString(p[lay.saltIdx])
+	masterSeed, e2 := hex.DecodeString(p[lay.seedIdx])
 	header, e3 := hex.DecodeString(p[9])
 	headerHMAC, e4 := hex.DecodeString(p[10])
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {

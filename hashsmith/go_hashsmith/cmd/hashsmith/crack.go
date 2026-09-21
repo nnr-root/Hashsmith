@@ -2689,6 +2689,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyMetaMaskMobile(targetHash, candidate)
 	case "dogechain":
 		return verifyDogechain(targetHash, candidate)
+	case "1password-cloud":
+		return verifyOnePasswordCloud(targetHash, candidate)
 	case "bsdicrypt":
 		return verifyBSDiCrypt(targetHash, candidate)
 	case "ecryptfs":

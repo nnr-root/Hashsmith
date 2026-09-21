@@ -284,6 +284,10 @@ func webFrameworkPrototypes() []hashid.Prototype {
 		// A DiskCryptor header does not say how many ciphers are cascaded, so
 		// detection offers all three widths; the wider ones also test the
 		// narrower layouts, exactly as Hashcat's kernels do.
+		predicateProto(looksLikeOnePasswordCloud, "1Password cloud keychain", hashid.TierStructural,
+			"four colon-separated fields: 32-byte HMAC, hex salt, decimal iterations, keychain payload", 10,
+			"1Password is a widely used password manager and its cloud keychain is a standard extraction target",
+			"1password-cloud"),
 		hasPrefixProto("$iwork$", "Apple iWork document", 12,
 			"Pages, Numbers and Keynote files are common on macOS and are routinely password-protected", "iwork"),
 		hasPrefixProto("$metamaskMobile$", "MetaMask Mobile wallet", 14,
