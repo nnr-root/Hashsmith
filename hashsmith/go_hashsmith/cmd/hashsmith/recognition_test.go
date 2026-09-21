@@ -104,7 +104,17 @@ func TestRecognitionAccuracy(t *testing.T) {
 //     prototype for it would be the only match and would therefore name every
 //     such input a PKZIP key. It is reachable with -t pkzip-masterkey or
 //     -m 20500.
-const detectableFloor = 198
+//
+//   - domino5 (Hashcat 8600). Its record is a bare 32-hex digest, the same
+//     shape as MD5, MD4, MD2, NTLM and LM. Offering it there is possible and
+//     was tried; TestRawDigestAndBatchable rejected it, and rightly. A 32-hex
+//     target with no -t is the most common input this tool sees, and it takes
+//     the batched raw-digest path — which every candidate type has to support
+//     for the batch to happen at all. Adding one type that does not would cost
+//     that path on every bare MD5 to cover a legacy Domino deployment. The
+//     same trade as wbb4, decided the same way. It is reachable with -t
+//     domino5 or -m 8600.
+const detectableFloor = 199
 
 // undetectableByDesign names types that must NEVER be reachable from
 // auto-detection, and so are excluded from the count above rather than

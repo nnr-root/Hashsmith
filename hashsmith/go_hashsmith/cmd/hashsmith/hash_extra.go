@@ -351,6 +351,8 @@ func compatibilityHashAliasSeed() map[string]string {
 		"8200": "1password-cloud", "20500": "pkzip-masterkey",
 		"17200": "pkzip", "17210": "pkzip", "17220": "pkzip",
 		"17225": "pkzip", "17230": "pkzip",
+		"23001": "securezip", "23002": "securezip", "23003": "securezip",
+		"8600":  "domino5",
 		"29910": "encdatavault", "29920": "encdatavault",
 		"29930": "encdatavault", "29940": "encdatavault",
 		"18900": "android-backup",

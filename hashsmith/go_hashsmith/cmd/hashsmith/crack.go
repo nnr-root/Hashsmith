@@ -2693,6 +2693,10 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyOnePasswordCloud(targetHash, candidate)
 	case "pkzip":
 		return verifyPKZIP2(targetHash, candidate)
+	case "securezip":
+		return verifySecureZIP(targetHash, candidate)
+	case "domino5":
+		return verifyDomino5(targetHash, candidate)
 	case "pkzip-masterkey":
 		return verifyPKZIPMasterKey(targetHash, candidate)
 	case "bsdicrypt":
