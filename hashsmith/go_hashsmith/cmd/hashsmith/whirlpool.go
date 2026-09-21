@@ -80,40 +80,197 @@ func init() {
 }
 
 // whirlpoolTransform is the Miyaguchi-Preneel compression over one 64-byte block.
+// whirlpoolTransform is the Miyaguchi-Preneel compression.
+//
+// Written out rather than looped for the same reason as Streebog's LPS: the
+// row index into whirlpoolC and the (i+k)&7 state rotations are constants once
+// unrolled, so the modular arithmetic disappears and the eight round-state
+// words stay in registers instead of being reloaded from an array eight times
+// per round. The eight table rows are hoisted to locals so each lookup is a
+// single index rather than two.
 func whirlpoolTransform(hashState, block *[8]uint64) {
-	var K, state, L [8]uint64
-	for i := 0; i < 8; i++ {
-		K[i] = hashState[i]
-		state[i] = block[i] ^ K[i]
-	}
+	c0 := &whirlpoolC[0]
+	c1 := &whirlpoolC[1]
+	c2 := &whirlpoolC[2]
+	c3 := &whirlpoolC[3]
+	c4 := &whirlpoolC[4]
+	c5 := &whirlpoolC[5]
+	c6 := &whirlpoolC[6]
+	c7 := &whirlpoolC[7]
+
+	k0 := hashState[0]
+	k1 := hashState[1]
+	k2 := hashState[2]
+	k3 := hashState[3]
+	k4 := hashState[4]
+	k5 := hashState[5]
+	k6 := hashState[6]
+	k7 := hashState[7]
+	s0 := block[0] ^ k0
+	s1 := block[1] ^ k1
+	s2 := block[2] ^ k2
+	s3 := block[3] ^ k3
+	s4 := block[4] ^ k4
+	s5 := block[5] ^ k5
+	s6 := block[6] ^ k6
+	s7 := block[7] ^ k7
+
 	for r := 1; r <= 10; r++ {
-		for i := 0; i < 8; i++ {
-			L[i] = whirlpoolC[0][byte(K[i]>>56)] ^
-				whirlpoolC[1][byte(K[(i+7)&7]>>48)] ^
-				whirlpoolC[2][byte(K[(i+6)&7]>>40)] ^
-				whirlpoolC[3][byte(K[(i+5)&7]>>32)] ^
-				whirlpoolC[4][byte(K[(i+4)&7]>>24)] ^
-				whirlpoolC[5][byte(K[(i+3)&7]>>16)] ^
-				whirlpoolC[6][byte(K[(i+2)&7]>>8)] ^
-				whirlpoolC[7][byte(K[(i+1)&7])]
-		}
-		L[0] ^= whirlpoolRC[r]
-		K = L
-		for i := 0; i < 8; i++ {
-			L[i] = whirlpoolC[0][byte(state[i]>>56)] ^
-				whirlpoolC[1][byte(state[(i+7)&7]>>48)] ^
-				whirlpoolC[2][byte(state[(i+6)&7]>>40)] ^
-				whirlpoolC[3][byte(state[(i+5)&7]>>32)] ^
-				whirlpoolC[4][byte(state[(i+4)&7]>>24)] ^
-				whirlpoolC[5][byte(state[(i+3)&7]>>16)] ^
-				whirlpoolC[6][byte(state[(i+2)&7]>>8)] ^
-				whirlpoolC[7][byte(state[(i+1)&7])] ^ K[i]
-		}
-		state = L
+		l0 := c0[byte(k0>>56)] ^
+			c1[byte(k7>>48)] ^
+			c2[byte(k6>>40)] ^
+			c3[byte(k5>>32)] ^
+			c4[byte(k4>>24)] ^
+			c5[byte(k3>>16)] ^
+			c6[byte(k2>>8)] ^
+			c7[byte(k1)]
+		l1 := c0[byte(k1>>56)] ^
+			c1[byte(k0>>48)] ^
+			c2[byte(k7>>40)] ^
+			c3[byte(k6>>32)] ^
+			c4[byte(k5>>24)] ^
+			c5[byte(k4>>16)] ^
+			c6[byte(k3>>8)] ^
+			c7[byte(k2)]
+		l2 := c0[byte(k2>>56)] ^
+			c1[byte(k1>>48)] ^
+			c2[byte(k0>>40)] ^
+			c3[byte(k7>>32)] ^
+			c4[byte(k6>>24)] ^
+			c5[byte(k5>>16)] ^
+			c6[byte(k4>>8)] ^
+			c7[byte(k3)]
+		l3 := c0[byte(k3>>56)] ^
+			c1[byte(k2>>48)] ^
+			c2[byte(k1>>40)] ^
+			c3[byte(k0>>32)] ^
+			c4[byte(k7>>24)] ^
+			c5[byte(k6>>16)] ^
+			c6[byte(k5>>8)] ^
+			c7[byte(k4)]
+		l4 := c0[byte(k4>>56)] ^
+			c1[byte(k3>>48)] ^
+			c2[byte(k2>>40)] ^
+			c3[byte(k1>>32)] ^
+			c4[byte(k0>>24)] ^
+			c5[byte(k7>>16)] ^
+			c6[byte(k6>>8)] ^
+			c7[byte(k5)]
+		l5 := c0[byte(k5>>56)] ^
+			c1[byte(k4>>48)] ^
+			c2[byte(k3>>40)] ^
+			c3[byte(k2>>32)] ^
+			c4[byte(k1>>24)] ^
+			c5[byte(k0>>16)] ^
+			c6[byte(k7>>8)] ^
+			c7[byte(k6)]
+		l6 := c0[byte(k6>>56)] ^
+			c1[byte(k5>>48)] ^
+			c2[byte(k4>>40)] ^
+			c3[byte(k3>>32)] ^
+			c4[byte(k2>>24)] ^
+			c5[byte(k1>>16)] ^
+			c6[byte(k0>>8)] ^
+			c7[byte(k7)]
+		l7 := c0[byte(k7>>56)] ^
+			c1[byte(k6>>48)] ^
+			c2[byte(k5>>40)] ^
+			c3[byte(k4>>32)] ^
+			c4[byte(k3>>24)] ^
+			c5[byte(k2>>16)] ^
+			c6[byte(k1>>8)] ^
+			c7[byte(k0)]
+		l0 ^= whirlpoolRC[r]
+		k0 = l0
+		k1 = l1
+		k2 = l2
+		k3 = l3
+		k4 = l4
+		k5 = l5
+		k6 = l6
+		k7 = l7
+		l0 = c0[byte(s0>>56)] ^
+			c1[byte(s7>>48)] ^
+			c2[byte(s6>>40)] ^
+			c3[byte(s5>>32)] ^
+			c4[byte(s4>>24)] ^
+			c5[byte(s3>>16)] ^
+			c6[byte(s2>>8)] ^
+			c7[byte(s1)] ^ k0
+		l1 = c0[byte(s1>>56)] ^
+			c1[byte(s0>>48)] ^
+			c2[byte(s7>>40)] ^
+			c3[byte(s6>>32)] ^
+			c4[byte(s5>>24)] ^
+			c5[byte(s4>>16)] ^
+			c6[byte(s3>>8)] ^
+			c7[byte(s2)] ^ k1
+		l2 = c0[byte(s2>>56)] ^
+			c1[byte(s1>>48)] ^
+			c2[byte(s0>>40)] ^
+			c3[byte(s7>>32)] ^
+			c4[byte(s6>>24)] ^
+			c5[byte(s5>>16)] ^
+			c6[byte(s4>>8)] ^
+			c7[byte(s3)] ^ k2
+		l3 = c0[byte(s3>>56)] ^
+			c1[byte(s2>>48)] ^
+			c2[byte(s1>>40)] ^
+			c3[byte(s0>>32)] ^
+			c4[byte(s7>>24)] ^
+			c5[byte(s6>>16)] ^
+			c6[byte(s5>>8)] ^
+			c7[byte(s4)] ^ k3
+		l4 = c0[byte(s4>>56)] ^
+			c1[byte(s3>>48)] ^
+			c2[byte(s2>>40)] ^
+			c3[byte(s1>>32)] ^
+			c4[byte(s0>>24)] ^
+			c5[byte(s7>>16)] ^
+			c6[byte(s6>>8)] ^
+			c7[byte(s5)] ^ k4
+		l5 = c0[byte(s5>>56)] ^
+			c1[byte(s4>>48)] ^
+			c2[byte(s3>>40)] ^
+			c3[byte(s2>>32)] ^
+			c4[byte(s1>>24)] ^
+			c5[byte(s0>>16)] ^
+			c6[byte(s7>>8)] ^
+			c7[byte(s6)] ^ k5
+		l6 = c0[byte(s6>>56)] ^
+			c1[byte(s5>>48)] ^
+			c2[byte(s4>>40)] ^
+			c3[byte(s3>>32)] ^
+			c4[byte(s2>>24)] ^
+			c5[byte(s1>>16)] ^
+			c6[byte(s0>>8)] ^
+			c7[byte(s7)] ^ k6
+		l7 = c0[byte(s7>>56)] ^
+			c1[byte(s6>>48)] ^
+			c2[byte(s5>>40)] ^
+			c3[byte(s4>>32)] ^
+			c4[byte(s3>>24)] ^
+			c5[byte(s2>>16)] ^
+			c6[byte(s1>>8)] ^
+			c7[byte(s0)] ^ k7
+		s0 = l0
+		s1 = l1
+		s2 = l2
+		s3 = l3
+		s4 = l4
+		s5 = l5
+		s6 = l6
+		s7 = l7
 	}
-	for i := 0; i < 8; i++ {
-		hashState[i] ^= state[i] ^ block[i]
-	}
+
+	hashState[0] ^= s0 ^ block[0]
+	hashState[1] ^= s1 ^ block[1]
+	hashState[2] ^= s2 ^ block[2]
+	hashState[3] ^= s3 ^ block[3]
+	hashState[4] ^= s4 ^ block[4]
+	hashState[5] ^= s5 ^ block[5]
+	hashState[6] ^= s6 ^ block[6]
+	hashState[7] ^= s7 ^ block[7]
 }
 
 // whirlpoolDigest implements hash.Hash.
