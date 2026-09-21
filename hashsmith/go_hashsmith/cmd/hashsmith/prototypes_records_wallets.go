@@ -284,6 +284,12 @@ func webFrameworkPrototypes() []hashid.Prototype {
 		// A DiskCryptor header does not say how many ciphers are cascaded, so
 		// detection offers all three widths; the wider ones also test the
 		// narrower layouts, exactly as Hashcat's kernels do.
+		hasPrefixProto("$iwork$", "Apple iWork document", 12,
+			"Pages, Numbers and Keynote files are common on macOS and are routinely password-protected", "iwork"),
+		hasPrefixProto("$metamaskMobile$", "MetaMask Mobile wallet", 14,
+			"MetaMask is the most widely installed Ethereum wallet and its mobile vault is a frequent target", "metamask-mobile"),
+		hasPrefixProto("$dogechain$", "Dogechain.info wallet", 6,
+			"Dogechain.info is a single-chain web wallet with a small user base", "dogechain"),
 		hasPrefixProto("$fvde$", "Apple FileVault 2 / APFS volume", 20,
 			"FileVault 2 and APFS are the default full-disk encryption on every modern Mac, so their headers turn up in any macOS forensic image",
 			"fvde"),

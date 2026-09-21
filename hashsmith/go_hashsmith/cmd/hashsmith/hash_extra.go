@@ -347,6 +347,7 @@ func compatibilityHashAliasSeed() map[string]string {
 		"13200": "axcrypt1", "23500": "axcrypt2-128", "23600": "axcrypt2-256",
 		"20011": "diskcryptor-xts512", "20012": "diskcryptor-xts1024", "20013": "diskcryptor-xts1536",
 		"16700": "fvde", "18300": "fvde",
+		"23300": "iwork", "31900": "metamask-mobile", "32500": "dogechain",
 		"29910": "encdatavault", "29920": "encdatavault",
 		"29930": "encdatavault", "29940": "encdatavault",
 		"18900": "android-backup",

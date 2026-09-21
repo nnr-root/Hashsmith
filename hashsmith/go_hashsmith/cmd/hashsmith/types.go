@@ -515,6 +515,8 @@ func hashTypeCatalogueSeed() []typeGroup {
 		}},
 		{"Cloud storage", [][2]string{
 			{"mega", "mega.nz password-protected link, PBKDF2-HMAC-SHA512 + HMAC-SHA256, Hashcat 33400"},
+			{"metamask-mobile", "MetaMask Mobile wallet, PBKDF2-HMAC-SHA512 + AES-256-CBC, Hashcat 31900"},
+			{"dogechain", "Dogechain.info wallet, PBKDF2 over base64(SHA-256(pass)) + AES-256-CBC, Hashcat 32500"},
 		}},
 		{"Browser and file encryption", [][2]string{
 			{"axcrypt1", "AxCrypt 1 file, SHA-1 + iterated AES key unwrap, Hashcat 13200"},
@@ -525,6 +527,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"diskcryptor-xts1536", "DiskCryptor volume, three-cipher cascade XTS, Hashcat 20013"},
 			{"fvde", "Apple FileVault 2 (CoreStorage) or APFS volume, PBKDF2-HMAC-SHA256 + AES key unwrap, Hashcat 16700 and 18300"},
 			{"encdatavault", "ENCsecurity Datavault, MD5 or PBKDF2 key with an AES-CTR header check, Hashcat 29910/29920/29930/29940"},
+			{"iwork", "Apple iWork document, PBKDF2-HMAC-SHA1 + AES-128-CBC, Hashcat 23300"},
 		}},
 		{"Utility", [][2]string{
 			{"ecryptfs", "eCryptfs passphrase signature, Hashcat 12200"},

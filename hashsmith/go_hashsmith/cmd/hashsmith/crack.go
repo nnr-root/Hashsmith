@@ -2683,6 +2683,12 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyFVDE(targetHash, candidate)
 	case "encdatavault":
 		return verifyENCDataVault(targetHash, candidate)
+	case "iwork":
+		return verifyIWork(targetHash, candidate)
+	case "metamask-mobile":
+		return verifyMetaMaskMobile(targetHash, candidate)
+	case "dogechain":
+		return verifyDogechain(targetHash, candidate)
 	case "bsdicrypt":
 		return verifyBSDiCrypt(targetHash, candidate)
 	case "ecryptfs":
