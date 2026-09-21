@@ -134,3 +134,32 @@ func TestJohnHMACSpelling(t *testing.T) {
 		t.Errorf("hmac-md5 rejected John's vector: ok=%v err=%v", ok, err)
 	}
 }
+
+// TestSHA1CryptAcceptsBothTrailingByteConventions pins the fix for a real
+// disagreement between the two tools' published vectors.
+//
+// The 28-character checksum encodes 21 bytes while the digest is 20, and what
+// goes in the last byte is not agreed: NetBSD (and passlib, and John) wraps
+// around to digest[0], hashcat pads with zero. Comparing the ENCODED STRING
+// accepts whichever convention the implementation happens to use and rejects
+// the other — this tool cracked hashcat's record and refused all of John's,
+// with the digest computed correctly every time. Comparing the decoded digest
+// accepts both, which is what John does.
+func TestSHA1CryptAcceptsBothTrailingByteConventions(t *testing.T) {
+	for _, tc := range []struct{ record, password, origin string }{
+		// Zero-padded trailing byte.
+		{"$sha1$20000$75552156$HhYMDdaEHiK3eMIzTldOFPnw.s2Q", "hashcat", "hashcat"},
+		// Trailing byte wrapped to digest[0].
+		{"$sha1$64000$wnUR8T1U$vt1TFQ50tBMFgkflAFAOer2CwdYZ", "password", "john"},
+		{"$sha1$40000$jtNX3nZ2$hBNaIXkt4wBI2o5rsi8KejSjNqIq", "password", "john"},
+		{"$sha1$64000$wnUR8T1U$azjCegpOIk0FjE61qzGWhdkpuMRL", "complexlongpassword@123456", "john"},
+	} {
+		ok, err := verifySHA1Crypt(tc.record, tc.password)
+		if err != nil || !ok {
+			t.Errorf("%s vector rejected: %q ok=%v err=%v", tc.origin, tc.record, ok, err)
+		}
+		if bad, _ := verifySHA1Crypt(tc.record, tc.password+"x"); bad {
+			t.Errorf("%s vector accepted a wrong password: %q", tc.origin, tc.record)
+		}
+	}
+}

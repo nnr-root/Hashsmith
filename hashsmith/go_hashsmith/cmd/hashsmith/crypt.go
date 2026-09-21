@@ -18,6 +18,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
+	"crypto/subtle"
 	"errors"
 	"hash"
 	"strconv"
@@ -352,7 +353,8 @@ func verifyAPR1(targetHash, candidate string) (bool, error) {
 // message is "salt$sha1$rounds"; each remaining round HMACs the previous
 // digest with the password as key. The 20-byte result is padded with one zero
 // byte and emitted with crypt's little-endian Base64 alphabet.
-func sha1CryptRaw(password, salt string, rounds int) string {
+// sha1CryptDigest is the 20-byte HMAC chain, before any encoding.
+func sha1CryptDigest(password, salt string, rounds int) []byte {
 	key := []byte(password)
 	mac := hmac.New(sha1.New, key)
 	_, _ = mac.Write([]byte(salt + "$sha1$" + strconv.Itoa(rounds)))
@@ -362,6 +364,11 @@ func sha1CryptRaw(password, salt string, rounds int) string {
 		_, _ = mac.Write(digest)
 		digest = mac.Sum(nil)
 	}
+	return digest
+}
+
+func sha1CryptRaw(password, salt string, rounds int) string {
+	digest := sha1CryptDigest(password, salt, rounds)
 	out := make([]byte, 0, 28)
 	for i := 0; i < 18; i += 3 {
 		out = b64From24(out, digest[i], digest[i+1], digest[i+2], 4)
@@ -387,7 +394,44 @@ func verifySHA1Crypt(targetHash, candidate string) (bool, error) {
 			return false, errors.New("invalid sha1crypt alphabet")
 		}
 	}
-	return sha1CryptRaw(candidate, parts[3], rounds) == targetHash, nil
+	// Compare the DIGEST, not the encoded string.
+	//
+	// The 28-character checksum encodes 21 bytes, but the digest is 20. What
+	// goes in that 21st byte is not agreed: NetBSD wraps around to digest[0],
+	// while other implementations pad with zero, and both spellings are in
+	// circulation — hashcat's published vector is zero-padded and John's (and
+	// passlib's) wrap. Comparing strings therefore accepts one and rejects the
+	// other, which is what happened here: hashcat's record cracked and all
+	// four of John's did not, despite the digest being computed correctly for
+	// every one of them.
+	//
+	// John compares the decoded digest and so accepts both. So does this now.
+	// The trailing byte carries no information about the password, so nothing
+	// is given up by ignoring it.
+	want := decodeCrypt64(parts[4])
+	if len(want) < sha1.Size {
+		return false, errors.New("invalid sha1crypt checksum encoding")
+	}
+	return subtle.ConstantTimeCompare(sha1CryptDigest(candidate, parts[3], rounds), want[:sha1.Size]) == 1, nil
+}
+
+// decodeCrypt64 reverses b64From24's little-endian four-character groups.
+// A trailing partial group is ignored; every caller here works in whole
+// groups.
+func decodeCrypt64(s string) []byte {
+	out := make([]byte, 0, len(s)/4*3)
+	for i := 0; i+4 <= len(s); i += 4 {
+		var v uint32
+		for j := 3; j >= 0; j-- {
+			k := strings.IndexByte(itoa64, s[i+j])
+			if k < 0 {
+				return nil
+			}
+			v = v<<6 | uint32(k)
+		}
+		out = append(out, byte(v>>16), byte(v>>8), byte(v))
+	}
+	return out
 }
 
 // verifyShaCrypt checks a candidate against a $5$/$6$ target for the given params.
