@@ -2673,6 +2673,12 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyAxCrypt2(targetHash, candidate, 16)
 	case "axcrypt2-256":
 		return verifyAxCrypt2(targetHash, candidate, 32)
+	case "diskcryptor-xts512":
+		return verifyDiskCryptor(targetHash, candidate, 1)
+	case "diskcryptor-xts1024":
+		return verifyDiskCryptor(targetHash, candidate, 2)
+	case "diskcryptor-xts1536":
+		return verifyDiskCryptor(targetHash, candidate, 3)
 	case "bsdicrypt":
 		return verifyBSDiCrypt(targetHash, candidate)
 	case "ecryptfs":

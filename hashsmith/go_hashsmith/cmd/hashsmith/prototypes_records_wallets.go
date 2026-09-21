@@ -281,6 +281,12 @@ func webFrameworkPrototypes() []hashid.Prototype {
 		hasPrefixProto("$axcrypt$*2*", "AxCrypt 2 file", 8,
 			"AxCrypt is a single-vendor Windows file-encryption tool with a modest user base compared to general-purpose archive/disk encryption tools",
 			"axcrypt2-128", "axcrypt2-256"),
+		// A DiskCryptor header does not say how many ciphers are cascaded, so
+		// detection offers all three widths; the wider ones also test the
+		// narrower layouts, exactly as Hashcat's kernels do.
+		hasPrefixProto("$diskcryptor$", "DiskCryptor volume", 8,
+			"DiskCryptor is an abandoned Windows full-disk encryption tool with a small installed base",
+			"diskcryptor-xts512", "diskcryptor-xts1024", "diskcryptor-xts1536"),
 		predicateProto(looksLikeMegaLink, "mega.nz protected link", hashid.TierSignature,
 			"P! prefix over a base64url blob of the right length with algorithm 2", 10,
 			"mega.nz password-protected links are shared publicly and turn up in link dumps", "mega"),

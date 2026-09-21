@@ -520,6 +520,9 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"axcrypt1", "AxCrypt 1 file, SHA-1 + iterated AES key unwrap, Hashcat 13200"},
 			{"axcrypt2-128", "AxCrypt 2 AES-128 file, PBKDF2-HMAC-SHA512 + AES key unwrap, Hashcat 23500"},
 			{"axcrypt2-256", "AxCrypt 2 AES-256 file, PBKDF2-HMAC-SHA512 + AES key unwrap, Hashcat 23600"},
+			{"diskcryptor-xts512", "DiskCryptor volume, single-cipher XTS, Hashcat 20011"},
+			{"diskcryptor-xts1024", "DiskCryptor volume, two-cipher cascade XTS, Hashcat 20012"},
+			{"diskcryptor-xts1536", "DiskCryptor volume, three-cipher cascade XTS, Hashcat 20013"},
 		}},
 		{"Utility", [][2]string{
 			{"ecryptfs", "eCryptfs passphrase signature, Hashcat 12200"},
