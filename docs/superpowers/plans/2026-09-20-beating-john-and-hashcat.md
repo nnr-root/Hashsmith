@@ -1463,9 +1463,67 @@ What a later attempt should start from: the field layout above is confirmed,
 the scrypt parameters are the record's own, and the six cipher framings listed
 are ruled out.
 
+### Making the VeraCrypt KDFs cheaper, and a 3x tax found by measuring
+
+The section above concluded that the VeraCrypt timeouts were marginal rather
+than inherent. Chasing that turned up three separate costs, and only one of
+them was the hash function everybody was looking at.
+
+**crypto/hmac caches a key's inner and outer states — but only for a hash that
+can serialise itself.** Otherwise it re-compresses the 64-byte ipad and opad
+blocks for every single message, which in PBKDF2 means every single iteration.
+None of RIPEMD-160, Whirlpool or Streebog implemented
+`encoding.BinaryMarshaler`, so all three were paying it 500,000 or 655,331
+times per derived block. Per 20,000 iterations on an M2:
+
+| PRF | before | after | |
+|---|---|---|---|
+| RIPEMD-160 | 28.27 ms (x/crypto) | 19.83 ms (native) | 1.42x |
+| Whirlpool | 107.7 ms | 74.0 ms | 1.46x |
+| Streebog-512 | 221.3 ms | 177.2 ms | 1.25x |
+
+RIPEMD-160 came from `golang.org/x/crypto/ripemd160`, which is deprecated and
+cannot be given a marshaler. It did not need to: `ripemd.go` already
+implemented the family's narrow 5-round path, which IS RIPEMD-160 — only the
+constructor was missing. Adding it drops the dependency and takes LUKS and GPG
+along for the same gain. The two are pinned against each other at every length
+from 0 to 200 bytes, at every split point of a two-part write, through HMAC
+with an oversized key, and through PBKDF2 at VeraCrypt's own 192-byte width.
+
+**PBKDF2 output blocks are independent** (RFC 8018 §5.2), so a 192-byte key is
+a strict extension of the 64-byte key, not a different derivation. The
+auto-detect path derived 64 bytes, tested the common single-cipher case, and
+then derived 192 from scratch — repeating every block of the short key on every
+candidate that did not match, which when cracking is all of them but one.
+`pbkdf2Range` derives a block range, so the short derivation is extended
+instead: ten RIPEMD-160 blocks per candidate rather than fourteen, and the
+single-cipher hit still stops after four.
+
+**And then the part that was not about cryptography at all.** A single
+candidate against `-m 29411` took 7.8 seconds on a machine where one verify of
+that record measures 2.57. A stack dump at the verifier answered it: three
+calls per run, not one. `doCrack` probes the type and record once up front so a
+malformed hash fails loudly instead of silently finding nothing, and
+`checkFeasibility` then times its own verify to estimate a rate. Two full
+655,331-iteration derivations before the first real candidate. They are the
+same measurement, so the probe's duration is now passed to the feasibility
+guard, which takes it when it clears the same threshold it would demand of its
+own sample. 7.83s to 5.15s on a one-candidate run; the remaining two calls are
+the irreducible ones, the probe and the candidate.
+
+Worth noting which of these mattered. The hash work is what the earlier
+analysis pointed at, and it was real but bounded — 1.25x to 1.46x. The duplicated
+probe was a flat 2.57 seconds nobody had looked for, found only because a
+measured time disagreed with a predicted one by 3x and that gap got chased
+instead of rounded off.
+
+Conformance: 455 to 458 of 538, with -m 29411, 29431 and 29442 crossing the
+20-second per-record timeout. Ten VeraCrypt modes remain over it, and they are
+the wide ones — the cascade widths that derive 128 or 192 bytes of key.
+
 ### Still open
 
-- 66 unimplemented hashcat modes. Conformance is 455 of 538 (84.6%) on a quiet
-  machine, with 13 VeraCrypt modes sitting right at the per-record timeout.
+- 66 unimplemented hashcat modes. Conformance is 458 of 538 (85.1%) on a quiet
+  machine, with 10 VeraCrypt modes still over the per-record timeout.
 - John's rule corpus reads at 98.4%. The four lines left expand to millions of
   rules each and are refused by design, so this item is closed.
