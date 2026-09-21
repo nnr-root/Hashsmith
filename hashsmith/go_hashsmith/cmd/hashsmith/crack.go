@@ -2711,6 +2711,10 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyCryptoAPI(targetHash, candidate)
 	case "iphone-passcode":
 		return verifyIPhonePasscode(targetHash, candidate)
+	case "as400-des":
+		return verifyAS400DES(targetHash, candidate)
+	case "juniper-ive":
+		return verifyJuniperIVE(targetHash, candidate)
 	case "pdf-user-owner":
 		return verifyPDFUserOrOwner(targetHash, candidate)
 	case "rar3p":

@@ -612,6 +612,8 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"domino8", "hashcat", "", "(HC34tD3KtDp4oCZWmCJ4qC30mC30mC3KmC30mCcA5ovrMLH9M)", srcPublished},
 		{"stuffit5", "hashcat", "", "66a75cb059", srcPublished},
 		{"sqlcipher", "hashcat", "", "SQLCIPHER*1*64000*25548249195677404156261816261456*85b5e156e1cf1e0be5e9f4217186817b*33435c230bbc7989bbd027630e3f47cd", srcPublished},
+		{"as400-des", "SYS1", "", "$as400$des$*OPEN3*EC76FC0DEF5B0A83", srcPublished},
+		{"juniper-ive", "hashcat", "", "3u+UR6n8AgABAAAAHxxdXKmiOmUoqKnZlf8lTOhlPYy93EAkbPfs5+49YLFd/B1+omSKbW7DoqNM40/EeVnwJ8kYoXv9zy9D5C5m5A==", srcPublished},
 		{"iphone-passcode", "hashcat", "", "$uido$77889b1bca161ce876d976a102c7bf82$3090545724551425617156367874312887832777$50000$2d4c86b71c0c04129a47c6468e2437d1fecd88e232a7b15112d5364682dc391dbbbb921cf6e02664", srcPublished},
 		{"cryptoapi", "hashcat", "", "$cryptoapi$9$2$03000000000000000000000000000000$00000000000000000000000000000000$d1d20e91a8f2e18881dc79369d8af761", srcPublished},
 		{"rar3p", "hashcat", "", "$RAR3$*1*e54a73729887cb53*49b0a846*16*14*1*34620bcca8176642a210b1051901921e*30", srcPublished},
