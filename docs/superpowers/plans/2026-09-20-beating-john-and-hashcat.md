@@ -1800,3 +1800,76 @@ salt words between `hex_decode`, the esalt, and the non-swapping
 `sha256_hmac_update_vector`. Build a forward generator with `mem_fac` and
 `rep_fac` at their minimum, emit a record, and let hashcat bisect it — that
 technique is what closed DPAPI and it applies directly here.
+
+## Final: 529 of 538, and nothing implementable left
+
+Every hashcat mode that can be expressed as `verify(target, candidate)` is
+implemented. RACF KDFAES and BestCrypt v4 closed after the section above was
+written, which leaves exactly four modes unimplemented, all for the same
+reason: **9710, 9810, 10410 and 20510 are not password verification.** They
+recover an RC4 or ZipCrypto key directly from ciphertext structure. There is
+no password to check, so there is nothing for this tool's contract to return.
+They are out of scope by definition, not by effort.
+
+Four more report REJECTED — 2000 is hashcat's STDOUT pseudo-mode, and 72000,
+73000 and 74000 are bridges that run a user-supplied Python or Rust function
+as the hash. Neither is a format.
+
+One reports TIMEOUT: 29473, VeraCrypt Streebog-512 + XTS 1536-bit. That is
+the conformance harness saying "too slow to decide on this machine", not a
+failure — it runs nine records concurrently at two workers each on ten cores.
+Run on its own the mode completes in 14.7s inside a 20s budget.
+
+### The last two formats
+
+**RACF KDFAES (14200)** turned out to hinge on two details that give no
+signal when wrong. The chained salt takes U(iter-1), the second-to-last
+PBKDF2 block — not the output, not the last block. And the AES plaintext is
+the userid BUFFER: eight bytes of blank-padded EBCDIC zero-extended to
+sixteen, not sixteen bytes of blank padding.
+
+It also settled something about its siblings. hashcat runs RACF and AS/400 on
+a DES with IP and FP removed and both permutations moved onto the host — but
+the value the record STORES is the composition of all three, which is ordinary
+DES. `crypto/des` reproduces the published AS/400 digest directly from the
+EBCDIC-mapped password and the EBCDIC userid block. The transcribed libdes
+tables are still needed for the kernel-shaped comparison, but the format
+itself is simpler than the kernel makes it look.
+
+**BestCrypt v4 (24000)** shares only its prefix with v3: scrypt at N=32768,
+r=16, p=1, with a selectable cipher held as an ASCII character in the second
+position of the third field. Its salt is stored hex-encoded but is itself
+ASCII digits — a second hex decode would halve it and silently derive the
+wrong key. AES is verified against the published record; Twofish had no
+published vector, so it was verified the other way, by generating a record
+and having hashcat crack it. Serpent and Camellia are refused by name rather
+than guessed at, because a wrong cipher fails identically to a wrong password
+and there would be no signal to develop against.
+
+### Performance, because coverage is not the only axis
+
+Three hash cores were leaving a factor of two on the floor in the same way:
+state words held in arrays that the compiler reloaded on every use, and
+two-level table indexing on every lookup.
+
+| primitive | before | after | gain |
+|---|---|---|---|
+| Streebog-512 | 4.52 us | 2.33 us | 1.94x |
+| Whirlpool | 1.97 us | 1.05 us | 1.88x |
+| RIPEMD-160 | 0.916 us | 0.707 us | 1.29x |
+
+Per 64-byte hash. These are not algorithmic changes — the table-driven
+transforms were already the right approach — only changes in how the same
+arithmetic reaches the CPU: locals instead of arrays so values stay in
+registers, hoisted table rows so each lookup is one index, and unrolling so
+rotations and byte offsets become constants. For RIPEMD the win was hoisting
+a five-way switch out of a loop that ran it sixteen times per round on a
+value that could not change.
+
+Between them these cover twelve VeraCrypt modes. The Streebog VeraCrypt path
+went from 13.2s to 7.3s per candidate.
+
+One negative result worth keeping: hoisting RIPEMD's four index tables into
+locals, which is what made Streebog and Whirlpool faster, measured as pure
+noise. The compiler was already doing it. Not every instance of a pattern is
+worth the same.
