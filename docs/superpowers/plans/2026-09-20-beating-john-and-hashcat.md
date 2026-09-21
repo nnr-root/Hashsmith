@@ -659,37 +659,45 @@ passwords: none accepted.
 The lesson is narrower than "checks should be loose". The tags added nothing on
 top of 2^-104; they were pure format assumption wearing the clothes of rigour.
 
-### The 14 timeouts are honest, which took measuring to say
+### CORRECTED: the VeraCrypt timeouts are MARGINAL, not inherent
 
-Every mode that times out in the conformance run is VeraCrypt, and only the
-RIPEMD-160, Whirlpool and Streebog variants — never the SHA ones. That
-asymmetry looks like a bug, so it was measured rather than assumed. PBKDF2 at
-20,000 iterations:
+An earlier version of this section concluded that all fourteen timing-out modes
+were "correct and slow, not broken", on the strength of a cost measurement and
+some arithmetic. Both were taken on the contaminated machine described in the
+correction above, and both were wrong by about a factor of two.
 
-| PRF | cost |
-|---|---|
-| SHA-256 | 9.7 ms |
-| SHA-512 | 13.6 ms |
-| RIPEMD-160 | 178.6 ms |
-| Whirlpool | 180.4 ms |
-| Streebog-512 | 385.4 ms |
+Re-measured on a quiet machine, PBKDF2 at 20,000 iterations:
 
-Splitting raw hashing from the HMAC wrapper showed the wrapper costs the same
-2.4x for SHA-512 and RIPEMD-160, so the gap is the hash itself: SHA-512 has a
-Go assembly implementation and the other three are pure Go. Streebog's is
-already table-driven, which is the fast shape.
+| PRF | contaminated | clean |
+|---|---|---|
+| SHA-256 | 9.7 ms | 7 ms |
+| SHA-512 | 13.6 ms | 9 ms |
+| RIPEMD-160 | 178.6 ms | 111 ms |
+| Whirlpool | 180.4 ms | 106 ms |
+| Streebog-512 | 385.4 ms | 215 ms |
 
-So the arithmetic decides it. VeraCrypt runs 500,000 PBKDF2 iterations, which
-at 23.5 µs per HMAC-Streebog operation is around 23 seconds for ONE candidate.
-Closing the gap would need roughly a 20x speedup, not the 2x a pure-Go
-implementation might yield — and a change tried on Streebog's hot loop measured
-2%, inside the noise, so it was reverted rather than committed with a claim it
-could not support.
+The RATIOS survive — Streebog is still ~24x SHA-512, and the reason is still
+that SHA-512 has a Go assembly implementation while the others are pure Go —
+so "the gap is the hash, not the HMAC wrapper" stands. What does not survive is
+the conclusion.
 
-These modes are therefore correct and slow, not broken, and the per-record
-timeout is doing exactly what it was built to do: say "this machine was too
-slow to decide" instead of "this mode failed". Worth recording so the next
-person to see fourteen timeouts does not go looking for the bug.
+At 215 ms per 20,000 iterations, VeraCrypt's 500,000 come to about **5.4
+seconds per candidate**, not the 23 seconds computed from the inflated figures.
+The conformance harness gives each mode 20 seconds and four candidates, so
+these modes land at roughly 21 seconds against a 20-second budget: **right on
+the line, not far past it.**
+
+And they behave like it. A read-only run on the clean machine reported 456
+cracked and 12 timeouts; the regeneration a minute later reported 455 and 13.
+One mode — `-m 29481`, VeraCrypt Streebog-512 + XTS 512 with boot mode — moved
+from TIMEOUT to CRACKED and is now pinned there.
+
+So the honest statement is that these modes are MARGINAL on this machine rather
+than out of reach, they will flicker with load and hardware, and the
+keep-CRACKED rule added earlier is doing exactly the job it was written for:
+once a mode is pinned CRACKED, a later timeout cannot silently unpin it.
+
+Conformance on a quiet machine: **455 of 538 (84.6%)**, with 13 timeouts.
 
 ### Still open
 
@@ -1367,6 +1375,7 @@ are ruled out.
 
 ### Still open
 
-- 66 unimplemented hashcat modes. Conformance is 454 of 538 (84.4%).
+- 66 unimplemented hashcat modes. Conformance is 455 of 538 (84.6%) on a quiet
+  machine, with 13 VeraCrypt modes sitting right at the per-record timeout.
 - John's rule corpus reads at 98.4%. The four lines left expand to millions of
   rules each and are refused by design, so this item is closed.
