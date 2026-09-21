@@ -268,6 +268,7 @@ func compatibilityHashAliasSeed() map[string]string {
 
 		// ── Hashcat: disk encryption ──────────────────────────────────────────────
 		"14600": "luks", "34100": "luks2",
+		"18400": "odf", "18600": "odf",
 		"15300": "dpapi-masterkey", "15310": "dpapi-masterkey",
 		"15900": "dpapi-masterkey", "15910": "dpapi-masterkey", "22100": "bitlocker",
 		"6211": "truecrypt", "6212": "truecrypt", "6213": "truecrypt",

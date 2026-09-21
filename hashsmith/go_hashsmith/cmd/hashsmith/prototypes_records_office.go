@@ -39,6 +39,8 @@ func officePrototypes() []hashid.Prototype {
 			},
 			Prevalence: 10, Rationale: "$oldoffice$ type 3/4 is Hashcat mode 9800, the RC4+SHA-1 verifier for the same 97-2003 encryption; seen less often than the MD5 variant above because most legacy oldoffice dumps predate the SHA-1 revision",
 		},
+		hasPrefixProto("$odf$*", "OpenDocument (ODF) encrypted document", 14,
+			"LibreOffice and OpenOffice documents are common in European public-sector and academic material, so password-protected ODF turns up regularly", "odf"),
 		hasPrefixProto("$office$", "MS Office 2007/2010/2013", 30,
 			"the $office$ record spans Hashcat modes 9400-9600, covering three consecutive Office releases, giving it more real-world coverage than either single-release $oldoffice$ variant above", "office"),
 		hasPrefixProto("$mysqlna$", "MySQL CRAM-SHA1 auth", 10,
