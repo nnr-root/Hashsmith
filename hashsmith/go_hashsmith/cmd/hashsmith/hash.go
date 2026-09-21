@@ -178,6 +178,12 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 	case "sha3_384":
 		sum := sha3.Sum384([]byte(text))
 		return hex.EncodeToString(sum[:]), nil
+	case "md6-256":
+		sum, err := md6Sum256([]byte(text))
+		if err != nil {
+			return "", err
+		}
+		return hex.EncodeToString(sum), nil
 	case "whirlpool":
 		h := newWhirlpool()
 		_, _ = h.Write([]byte(text))

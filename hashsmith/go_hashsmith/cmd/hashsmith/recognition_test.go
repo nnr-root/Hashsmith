@@ -129,7 +129,18 @@ func TestRecognitionAccuracy(t *testing.T) {
 //     Oracle target would pay a second slow derivation to cover a format it
 //     is far more common than. It is reachable with -t android-fde-samsung or
 //     -m 12900.
-const detectableFloor = 201
+//
+//   - md6-256 (Hashcat 34600). Its record is a bare 64-hex digest, the same
+//     shape as SHA-256, and unlike domino5 it COULD join that batch: MD6 goes
+//     through hashText like any other raw hash. The objection is cost, not
+//     structure. One MD6-256 compression is 104 rounds of 16 steps — 1664 word
+//     operations against SHA-256's 64 — so it is on the order of a thousand
+//     times the work per candidate. Offering it to auto-detection would put
+//     that on every bare 64-hex crack, which is one of the most common inputs
+//     this tool sees, to cover a SHA-3 candidate that lost in 2009 and is used
+//     essentially nowhere. It is reachable with -t md6-256 or -m 34600, and it
+//     is a first-class hash for the `hash` side of the tool.
+const detectableFloor = 202
 
 // undetectableByDesign names types that must NEVER be reachable from
 // auto-detection, and so are excluded from the count above rather than

@@ -68,7 +68,7 @@ func compatibilityHashAliasSeed() map[string]string {
 		"1700": "sha512", "1770": "sha512-utf16le",
 		"10800": "sha384", "10870": "sha384-utf16le",
 		"600": "blake2b", "31000": "blake2s", "34800": "blake2b256",
-		"6000": "ripemd160", "6100": "whirlpool",
+		"6000": "ripemd160", "6100": "whirlpool", "34600": "md6-256",
 		// RIPEMD-128/256 have no Hashcat mode; John names them directly.
 		"ripemd-128": "ripemd128", "ripemd-256": "ripemd256", "ripemd-320": "ripemd320",
 		"6900": "gost", "11700": "streebog256", "11800": "streebog512", "31100": "sm3", "33600": "ripemd320",
@@ -356,7 +356,7 @@ func compatibilityHashAliasSeed() map[string]string {
 		"24700": "stuffit5", "24600": "sqlcipher",
 		"14500": "cryptoapi", "25400": "pdf-user-owner", "23700": "rar3p",
 		"8800": "android-fde", "12900": "android-fde-samsung",
-		"26500": "iphone-passcode", "8501": "as400-des", "8500": "racf", "32700": "kremlin", "28100": "windows-hello", "501": "juniper-ive",
+		"26500": "iphone-passcode", "8501": "as400-des", "8500": "racf", "32700": "kremlin", "23900": "bestcrypt-v3", "28100": "windows-hello", "501": "juniper-ive",
 		"27700": "multibit", "29800": "multibit", "22700": "multibit-hd",
 		"29910": "encdatavault", "29920": "encdatavault",
 		"29930": "encdatavault", "29940": "encdatavault",
