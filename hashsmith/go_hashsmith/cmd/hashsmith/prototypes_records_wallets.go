@@ -449,6 +449,8 @@ func webFrameworkPrototypes() []hashid.Prototype {
 		// LUKS2 records carry their version in the second field, so the more
 		// specific prototype goes first; the two formats share nothing past the
 		// prefix except the anti-forensic split.
+		hasPrefixProto("$DPAPImk$", "DPAPI masterkey file", 18,
+			"DPAPI protects saved browser and Windows credentials, so masterkey files are a standard target in Windows forensics", "dpapi-masterkey"),
 		hasPrefixProto("$luks$2$", "LUKS v2 encrypted volume", 12,
 			"LUKS2 has been the cryptsetup default since 2018, so it is now the common case on Linux full-disk encryption", "luks2"),
 		hasPrefixProto("$luks$", "LUKS encrypted volume", 15,

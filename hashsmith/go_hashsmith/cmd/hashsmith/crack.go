@@ -2823,6 +2823,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyPhpass(targetHash, candidate)
 	case "drupal7":
 		return verifyDrupal7(targetHash, candidate)
+	case "dpapi-masterkey":
+		return verifyDPAPIMasterKey(targetHash, candidate)
 	case "luks2":
 		return verifyLUKS2(targetHash, candidate)
 	case "luks":
