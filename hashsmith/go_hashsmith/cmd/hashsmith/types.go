@@ -415,6 +415,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"veracrypt-streebog512-boot-xts1024", "VeraCrypt boot-mode Streebog-512 up to two-cipher XTS, Hashcat 13782/29482"},
 			{"veracrypt-streebog512-boot-xts1536", "VeraCrypt boot-mode Streebog-512 up to three-cipher XTS, Hashcat 13783/29483"},
 			{"bitlocker", "BitLocker (1M-round SHA-256 + AES-CTR)"},
+			{"luks2", "LUKS v2 — Argon2id/Argon2i/PBKDF2 keyslot, Hashcat 34100"},
 			{"luks", "LUKS v1 — AES/Twofish, XTS/CBC, SHA-1/256/512/RIPEMD-160 (use luks2smith)"},
 			{"luks-sha1-aes", "LUKS v1 SHA-1 + AES, Hashcat 29511"},
 			{"luks-sha1-serpent", "LUKS v1 SHA-1 + Serpent, Hashcat 29512"},

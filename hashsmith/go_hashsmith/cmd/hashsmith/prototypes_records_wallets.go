@@ -446,6 +446,11 @@ func webFrameworkPrototypes() []hashid.Prototype {
 		predicateProto(isDrupal7Hash, "Drupal 7 password hash", hashid.TierSignature,
 			"record prefix $S$ with a fixed 55-char total length",
 			15, "Drupal 7 remained in active use and received official security support into 2025, a much longer tail than most CMS major versions get, so its password hash still recurs in Drupal-site credential dumps", "drupal7"),
+		// LUKS2 records carry their version in the second field, so the more
+		// specific prototype goes first; the two formats share nothing past the
+		// prefix except the anti-forensic split.
+		hasPrefixProto("$luks$2$", "LUKS v2 encrypted volume", 12,
+			"LUKS2 has been the cryptsetup default since 2018, so it is now the common case on Linux full-disk encryption", "luks2"),
 		hasPrefixProto("$luks$", "LUKS encrypted volume", 15,
 			"LUKS is the standard Linux full-disk-encryption format, so its header recurs wherever an encrypted Linux volume or disk image is seized", "luks"),
 		// Fixed literal prefix ("$8$") plus an exact total length (61).

@@ -267,7 +267,7 @@ func compatibilityHashAliasSeed() map[string]string {
 		"19000": "qnx-md5", "19100": "qnx-sha256", "19200": "qnx-sha512", "19210": "qnx-sha512",
 
 		// ── Hashcat: disk encryption ──────────────────────────────────────────────
-		"14600": "luks", "22100": "bitlocker",
+		"14600": "luks", "34100": "luks2", "22100": "bitlocker",
 		"6211": "truecrypt", "6212": "truecrypt", "6213": "truecrypt",
 		"6221": "truecrypt", "6222": "truecrypt", "6223": "truecrypt",
 		"6231": "truecrypt-whirlpool", "6232": "truecrypt-whirlpool-xts1024", "6233": "truecrypt-whirlpool-xts1536",

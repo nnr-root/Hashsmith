@@ -704,8 +704,17 @@ func runCrack(args []string) error {
 	}
 
 	w := *workers
+	explicitWorkers := w >= 1
 	if w < 1 {
 		w = runtime.NumCPU()
+	}
+	// A memory-hard format can want more RAM per candidate than the machine
+	// has cores' worth. An explicit -p is always honoured; the default is not.
+	if !explicitWorkers && len(targets) > 0 {
+		if capped, note := workerCapForMemory(w, *typ, targets[0]); note != "" {
+			w = capped
+			fmt.Fprintln(os.Stderr, note)
+		}
 	}
 	sn := *sessName
 	if sn == "" {
@@ -2814,6 +2823,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyPhpass(targetHash, candidate)
 	case "drupal7":
 		return verifyDrupal7(targetHash, candidate)
+	case "luks2":
+		return verifyLUKS2(targetHash, candidate)
 	case "luks":
 		return verifyLUKS(targetHash, candidate)
 	case "cisco8":
