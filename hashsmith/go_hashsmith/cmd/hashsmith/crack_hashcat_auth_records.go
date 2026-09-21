@@ -24,8 +24,10 @@ import (
 )
 
 func verifyPostgresCRAM(target, candidate string) (bool, error) {
+	// John emits "$postgres$" and also accepts "$postgre$" for older records;
+	// the body is identical either way.
 	parts := strings.Split(target, "$")
-	if len(parts) != 3 || parts[0] != "" || parts[1] != "postgres" {
+	if len(parts) != 3 || parts[0] != "" || (parts[1] != "postgres" && parts[1] != "postgre") {
 		return false, errors.New("invalid PostgreSQL CRAM-MD5 record")
 	}
 	fields := strings.Split(parts[2], "*")

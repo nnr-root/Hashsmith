@@ -220,7 +220,7 @@ PKZIP $pkzip$	NOT-DETECTED
 PKZIP $pkzip2$	CRACKED
 po	NOT-FOUND
 postgres $postgres$	CRACKED
-postgres $postgre$	NOT-DETECTED
+postgres $postgre$	CRACKED
 PST $pst$	NOT-DETECTED
 PuTTY $putty$	NOT-DETECTED
 pwsafe $pwsafe$	CRACKED

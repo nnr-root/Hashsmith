@@ -55,6 +55,9 @@ func officePrototypes() []hashid.Prototype {
 			"XMPP SCRAM PBKDF2-SHA1 stored keys (Hashcat mode 23200) appear only where an XMPP server's own authentication database is captured, a narrower target than XMPP's overall deployment", "xmpp-scram"),
 		hasPrefixProto("$postgres$", "PostgreSQL CRAM-MD5 auth", 20,
 			"PostgreSQL's MD5 challenge-response (Hashcat mode 11100) was the default auth method before SCRAM-SHA-256 arrived in PostgreSQL 10, and many self-hosted instances still run with it", "postgres-cram"),
+		// John's older spelling of the same record, one character short.
+		hasPrefixProto("$postgre$", "PostgreSQL CRAM-MD5 auth (John legacy spelling)", 4,
+			"John accepts this shortened envelope for records written by older versions", "postgres-cram"),
 		hasPrefixProto("$SNMPv3$", "SNMPv3 USM auth", 10,
 			"SNMPv3 USM auth (Hashcat modes 25000/25100) is less common than legacy SNMP v1/v2c community-string captures, since many network deployments never migrated off the weaker versions", "snmpv3"),
 		// The legacy branch tests "@m@" and "@m," in one `if` for QNX's
