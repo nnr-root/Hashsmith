@@ -545,6 +545,8 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"cryptoapi", "Linux Kernel Crypto API, RIPEMD-160 key + one AES block, Hashcat 14500"},
 			{"pdf-user-owner", "PDF 1.4-1.6 accepting either the user or the owner password, Hashcat 25400"},
 			{"rar3p", "RAR3 with -p (file data encrypted, stored method only), Hashcat 23700"},
+			{"android-fde", "Android full-disk encryption (crypto footer, <= 4.3), Hashcat 8800"},
+			{"android-fde-samsung", "Samsung Android FDE, PBKDF2-HMAC-SHA256 + HMAC, Hashcat 12900"},
 			{"pkzip-masterkey", "PKZIP/ZipCrypto 96-bit master key state, Hashcat 20500 (a bare 24-hex record, so -t is required)"},
 			{"plaintext", "The target IS the password, Hashcat 99999 — for exercising a wordlist or ruleset"},
 		}},

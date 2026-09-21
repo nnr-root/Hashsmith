@@ -121,7 +121,15 @@ func TestRecognitionAccuracy(t *testing.T) {
 //     check before trying the owner one, doubling the work on every PDF to
 //     reach a credential most callers are not asking for. It is reachable
 //     with -t pdf-user-owner or -m 25400.
-const detectableFloor = 200
+//
+//   - android-fde-samsung (Hashcat 12900). Its record is 160 bare hex
+//     characters, the same shape as an Oracle 12c verifier, which already
+//     claims it. Offering both was tried; TestOracle12cVector rejected it.
+//     Oracle 12c is PBKDF2-SHA512 and Samsung FDE is PBKDF2-SHA256, so every
+//     Oracle target would pay a second slow derivation to cover a format it
+//     is far more common than. It is reachable with -t android-fde-samsung or
+//     -m 12900.
+const detectableFloor = 201
 
 // undetectableByDesign names types that must NEVER be reachable from
 // auto-detection, and so are excluded from the count above rather than

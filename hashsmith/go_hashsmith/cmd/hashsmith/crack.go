@@ -2711,6 +2711,10 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyPDFUserOrOwner(targetHash, candidate)
 	case "rar3p":
 		return verifyRAR3p(targetHash, candidate)
+	case "android-fde":
+		return verifyAndroidFDE(targetHash, candidate)
+	case "android-fde-samsung":
+		return verifyAndroidSamsungFDE(targetHash, candidate)
 	case "multibit":
 		return verifyMultiBit(targetHash, candidate)
 	case "multibit-hd":

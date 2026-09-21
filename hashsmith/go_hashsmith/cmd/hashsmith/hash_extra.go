@@ -355,6 +355,7 @@ func compatibilityHashAliasSeed() map[string]string {
 		"8600": "domino5", "8700": "domino6", "9100": "domino8",
 		"24700": "stuffit5", "24600": "sqlcipher",
 		"14500": "cryptoapi", "25400": "pdf-user-owner", "23700": "rar3p",
+		"8800": "android-fde", "12900": "android-fde-samsung",
 		"27700": "multibit", "29800": "multibit", "22700": "multibit-hd",
 		"29910": "encdatavault", "29920": "encdatavault",
 		"29930": "encdatavault", "29940": "encdatavault",

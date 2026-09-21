@@ -75,6 +75,8 @@ func archivePrototypes() []hashid.Prototype {
 		hasPrefixProto("SQLCIPHER*", "SQLCipher database", 12,
 			"SQLCipher backs many mobile applications' local databases, so it turns up throughout mobile forensics",
 			"sqlcipher"),
+		hasPrefixProto("$fde$", "Android full-disk encryption", 14,
+			"Android's pre-5.0 crypto footer is a standard artefact in mobile forensics on older devices", "android-fde"),
 		hasPrefixProto("$cryptoapi$", "Linux Kernel Crypto API volume", 5,
 			"a 2.4-era loop-AES construction; effectively only seen on very old Linux images", "cryptoapi"),
 		hasPrefixProto("$zip3$", "PKWARE SecureZIP (AES)", 8,
