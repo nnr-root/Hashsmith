@@ -141,3 +141,34 @@ func shouldNormalizeTarget(explicitType string) bool {
 	t := strings.TrimSpace(explicitType)
 	return t == "" || strings.EqualFold(t, "auto")
 }
+
+// resolveCrackTarget decides whether a crack target should be read as an
+// encoded digest and rewritten to hex, returning the target to use and the
+// encoding name when one was applied ("" when the input is used as given).
+//
+// The rule is that reinterpreting the input as an encoding is a LAST resort.
+// normalizeHashInput knows nothing about hash shapes — it asks only whether
+// the string decodes to something of a plausible digest length — and real
+// hashes satisfy that by accident all the time. A 13-character descrypt hash
+// is valid z-base-32 and decodes to eight bytes, which is exactly a half-MD5,
+// so normalizing first turned `crack CCNf8Sbh3HDfQ` into attempts at mysql323,
+// cisco-pix and half-md5 while descrypt was never tried at all. identify got
+// the same input right, because it ranks candidates by evidence and rules the
+// encodings out as weaker; this is how crack comes to agree with it.
+//
+// An explicit -t suppresses the rewrite entirely: the caller has said what the
+// bytes are, and second-guessing that is never an improvement.
+func resolveCrackTarget(target, explicitType string) (resolved, encoding string) {
+	if !shouldNormalizeTarget(explicitType) {
+		return target, ""
+	}
+	normalized, enc := normalizeHashInput(target)
+	if enc == "" {
+		return target, ""
+	}
+	// Anything that already reads as a hash keeps its original spelling.
+	if len(detectHashTypes(target)) > 0 {
+		return target, ""
+	}
+	return normalized, enc
+}

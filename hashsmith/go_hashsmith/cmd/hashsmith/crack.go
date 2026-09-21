@@ -1757,9 +1757,9 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 			target[:strings.IndexByte(target, ':')])
 		target = stripped
 	}
-	if normalized, enc := normalizeHashInput(target); shouldNormalizeTarget(explicitType) && enc != "" {
+	if resolved, enc := resolveCrackTarget(target, explicitType); enc != "" {
 		clrYellow.Fprintf(os.Stderr, "Detected %s encoded hash — normalizing to hex\n", enc)
-		target = normalized
+		target = resolved
 	}
 
 	// --show reports the potfile entry (if any) for this hash and stops.

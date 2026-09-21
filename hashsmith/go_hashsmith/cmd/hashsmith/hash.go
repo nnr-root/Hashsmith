@@ -1,7 +1,8 @@
 package main
 
 import (
-	"bytes"
+	"crypto/subtle"
+
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/rand"
@@ -14,6 +15,7 @@ import (
 	"flag"
 	"fmt"
 	"hash"
+	"hashsmith-go/internal/argon2d"
 	"io"
 	"strconv"
 	"strings"
@@ -573,9 +575,13 @@ func verifyArgon2(encoded string, password string) bool {
 	if len(parts) != 6 || parts[0] != "" || parts[2] != "v=19" {
 		return false
 	}
-	// Supported variants: argon2id and argon2i (argon2d isn't in the Go library).
+	// All three PHC variants. argon2d is not in x/crypto, which is why this
+	// used to refuse it — but this repo has carried its own implementation
+	// since KeePass needed one (internal/argon2d), and the detection table
+	// has always claimed $argon2d$, so refusing it here meant identify named
+	// a type that crack could not then use.
 	variant := parts[1]
-	if variant != "argon2id" && variant != "argon2i" {
+	if variant != "argon2id" && variant != "argon2i" && variant != "argon2d" {
 		return false
 	}
 	params := parts[3]
@@ -627,10 +633,13 @@ func verifyArgon2(encoded string, password string) bool {
 		return false
 	}
 	var got []byte
-	if variant == "argon2i" {
+	switch variant {
+	case "argon2i":
 		got = argon2.Key([]byte(password), salt, iter, mem, parallel, uint32(len(expected)))
-	} else {
+	case "argon2d":
+		got = argon2d.DKey([]byte(password), salt, iter, mem, parallel, uint32(len(expected)))
+	default:
 		got = argon2.IDKey([]byte(password), salt, iter, mem, parallel, uint32(len(expected)))
 	}
-	return bytes.Equal(got, expected)
+	return subtle.ConstantTimeCompare(got, expected) == 1
 }

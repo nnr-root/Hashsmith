@@ -1,0 +1,88 @@
+package main
+
+import "testing"
+
+// TestEncodingGuessDoesNotOutrankAHashMatch pins the rule that a crack target
+// which already reads as a hash is never rewritten as an encoded digest.
+//
+// This completes defect F. That fix stopped an explicit -t from being
+// overruled by the normalizer, but left auto-detection — the far more common
+// path — taking the encoding reading instead of the hash one.
+//
+// The case that motivated it: a descrypt hash is thirteen characters from the
+// crypt-64 alphabet, which is also valid z-base-32 and decodes to eight bytes
+// — the length of a half-MD5. crack used to take that reading and try
+// mysql323, cisco-pix and half-md5, never descrypt, while identify on the same
+// input reported descrypt correctly.
+func TestEncodingGuessDoesNotOutrankAHashMatch(t *testing.T) {
+	// Every one of these is a real hash that normalizeHashInput alone would
+	// happily reinterpret as some encoding.
+	for _, tc := range []struct{ name, target string }{
+		{"john descrypt vector", "CCNf8Sbh3HDfQ"},
+		{"john descrypt vector with a dot", "CC4rMpbg9AMZ."},
+		// The record from defect F, which was fixed only for the explicit -t
+		// path; auto-detection kept rewriting it until this rule landed.
+		{"hashcat descrypt record", "24leDr0hHfb3A"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, enc := normalizeHashInput(tc.target); enc == "" {
+				t.Skipf("normalizeHashInput no longer rewrites %q; the guard is moot for it", tc.target)
+			}
+			resolved, enc := resolveCrackTarget(tc.target, "")
+			if enc != "" || resolved != tc.target {
+				t.Fatalf("crack would rewrite %q as %s (%q); a hash match must win",
+					tc.target, enc, resolved)
+			}
+			if got := detectHashTypes(tc.target); len(got) == 0 {
+				t.Fatalf("%q is no longer detected as any hash type", tc.target)
+			}
+		})
+	}
+}
+
+// TestEncodingGuessStillAppliesWithNoHashMatch keeps the feature the rule
+// above narrows: an encoded digest that nothing recognises is still decoded.
+func TestEncodingGuessStillAppliesWithNoHashMatch(t *testing.T) {
+	// Base64 of the 16-byte MD5 of "abc" — no hash type claims this spelling.
+	const encoded = "kAFQmDzST7DWlj99KOF/cg=="
+	resolved, enc := resolveCrackTarget(encoded, "")
+	if enc == "" {
+		t.Fatalf("expected %q to be normalized, got it unchanged", encoded)
+	}
+	if resolved != "900150983cd24fb0d6963f7d28e17f72" {
+		t.Fatalf("normalized to %q, want the MD5 of \"abc\"", resolved)
+	}
+}
+
+// TestExplicitTypeStillSuppressesNormalization re-checks defect F's original
+// guarantee through the new entry point; TestExplicitTypeSuppressesNormalization
+// in phase0_input_test.go covers shouldNormalizeTarget directly.
+func TestExplicitTypeStillSuppressesNormalization(t *testing.T) {
+	const encoded = "kAFQmDzST7DWlj99KOF/cg=="
+	if resolved, enc := resolveCrackTarget(encoded, "md5"); enc != "" || resolved != encoded {
+		t.Fatalf("explicit -t was overridden: %q %q", resolved, enc)
+	}
+}
+
+// TestArgon2dVectors covers the PHC variant x/crypto does not provide. These
+// are John the Ripper's own argon2 test vectors; before this, identify named
+// "argon2" for them and crack then refused every one.
+func TestArgon2dVectors(t *testing.T) {
+	for _, tc := range []struct{ encoded, password string }{
+		{"$argon2d$v=19$m=4096,t=3,p=1$ZGFtYWdlX2RvbmU$w9w3s5/zV8+PcAZlJhnTCOE+vBkZssmZf6jOq3dKv50", "password"},
+		{"$argon2i$v=19$m=4096,t=3,p=1$ZGFtYWdlX2RvbmU$N59QwnpxDQZRj1/cO6bqm408dD6Z2Z9LKYpwFJSPVKA", "password"},
+		{"$argon2d$v=19$m=4096,t=3,p=1$c2hvcnRfc2FsdA$zMrTcOAOUje6UqObRVh84Pe1K6gumcDqqGzRM0ILzYmj", "sacrificed"},
+		{"$argon2i$v=19$m=4096,t=3,p=1$c2hvcnRfc2FsdA$1l4kAwUdAApoCbFH7ghBEf7bsdrOQzE4axIJ3PV0Ncrd", "sacrificed"},
+		{"$argon2d$v=19$m=16384,t=3,p=1$c2hvcnRfc2FsdA$TLSTPihIo+5F67Y1vJdfWdB9", "blessed_dead"},
+		{"$argon2i$v=19$m=16384,t=3,p=1$c2hvcnRfc2FsdA$vvjDVog22A5x9eljmB+2yC8y", "blessed_dead"},
+		{"$argon2d$v=19$m=16384,t=4,p=3$YW5vdGhlcl9zYWx0$yw93eMxC8REPAwbQ0e/q43jR9+RI9HI/DHP75uzm7tQfjU734oaI3dzcMWjYjHzVQD+J4+MG+7oyD8dN/PtnmPCZs+UZ67E+rkXJ/wTvY4WgXgAdGtJRrAGxhy4rD7d5G+dCpqhrog", "death_dying"},
+		{"$argon2i$v=19$m=16384,t=4,p=3$YW5vdGhlcl9zYWx0$K7unxwO5aeuZCpnIJ06FMCRKod3eRg8oIRzQrK3E6mGbyqlTvvl47jeDWq/5drF1COJkEF9Ty7FWXJZHa+vqlf2YZGp/4qSlAvKmdtJ/6JZU32iQItzMRwcfujHE+PBjbL5uz4966A", "death_dying"},
+	} {
+		if !verifyArgon2(tc.encoded, tc.password) {
+			t.Errorf("verifyArgon2 rejected the correct password for %.32s...", tc.encoded)
+		}
+		if verifyArgon2(tc.encoded, tc.password+"x") {
+			t.Errorf("verifyArgon2 accepted a wrong password for %.32s...", tc.encoded)
+		}
+	}
+}
