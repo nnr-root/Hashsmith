@@ -1,6 +1,6 @@
 package main
 
-// RIPEMD-128 / RIPEMD-256 / RIPEMD-320 (RIPEMD-160 comes from x/crypto).
+// RIPEMD-128 / RIPEMD-160 / RIPEMD-256 / RIPEMD-320.
 //
 // All four members of the family share one compression structure: two parallel
 // lines of 4 or 5 rounds over the same message block, differing only in the
@@ -15,6 +15,7 @@ package main
 
 import (
 	"encoding/binary"
+	"errors"
 	"hash"
 	"math/bits"
 )
@@ -82,8 +83,14 @@ func ripemdF(j int, x, y, z uint32) uint32 {
 // ripemdDigest is the shared state for every width in the family.  h holds 4,
 // 5, 8 or 10 words depending on the variant; wide reports whether the two
 // lines stay separate (256/320) or are folded together (128/160).
+//
+// h is a fixed array rather than a slice on purpose: it makes the whole digest
+// copyable by assignment, which is what lets Sum work on a copy and Reset
+// restore an initial value without allocating.  Both sit in PBKDF2's inner
+// loop, where VeraCrypt runs them 655,331 times per derived block.
 type ripemdDigest struct {
-	h      []uint32
+	h      [10]uint32
+	hn     int // words of h this variant uses
 	x      [64]byte
 	nx     int
 	length uint64
@@ -92,35 +99,58 @@ type ripemdDigest struct {
 	size   int  // digest length in bytes
 }
 
-func newRIPEMD128() hash.Hash {
-	return &ripemdDigest{h: []uint32{0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476}, rounds: 4, size: 16}
-}
+var (
+	ripemd128Init = ripemdDigest{
+		h:  [10]uint32{0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476},
+		hn: 4, rounds: 4, size: 16,
+	}
+	ripemd160Init = ripemdDigest{
+		h:  [10]uint32{0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0},
+		hn: 5, rounds: 5, size: 20,
+	}
+	ripemd256Init = ripemdDigest{
+		h: [10]uint32{
+			0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476,
+			0x76543210, 0xfedcba98, 0x89abcdef, 0x01234567,
+		},
+		hn: 8, rounds: 4, wide: true, size: 32,
+	}
+	ripemd320Init = ripemdDigest{
+		h: [10]uint32{
+			0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0,
+			0x76543210, 0xfedcba98, 0x89abcdef, 0x01234567, 0x3c2d1e0f,
+		},
+		hn: 10, rounds: 5, wide: true, size: 40,
+	}
+)
 
-func newRIPEMD256() hash.Hash {
-	return &ripemdDigest{h: []uint32{
-		0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476,
-		0x76543210, 0xfedcba98, 0x89abcdef, 0x01234567,
-	}, rounds: 4, wide: true, size: 32}
-}
+func newRIPEMD128() hash.Hash { d := ripemd128Init; return &d }
 
-func newRIPEMD320() hash.Hash {
-	return &ripemdDigest{h: []uint32{
-		0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0,
-		0x76543210, 0xfedcba98, 0x89abcdef, 0x01234567, 0x3c2d1e0f,
-	}, rounds: 5, wide: true, size: 40}
-}
+// newRIPEMD160 completes the family in this file.  The narrow 5-round path in
+// block5 already WAS RIPEMD-160 — only the constructor was missing, and
+// x/crypto/ripemd160 was used instead.  That package is deprecated and, more
+// to the point here, its digest implements no encoding.BinaryMarshaler, so
+// crypto/hmac cannot cache the ipad/opad states and re-compresses both on
+// every single PBKDF2 iteration.
+func newRIPEMD160() hash.Hash { d := ripemd160Init; return &d }
+
+func newRIPEMD256() hash.Hash { d := ripemd256Init; return &d }
+
+func newRIPEMD320() hash.Hash { d := ripemd320Init; return &d }
 
 func (d *ripemdDigest) Size() int      { return d.size }
 func (d *ripemdDigest) BlockSize() int { return 64 }
 
 func (d *ripemdDigest) Reset() {
-	switch {
-	case d.size == 16:
-		*d = *(newRIPEMD128().(*ripemdDigest))
-	case d.size == 32:
-		*d = *(newRIPEMD256().(*ripemdDigest))
+	switch d.size {
+	case 16:
+		*d = ripemd128Init
+	case 20:
+		*d = ripemd160Init
+	case 32:
+		*d = ripemd256Init
 	default:
-		*d = *(newRIPEMD320().(*ripemdDigest))
+		*d = ripemd320Init
 	}
 }
 
@@ -149,7 +179,6 @@ func (d *ripemdDigest) Write(p []byte) (int, error) {
 func (d *ripemdDigest) Sum(in []byte) []byte {
 	// Work on a copy so Sum does not disturb a digest that is still being fed.
 	c := *d
-	c.h = append([]uint32(nil), d.h...)
 
 	length := c.length
 	var pad [64]byte
@@ -293,4 +322,60 @@ func (d *ripemdDigest) block5(x *[16]uint32) {
 	d.h[3] = d.h[4] + a + bb
 	d.h[4] = d.h[0] + b + cc
 	d.h[0] = t
+}
+
+// ripemdMarshalMagic tags a serialised digest.  The trailing byte is the
+// digest size, so a state saved from one width can never be restored into
+// another — the two would otherwise be indistinguishable byte strings of
+// different lengths.
+const ripemdMarshalMagic = "hashsmith\x01ripemd\x01"
+
+// MarshalBinary, AppendBinary and UnmarshalBinary exist for crypto/hmac.
+//
+// hmac keeps the key's inner and outer states and restores them for every
+// message, but only when the hash can serialise itself; otherwise it
+// re-compresses the 64-byte ipad and opad blocks each time.  In PBKDF2 that is
+// the difference between two and four compressions per iteration, and
+// VeraCrypt's RIPEMD-160 KDF runs 655,331 iterations for each of ten derived
+// blocks.  Measured with x/crypto/sha512, which does implement this, hiding
+// the marshaler behind a wrapper costs 1.66x.
+func (d *ripemdDigest) MarshalBinary() ([]byte, error) {
+	return d.AppendBinary(make([]byte, 0, len(ripemdMarshalMagic)+1+40+64+8+1))
+}
+
+func (d *ripemdDigest) AppendBinary(b []byte) ([]byte, error) {
+	b = append(b, ripemdMarshalMagic...)
+	b = append(b, byte(d.size))
+	for i := 0; i < d.hn; i++ {
+		b = binary.BigEndian.AppendUint32(b, d.h[i])
+	}
+	b = append(b, d.x[:]...)
+	b = append(b, byte(d.nx))
+	return binary.BigEndian.AppendUint64(b, d.length), nil
+}
+
+func (d *ripemdDigest) UnmarshalBinary(b []byte) error {
+	if len(b) < len(ripemdMarshalMagic)+1 || string(b[:len(ripemdMarshalMagic)]) != ripemdMarshalMagic {
+		return errors.New("ripemd: invalid hash state identifier")
+	}
+	b = b[len(ripemdMarshalMagic):]
+	if int(b[0]) != d.size {
+		return errors.New("ripemd: hash state is for a different digest size")
+	}
+	b = b[1:]
+	if len(b) != d.hn*4+64+1+8 {
+		return errors.New("ripemd: invalid hash state size")
+	}
+	for i := 0; i < d.hn; i++ {
+		d.h[i] = binary.BigEndian.Uint32(b[i*4:])
+	}
+	b = b[d.hn*4:]
+	copy(d.x[:], b[:64])
+	b = b[64:]
+	d.nx = int(b[0])
+	if d.nx >= 64 {
+		return errors.New("ripemd: invalid buffered length in hash state")
+	}
+	d.length = binary.BigEndian.Uint64(b[1:])
+	return nil
 }

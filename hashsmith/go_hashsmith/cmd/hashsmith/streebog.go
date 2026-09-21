@@ -6,7 +6,9 @@ package main
 // standard. Pinned to the GOST test vectors in the tests.
 
 import (
+	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"hash"
 )
 
@@ -208,4 +210,72 @@ func reverseBytes(b []byte) {
 	for i, j := 0, len(b)-1; i < j; i, j = i+1, j-1 {
 		b[i], b[j] = b[j], b[i]
 	}
+}
+
+// streebogMarshalMagic tags a serialised digest. The trailing size byte keeps
+// a 256-bit state from being restored into a 512-bit digest, whose only other
+// difference is the initial h.
+const streebogMarshalMagic = "hashsmith\x01streebog\x01"
+
+// MarshalBinary, AppendBinary and UnmarshalBinary exist for crypto/hmac, which
+// caches a key's inner and outer states only when the hash can serialise
+// itself and otherwise re-compresses the ipad and opad blocks on every
+// message. VeraCrypt's Streebog-512 KDF is 500,000 PBKDF2 iterations per
+// derived block. See the same methods on ripemdDigest for the measurement.
+func (d *streebogDigest) MarshalBinary() ([]byte, error) {
+	return d.AppendBinary(make([]byte, 0, len(streebogMarshalMagic)+1+3*64+64+1))
+}
+
+func (d *streebogDigest) AppendBinary(b []byte) ([]byte, error) {
+	b = append(b, streebogMarshalMagic...)
+	b = append(b, byte(d.size))
+	for _, w := range [][8]uint64{d.h, d.n, d.s} {
+		for _, v := range w {
+			b = binary.BigEndian.AppendUint64(b, v)
+		}
+	}
+	b = append(b, d.buf[:]...)
+	return append(b, byte(d.nx)), nil
+}
+
+func (d *streebogDigest) UnmarshalBinary(b []byte) error {
+	if len(b) < len(streebogMarshalMagic)+1 || string(b[:len(streebogMarshalMagic)]) != streebogMarshalMagic {
+		return errors.New("streebog: invalid hash state identifier")
+	}
+	b = b[len(streebogMarshalMagic):]
+	if int(b[0]) != d.size {
+		return errors.New("streebog: hash state is for a different digest size")
+	}
+	b = b[1:]
+	if len(b) != 3*64+64+1 {
+		return errors.New("streebog: invalid hash state size")
+	}
+	for i, w := range []*[8]uint64{&d.h, &d.n, &d.s} {
+		for j := range w {
+			w[j] = binary.BigEndian.Uint64(b[i*64+j*8:])
+		}
+	}
+	b = b[3*64:]
+	copy(d.buf[:], b[:64])
+	d.nx = int(b[64])
+	if d.nx >= 64 {
+		return errors.New("streebog: invalid buffered length in hash state")
+	}
+	return nil
+}
+
+// streebogNativeDigest embeds hash.Hash, an interface, so the marshaler above
+// is NOT promoted through it — and crypto/hmac asks the outermost value. These
+// forwarders are what actually puts VeraCrypt's Streebog KDF on the fast path;
+// without them the methods exist and are never reached.
+func (d *streebogNativeDigest) MarshalBinary() ([]byte, error) {
+	return d.Hash.(*streebogDigest).MarshalBinary()
+}
+
+func (d *streebogNativeDigest) AppendBinary(b []byte) ([]byte, error) {
+	return d.Hash.(*streebogDigest).AppendBinary(b)
+}
+
+func (d *streebogNativeDigest) UnmarshalBinary(b []byte) error {
+	return d.Hash.(*streebogDigest).UnmarshalBinary(b)
 }

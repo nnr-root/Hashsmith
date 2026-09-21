@@ -29,7 +29,6 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/pbkdf2"
-	"golang.org/x/crypto/ripemd160"
 	"golang.org/x/crypto/twofish"
 	"golang.org/x/crypto/xts"
 )
@@ -89,19 +88,19 @@ var vcKDFs = []vcKDF{
 	{sha256.New, 500000},           // VeraCrypt SHA-256
 	{newWhirlpool, 500000},         // VeraCrypt Whirlpool
 	{newStreebog512Native, 500000}, // VeraCrypt Streebog-512
-	{ripemd160.New, 655331},        // VeraCrypt RIPEMD-160
-	{ripemd160.New, 327661},        // VeraCrypt boot RIPEMD-160
+	{newRIPEMD160, 655331},         // VeraCrypt RIPEMD-160
+	{newRIPEMD160, 327661},         // VeraCrypt boot RIPEMD-160
 	{sha256.New, 200000},           // VeraCrypt boot SHA-256
 	{newStreebog512Native, 200000}, // VeraCrypt boot Streebog-512
-	{ripemd160.New, 2000},          // TrueCrypt RIPEMD-160
-	{ripemd160.New, 1000},          // TrueCrypt boot RIPEMD-160
+	{newRIPEMD160, 2000},           // TrueCrypt RIPEMD-160
+	{newRIPEMD160, 1000},           // TrueCrypt boot RIPEMD-160
 }
 
 var tcKDFs = []vcKDF{
-	{ripemd160.New, 2000}, // TrueCrypt RIPEMD-160
-	{sha512.New, 1000},    // TrueCrypt SHA-512
-	{newWhirlpool, 1000},  // TrueCrypt Whirlpool
-	{ripemd160.New, 1000}, // TrueCrypt boot RIPEMD-160
+	{newRIPEMD160, 2000}, // TrueCrypt RIPEMD-160
+	{sha512.New, 1000},   // TrueCrypt SHA-512
+	{newWhirlpool, 1000}, // TrueCrypt Whirlpool
+	{newRIPEMD160, 1000}, // TrueCrypt boot RIPEMD-160
 }
 
 // verifyVeraCrypt checks a passphrase against a 512-byte volume header (hex).
@@ -134,7 +133,7 @@ func verifyCryptCascadeMode(targetHash, candidate, kdf string, bits int, vera, b
 	var iter int
 	switch kdf {
 	case "ripemd160":
-		newHash = ripemd160.New
+		newHash = newRIPEMD160
 		if vera {
 			iter = 655331
 			if boot {

@@ -26,7 +26,6 @@ import (
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/blake2s"
 	"golang.org/x/crypto/md4"
-	"golang.org/x/crypto/ripemd160"
 	"golang.org/x/crypto/scrypt"
 	xsha3 "golang.org/x/crypto/sha3"
 )
@@ -121,7 +120,7 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		h := sha1.Sum([]byte(text))
 		return hex.EncodeToString(h[:]), nil
 	case "ripemd160":
-		h := ripemd160.New()
+		h := newRIPEMD160()
 		_, _ = h.Write([]byte(text))
 		return hex.EncodeToString(h.Sum(nil)), nil
 	case "ripemd128":
@@ -267,7 +266,7 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 	case "hmac-sha3_512":
 		return hmacHex(newSHA3_512, text, salt), nil
 	case "hmac-ripemd160":
-		return hmacHex(ripemd160.New, text, salt), nil
+		return hmacHex(newRIPEMD160, text, salt), nil
 	case "hmac-ripemd320":
 		return hmacHex(newRIPEMD320, text, salt), nil
 	case "hmac-blake2s":
@@ -297,7 +296,7 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 	case "hmac-sha3_512-saltkey":
 		return hmacHex(newSHA3_512, salt, text), nil
 	case "hmac-ripemd160-saltkey":
-		return hmacHex(ripemd160.New, salt, text), nil
+		return hmacHex(newRIPEMD160, salt, text), nil
 	case "hmac-ripemd320-saltkey":
 		return hmacHex(newRIPEMD320, salt, text), nil
 	case "hmac-streebog256-saltkey":

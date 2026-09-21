@@ -24,7 +24,6 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/pbkdf2"
-	"golang.org/x/crypto/ripemd160"
 	"golang.org/x/crypto/twofish"
 	"golang.org/x/crypto/xts"
 )
@@ -193,7 +192,7 @@ func luksHasher(spec string) (func() hash.Hash, bool) {
 	case "sha512":
 		return sha512.New, true
 	case "ripemd160":
-		return ripemd160.New, true
+		return newRIPEMD160, true
 	case "whirlpool":
 		return newWhirlpool, true
 	}

@@ -5,7 +5,11 @@ package main
 // circulant tables and round constants are generated at init from the S-box, and
 // the whole thing is pinned to the published test vectors in the tests.
 
-import "hash"
+import (
+	"encoding/binary"
+	"errors"
+	"hash"
+)
 
 // whirlpoolSBox is the 256-entry Whirlpool substitution box.
 var whirlpoolSBox = [256]byte{
@@ -192,4 +196,49 @@ func addBits(counter *[32]byte, bits uint64) {
 		counter[i] = byte(carry)
 		carry >>= 8
 	}
+}
+
+// whirlpoolMarshalMagic tags a serialised digest.
+const whirlpoolMarshalMagic = "hashsmith\x01whirlpool\x01"
+
+// MarshalBinary, AppendBinary and UnmarshalBinary exist for crypto/hmac, which
+// caches a key's inner and outer states only when the hash can serialise
+// itself and otherwise re-compresses the ipad and opad blocks on every
+// message. VeraCrypt's Whirlpool KDF is 500,000 PBKDF2 iterations per derived
+// block, so that is 500,000 avoidable pairs of compressions. See the same
+// methods on ripemdDigest for the measurement.
+func (d *whirlpoolDigest) MarshalBinary() ([]byte, error) {
+	return d.AppendBinary(make([]byte, 0, len(whirlpoolMarshalMagic)+64+64+1+32))
+}
+
+func (d *whirlpoolDigest) AppendBinary(b []byte) ([]byte, error) {
+	b = append(b, whirlpoolMarshalMagic...)
+	for _, v := range d.state {
+		b = binary.BigEndian.AppendUint64(b, v)
+	}
+	b = append(b, d.buf[:]...)
+	b = append(b, byte(d.nx))
+	return append(b, d.length[:]...), nil
+}
+
+func (d *whirlpoolDigest) UnmarshalBinary(b []byte) error {
+	if len(b) < len(whirlpoolMarshalMagic) || string(b[:len(whirlpoolMarshalMagic)]) != whirlpoolMarshalMagic {
+		return errors.New("whirlpool: invalid hash state identifier")
+	}
+	b = b[len(whirlpoolMarshalMagic):]
+	if len(b) != 64+64+1+32 {
+		return errors.New("whirlpool: invalid hash state size")
+	}
+	for i := range d.state {
+		d.state[i] = binary.BigEndian.Uint64(b[i*8:])
+	}
+	b = b[64:]
+	copy(d.buf[:], b[:64])
+	b = b[64:]
+	d.nx = int(b[0])
+	if d.nx >= 64 {
+		return errors.New("whirlpool: invalid buffered length in hash state")
+	}
+	copy(d.length[:], b[1:])
+	return nil
 }

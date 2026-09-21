@@ -17,7 +17,6 @@ import (
 	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/blake2s"
 	"golang.org/x/crypto/md4"
-	"golang.org/x/crypto/ripemd160"
 )
 
 // rawHasher returns a function that writes the raw digest of s into dst and
@@ -60,7 +59,7 @@ func rawHasher(typ string) (func(dst []byte, s string) int, bool) {
 		}, true
 	case "ripemd160":
 		return func(dst []byte, s string) int {
-			h := ripemd160.New()
+			h := newRIPEMD160()
 			_, _ = h.Write([]byte(s))
 			return copy(dst, h.Sum(nil))
 		}, true
@@ -108,7 +107,7 @@ func rawHasherBytes(typ string) (func(dst, s []byte) int, bool) {
 		}, true
 	case "ripemd160":
 		return func(dst, s []byte) int {
-			h := ripemd160.New()
+			h := newRIPEMD160()
 			_, _ = h.Write(s)
 			return copy(dst, h.Sum(nil))
 		}, true

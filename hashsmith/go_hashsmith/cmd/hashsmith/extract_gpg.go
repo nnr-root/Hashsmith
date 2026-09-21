@@ -21,7 +21,6 @@ import (
 
 	"golang.org/x/crypto/cast5"
 	"golang.org/x/crypto/openpgp/armor"
-	"golang.org/x/crypto/ripemd160"
 )
 
 // ── GPG symmetric-encryption extraction (gpg2smith) ────────────────────────────
@@ -242,7 +241,7 @@ func gpgHashNew(algo int) (func() hash.Hash, error) {
 	case 2:
 		return sha1.New, nil
 	case 3:
-		return ripemd160.New, nil
+		return newRIPEMD160, nil
 	case 8:
 		return sha256.New, nil
 	case 9:

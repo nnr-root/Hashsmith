@@ -11,8 +11,6 @@ import (
 	"errors"
 	"math/big"
 	"strings"
-
-	"golang.org/x/crypto/ripemd160"
 )
 
 var (
@@ -103,7 +101,7 @@ func bitcoinPublicKey(private []byte, compressed bool) ([]byte, error) {
 
 func hash160(data []byte) []byte {
 	s := sha256.Sum256(data)
-	h := ripemd160.New()
+	h := newRIPEMD160()
 	_, _ = h.Write(s[:])
 	return h.Sum(nil)
 }
