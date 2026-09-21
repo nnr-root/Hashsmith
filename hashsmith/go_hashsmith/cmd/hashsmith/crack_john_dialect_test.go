@@ -163,3 +163,34 @@ func TestSHA1CryptAcceptsBothTrailingByteConventions(t *testing.T) {
 		}
 	}
 }
+
+// TestPBKDF2HMACRecordSeparators pins that either separator is read for any
+// algorithm in the "$pbkdf2-hmac-<alg>$" family.
+//
+// The separator is inconsistent within each tool, not just between them:
+// hashcat's SHA-1 record uses '$' and its SHA-512 record uses '.', while
+// John's SHA-1 record uses '.'. Hard-coding one per algorithm parsed three of
+// those four and refused the fourth.
+func TestPBKDF2HMACRecordSeparators(t *testing.T) {
+	for _, tc := range []struct{ record, password, origin string }{
+		// John's vectors: MD4 and MD5 with '$', SHA-1 and SHA-512 with '.'.
+		{"$pbkdf2-hmac-md4$1000$6d61676e756d$32ebfcea201e61cc498948916a213459", "magnum", "john"},
+		{"$pbkdf2-hmac-md5$1000$38333335343433323338$f445d6d0ed5cbe9fc12c03ea9530c1c6", "hashcat", "john"},
+		{"$pbkdf2-hmac-sha1$1000.fd11cde0.27de197171e6d49fc5f55c9ef06c0d8751cd7250", "3956", "john"},
+	} {
+		ok, err := verifyNetIQPBKDF2(tc.record, tc.password)
+		if err != nil || !ok {
+			t.Errorf("%s vector rejected: %q ok=%v err=%v", tc.origin, tc.record, ok, err)
+		}
+		if bad, _ := verifyNetIQPBKDF2(tc.record, tc.password+"x"); bad {
+			t.Errorf("%s vector accepted a wrong password: %q", tc.origin, tc.record)
+		}
+		if !isNetIQPBKDF2(tc.record) {
+			t.Errorf("%q is not recognised as a PBKDF2-HMAC record", tc.record)
+		}
+	}
+	// An unknown algorithm in the envelope must not be claimed.
+	if isNetIQPBKDF2("$pbkdf2-hmac-nosuchhash$1000$aa$bb") {
+		t.Error("an unknown algorithm was claimed as a PBKDF2-HMAC record")
+	}
+}

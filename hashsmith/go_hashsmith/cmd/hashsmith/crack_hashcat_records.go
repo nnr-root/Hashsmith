@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"golang.org/x/crypto/md4"
 	"hash"
 	"strconv"
 	"strings"
@@ -100,53 +101,81 @@ func isSSPR(target string) bool {
 	return strings.HasPrefix(target, "$sspr$")
 }
 
+// pbkdf2HMACAlgos are the hashes that appear in a "$pbkdf2-hmac-<alg>$"
+// record. hashcat reaches this family through NetIQ SSPR and publishes only
+// SHA-1 and SHA-512; John writes the same envelope for MD4 and MD5 too.
+var pbkdf2HMACAlgos = map[string]func() hash.Hash{
+	"md4":    md4.New,
+	"md5":    md5.New,
+	"sha1":   sha1.New,
+	"sha256": sha256.New,
+	"sha512": sha512.New,
+}
+
+// verifyNetIQPBKDF2 reads a "$pbkdf2-hmac-<alg>$<iterations><sep><salt><sep><digest>"
+// record, where salt and digest are hex.
+//
+// The separator is not consistent, and not between tools but WITHIN them:
+// hashcat's SHA-1 record uses '$' while its SHA-512 record uses '.', and
+// John's SHA-1 record uses '.'. This used to hard-code one separator per
+// algorithm, which meant hashcat's SHA-1 and John's SHA-512 both parsed and
+// John's SHA-1 did not. Either separator is accepted for any algorithm now;
+// nothing else distinguishes them, so nothing is lost by not caring.
 func verifyNetIQPBKDF2(target, candidate string) (bool, error) {
-	var newHash func() hash.Hash
-	var iterations int
-	var salt, want []byte
-	var err error
-	switch {
-	case strings.HasPrefix(target, "$pbkdf2-hmac-sha1$"):
-		parts := strings.Split(target, "$")
-		if len(parts) != 5 || parts[0] != "" || parts[1] != "pbkdf2-hmac-sha1" {
-			return false, errors.New("invalid NetIQ PBKDF2-SHA1 record")
-		}
-		iterations, err = strconv.Atoi(parts[2])
-		if err == nil {
-			salt, err = hex.DecodeString(parts[3])
-		}
-		if err == nil {
-			want, err = hex.DecodeString(parts[4])
-		}
-		newHash = sha1.New
-	case strings.HasPrefix(target, "$pbkdf2-hmac-sha512$"):
-		body := strings.TrimPrefix(target, "$pbkdf2-hmac-sha512$")
-		parts := strings.Split(body, ".")
-		if len(parts) != 3 {
-			return false, errors.New("invalid NetIQ PBKDF2-SHA512 record")
-		}
-		iterations, err = strconv.Atoi(parts[0])
-		if err == nil {
-			salt, err = hex.DecodeString(parts[1])
-		}
-		if err == nil {
-			want, err = hex.DecodeString(parts[2])
-		}
-		newHash = sha512.New
-	default:
-		return false, errors.New("invalid NetIQ PBKDF2 record")
+	algo, body, ok := splitPBKDF2HMACPrefix(target)
+	if !ok {
+		return false, errors.New("invalid PBKDF2-HMAC record")
 	}
-	if err != nil || iterations < 1 || iterations > maxKDFIterations ||
+	newHash := pbkdf2HMACAlgos[algo]
+
+	fields := strings.Split(body, "$")
+	if len(fields) != 3 {
+		fields = strings.Split(body, ".")
+	}
+	if len(fields) != 3 {
+		return false, errors.New("invalid PBKDF2-HMAC record fields")
+	}
+	iterations, err := strconv.Atoi(fields[0])
+	if err != nil {
+		return false, errors.New("invalid PBKDF2-HMAC iteration count")
+	}
+	salt, err := hex.DecodeString(fields[1])
+	if err != nil {
+		return false, errors.New("invalid PBKDF2-HMAC salt")
+	}
+	want, err := hex.DecodeString(fields[2])
+	if err != nil {
+		return false, errors.New("invalid PBKDF2-HMAC digest")
+	}
+	if iterations < 1 || iterations > maxKDFIterations ||
 		len(salt) == 0 || len(salt) > maxKDFFieldSize || len(want) != newHash().Size() {
-		return false, errors.New("invalid NetIQ PBKDF2 parameters")
+		return false, errors.New("invalid PBKDF2-HMAC parameters")
 	}
 	got := pbkdf2.Key([]byte(candidate), salt, iterations, len(want), newHash)
 	return bytesEqualCT(got, want), nil
 }
 
+// splitPBKDF2HMACPrefix reads the "$pbkdf2-hmac-<alg>$" envelope.
+func splitPBKDF2HMACPrefix(target string) (algo, body string, ok bool) {
+	const prefix = "$pbkdf2-hmac-"
+	if !strings.HasPrefix(target, prefix) {
+		return "", "", false
+	}
+	rest := target[len(prefix):]
+	i := strings.IndexByte(rest, '$')
+	if i <= 0 {
+		return "", "", false
+	}
+	algo = rest[:i]
+	if _, known := pbkdf2HMACAlgos[algo]; !known {
+		return "", "", false
+	}
+	return algo, rest[i+1:], true
+}
+
 func isNetIQPBKDF2(target string) bool {
-	return strings.HasPrefix(target, "$pbkdf2-hmac-sha1$") ||
-		strings.HasPrefix(target, "$pbkdf2-hmac-sha512$")
+	_, _, ok := splitPBKDF2HMACPrefix(target)
+	return ok
 }
 
 func verifyAS400SSHA1(target, candidate string) (bool, error) {
