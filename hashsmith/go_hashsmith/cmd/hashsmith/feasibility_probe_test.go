@@ -310,7 +310,7 @@ func TestFeasibilityNoFalseRefusalForFastPath(t *testing.T) {
 	// (unaffected by this task) plus benchTarget. work is set enormous so
 	// tier one — a ceiling on the SCALAR path only — cannot possibly resolve
 	// this as feasible on its own; only benchTarget's real timing can.
-	scalarRate, ok := feasibilityRate(1<<62, typ, target, salt, saltMode, workers, nil)
+	scalarRate, ok := feasibilityRate(1<<62, typ, target, salt, saltMode, workers, nil, 0)
 	if !ok || scalarRate <= 0 {
 		t.Fatalf("scalar-path rate measurement failed: rate=%v ok=%v", scalarRate, ok)
 	}
@@ -349,7 +349,7 @@ func TestFeasibilityNoFalseRefusalForFastPath(t *testing.T) {
 	var err error
 	for i := 0; i < attempts; i++ {
 		out, err = captureStderrResult(t, func() error {
-			return checkFeasibility(work, false, typ, target, salt, saltMode, workers, false, fastProbe)
+			return checkFeasibility(work, false, typ, target, salt, saltMode, workers, false, fastProbe, 0)
 		})
 		if err == nil {
 			break
@@ -376,7 +376,7 @@ func TestFeasibilityNoFalseRefusalForFastPath(t *testing.T) {
 	refusedOnce := false
 	for i := 0; i < attempts; i++ {
 		_, errOld = captureStderrResult(t, func() error {
-			return checkFeasibility(work, false, typ, target, salt, saltMode, workers, false, nil)
+			return checkFeasibility(work, false, typ, target, salt, saltMode, workers, false, nil, 0)
 		})
 		if errOld != nil && isFeasibilityRefusal(errOld) {
 			refusedOnce = true
@@ -407,8 +407,8 @@ func TestFeasibilityUnchangedForSlowKDF(t *testing.T) {
 	verifyFn := feasibilityScalarVerifier("bcrypt", "", "prefix", target)
 	probe := feasibilityDispatchProbe(layout, workers, "bcrypt", "", "prefix", target, verifyFn)
 
-	withProbe, ok1 := feasibilityRate(layout.total, "bcrypt", target, "", "prefix", workers, probe)
-	withoutProbe, ok2 := feasibilityRate(layout.total, "bcrypt", target, "", "prefix", workers, nil)
+	withProbe, ok1 := feasibilityRate(layout.total, "bcrypt", target, "", "prefix", workers, probe, 0)
+	withoutProbe, ok2 := feasibilityRate(layout.total, "bcrypt", target, "", "prefix", workers, nil, 0)
 	if !ok1 || !ok2 {
 		t.Fatalf("rate measurement failed: withProbe ok=%v rate=%v, withoutProbe ok=%v rate=%v",
 			ok1, withProbe, ok2, withoutProbe)

@@ -900,7 +900,7 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 	// keyspace is perfectly feasible on its own, so estimating it as if it were
 	// the whole keyspace would refuse every distributed run.
 	if err := checkFeasibility(total, resumeFrom != 0 || limit > 0,
-		typ, batch[active[0]].norm, salt, saltMode, workers, force, probe); err != nil {
+		typ, batch[active[0]].norm, salt, saltMode, workers, force, probe, 0); err != nil {
 		return false, err
 	}
 

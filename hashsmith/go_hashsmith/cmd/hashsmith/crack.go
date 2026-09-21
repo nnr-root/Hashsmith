@@ -1125,9 +1125,17 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	// Validate the type and hash format up front. The per-candidate verify loops
 	// ignore errors for speed, so without this an unknown type or malformed hash
 	// would silently "find nothing"; probing once surfaces it as a real error.
+	//
+	// How long it took is worth keeping. This is one full verify against the
+	// real record, which is the same measurement the feasibility guard makes
+	// below to estimate a rate — and for a slow KDF that is seconds, not
+	// microseconds, so making it twice is a cost a user waits through before
+	// the run starts.
+	probeStart := time.Now()
 	if _, err := verifyCandidate("hashsmith-probe", targetHash, typ, salt, saltMode); err != nil {
 		return false, err
 	}
+	probeCost := time.Since(probeStart)
 
 	// ── attack setup: session resume + --skip/--limit ───────────────────────
 	// A named session installs a SIGINT handler so Ctrl-C checkpoints progress
@@ -1352,7 +1360,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	// This runs after every setup error above and before the progress bar, so a
 	// refused run has started nothing and has nothing to tear down.
 	if err := checkFeasibility(total, resumeFrom != 0 || limit > 0,
-		typ, targetHash, salt, saltMode, workers, cc != nil && cc.force, probe); err != nil {
+		typ, targetHash, salt, saltMode, workers, cc != nil && cc.force, probe, probeCost); err != nil {
 		return false, err
 	}
 

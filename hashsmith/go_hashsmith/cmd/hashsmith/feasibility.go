@@ -135,7 +135,7 @@ type feasibilityProbe func(ctx context.Context, limit int64) (attempts int64, ok
 // to offer, e.g. dict, hybrid, markov, combinator, prince, or a brute/mask
 // call whose layout could not be built) — feasibilityRate falls back to
 // benchTarget exactly as before whenever it is nil.
-func checkFeasibility(work int64, bounded bool, typ, target, salt, saltMode string, workers int, force bool, probe feasibilityProbe) error {
+func checkFeasibility(work int64, bounded bool, typ, target, salt, saltMode string, workers int, force bool, probe feasibilityProbe, measuredPerOp time.Duration) error {
 	if work == 0 {
 		return nil
 	}
@@ -154,7 +154,7 @@ func checkFeasibility(work int64, bounded bool, typ, target, salt, saltMode stri
 	// isn't the real one.
 	lowerBound := work == math.MaxInt64
 
-	rate, ok := feasibilityRate(work, typ, target, salt, saltMode, workers, probe)
+	rate, ok := feasibilityRate(work, typ, target, salt, saltMode, workers, probe, measuredPerOp)
 	if !ok {
 		clrYellow.Fprintf(os.Stderr,
 			"Could not measure %s throughput on this machine — no ETA for this run; starting anyway\n", typ)
@@ -225,8 +225,22 @@ func checkFeasibility(work int64, bounded bool, typ, target, salt, saltMode stri
 // takes long enough for tier two to run: on an 8-billion-candidate dump the
 // probe lands within about 14% of the real rate, against 5.7x pessimistic
 // before it existed.
-func feasibilityRate(work int64, typ, target, salt, saltMode string, workers int, probe feasibilityProbe) (float64, bool) {
-	_, _, perOp := benchVerifyPath(typ, target, salt, saltMode, feasibilityWarmup)
+func feasibilityRate(work int64, typ, target, salt, saltMode string, workers int, probe feasibilityProbe, measuredPerOp time.Duration) (float64, bool) {
+	// measuredPerOp is a verify call the caller has ALREADY paid for — doCrack
+	// probes the type and the record once before anything else, and that probe
+	// runs the same path over the same target, so its duration is this
+	// measurement. Taking it saves a second one, which matters only where it
+	// is expensive and there it matters a lot: one VeraCrypt RIPEMD-160 verify
+	// is 655,331 PBKDF2 iterations, about 2.6 seconds on an M2, and the run
+	// was paying that twice before starting.
+	//
+	// It is trusted only when it clears feasibilityWarmup, which is exactly the
+	// bar benchVerifyPath sets for its own single-call sample; a sub-microsecond
+	// reading from a fast hash is no more usable from here than from there.
+	perOp := measuredPerOp
+	if perOp < feasibilityWarmup {
+		_, _, perOp = benchVerifyPath(typ, target, salt, saltMode, feasibilityWarmup)
+	}
 	if perOp > 0 {
 		optimistic := float64(workers) / perOp.Seconds()
 		if optimistic > 0 && float64(work)/optimistic < feasibilityRoughCeiling {

@@ -670,7 +670,7 @@ func TestBatchFeasibilityNoFalseRefusalForFastPath(t *testing.T) {
 	if !ok || fastRate <= 0 {
 		t.Fatalf("fast-path rate measurement failed: rate=%v ok=%v", fastRate, ok)
 	}
-	scalarRate, ok := feasibilityRate(1<<62, typ, batch[active[0]].norm, salt, saltMode, workers, nil)
+	scalarRate, ok := feasibilityRate(1<<62, typ, batch[active[0]].norm, salt, saltMode, workers, nil, 0)
 	if !ok || scalarRate <= 0 {
 		t.Fatalf("scalar-path rate measurement failed: rate=%v ok=%v", scalarRate, ok)
 	}
@@ -689,7 +689,7 @@ func TestBatchFeasibilityNoFalseRefusalForFastPath(t *testing.T) {
 	var err error
 	for i := 0; i < attempts; i++ {
 		out, err = captureStderrResult(t, func() error {
-			return checkFeasibility(work, false, typ, batch[active[0]].norm, salt, saltMode, workers, false, fastProbe)
+			return checkFeasibility(work, false, typ, batch[active[0]].norm, salt, saltMode, workers, false, fastProbe, 0)
 		})
 		if err == nil {
 			break
@@ -709,7 +709,7 @@ func TestBatchFeasibilityNoFalseRefusalForFastPath(t *testing.T) {
 	refusedOnce := false
 	for i := 0; i < attempts; i++ {
 		_, errOld = captureStderrResult(t, func() error {
-			return checkFeasibility(work, false, typ, batch[active[0]].norm, salt, saltMode, workers, false, nil)
+			return checkFeasibility(work, false, typ, batch[active[0]].norm, salt, saltMode, workers, false, nil, 0)
 		})
 		if errOld != nil && isFeasibilityRefusal(errOld) {
 			refusedOnce = true
