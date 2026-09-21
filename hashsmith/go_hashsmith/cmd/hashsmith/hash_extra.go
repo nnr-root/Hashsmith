@@ -349,6 +349,8 @@ func compatibilityHashAliasSeed() map[string]string {
 		"16700": "fvde", "18300": "fvde",
 		"23300": "iwork", "31900": "metamask-mobile", "32500": "dogechain",
 		"8200": "1password-cloud", "20500": "pkzip-masterkey",
+		"17200": "pkzip", "17210": "pkzip", "17220": "pkzip",
+		"17225": "pkzip", "17230": "pkzip",
 		"29910": "encdatavault", "29920": "encdatavault",
 		"29930": "encdatavault", "29940": "encdatavault",
 		"18900": "android-backup",
