@@ -21,26 +21,73 @@ package main
 
 import "strings"
 
-// johnWrappers maps a record prefix John writes to the canonical type whose
-// verifier should see the remainder. Order matters only in that a longer
-// prefix must precede a shorter one that is its prefix.
+// johnWrappers maps a record envelope John writes to the canonical type whose
+// verifier should see the remainder.
+//
+// Matching is case-insensitive on the envelope name, because John is not
+// consistent about it: "$SHA512$" and "$MD4$" are upper case, "$gost$" and
+// "$keccak256$" are lower. Nothing downstream depends on the case, so there is
+// no reason to make a user reproduce it.
 var johnWrappers = []struct{ prefix, typ string }{
+	// Raw digests. The envelope is the only thing that makes these
+	// identifiable — a bare 128-hex digest is SHA-512, SHA3-512, BLAKE2b,
+	// Whirlpool, Streebog-512 or Keccak-512 with nothing to choose between
+	// them, and John's records say which.
+	{"$sha224$", "sha224"},
+	{"$sha256$", "sha256"},
+	{"$sha384$", "sha384"},
+	{"$sha512$", "sha512"},
+	{"$md4$", "md4"},
 	{"$md2$", "md2"},
+	{"$gost$", "gost"},
+	{"$keccak256$", "keccak256"},
+	{"$whirlpool$", "whirlpool"},
+	// Structured records whose payload this tool reads under another name.
 	{"$oracle12c$", "oracle12c"},
 	{"$django$*1*", "django"},
-	{"$LM$", "lm"},
+	{"$lm$", "lm"},
+}
+
+// johnWrapperFor reports the type and payload of a John-enveloped record.
+func johnWrapperFor(target string) (typ, payload string, ok bool) {
+	for _, w := range johnWrappers {
+		if len(target) >= len(w.prefix) && strings.EqualFold(target[:len(w.prefix)], w.prefix) {
+			return w.typ, target[len(w.prefix):], true
+		}
+	}
+	return "", "", false
 }
 
 // stripJohnWrapper removes a John-only envelope when the record carries one
 // and it belongs to the type being verified. Anything else is returned
 // unchanged, so a record that merely resembles a wrapper is never mangled.
 func stripJohnWrapper(target, typ string) string {
-	for _, w := range johnWrappers {
-		if typ == w.typ && strings.HasPrefix(target, w.prefix) {
-			return strings.TrimPrefix(target, w.prefix)
-		}
+	if wrapped, payload, ok := johnWrapperFor(target); ok && wrapped == typ {
+		return payload
 	}
 	return target
+}
+
+// isJohnWrappedRecord reports whether a record carries a John envelope this
+// tool can unwrap, for the detection table.
+func isJohnWrappedRecord(s string) bool {
+	_, payload, ok := johnWrapperFor(strings.TrimSpace(s))
+	return ok && payload != ""
+}
+
+// johnWrappedTypes names every type a John envelope can resolve to. Detection
+// offers the set; the envelope itself narrows it to one at verification time,
+// since stripJohnWrapper only unwraps for the matching type.
+func johnWrappedTypes() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, w := range johnWrappers {
+		if !seen[w.typ] {
+			seen[w.typ] = true
+			out = append(out, w.typ)
+		}
+	}
+	return out
 }
 
 // johnHMACDigestLens are the digest sizes, in hex characters, that John's

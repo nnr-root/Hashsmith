@@ -180,7 +180,19 @@ func verifyHMailServer(targetHash, candidate string) (bool, error) {
 }
 
 func isHMailServer(s string) bool {
-	return len(s) == 70 && isHex(s[6:]) && !isHex(s[:6])
+	if len(s) != 70 || !isHex(s[6:]) || isHex(s[:6]) {
+		return false
+	}
+	// A record opening with a format envelope this tool recognises is that
+	// format, not an hMailServer hash whose six-character salt happens to
+	// look like one. "$gost$" is six non-hex characters followed by 64 hex,
+	// which is exactly this shape — and it is John's spelling of a GOST
+	// digest. The envelope is a signature; this predicate is only a shape,
+	// so it yields.
+	if _, _, ok := johnWrapperFor(s); ok {
+		return false
+	}
+	return true
 }
 
 // episerverB64 decodes a standard-alphabet base64 field with or without its

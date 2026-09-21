@@ -243,3 +243,49 @@ func TestDjangoScryptBothLayouts(t *testing.T) {
 		t.Errorf("detectHashTypes = %v; want django first", types)
 	}
 }
+
+// TestJohnRawDigestEnvelopes covers John's "$NAME$<hex>" spelling for raw
+// digests. These are the records the John ratchet cannot see: its corpus
+// takes one vector per format and John lists the BARE digest first for most
+// of these, so the envelope spelling is only exercised here.
+//
+// The envelope is what makes them identifiable at all — a bare 128-hex digest
+// is SHA-512, SHA3-512, BLAKE2b, Whirlpool, Streebog-512 or Keccak-512 with
+// nothing to choose between them.
+func TestJohnRawDigestEnvelopes(t *testing.T) {
+	for _, tc := range []struct{ record, password string }{
+		{"$gost$d42c539e367c66e9c88a801f6649349c21871b4344c6a573f849fdce62f314dd", "a"},
+		{"$SHA512$f342aae82952db35b8e02c30115e3deed3d80fdfdadacab336f0ba51ac54e297291fa1d6b201d69a2bd77e2535280f17a54fa1e527abc6e2eddba79ad3be11c0", "epixoip"},
+		{"$keccak256$4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45", "abc"},
+		{"$MD4$6d78785c44ea8dfa178748b245d8c3ae", "magnum"},
+		{"$SHA224$d63dc919e201d7bc4c825630d2cf25fdc93d4b2f0d46706d29038d01", "password"},
+		{"$SHA256$71c3f65d17745f05235570f1799d75e69795d469d9fcb83e326f82f1afa80dea", "epixoip"},
+		{"$SHA384$a8b64babd0aca91a59bdbb7761b421d4f2bb38280d3a75ba0f21f2bebc45583d446c598660c94ce680c47d19c30783a7", "password"},
+	} {
+		typ, _, ok := johnWrapperFor(tc.record)
+		if !ok {
+			t.Errorf("no envelope recognised in %.28s...", tc.record)
+			continue
+		}
+		types := detectHashTypes(tc.record)
+		if !containsString(types, typ) {
+			t.Errorf("detectHashTypes(%.28s...) = %v, want %q", tc.record, types, typ)
+		}
+		got, err := verifyCandidate(tc.password, tc.record, typ, "", "prefix")
+		if err != nil || !got {
+			t.Errorf("%.28s... rejected the right password: ok=%v err=%v", tc.record, got, err)
+		}
+		if bad, _ := verifyCandidate(tc.password+"x", tc.record, typ, "", "prefix"); bad {
+			t.Errorf("%.28s... accepted a wrong password", tc.record)
+		}
+	}
+	// The envelope is matched case-insensitively, since John is not
+	// consistent: $SHA512$ and $MD4$ are upper, $gost$ and $keccak256$ lower.
+	if _, _, ok := johnWrapperFor("$sha512$aa"); !ok {
+		t.Error("a lower-case $sha512$ envelope was not recognised")
+	}
+	// And an envelope only unwraps for the type it names.
+	if got := stripJohnWrapper("$md4$abc", "sha256"); got != "$md4$abc" {
+		t.Errorf("stripJohnWrapper unwrapped for the wrong type: %q", got)
+	}
+}
