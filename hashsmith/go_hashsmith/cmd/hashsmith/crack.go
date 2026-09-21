@@ -2726,6 +2726,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyBestCryptV3(targetHash, candidate)
 	case "kremlin":
 		return verifyKremlin(targetHash, candidate)
+	case "racf-kdfaes":
+		return verifyRACFKDFAES(targetHash, candidate)
 	case "racf":
 		return verifyRACF(targetHash, candidate)
 	case "as400-des":

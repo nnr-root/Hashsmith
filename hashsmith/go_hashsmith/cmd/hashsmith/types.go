@@ -557,6 +557,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"windows-hello", "Windows Hello PIN/password, PBKDF2-HMAC-SHA256 + DPAPI HMAC-SHA512, Hashcat 28100"},
 			{"bestcrypt-v3", "BestCrypt v3 volume, 64 KiB SHA-256 stretch + AES-256-CBC, Hashcat 23900"},
 			{"kremlin", "Kremlin Encrypt 3.0, SHA-1 keyed NewDES over 1000 rounds, Hashcat 32700"},
+			{"racf-kdfaes", "IBM RACF KDFAES, legacy DES hash through a memory-hard KDF + AES-256, Hashcat 14200"},
 			{"racf", "IBM RACF (z/OS), EBCDIC userid under an EBCDIC password key, Hashcat 8500"},
 			{"as400-des", "AS/400 (IBM i) DES, EBCDIC profile name under an EBCDIC password key, Hashcat 8501"},
 			{"juniper-ive", "Juniper IVE, md5crypt wrapped in a fixed-key AES-128-CBC blob, Hashcat 501"},

@@ -624,6 +624,7 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"md6-256", "hashcat", "", "539a8b63639c94b80e746611c476a684e7cc95235187b2f8b81a188d6dfbf64c", srcPublished},
 		{"bestcrypt-v3", "hashcat", "", "$bcve$3$08$234b8182cee7098b$35c12ef76a1e88175c4c222da3558310a0075bc7a06ecf46746d149c02a81fb8a97637d1103d2e13ddd5deaf982889594b18c12d7ca18a54875c5da4a47f90ae615ab94b8e3ed9e3c793d872a1b5ac35cfdb66c221d6d0853e9ff2e0f4435b43", srcPublished},
 		{"kremlin", "hashcat", "", "$kgb$0ab30cf7a52dad93$82a7c454246fc7570224e9f24279791aa2a63bf4", srcPublished},
+		{"racf-kdfaes", "hashcat", "", "$racf-kdfaes$*USER*E7D7E66D000180000008003200100010*00112233445566778899AABBCCDDEEFF*5390653DEC0316FB5AD56053208056A6", srcPublished},
 		{"racf", "hashcat", "", "$racf$*8481*6095E8FCA59F8E3E", srcPublished},
 		{"as400-des", "SYS1", "", "$as400$des$*OPEN3*EC76FC0DEF5B0A83", srcPublished},
 		{"juniper-ive", "hashcat", "", "3u+UR6n8AgABAAAAHxxdXKmiOmUoqKnZlf8lTOhlPYy93EAkbPfs5+49YLFd/B1+omSKbW7DoqNM40/EeVnwJ8kYoXv9zy9D5C5m5A==", srcPublished},

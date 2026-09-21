@@ -83,6 +83,10 @@ func archivePrototypes() []hashid.Prototype {
 			"Jetico BestCrypt has a small but persistent installed base, mostly in European enterprise deployments", "bestcrypt-v3"),
 		hasPrefixProto("$kgb$", "Kremlin Encrypt 3.0 archive", 3,
 			"Kremlin Encrypt was a 1990s Windows file-encryption product with no current user base; its records appear mainly in old evidence images", "kremlin"),
+		// Listed before $racf$ so the longer prefix wins; the two formats share
+		// only the legacy DES hash buried inside KDFAES.
+		hasPrefixProto("$racf-kdfaes$*", "IBM RACF KDFAES userid", 6,
+			"KDFAES is the modern RACF password format on supported z/OS levels, so it is displacing the bare DES hash in current audits", "racf-kdfaes"),
 		hasPrefixProto("$racf$*", "IBM RACF (z/OS) userid", 8,
 			"RACF secures most mainframe z/OS installations, so its hashes appear wherever mainframe credentials are audited", "racf"),
 		hasPrefixProto("$as400$des$*", "AS/400 (IBM i) user profile (DES)", 8,
