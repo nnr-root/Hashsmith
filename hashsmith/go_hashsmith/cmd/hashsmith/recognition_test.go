@@ -96,7 +96,15 @@ func TestRecognitionAccuracy(t *testing.T) {
 //     work on EVERY bcrypt target — the slowest common format there is — to
 //     cover one forum product. The same trade as keepass-keyfile, and decided
 //     the same way. It is reachable with -t wbb4 or -m 33800.
-const detectableFloor = 197
+//
+//   - pkzip-masterkey (Hashcat 20500). Its record is the ZipCrypto key state
+//     written as 24 bare hex characters, with no prefix, no separator and no
+//     length that distinguishes it from any other 96-bit value — a truncated
+//     digest, a CRC, a MAC fragment. Nothing currently claims 24 hex, so a
+//     prototype for it would be the only match and would therefore name every
+//     such input a PKZIP key. It is reachable with -t pkzip-masterkey or
+//     -m 20500.
+const detectableFloor = 198
 
 // undetectableByDesign names types that must NEVER be reachable from
 // auto-detection, and so are excluded from the count above rather than

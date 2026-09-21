@@ -533,6 +533,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 		{"Utility", [][2]string{
 			{"ecryptfs", "eCryptfs passphrase signature, Hashcat 12200"},
 			{"wbb4", "WoltLab Burning Board 4, bcrypt(bcrypt($pass)), Hashcat 33800 (record is indistinguishable from plain bcrypt, so -t is required)"},
+			{"pkzip-masterkey", "PKZIP/ZipCrypto 96-bit master key state, Hashcat 20500 (a bare 24-hex record, so -t is required)"},
 			{"plaintext", "The target IS the password, Hashcat 99999 — for exercising a wordlist or ruleset"},
 		}},
 	}
