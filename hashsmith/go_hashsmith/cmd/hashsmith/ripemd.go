@@ -63,23 +63,6 @@ var (
 	ripemdKRight4 = [4]uint32{0x50a28be6, 0x5c4dd124, 0x6d703ef3, 0x00000000}
 )
 
-// ripemdF applies the round function for round index j (0-based).  The right
-// line walks the same five functions in reverse.
-func ripemdF(j int, x, y, z uint32) uint32 {
-	switch j {
-	case 0:
-		return x ^ y ^ z
-	case 1:
-		return (x & y) | (^x & z)
-	case 2:
-		return (x | ^y) ^ z
-	case 3:
-		return (x & z) | (y & ^z)
-	default:
-		return x ^ (y | ^z)
-	}
-}
-
 // ripemdDigest is the shared state for every width in the family.  h holds 4,
 // 5, 8 or 10 words depending on the variant; wide reports whether the two
 // lines stay separate (256/320) or are folded together (128/160).
@@ -223,14 +206,56 @@ func (d *ripemdDigest) block4(x *[16]uint32) {
 	dLeft := e
 
 	for j := 0; j < 4; j++ {
-		for i := j * 16; i < (j+1)*16; i++ {
-			t := bits.RotateLeft32(a+ripemdF(j, b, c, dLeft)+x[ripemdOrderLeft[i]]+ripemdKLeft4[j],
-				int(ripemdRotLeft[i]))
-			a, dLeft, c, b = dLeft, c, b, t
-
-			t = bits.RotateLeft32(aa+ripemdF(3-j, bb, cc, dd)+x[ripemdOrderRight[i]]+ripemdKRight4[j],
-				int(ripemdRotRight[i]))
-			aa, dd, cc, bb = dd, cc, bb, t
+		kl := ripemdKLeft4[j]
+		kr := ripemdKRight4[j]
+		lo := j * 16
+		// The round function is selected per round, not per step. It used to be
+		// a call — already inlined, but the five-way switch stayed inside the
+		// inner loop and ran 16 times per round on a value that cannot change
+		// there. Hoisting it into a switch over specialised loops makes each
+		// round's function a constant expression, worth about a quarter of the
+		// time; VeraCrypt's RIPEMD-160 KDF runs 655,331 iterations for each of
+		// ten derived blocks, so that is seconds per candidate.
+		//
+		// The five functions, in order, are:
+		//
+		//	0  x ^ y ^ z
+		//	1  (x & y) | (~x & z)
+		//	2  (x | ~y) ^ z
+		//	3  (x & z) | (y & ~z)
+		//	4  x ^ (y | ~z)
+		//
+		// The left line walks them forwards and the right line backwards, so
+		// round j pairs function j with function (rounds-1-j).
+		switch j {
+		case 0:
+			for i := lo; i < lo+16; i++ {
+				t := bits.RotateLeft32(a+(b^c^dLeft)+x[ripemdOrderLeft[i]]+kl, int(ripemdRotLeft[i]))
+				a, dLeft, c, b = dLeft, c, b, t
+				t = bits.RotateLeft32(aa+((bb&dd)|(cc & ^dd))+x[ripemdOrderRight[i]]+kr, int(ripemdRotRight[i]))
+				aa, dd, cc, bb = dd, cc, bb, t
+			}
+		case 1:
+			for i := lo; i < lo+16; i++ {
+				t := bits.RotateLeft32(a+((b&c)|(^b&dLeft))+x[ripemdOrderLeft[i]]+kl, int(ripemdRotLeft[i]))
+				a, dLeft, c, b = dLeft, c, b, t
+				t = bits.RotateLeft32(aa+((bb|^cc)^dd)+x[ripemdOrderRight[i]]+kr, int(ripemdRotRight[i]))
+				aa, dd, cc, bb = dd, cc, bb, t
+			}
+		case 2:
+			for i := lo; i < lo+16; i++ {
+				t := bits.RotateLeft32(a+((b|^c)^dLeft)+x[ripemdOrderLeft[i]]+kl, int(ripemdRotLeft[i]))
+				a, dLeft, c, b = dLeft, c, b, t
+				t = bits.RotateLeft32(aa+((bb&cc)|(^bb&dd))+x[ripemdOrderRight[i]]+kr, int(ripemdRotRight[i]))
+				aa, dd, cc, bb = dd, cc, bb, t
+			}
+		case 3:
+			for i := lo; i < lo+16; i++ {
+				t := bits.RotateLeft32(a+((b&dLeft)|(c & ^dLeft))+x[ripemdOrderLeft[i]]+kl, int(ripemdRotLeft[i]))
+				a, dLeft, c, b = dLeft, c, b, t
+				t = bits.RotateLeft32(aa+(bb^cc^dd)+x[ripemdOrderRight[i]]+kr, int(ripemdRotRight[i]))
+				aa, dd, cc, bb = dd, cc, bb, t
+			}
 		}
 		if d.wide {
 			// RIPEMD-256 keeps the lines separate but swaps one word between
@@ -248,7 +273,6 @@ func (d *ripemdDigest) block4(x *[16]uint32) {
 			}
 		}
 	}
-
 	if d.wide {
 		d.h[0] += a
 		d.h[1] += b
@@ -278,14 +302,63 @@ func (d *ripemdDigest) block5(x *[16]uint32) {
 	}
 
 	for j := 0; j < 5; j++ {
-		for i := j * 16; i < (j+1)*16; i++ {
-			t := bits.RotateLeft32(a+ripemdF(j, b, c, dl)+x[ripemdOrderLeft[i]]+ripemdKLeft5[j],
-				int(ripemdRotLeft[i])) + e
-			a, e, dl, c, b = e, dl, bits.RotateLeft32(c, 10), b, t
-
-			t = bits.RotateLeft32(aa+ripemdF(4-j, bb, cc, dd)+x[ripemdOrderRight[i]]+ripemdKRight5[j],
-				int(ripemdRotRight[i])) + ee
-			aa, ee, dd, cc, bb = ee, dd, bits.RotateLeft32(cc, 10), bb, t
+		kl := ripemdKLeft5[j]
+		kr := ripemdKRight5[j]
+		lo := j * 16
+		// The round function is selected per round, not per step. It used to be
+		// a call — already inlined, but the five-way switch stayed inside the
+		// inner loop and ran 16 times per round on a value that cannot change
+		// there. Hoisting it into a switch over specialised loops makes each
+		// round's function a constant expression, worth about a quarter of the
+		// time; VeraCrypt's RIPEMD-160 KDF runs 655,331 iterations for each of
+		// ten derived blocks, so that is seconds per candidate.
+		//
+		// The five functions, in order, are:
+		//
+		//	0  x ^ y ^ z
+		//	1  (x & y) | (~x & z)
+		//	2  (x | ~y) ^ z
+		//	3  (x & z) | (y & ~z)
+		//	4  x ^ (y | ~z)
+		//
+		// The left line walks them forwards and the right line backwards, so
+		// round j pairs function j with function (rounds-1-j).
+		switch j {
+		case 0:
+			for i := lo; i < lo+16; i++ {
+				t := bits.RotateLeft32(a+(b^c^dl)+x[ripemdOrderLeft[i]]+kl, int(ripemdRotLeft[i])) + e
+				a, e, dl, c, b = e, dl, bits.RotateLeft32(c, 10), b, t
+				t = bits.RotateLeft32(aa+(bb^(cc|^dd))+x[ripemdOrderRight[i]]+kr, int(ripemdRotRight[i])) + ee
+				aa, ee, dd, cc, bb = ee, dd, bits.RotateLeft32(cc, 10), bb, t
+			}
+		case 1:
+			for i := lo; i < lo+16; i++ {
+				t := bits.RotateLeft32(a+((b&c)|(^b&dl))+x[ripemdOrderLeft[i]]+kl, int(ripemdRotLeft[i])) + e
+				a, e, dl, c, b = e, dl, bits.RotateLeft32(c, 10), b, t
+				t = bits.RotateLeft32(aa+((bb&dd)|(cc & ^dd))+x[ripemdOrderRight[i]]+kr, int(ripemdRotRight[i])) + ee
+				aa, ee, dd, cc, bb = ee, dd, bits.RotateLeft32(cc, 10), bb, t
+			}
+		case 2:
+			for i := lo; i < lo+16; i++ {
+				t := bits.RotateLeft32(a+((b|^c)^dl)+x[ripemdOrderLeft[i]]+kl, int(ripemdRotLeft[i])) + e
+				a, e, dl, c, b = e, dl, bits.RotateLeft32(c, 10), b, t
+				t = bits.RotateLeft32(aa+((bb|^cc)^dd)+x[ripemdOrderRight[i]]+kr, int(ripemdRotRight[i])) + ee
+				aa, ee, dd, cc, bb = ee, dd, bits.RotateLeft32(cc, 10), bb, t
+			}
+		case 3:
+			for i := lo; i < lo+16; i++ {
+				t := bits.RotateLeft32(a+((b&dl)|(c & ^dl))+x[ripemdOrderLeft[i]]+kl, int(ripemdRotLeft[i])) + e
+				a, e, dl, c, b = e, dl, bits.RotateLeft32(c, 10), b, t
+				t = bits.RotateLeft32(aa+((bb&cc)|(^bb&dd))+x[ripemdOrderRight[i]]+kr, int(ripemdRotRight[i])) + ee
+				aa, ee, dd, cc, bb = ee, dd, bits.RotateLeft32(cc, 10), bb, t
+			}
+		case 4:
+			for i := lo; i < lo+16; i++ {
+				t := bits.RotateLeft32(a+(b^(c|^dl))+x[ripemdOrderLeft[i]]+kl, int(ripemdRotLeft[i])) + e
+				a, e, dl, c, b = e, dl, bits.RotateLeft32(c, 10), b, t
+				t = bits.RotateLeft32(aa+(bb^cc^dd)+x[ripemdOrderRight[i]]+kr, int(ripemdRotRight[i])) + ee
+				aa, ee, dd, cc, bb = ee, dd, bits.RotateLeft32(cc, 10), bb, t
+			}
 		}
 		if d.wide {
 			switch j {
@@ -302,7 +375,6 @@ func (d *ripemdDigest) block5(x *[16]uint32) {
 			}
 		}
 	}
-
 	if d.wide {
 		d.h[0] += a
 		d.h[1] += b
