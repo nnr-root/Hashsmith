@@ -549,6 +549,8 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"android-fde", "Android full-disk encryption (crypto footer, <= 4.3), Hashcat 8800"},
 			{"android-fde-samsung", "Samsung Android FDE, PBKDF2-HMAC-SHA256 + HMAC, Hashcat 12900"},
 			{"iphone-passcode", "iPhone passcode, UID-key loop + RFC 3394 class-key unwrap, Hashcat 26500"},
+			{"windows-hello", "Windows Hello PIN/password, PBKDF2-HMAC-SHA256 + DPAPI HMAC-SHA512, Hashcat 28100"},
+			{"racf", "IBM RACF (z/OS), EBCDIC userid under an EBCDIC password key, Hashcat 8500"},
 			{"as400-des", "AS/400 (IBM i) DES, EBCDIC profile name under an EBCDIC password key, Hashcat 8501"},
 			{"juniper-ive", "Juniper IVE, md5crypt wrapped in a fixed-key AES-128-CBC blob, Hashcat 501"},
 			{"pkzip-masterkey", "PKZIP/ZipCrypto 96-bit master key state, Hashcat 20500 (a bare 24-hex record, so -t is required)"},
