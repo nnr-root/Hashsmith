@@ -1873,3 +1873,92 @@ One negative result worth keeping: hoisting RIPEMD's four index tables into
 locals, which is what made Streebog and Whirlpool faster, measured as pure
 noise. The compiler was already doing it. Not every instance of a pattern is
 worth the same.
+
+## The other half: John coverage, which nothing had measured
+
+With every hashcat mode implemented, the remaining question was the one the
+hashcat ratchet structurally cannot ask. It always passes `-t`, so it measures
+"given the mode number, does this crack the record" and never "is this record
+RECOGNISED". For a user moving off John that second question is the whole
+experience: John has no mode numbers, so they arrive with nothing but bytes.
+
+So there is now a second ratchet over `john --list=format-tests` — 6353
+vectors, 493 formats — driving the real binary with **no -t**. It found real
+defects immediately, which is the point.
+
+### What it found
+
+**A core crack-path defect, and a half-finished earlier fix.**
+`crackWithDetection` asked "does this decode as an encoding?" before "is this
+a hash?", and took the encoding reading whenever one existed.
+`normalizeHashInput` knows nothing about hash shapes — it asks only whether a
+string decodes to a plausible digest length — and real hashes satisfy that by
+accident. A descrypt hash is thirteen crypt-64 characters, which is valid
+z-base-32 decoding to eight bytes, exactly a half-MD5. So `crack CCNf8Sbh3HDfQ`
+tried mysql323, cisco-pix and half-md5 and never descrypt, while `identify` on
+the same input said descrypt correctly.
+
+This was **defect F fixed halfway**: that earlier fix stopped an explicit `-t`
+being overruled and left auto-detection, the far more common path, wrong. The
+rule is named now (`resolveCrackTarget`) and says what it means.
+
+**sha1crypt agreed with hashcat and disagreed with John**, with the digest
+computed correctly for both. The 28-character checksum encodes 21 bytes while
+the digest is 20, and the last byte is not agreed: NetBSD, passlib and John
+wrap around to `digest[0]`, hashcat pads with zero. Comparing the ENCODED
+STRING accepts whichever convention you implement. John accepts both because
+it compares the decoded digest; so does this now. **This is the class of
+defect a single published vector per format cannot expose — one vector always
+agrees with itself.**
+
+**`verifyArgon2` refused `$argon2d$`** citing a Go library that lacks it,
+while `internal/argon2d` had been in this repo since KeePass needed it and the
+detection table had always claimed `$argon2d$`. identify named a type crack
+then rejected.
+
+**A structural predicate outranking a signature.** `isHMailServer` is
+70 characters, six non-hex then 64 hex — and `$gost$` is six non-hex
+characters, so John's GOST record matched it exactly and, being exclusive,
+suppressed the envelope reading entirely. Its own comment already said why
+that was wrong: it is TierStructural, "not the TierSignature a record prefix
+would earn".
+
+### Dialect, and the discipline of not calling everything dialect
+
+Most of the residue is the same algorithm spelled differently, and that is
+worth closing because a John user has John's spelling. Landed: John's format
+envelopes (`$md2$`, `$SHA512$`, `$MD4$`, `$gost$`, `$keccak256$`,
+`$oracle12c$`, `$django$*1*`, `$LM$`, matched case-insensitively because John
+is not consistent); its `<message>#<digest>` HMAC spelling, which is narrow
+enough to refuse `$DCC2$10240#user#hash`; either separator in the
+`$pbkdf2-hmac-<alg>$` family, which is inconsistent WITHIN each tool rather
+than between them; John's RACF KDFAES envelope; and the django-scrypt
+package's layout alongside Django core's.
+
+Three things were deliberately NOT called dialect:
+
+- `$pkzip$` is not a renamed `$pkzip2$` — the field layouts differ, so it
+  needs a parser, and shipping the rename would have looked like a fix.
+- django-scrypt is not a Django core variant; the parameter encoding
+  genuinely differs, so it got its own reader.
+- Tiger, SunMD5 and xsha have no type here at all. They are missing
+  algorithms, and calling them spellings would hide that.
+
+### A measurement that could not see its own subject
+
+The corpus first took one vector per format. Envelope support went in and the
+count did not move, because every affected format's first vector is the bare
+digest. The corpus is now keyed by format AND record shape — 605 entries over
+the same 493 formats — which makes the dialects visible and immediately
+surfaced a gap one-vector-per-format had hidden entirely: `gost $gost-cp$`,
+the CryptoPro parameter set.
+
+An earlier version of the same problem: 22 formats had been scored on an
+EMPTY-password vector, which measures whether empty candidates are tried
+rather than whether the format is supported.
+
+### Where it stands
+
+145 -> 210 of 605 records cracked from the record alone, and no entry has ever
+reported a wrong password — 605 unfamiliar records and not one verifier
+accepted a decoy. hashcat conformance is unchanged at 529 of 538 throughout.
