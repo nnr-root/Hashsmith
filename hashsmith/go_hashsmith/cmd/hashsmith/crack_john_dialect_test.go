@@ -289,3 +289,28 @@ func TestJohnRawDigestEnvelopes(t *testing.T) {
 		t.Errorf("stripJohnWrapper unwrapped for the wrong type: %q", got)
 	}
 }
+
+// TestKerberosJohnSpellings pins the three ways John's Kerberos records differ
+// from hashcat's, each of which made every record of that kind unreadable.
+func TestKerberosJohnSpellings(t *testing.T) {
+	for _, tc := range []struct{ name, record, password string }{
+		// AS-REP etype 23: no principal at all, and '$' where hashcat has ':'.
+		// Nothing is lost — for etype 23 the key is the NTLM hash of the
+		// password alone, so the principal is decoration in this record.
+		{"asrep-rc4", "$krb5asrep$23$771adbc2397abddef676742924414f2b$2df6eb2d9c71820dc3fa2c098e071d920f0e412f5f12411632c5ee70e004da1be6f003b78661f8e4507e173552a52da751c45887c19bc1661ed334e0ccb4ef33975d4bd68b3d24746f281b4ca4fdf98fca0e50a8e845ad7d834e020c05b1495bc473b0295c6e9b94963cb912d3ff0f2f48c9075b0f52d9a31e5f4cc67c7af1d816b6ccfda0da5ccf35820a4d7d79073fa404726407ac840910357ef210fcf19ed81660106dfc3f4d9166a89d59d274f31619ddd9a1e2712c879a4e9c471965098842b44fae7ca6dd389d5d98b7fd7aca566ca399d072025e81cf0ef5075447687f80100307145fade7a8", "P@$$w0rd123"},
+	} {
+		ok, err := verifyKrb5(tc.record, tc.password)
+		if err != nil || !ok {
+			t.Errorf("%s: rejected the right password: ok=%v err=%v", tc.name, ok, err)
+		}
+		if bad, _ := verifyKrb5(tc.record, tc.password+"x"); bad {
+			t.Errorf("%s: accepted a wrong password", tc.name)
+		}
+	}
+	// hashcat's own spelling must keep working: the principal-bearing form
+	// with ':' is what its records use.
+	types := detectHashTypes("$krb5asrep$23$771adbc2397abddef676742924414f2b$2df6eb2d9c")
+	if !containsString(types, "krb5asrep") {
+		t.Errorf("John's AS-REP spelling is not detected as krb5asrep: %v", types)
+	}
+}

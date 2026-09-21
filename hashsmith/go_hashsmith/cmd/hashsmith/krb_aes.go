@@ -204,11 +204,36 @@ func verifyKrb5AESHash(target, candidate string) (bool, error) {
 	if err != nil || (etype != 17 && etype != 18) {
 		return false, errors.New("unsupported Kerberos etype (want 17 or 18)")
 	}
+	// John writes AS-REP as "<etype>$<salt>$<edata>$<checksum>": the salt
+	// already concatenated rather than a separate user and realm, and the
+	// checksum AFTER the data instead of before it. hashcat writes
+	// "<etype>$<user>$<realm>$<checksum>$<edata>". The field count tells them
+	// apart, and the salt this code builds is upper(realm)+user — exactly
+	// what John's single field already holds — so it is passed through as the
+	// user with an empty realm.
+	if isASREP && len(f) == 4 {
+		edata, err := hex.DecodeString(f[2])
+		if err != nil {
+			return false, errors.New("invalid krb5asrep edata")
+		}
+		checksum, err := hex.DecodeString(f[3])
+		if err != nil || len(checksum) != 12 {
+			return false, errors.New("invalid krb5asrep checksum")
+		}
+		return verifyKrb5AES(candidate, "", f[1], etype, usage, edata, checksum), nil
+	}
+
 	user, realm := f[1], f[2]
 
 	var edata, checksum []byte
 	if isPA {
-		blob, err := hex.DecodeString(f[3])
+		// John writes an extra empty field before the pre-auth blob, where
+		// hashcat writes none; take the last field either way.
+		blobField := f[3]
+		if blobField == "" && len(f) >= 5 {
+			blobField = f[4]
+		}
+		blob, err := hex.DecodeString(blobField)
 		if err != nil || len(blob) < 12 {
 			return false, errors.New("invalid krb5pa data")
 		}

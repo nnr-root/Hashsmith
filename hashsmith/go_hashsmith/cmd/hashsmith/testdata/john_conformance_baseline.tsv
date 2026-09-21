@@ -109,8 +109,8 @@ known_hosts $known_hosts$	NOT-DETECTED
 krb4 $af$	NOT-DETECTED
 krb5 $krb5$	NOT-DETECTED
 krb5asrep	NOT-DETECTED
-krb5asrep $krb5asrep$	NOT-FOUND
-krb5pa-sha1 $krb5pa$	REJECTED
+krb5asrep $krb5asrep$	CRACKED
+krb5pa-sha1 $krb5pa$	CRACKED
 krb5tgs $krb5tgs$	CRACKED
 krb5-17 $krb17$	NOT-DETECTED
 krb5-18	NOT-DETECTED
@@ -385,8 +385,8 @@ keyring-opencl $keyring$	NOT-DETECTED
 keystore-opencl $keystore$	NOT-DETECTED
 krb5pa-md5-opencl $krb5pa$	CRACKED
 krb5pa-md5-opencl $mskrb5$	NOT-DETECTED
-krb5pa-sha1-opencl $krb5pa$	REJECTED
-krb5asrep-aes-opencl $krb5asrep$	REJECTED
+krb5pa-sha1-opencl $krb5pa$	CRACKED
+krb5asrep-aes-opencl $krb5asrep$	CRACKED
 lp-opencl $lp$	NOT-DETECTED
 lpcli-opencl $lpcli$	NOT-DETECTED
 LM-opencl $lm$	CRACKED

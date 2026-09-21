@@ -97,12 +97,19 @@ func parseKrb5(h string) (checksum, edata []byte, usages []int, err error) {
 	case strings.HasPrefix(h, "$krb5asrep$"):
 		body := strings.TrimPrefix(h, "$krb5asrep$")
 		body = strings.TrimPrefix(body, "23$") // etype 23 only
-		// body = user@REALM:<checksum>$<edata>
-		colon := strings.LastIndex(body, ":")
-		if colon < 0 {
-			return nil, nil, nil, errors.New("invalid krb5asrep format (missing ':')")
+		// body = user@REALM:<checksum>$<edata>, or just <checksum>$<edata>.
+		//
+		// John writes AS-REP records WITHOUT the principal, as
+		// "$krb5asrep$23$<checksum>$<edata>". Nothing is lost: for etype 23
+		// the key is the NTLM hash of the password alone — unlike etypes 17
+		// and 18, which salt with the principal and realm — so the principal
+		// is decoration in this record and its absence changes nothing about
+		// what has to be computed. Requiring it meant refusing every AS-REP
+		// record a John user has.
+		rest := body
+		if colon := strings.LastIndex(body, ":"); colon >= 0 {
+			rest = body[colon+1:]
 		}
-		rest := body[colon+1:]
 		dollar := strings.Index(rest, "$")
 		if dollar < 0 {
 			return nil, nil, nil, errors.New("invalid krb5asrep format (missing checksum/edata separator)")
