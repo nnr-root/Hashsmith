@@ -86,3 +86,51 @@ func TestArgon2dVectors(t *testing.T) {
 		}
 	}
 }
+
+// TestJohnEnvelopesReachTheRightVerifier checks the two halves of the envelope
+// mechanism together: that John's spelling resolves to the intended type, and
+// that the verifier for that type then sees a payload it accepts.
+func TestJohnEnvelopesReachTheRightVerifier(t *testing.T) {
+	for _, tc := range []struct{ record, typ, password string }{
+		{"$md2$ab4f496bfb2a530b219ff33031fe06b0", "md2", "message digest"},
+		{"$LM$a9c604d244c4e99d", "lm", "aaaaaa"},
+	} {
+		types := detectHashTypes(tc.record)
+		if !containsString(types, tc.typ) {
+			t.Errorf("detectHashTypes(%q) = %v, want it to include %q", tc.record, types, tc.typ)
+			continue
+		}
+		ok, err := verifyCandidate(tc.password, tc.record, tc.typ, "", "prefix")
+		if err != nil || !ok {
+			t.Errorf("verifyCandidate rejected the right password for %q: ok=%v err=%v", tc.record, ok, err)
+		}
+	}
+}
+
+// TestJohnHMACSpelling pins the `<message>#<digest>` reading, including the
+// cases the predicate must refuse. A '#' is an ordinary field separator in
+// several records, so reading every one of them as an HMAC message would be a
+// worse bug than not reading John's at all.
+func TestJohnHMACSpelling(t *testing.T) {
+	msg, digest, ok := splitJohnHMAC("what do ya want for nothing?#750c783e6ab0b503eaa86e310a5db738")
+	if !ok || msg != "what do ya want for nothing?" || digest != "750c783e6ab0b503eaa86e310a5db738" {
+		t.Fatalf("splitJohnHMAC = %q %q %v", msg, digest, ok)
+	}
+	for _, bad := range []string{
+		"$DCC2$10240#6848#e2829c8af2232fa53797e29b51f4e0cd", // '#' as a field separator
+		"no-digest-here#zzzz",                               // not hex
+		"#750c783e6ab0b503eaa86e310a5db738",                 // empty message
+		"what do ya want for nothing?#",                     // empty digest
+		"abc#750c783e6ab0b503eaa86e310a5db7",                // not a digest length
+	} {
+		if _, _, ok := splitJohnHMAC(bad); ok {
+			t.Errorf("splitJohnHMAC accepted %q; it must not", bad)
+		}
+	}
+	// End to end, through the verifier, with John's own vector.
+	ok, err := verifyCandidate("Jefe", "what do ya want for nothing?#750c783e6ab0b503eaa86e310a5db738",
+		"hmac-md5", "", "prefix")
+	if err != nil || !ok {
+		t.Errorf("hmac-md5 rejected John's vector: ok=%v err=%v", ok, err)
+	}
+}

@@ -90,6 +90,16 @@ func saltedPrototypes() []hashid.Prototype {
 		// gets only the general type. Both are plain literal-prefix checks, so
 		// TierSignature; the more specific "$23$" form is listed first so
 		// table order reproduces the nested precedence.
+		// John's HMAC spelling, `<message>#<digest>`. The HMAC types are
+		// otherwise undetectable by design — a bare HMAC-MD5 digest is a bare
+		// MD5 digest — but this spelling carries the message with it, which
+		// makes the record self-describing in a way the digest alone is not.
+		// Candidates are every HMAC type of that digest length, since the
+		// spelling names the construction and not the hash inside it.
+		predicateProtoShared(isJohnHMACRecord, "HMAC (John message#digest spelling)", hashid.TierStructural,
+			"a non-record message, '#', and a hex digest of an HMAC digest length",
+			6, "John's HMAC formats write the message alongside the digest, so these records arrive from John users with no separate salt flag",
+			johnHMACTypes()...),
 		// John-only envelopes. Each names a format whose payload this tool
 		// already reads; without the prototype the record resolves to whatever
 		// its bare payload looks like, which for a 32-hex MD2 digest is MD5.

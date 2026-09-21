@@ -42,3 +42,47 @@ func stripJohnWrapper(target, typ string) string {
 	}
 	return target
 }
+
+// johnHMACDigestLens are the digest sizes, in hex characters, that John's
+// HMAC formats emit: MD5, SHA-1, SHA-224, SHA-256, SHA-384 and SHA-512.
+var johnHMACDigestLens = map[int]bool{32: true, 40: true, 56: true, 64: true, 96: true, 128: true}
+
+// splitJohnHMAC reads John's `<message>#<digest>` HMAC spelling, the reverse
+// of the `<digest>:<message>` pairing used here.
+//
+// The predicate is deliberately narrow. It splits on the LAST '#', because a
+// message may contain one, and it requires the right-hand side to be hex of a
+// digest length — which is what keeps it off records like
+// "$DCC2$10240#user#hash" that use '#' as an ordinary field separator. A
+// leading '$' is refused for the same reason: every record spelled that way
+// names its own format and has no business being read as an HMAC message.
+func splitJohnHMAC(target string) (message, digest string, ok bool) {
+	if target == "" || target[0] == '$' {
+		return "", "", false
+	}
+	i := strings.LastIndexByte(target, '#')
+	if i <= 0 || i == len(target)-1 {
+		return "", "", false
+	}
+	message, digest = target[:i], target[i+1:]
+	if !johnHMACDigestLens[len(digest)] || !isHex(digest) {
+		return "", "", false
+	}
+	return message, digest, true
+}
+
+// isJohnHMACRecord reports whether a record uses John's HMAC spelling.
+func isJohnHMACRecord(s string) bool {
+	_, _, ok := splitJohnHMAC(strings.TrimSpace(s))
+	return ok
+}
+
+// johnHMACTypes names the HMAC types this spelling can resolve to. The
+// digest length narrows it further at verification time; offering the whole
+// family here costs one refused parse per wrong candidate and nothing else.
+func johnHMACTypes() []string {
+	return []string{
+		"hmac-md5", "hmac-sha1", "hmac-sha224",
+		"hmac-sha256", "hmac-sha384", "hmac-sha512",
+	}
+}

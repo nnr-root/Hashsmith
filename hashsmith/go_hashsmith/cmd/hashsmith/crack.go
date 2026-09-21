@@ -2972,9 +2972,15 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 	}
 	// HMAC types take their message from a "hash:salt" pairing when no salt was
 	// supplied via -s, so `<hmac>:<salt>` targets crack without extra flags.
+	//
+	// John writes the same thing the other way round and with a different
+	// separator — `<message>#<digest>` — which is the spelling in its test
+	// vectors and therefore the one a John user has. Both are read.
 	target, effSalt := targetHash, salt
 	if effSalt == "" && strings.HasPrefix(algo, "hmac-") {
-		if i := strings.LastIndexByte(targetHash, ':'); i >= 0 {
+		if msg, digest, ok := splitJohnHMAC(targetHash); ok {
+			target, effSalt = digest, msg
+		} else if i := strings.LastIndexByte(targetHash, ':'); i >= 0 {
 			target, effSalt = targetHash[:i], targetHash[i+1:]
 		}
 	}
