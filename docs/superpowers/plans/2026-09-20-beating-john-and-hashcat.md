@@ -1962,3 +1962,59 @@ rather than whether the format is supported.
 145 -> 210 of 605 records cracked from the record alone, and no entry has ever
 reported a wrong password — 605 unfamiliar records and not one verifier
 accepted a decoy. hashcat conformance is unchanged at 529 of 538 throughout.
+
+### Continued: 217 of 605, and what the shape-aware corpus found next
+
+Keying the corpus by format AND record shape immediately changed what the
+ratchet could say. Instead of "bcrypt: cracked" it now says "bcrypt $2a$:
+cracked, bcrypt $2b$: cracked, bcrypt $2x$: not detected" — which is the
+difference between a format and a spelling, made visible.
+
+Closed since:
+
+**Kerberos, three separate spelling differences**, each of which made every
+record of its kind unreadable. AS-REP etype 23 arrives from John with no
+principal at all and '$' where hashcat has ':'; nothing is lost, because for
+etype 23 the key is the NTLM hash of the password alone — unlike etypes 17
+and 18, which salt with principal and realm — so the principal is decoration
+in that record. AS-REP with AES arrives as `<etype>$<salt>$<edata>$<checksum>`:
+salt pre-concatenated instead of separate user and realm fields, and the
+checksum AFTER the data instead of before. Pre-auth arrives with an extra
+empty field. The AES layout was settled by measurement rather than reading —
+the record's own fields were fed to the existing key derivation at each usage
+number until one matched, which also confirmed usage 3.
+
+**Both AS/400 envelopes.** `$as400des$` keeps hashcat's body; `$as400ssha1$`
+also writes the digest BEFORE the profile name.
+
+**PostgreSQL's legacy `$postgre$`**, one character short of the modern
+spelling. Invisible until something read the other tool's whole corpus,
+because the modern spelling already worked.
+
+### Three things deliberately left alone, and why
+
+- **`$sxc$` is not a renamed `$odf$`.** It carries two extra length fields,
+  so it needs a parser. The prefix rewrite would have parsed and then failed.
+- **bcrypt `$2x$` parses and fails, correctly.** That variant exists to
+  reproduce a sign-extension bug in old crypt_blowfish; Go's bcrypt does not
+  implement the bug. Reading it as `$2a$` would report a WRONG answer instead
+  of none, which is strictly worse.
+- **`$gost-cp$` is the CryptoPro parameter set** — different S-boxes, not a
+  different spelling of GOST.
+
+A test-writing note worth keeping. The first AS/400 test asserted that
+appending a character to the right password must fail, and it did not. That
+is the format, not a weak check: AS/400 DES builds a DES key schedule from
+the EBCDIC password and truncates at eight characters, so "AAAAAAAA" and
+"AAAAAAAAx" are genuinely the same hash. The wrong password in a negative
+test has to differ where the format actually looks.
+
+### The residue
+
+Of 605 records: 217 crack, 344 are not detected, 35 are detected and fail, 9
+are refused. The long tail is now per-format parser work — MongoDB, SCRAM,
+CHAP, IKE, LastPass, PKCS#12, PKZIP and the NetNTLM/MSCHAPv2 family each
+carry a genuinely different field layout rather than a differently spelled
+envelope. None of it is cryptography; all of it is reading records.
+
+Still true after every change: no entry has ever reported a WRONG password.
