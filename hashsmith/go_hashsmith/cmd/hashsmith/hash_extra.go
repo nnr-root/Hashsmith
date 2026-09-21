@@ -348,7 +348,7 @@ func compatibilityHashAliasSeed() map[string]string {
 		"20011": "diskcryptor-xts512", "20012": "diskcryptor-xts1024", "20013": "diskcryptor-xts1536",
 		"16700": "fvde", "18300": "fvde",
 		"23300": "iwork", "31900": "metamask-mobile", "32500": "dogechain",
-		"8200": "1password-cloud", "20500": "pkzip-masterkey",
+		"8200": "1password-cloud", "31800": "1password8", "20500": "pkzip-masterkey",
 		"17200": "pkzip", "17210": "pkzip", "17220": "pkzip",
 		"17225": "pkzip", "17230": "pkzip",
 		"23001": "securezip", "23002": "securezip", "23003": "securezip",

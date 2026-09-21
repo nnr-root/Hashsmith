@@ -1612,6 +1612,32 @@ A later attempt should start by settling how `sha1_hmac_update_global` consumes
 that swapped buffer — ideally by instrumenting hashcat itself rather than by
 further inference, since inference has now been exhausted.
 
+### ODF, a fourth attempt and what it narrowed
+
+The earlier verdict on ODF 1.1 and 1.2 (18600, 18400) was reached without the
+Hashcat kernel sources. With them, the algorithm is no longer in doubt:
+
+  key    = PBKDF2-HMAC-SHA1(SHA-1(password), salt, iterations, keysize)  [1.1]
+           PBKDF2-HMAC-SHA1(SHA-256(password), salt, iterations, keysize) [1.2]
+  plain  = Blowfish-CFB(key, iv, data)      [1.1, 64-bit block, Go's CFB fits]
+           AES-256-CBC(key, iv, data)       [1.2]
+  check  = SHA-1 or SHA-256 of the plaintext against the record's checksum
+
+That was implemented in full and still does not reproduce Hashcat's published
+vector: the decryption yields noise, which means the key is wrong before the
+cipher is reached. Ruled out by sweep, against the 18600 vector: iteration
+counts of 1023/1024/1025, the IV taken from either end of the record's 16-byte
+field, PBKDF2 output widths of 16 and 20, and the PBKDF2 password given as the
+SHA-1 digest's raw bytes, its lower-case hex, its upper-case hex, and the
+password itself. None produced anything but noise.
+
+What is left to check is the record's field mapping. The module's parser reads
+thirteen tokens where the record splits into twelve, so one field is being
+counted differently from the obvious reading, and the PBKDF2 salt may not be
+the field that looks like one. The implementation is not committed, because a
+verifier that parses every record and rejects every password is the failure
+this project refuses to ship.
+
 ### Where every remaining mode stands
 
 Thirty-four modes were unimplemented at the start of this push and twenty-nine

@@ -518,6 +518,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"metamask-mobile", "MetaMask Mobile wallet, PBKDF2-HMAC-SHA512 + AES-256-CBC, Hashcat 31900"},
 			{"dogechain", "Dogechain.info wallet, PBKDF2 over base64(SHA-256(pass)) + AES-256-CBC, Hashcat 32500"},
 			{"1password-cloud", "1Password cloud keychain, PBKDF2-HMAC-SHA512 + HMAC-SHA256, Hashcat 8200"},
+			{"1password8", "1Password 8 mobile keychain, two-secret KDF + AES-256-GCM, Hashcat 31800"},
 			{"multibit", "MultiBit Classic or Bisq wallet, scrypt + AES-256-CBC, Hashcat 27700 and 29800"},
 			{"multibit-hd", "MultiBit HD wallet, scrypt with baked-in parameters, Hashcat 22700"},
 		}},
