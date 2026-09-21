@@ -536,6 +536,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"pkzip", "PKZIP/ZipCrypto archive, one or more files, Hashcat 17200/17210/17220/17225/17230"},
 			{"securezip", "PKWARE SecureZIP with AES-128/192/256, Hashcat 23001/23002/23003"},
 			{"domino5", "Lotus Notes/Domino 5 proprietary hash, Hashcat 8600"},
+			{"domino6", "Lotus Notes/Domino 6 salted hash, Hashcat 8700"},
 			{"pkzip-masterkey", "PKZIP/ZipCrypto 96-bit master key state, Hashcat 20500 (a bare 24-hex record, so -t is required)"},
 			{"plaintext", "The target IS the password, Hashcat 99999 — for exercising a wordlist or ruleset"},
 		}},

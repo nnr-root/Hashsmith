@@ -1,7 +1,7 @@
 package main
 
 // Lotus Notes / Domino — the proprietary hash behind Hashcat 8600, and the
-// base for 8700 and 9100.
+// salted form built on it, Hashcat 8700.
 //
 // Domino does not use a standard digest. It runs a 256-byte substitution table
 // through a Merkle-Damgard-shaped construction of its own, over a single
@@ -14,6 +14,7 @@ package main
 // enough here: the mix masks its index to a byte anyway.
 
 import (
+	"crypto/subtle"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -92,8 +93,40 @@ func lotusMDTransformNoRecalc(state, block *[4]uint32) {
 	}
 }
 
-// dominoHash is the Domino 5 digest of a password: one block absorbed, then
-// the checksum of that block absorbed in turn.
+// dominoBigMD is Domino's digest over an arbitrary message.
+//
+// The message is padded to a whole number of 16-byte blocks with the byte
+// giving how many were added — PKCS#7's rule, and always at least one block's
+// worth, so a message that already fits gets a whole extra block. Each block
+// is absorbed into the state and folded into a running checksum, and the
+// checksum is absorbed last.
+func dominoBigMD(msg []byte) []byte {
+	pad := 16 - len(msg)%16
+	full := make([]byte, len(msg)+pad)
+	copy(full, msg)
+	for i := len(msg); i < len(full); i++ {
+		full[i] = byte(pad)
+	}
+	var state, checksum [4]uint32
+	for off := 0; off < len(full); off += 16 {
+		var block [4]uint32
+		for i := 0; i < 4; i++ {
+			block[i] = binary.LittleEndian.Uint32(full[off+i*4:])
+		}
+		lotusMDTransformNoRecalc(&state, &block)
+		lotusTransformPassword(&block, &checksum)
+	}
+	lotusMDTransformNoRecalc(&state, &checksum)
+
+	out := make([]byte, 16)
+	for i := 0; i < 4; i++ {
+		binary.LittleEndian.PutUint32(out[i*4:], state[i])
+	}
+	return out
+}
+
+// dominoHash is the Domino 5 digest of a password. Domino 5 truncates at
+// sixteen characters because the password IS the single block it hashes.
 func dominoHash(candidate string) []byte {
 	pw := []byte(candidate)
 	if len(pw) > 16 {
@@ -126,4 +159,82 @@ func verifyDomino5(target, candidate string) (bool, error) {
 		return false, errors.New("Lotus Domino 5 hash must be 32 hex characters")
 	}
 	return strings.EqualFold(hex.EncodeToString(dominoHash(candidate)), want), nil
+}
+
+// Domino 6 — Hashcat 8700.
+//
+//	(G<lotus base64>)
+//
+// The record's body decodes to five bytes of salt and a nine-byte digest. Two
+// details in there are pure archaeology and neither is guessable:
+//
+//   - the salt's FOURTH byte is stored four higher than its real value and
+//     has to be decremented on the way in
+//   - the message hashed in the second pass is the salt, then a literal '('
+//     character, then the Domino 5 digest of the password in UPPERCASE hex
+//     TRUNCATED to 28 of its 32 characters
+//
+// That is 5 + 1 + 28 = 34 bytes. The stray '(' is the opening parenthesis of
+// the record itself, which Domino apparently never stopped including.
+
+// lotusBase64Alphabet is Domino's own ordering: digits first, then upper case,
+// then lower, then + and /. It is not RFC 4648's and the two do not agree on a
+// single character's value.
+const lotusBase64Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/"
+
+const (
+	domino6SaltLen   = 5
+	domino6DigestLen = 9
+	// The second pass keeps only 28 of the 32 hex characters.
+	domino6HexLen = 28
+)
+
+func lotusBase64Decode(s string) ([]byte, error) {
+	out := make([]byte, 0, len(s)*6/8)
+	var buf, bits int
+	for i := 0; i < len(s); i++ {
+		v := strings.IndexByte(lotusBase64Alphabet, s[i])
+		if v < 0 {
+			return nil, errors.New("invalid character in Lotus base64")
+		}
+		buf = buf<<6 | v
+		bits += 6
+		if bits >= 8 {
+			bits -= 8
+			out = append(out, byte(buf>>bits))
+		}
+	}
+	return out, nil
+}
+
+func verifyDomino6(target, candidate string) (bool, error) {
+	t := strings.TrimSpace(target)
+	if !strings.HasPrefix(t, "(G") || !strings.HasSuffix(t, ")") {
+		return false, errors.New("not a Lotus Domino 6 record")
+	}
+	raw, err := lotusBase64Decode(strings.TrimSuffix(strings.TrimPrefix(t, "(G"), ")"))
+	if err != nil {
+		return false, err
+	}
+	if len(raw) < domino6SaltLen+domino6DigestLen {
+		return false, errors.New("Lotus Domino 6 record is too short")
+	}
+	salt := append([]byte(nil), raw[:domino6SaltLen]...)
+	salt[3] -= 4
+	want := raw[domino6SaltLen : domino6SaltLen+domino6DigestLen]
+
+	inner := strings.ToUpper(hex.EncodeToString(dominoHash(candidate)))
+	msg := make([]byte, 0, domino6SaltLen+1+domino6HexLen)
+	msg = append(msg, salt...)
+	msg = append(msg, '(')
+	msg = append(msg, inner[:domino6HexLen]...)
+
+	return subtle.ConstantTimeCompare(dominoBigMD(msg)[:domino6DigestLen], want) == 1, nil
+}
+
+// looksLikeDomino6 reports whether a line is a Domino 6 record: parenthesised,
+// tagged with G, and a body that decodes to at least a salt and a digest.
+func looksLikeDomino6(s string) bool {
+	_, err := verifyDomino6(s, "")
+	return err == nil
 }
