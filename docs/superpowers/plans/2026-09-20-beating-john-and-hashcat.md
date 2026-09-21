@@ -1437,6 +1437,29 @@ weaker with nothing to show for it. A mode already pinned CRACKED now keeps
 that pin through a timeout. Nothing else is preserved: a CRACKED that becomes
 NOT-FOUND or REJECTED is a real regression and still shows up as one.
 
+### RESOLVED: the MultiBit modes below are implemented, and the missing step was the password
+
+The section that follows is kept because its reasoning was sound and its
+conclusion was right at the time — the plausible reading really did fail, and
+shipping it would have produced a verifier that rejects every password. What it
+could not find was the one step the record does not show, and the step turned
+out not to be in the cipher framing at all.
+
+**scrypt never sees the password's bytes.** MultiBit and Bisq are Java programs
+and hand scrypt `String.getBytes("UTF-16BE")`, so an ASCII passphrase arrives
+with a zero byte before every character. Every combination tried below was
+correct about the framing — AES-CBC with the IV in the first sixteen bytes of
+the data field, checked against a full block of PKCS#7 padding — and wrong
+about the key, for a reason no amount of varying the cipher could reach.
+
+It was found by sweeping four password encodings (raw, UTF-16LE, UTF-16BE,
+UTF-16BE with a BOM) rather than more cipher framings. The lesson is narrow and
+worth keeping: when a KDF's inputs are salt, parameters and password, and the
+first two are right there in the record, the one that is not written down is
+the one to vary.
+
+22700, 27700 and 29800 are now all CRACKED against Hashcat's published vectors.
+
 ### A mode NOT implemented, and why that is the result
 
 MultiBit HD (`-m 22700`/`27700`) and Bisq (`-m 29800`) looked like the next
@@ -1589,9 +1612,54 @@ A later attempt should start by settling how `sha1_hmac_update_global` consumes
 that swapped buffer — ideally by instrumenting hashcat itself rather than by
 further inference, since inference has now been exhausted.
 
+### Where every remaining mode stands
+
+Thirty-four modes were unimplemented at the start of this push and twenty-nine
+remain. They are not one backlog; they are five, and only one of them is a
+matter of getting round to it.
+
+**Deliberately not supported, and already decided (4).** Modes 9710, 9810 and
+10410 ask for an intermediate RC4 key rather than a document password —
+Hashcat's own answer for 9710 is `$HEX[91b2e062b9]`, not a passphrase — and
+Hashsmith recovers the password directly through their "#2" siblings 9720,
+9820 and 10420, which ARE supported. That decision is recorded in
+hash_extra.go and predates this push. Mode 20510 is the same shape: given the
+candidate "t" against its own example record, hashcat answers "hashcat",
+because the mode recovers the remaining six bytes itself. A verifier answers
+yes or no about the candidate it was handed; none of these four asks that
+question.
+
+**Blocked on evidence, not effort (4).** The DPAPI master key modes 15300,
+15310, 15900 and 15910. Record layout, blob layout, `salt_iter = rounds - 1`,
+the digest's provenance and the per-context derivations are all confirmed and
+written down above; roughly 250 combinations of the remaining unknowns were
+tried against the real record and none matched. The next step is instrumenting
+hashcat, not more inference.
+
+**Blocked on a resource decision (1).** LUKS v2 argon2, mode 34100, whose
+example asks for 1 GiB of Argon2 memory at t=4, p=4. That is seconds and a
+gigabyte per candidate, and the conformance harness runs modes in parallel, so
+landing it without a deliberate decision about memory limits risks the machine
+rather than the test.
+
+**Need a primitive Go does not have (7).** Electrum 21700 and 21800 need
+secp256k1 point multiplication. MD6 34600 needs MD6. Kremlin 32700 needs
+NewDES, including its 256-entry rotor table. BestCrypt 23900 and 24000 need a
+bespoke 4 KiB-table KDF and, for v4, Keccak. RACF 8500 and 14200 need the
+proprietary RACF DES construction. Each is a self-contained port of a few
+hundred lines; none is research.
+
+**Ordinary work, in rough order of cost (13).** 23700 RAR3-p and 25400 PDF
+1.4-1.6 both extend machinery already here. 8501 AS/400 shares RACF's kernel.
+14500 Linux Kernel Crypto API, 501 Juniper IVE, 31800 1Password 8 (AES-GCM
+with the two-secret derivation), 8800 and 12900 Android FDE, 26500 iPhone
+passcode, 28100 Windows Hello, 18400 and 18600 ODF. These are the ones where
+the only question is time.
+
 ### Still open
 
-- 66 unimplemented hashcat modes. Conformance is 458 of 538 (85.1%) on a quiet
-  machine, with 10 VeraCrypt modes still over the per-record timeout.
+- 29 unimplemented hashcat modes, categorised in the section above.
+  Conformance is 497 of 538 (92.4%) on a quiet machine, with 8 VeraCrypt modes
+  still over the per-record timeout.
 - John's rule corpus reads at 98.4%. The four lines left expand to millions of
   rules each and are refused by design, so this item is closed.
