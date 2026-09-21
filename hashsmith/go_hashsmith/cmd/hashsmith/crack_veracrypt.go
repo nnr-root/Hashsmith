@@ -216,14 +216,20 @@ func verifyCryptHeader(targetHash, candidate string, kdfs []vcKDF) (bool, error)
 
 	for _, kdf := range kdfs {
 		// Most real-world headers are single-cipher. Test the 64-byte PBKDF2
-		// prefix first so that ordinary auto-detection does not pay for all six
-		// cascade key blocks. Derive the full key only after that fast path fails.
-		singleKey := pbkdf2.Key([]byte(candidate), salt, kdf.iter, 64, kdf.newHash)
-		if vcHeaderValidCipherRange(singleKey, encrypted, 1, 1) {
+		// prefix first so that ordinary auto-detection does not pay for all the
+		// cascade key blocks, then EXTEND that derivation to 192 bytes rather
+		// than starting over — PBKDF2 output blocks are independent, so the
+		// blocks already computed are the first blocks of the longer key. See
+		// pbkdf2Range. Deriving twice repeated every block of the short key on
+		// each candidate that did not match, which is all of them but one.
+		single := pbkdf2BlocksFor(64, kdf.newHash)
+		cascade := pbkdf2BlocksFor(192, kdf.newHash)
+		key := pbkdf2Range([]byte(candidate), salt, kdf.iter, 1, single+1, kdf.newHash)
+		if vcHeaderValidCipherRange(key[:64], encrypted, 1, 1) {
 			return true, nil
 		}
-		cascadeKey := pbkdf2.Key([]byte(candidate), salt, kdf.iter, 192, kdf.newHash)
-		if vcHeaderValidCipherRange(cascadeKey, encrypted, 2, 3) {
+		key = append(key, pbkdf2Range([]byte(candidate), salt, kdf.iter, single+1, cascade+1, kdf.newHash)...)
+		if vcHeaderValidCipherRange(key[:192], encrypted, 2, 3) {
 			return true, nil
 		}
 	}
