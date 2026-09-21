@@ -37,14 +37,16 @@ const memoryBudgetFallback = 2 << 30 // 2 GiB
 // hold whether or not the operator passed -t: an auto-detected LUKS2 header
 // costs exactly as much as a declared one.
 func candidateMemoryBytes(typ, target string) uint64 {
-	if typ != "" && typ != "luks2" {
-		return 0
+	switch {
+	case typ == "" || typ == "luks2":
+		if p, err := parseLUKS2Params(target); err == nil {
+			return p.memoryBytes()
+		}
 	}
-	p, err := parseLUKS2Params(target)
-	if err != nil {
-		return 0
+	if (typ == "" || typ == "bestcrypt-v4") && strings.HasPrefix(strings.TrimSpace(target), bestCryptV4Prefix) {
+		return bestCryptV4Memory
 	}
-	return p.memoryBytes()
+	return 0
 }
 
 // workerCapForMemory returns the number of workers that fit the budget, and a

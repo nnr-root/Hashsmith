@@ -69,7 +69,13 @@ func slowSelfTestTypeSeed() map[string]bool {
 		// scrypt-backed wallets: Bisq's example uses N=32768 with p=6, which
 		// is a fraction of a second on its own and well past the fast budget.
 		"multibit": true, "multibit-hd": true,
-		"aix": true, "grub2": true, "passlib-pbkdf2": true, "werkzeug": true,
+		// BestCrypt v4 is scrypt at N=32768, r=16 — 64 MiB of working set per
+		// candidate, which is the memory cost rather than the time cost that
+		// keeps it out of the fast pass.
+		"bestcrypt-v4": true,
+		// LUKS2 headers ask for Argon2 at a gibibyte; see memory_budget.go.
+		"luks2": true,
+		"aix":   true, "grub2": true, "passlib-pbkdf2": true, "werkzeug": true,
 		"krb5pa": true, "krb5tgs": true, "veracrypt": true, "truecrypt": true,
 		"truecrypt-ripemd160": true, "truecrypt-sha512": true, "truecrypt-whirlpool": true,
 		"veracrypt-ripemd160": true, "veracrypt-sha512": true, "veracrypt-whirlpool": true,

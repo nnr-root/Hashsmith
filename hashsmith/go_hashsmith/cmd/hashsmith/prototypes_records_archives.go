@@ -79,6 +79,8 @@ func archivePrototypes() []hashid.Prototype {
 			"Android's pre-5.0 crypto footer is a standard artefact in mobile forensics on older devices", "android-fde"),
 		hasPrefixProto("$WINHELLO$*", "Windows Hello PIN/password", 12,
 			"Windows Hello is the default sign-in on current Windows, so its PIN protector is a routine target in modern Windows forensics", "windows-hello"),
+		hasPrefixProto("$bcve$4$", "BestCrypt v4 encrypted volume", 5,
+			"BestCrypt v4 is Jetico's current volume format, so it is the one a present-day container will carry", "bestcrypt-v4"),
 		hasPrefixProto("$bcve$3$", "BestCrypt v3 encrypted volume", 5,
 			"Jetico BestCrypt has a small but persistent installed base, mostly in European enterprise deployments", "bestcrypt-v3"),
 		hasPrefixProto("$kgb$", "Kremlin Encrypt 3.0 archive", 3,

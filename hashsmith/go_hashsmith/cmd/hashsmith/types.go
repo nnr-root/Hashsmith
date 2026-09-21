@@ -555,6 +555,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"android-fde-samsung", "Samsung Android FDE, PBKDF2-HMAC-SHA256 + HMAC, Hashcat 12900"},
 			{"iphone-passcode", "iPhone passcode, UID-key loop + RFC 3394 class-key unwrap, Hashcat 26500"},
 			{"windows-hello", "Windows Hello PIN/password, PBKDF2-HMAC-SHA256 + DPAPI HMAC-SHA512, Hashcat 28100"},
+			{"bestcrypt-v4", "BestCrypt v4 volume, scrypt + AES-256 or Twofish-256, Hashcat 24000"},
 			{"bestcrypt-v3", "BestCrypt v3 volume, 64 KiB SHA-256 stretch + AES-256-CBC, Hashcat 23900"},
 			{"kremlin", "Kremlin Encrypt 3.0, SHA-1 keyed NewDES over 1000 rounds, Hashcat 32700"},
 			{"racf-kdfaes", "IBM RACF KDFAES, legacy DES hash through a memory-hard KDF + AES-256, Hashcat 14200"},

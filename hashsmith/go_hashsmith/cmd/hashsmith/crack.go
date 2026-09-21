@@ -2722,6 +2722,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyIPhonePasscode(targetHash, candidate)
 	case "windows-hello":
 		return verifyWindowsHello(targetHash, candidate)
+	case "bestcrypt-v4":
+		return verifyBestCryptV4(targetHash, candidate)
 	case "bestcrypt-v3":
 		return verifyBestCryptV3(targetHash, candidate)
 	case "kremlin":
