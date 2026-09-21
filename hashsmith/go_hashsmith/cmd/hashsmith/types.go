@@ -518,6 +518,8 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"metamask-mobile", "MetaMask Mobile wallet, PBKDF2-HMAC-SHA512 + AES-256-CBC, Hashcat 31900"},
 			{"dogechain", "Dogechain.info wallet, PBKDF2 over base64(SHA-256(pass)) + AES-256-CBC, Hashcat 32500"},
 			{"1password-cloud", "1Password cloud keychain, PBKDF2-HMAC-SHA512 + HMAC-SHA256, Hashcat 8200"},
+			{"multibit", "MultiBit Classic or Bisq wallet, scrypt + AES-256-CBC, Hashcat 27700 and 29800"},
+			{"multibit-hd", "MultiBit HD wallet, scrypt with baked-in parameters, Hashcat 22700"},
 		}},
 		{"Browser and file encryption", [][2]string{
 			{"axcrypt1", "AxCrypt 1 file, SHA-1 + iterated AES key unwrap, Hashcat 13200"},
@@ -538,6 +540,8 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"domino5", "Lotus Notes/Domino 5 proprietary hash, Hashcat 8600"},
 			{"domino6", "Lotus Notes/Domino 6 salted hash, Hashcat 8700"},
 			{"domino8", "Lotus Notes/Domino 8, Domino 6 through PBKDF2-HMAC-SHA1, Hashcat 9100"},
+			{"stuffit5", "StuffIt5 archive, MD5(MD5(pass)[:5])[:5], Hashcat 24700"},
+			{"sqlcipher", "SQLCipher database, PBKDF2-HMAC-SHA1 + AES-256-CBC, Hashcat 24600"},
 			{"pkzip-masterkey", "PKZIP/ZipCrypto 96-bit master key state, Hashcat 20500 (a bare 24-hex record, so -t is required)"},
 			{"plaintext", "The target IS the password, Hashcat 99999 — for exercising a wordlist or ruleset"},
 		}},

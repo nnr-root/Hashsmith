@@ -284,6 +284,14 @@ func webFrameworkPrototypes() []hashid.Prototype {
 		// A DiskCryptor header does not say how many ciphers are cascaded, so
 		// detection offers all three widths; the wider ones also test the
 		// narrower layouts, exactly as Hashcat's kernels do.
+		hasPrefixProto("$multibit$2*", "MultiBit HD wallet", 10,
+			"MultiBit was a widely used Bitcoin wallet before it was discontinued, and its files persist in recovery work",
+			"multibit-hd"),
+		hasPrefixProto("$multibit$3*", "MultiBit Classic wallet", 10,
+			"MultiBit was a widely used Bitcoin wallet before it was discontinued, and its files persist in recovery work",
+			"multibit"),
+		hasPrefixProto("$bisq$", "Bisq wallet", 6,
+			"Bisq is a niche decentralised exchange whose wallet shares MultiBit's format", "multibit"),
 		predicateProto(looksLikeDomino8, "Lotus Notes/Domino 8", hashid.TierSignature,
 			"parenthesised (H...) record whose Lotus base64 body decodes to a salt, a decimal iteration count and a digest", 10,
 			"Domino 8 is the current form and the one most likely to come out of a live directory", "domino8"),

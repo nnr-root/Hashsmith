@@ -66,6 +66,9 @@ func slowSelfTestTypeSeed() map[string]bool {
 		"bitwarden": true, "blockchain": true, "dcc2": true, "electrum": true,
 		"itunes": true, "keepass": true, "oracle12c": true, "pdf-r6": true,
 		"solarwinds": true, "argon2": true, "scrypt": true, "bcrypt": true,
+		// scrypt-backed wallets: Bisq's example uses N=32768 with p=6, which
+		// is a fraction of a second on its own and well past the fast budget.
+		"multibit": true, "multibit-hd": true,
 		"aix": true, "grub2": true, "passlib-pbkdf2": true, "werkzeug": true,
 		"krb5pa": true, "krb5tgs": true, "veracrypt": true, "truecrypt": true,
 		"truecrypt-ripemd160": true, "truecrypt-sha512": true, "truecrypt-whirlpool": true,

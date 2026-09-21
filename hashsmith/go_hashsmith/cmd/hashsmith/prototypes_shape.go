@@ -39,6 +39,9 @@ func lowercaseRulesOutLM(in hashid.Input) (string, bool) {
 
 func shapePrototypes() []hashid.Prototype {
 	return []hashid.Prototype{
+		hexShapeProto(10, "StuffIt5", 5,
+			"a 40-bit archive checksum; nothing else in the table is ten hex characters, so claiming it costs nothing",
+			nil, "stuffit5"),
 		hexShapeProto(16, "MySQL 3.23 / Cisco-PIX / half-MD5", 25,
 			"truncated and legacy digests; uncommon as a primary target", nil,
 			"mysql323", "cisco-pix", "half-md5"),

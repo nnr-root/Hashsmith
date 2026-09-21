@@ -2701,6 +2701,14 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyDomino6(targetHash, candidate)
 	case "domino8":
 		return verifyDomino8(targetHash, candidate)
+	case "stuffit5":
+		return verifyStuffit5(targetHash, candidate)
+	case "sqlcipher":
+		return verifySQLCipher(targetHash, candidate)
+	case "multibit":
+		return verifyMultiBit(targetHash, candidate)
+	case "multibit-hd":
+		return verifyMultiBitHD(targetHash, candidate)
 	case "pkzip-masterkey":
 		return verifyPKZIPMasterKey(targetHash, candidate)
 	case "bsdicrypt":
