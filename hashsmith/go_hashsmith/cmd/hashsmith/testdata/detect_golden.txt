@@ -209,6 +209,7 @@ $zipaes192$00112233445566778899aabb$0440	zipaes192
 $zipaes256$00112233445566778899aabbccddeeff$c0f8	zipaes256
 $zipcrypto$b2$ec7c41d8f99cc1b0e6a61c86	zipcrypto
 (GDJ0nDZI8l8RJzlRbemg)	domino6
+(HC34tD3KtDp4oCZWmCJ4qC30mC30mC3KmC30mCcA5ovrMLH9M)	domino8
 0123456789abcdef	mysql323,cisco-pix,half-md5
 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef	sha384,sha3_384,blake2b384,keccak384
 0127eecea3120e34c8934ba3b72a390a:0	vbulletin,dcc,md5-pass-salt,md5-salt-pass,md5-utf16le-pass-salt,md5-salt-utf16le-pass,md5-md5-md5pass-salt,md5-md5binpass,md5-md5pass-md5salt,md5-md5pass-pass,md5-md5pass-salt,md5-md5passsalt,md5-md5salt-md5-md5pass,md5-md5salt-md5pass,md5-md5salt-pass,md5-pass-md5pass,md5-pass-pass,md5-salt-md5pass,md5-salt-md5pass-salt,md5-salt-md5passsalt,md5-salt-md5saltpass,md5-salt-pass-md5pass,md5-salt-pass-salt,md5-salt-sha1saltpass,md5-sha1-md5pass,md5-sha1pass-md5pass-sha1pass,md5-sha1pass-salt,md5-sha1passsalt,md5-sha1salt-md5pass,md5-sha1saltpass,skype

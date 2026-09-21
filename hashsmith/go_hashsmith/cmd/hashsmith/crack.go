@@ -2699,6 +2699,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyDomino5(targetHash, candidate)
 	case "domino6":
 		return verifyDomino6(targetHash, candidate)
+	case "domino8":
+		return verifyDomino8(targetHash, candidate)
 	case "pkzip-masterkey":
 		return verifyPKZIPMasterKey(targetHash, candidate)
 	case "bsdicrypt":

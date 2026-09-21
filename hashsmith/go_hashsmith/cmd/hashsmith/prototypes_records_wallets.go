@@ -284,6 +284,9 @@ func webFrameworkPrototypes() []hashid.Prototype {
 		// A DiskCryptor header does not say how many ciphers are cascaded, so
 		// detection offers all three widths; the wider ones also test the
 		// narrower layouts, exactly as Hashcat's kernels do.
+		predicateProto(looksLikeDomino8, "Lotus Notes/Domino 8", hashid.TierSignature,
+			"parenthesised (H...) record whose Lotus base64 body decodes to a salt, a decimal iteration count and a digest", 10,
+			"Domino 8 is the current form and the one most likely to come out of a live directory", "domino8"),
 		predicateProto(looksLikeDomino6, "Lotus Notes/Domino 6", hashid.TierSignature,
 			"parenthesised (G...) record whose Lotus base64 body decodes to a salt and digest", 8,
 			"Domino 6 is legacy but still runs in long-lived enterprise mail deployments", "domino6"),

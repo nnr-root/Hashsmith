@@ -1,7 +1,7 @@
 package main
 
-// Lotus Notes / Domino — the proprietary hash behind Hashcat 8600, and the
-// salted form built on it, Hashcat 8700.
+// Lotus Notes / Domino — the proprietary hash behind Hashcat 8600, and the two
+// formats built on it, Hashcat 8700 and 9100.
 //
 // Domino does not use a standard digest. It runs a 256-byte substitution table
 // through a Merkle-Damgard-shaped construction of its own, over a single
@@ -14,11 +14,15 @@ package main
 // enough here: the mix masks its index to a byte anyway.
 
 import (
+	"crypto/sha1"
 	"crypto/subtle"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"strings"
+
+	"golang.org/x/crypto/pbkdf2"
 )
 
 // lotusMagicTable is Domino's substitution box.
@@ -96,12 +100,20 @@ func lotusMDTransformNoRecalc(state, block *[4]uint32) {
 // dominoBigMD is Domino's digest over an arbitrary message.
 //
 // The message is padded to a whole number of 16-byte blocks with the byte
-// giving how many were added — PKCS#7's rule, and always at least one block's
-// worth, so a message that already fits gets a whole extra block. Each block
-// is absorbed into the state and folded into a running checksum, and the
-// checksum is absorbed last.
+// giving how many were added. Unlike PKCS#7 there is NO padding at all when
+// the message already fills its blocks: Hashcat's loop runs while
+// `curpos + 16 < size`, strictly, so a 16-byte message is one block and the
+// padding block it prepares is never hashed. Adding one anyway is invisible
+// on Hashcat's own 7-character example and wrong for every password whose
+// length is a multiple of sixteen.
+//
+// Each block is absorbed into the state and folded into a running checksum,
+// and the checksum is absorbed last.
 func dominoBigMD(msg []byte) []byte {
-	pad := 16 - len(msg)%16
+	pad := (16 - len(msg)%16) % 16
+	if len(msg) == 0 {
+		pad = 16
+	}
 	full := make([]byte, len(msg)+pad)
 	copy(full, msg)
 	for i := len(msg); i < len(full); i++ {
@@ -223,7 +235,7 @@ func verifyDomino6(target, candidate string) (bool, error) {
 	salt[3] -= 4
 	want := raw[domino6SaltLen : domino6SaltLen+domino6DigestLen]
 
-	inner := strings.ToUpper(hex.EncodeToString(dominoHash(candidate)))
+	inner := strings.ToUpper(hex.EncodeToString(dominoBigMD([]byte(candidate))))
 	msg := make([]byte, 0, domino6SaltLen+1+domino6HexLen)
 	msg = append(msg, salt...)
 	msg = append(msg, '(')
@@ -236,5 +248,101 @@ func verifyDomino6(target, candidate string) (bool, error) {
 // tagged with G, and a body that decodes to at least a salt and a digest.
 func looksLikeDomino6(s string) bool {
 	_, err := verifyDomino6(s, "")
+	return err == nil
+}
+
+// lotusBase64Encode is the inverse of lotusBase64Decode: three bytes to four
+// characters, most significant first, in Domino's alphabet.
+func lotusBase64Encode(in []byte) string {
+	var sb strings.Builder
+	for i := 0; i < len(in); i += 3 {
+		var n uint32
+		bits := 0
+		for j := 0; j < 3 && i+j < len(in); j++ {
+			n |= uint32(in[i+j]) << uint(16-8*j)
+			bits += 8
+		}
+		for k := 0; k < (bits+5)/6; k++ {
+			sb.WriteByte(lotusBase64Alphabet[(n>>uint(18-6*k))&0x3f])
+		}
+	}
+	return sb.String()
+}
+
+// Domino 8 — Hashcat 9100.
+//
+//	(H<lotus base64>)
+//
+// Domino 8 runs Domino 6 and then puts the whole thing through PBKDF2-HMAC-
+// SHA1 — but what it hands PBKDF2 as the PASSWORD is not a digest. It is the
+// Domino 6 RECORD, rebuilt as text: the literal characters "(G", the salt and
+// digest re-encoded in Lotus base64, and a closing ")". Twenty-two characters
+// of ASCII, parentheses and all.
+//
+// The 36-byte body holds a 16-byte salt, the iteration count as TEN ASCII
+// DIGITS rather than a number, two bytes that go unused here, and the 8-byte
+// PBKDF2 output. The salt's fourth byte carries the same off-by-four as
+// Domino 6 — stored high, decremented on the way in, and put back before the
+// rebuild, which is why both forms appear below.
+//
+// One detail is worth the line it costs. The rebuilt record is nineteen
+// base64 characters, which is fourteen bytes and two bits. Those last two bits
+// are NOT padding: they come from the tenth byte of the Domino 6 digest, which
+// the record does not otherwise carry. Encoding fourteen bytes and stopping
+// gets every character but the last one right, and the last one wrong, and a
+// wrong PBKDF2 password looks exactly like a wrong guess.
+
+const (
+	domino8SaltLen   = 16
+	domino8IterLen   = 10
+	domino8DigestLen = 8
+	domino8BodyLen   = 36
+	// Fifteen bytes in, twenty characters out, nineteen kept.
+	domino8RebuildBytes = 15
+	domino8RebuildChars = 19
+)
+
+func verifyDomino8(target, candidate string) (bool, error) {
+	t := strings.TrimSpace(target)
+	if !strings.HasPrefix(t, "(H") || !strings.HasSuffix(t, ")") {
+		return false, errors.New("not a Lotus Domino 8 record")
+	}
+	raw, err := lotusBase64Decode(strings.TrimSuffix(strings.TrimPrefix(t, "(H"), ")"))
+	if err != nil {
+		return false, err
+	}
+	if len(raw) < domino8BodyLen {
+		return false, errors.New("Lotus Domino 8 record is too short")
+	}
+	stored := append([]byte(nil), raw[:domino8SaltLen]...)
+	stored[3] -= 4
+	iterations, err := strconv.Atoi(strings.TrimSpace(string(raw[domino8SaltLen : domino8SaltLen+domino8IterLen])))
+	if err != nil || iterations < 1 {
+		return false, errors.New("Lotus Domino 8 iteration count is not a positive decimal")
+	}
+	want := raw[domino8BodyLen-domino8DigestLen : domino8BodyLen]
+
+	// The Domino 6 stage, over the decremented salt exactly as 8700 does it.
+	inner := strings.ToUpper(hex.EncodeToString(dominoBigMD([]byte(candidate))))
+	msg := make([]byte, 0, domino6SaltLen+1+domino6HexLen)
+	msg = append(msg, stored[:domino6SaltLen]...)
+	msg = append(msg, '(')
+	msg = append(msg, inner[:domino6HexLen]...)
+	digest := dominoBigMD(msg)
+
+	// Rebuild the Domino 6 record text. The salt byte goes back up by four,
+	// and ten digest bytes are encoded so the nineteenth character is right.
+	plain := make([]byte, 0, domino8RebuildBytes)
+	plain = append(plain, raw[:domino6SaltLen]...)
+	plain = append(plain, digest[:domino8RebuildBytes-domino6SaltLen]...)
+	rebuilt := "(G" + lotusBase64Encode(plain)[:domino8RebuildChars] + ")"
+
+	out := pbkdf2.Key([]byte(rebuilt), stored, iterations, domino8DigestLen, sha1.New)
+	return subtle.ConstantTimeCompare(out, want) == 1, nil
+}
+
+// looksLikeDomino8 reports whether a line is a Domino 8 record.
+func looksLikeDomino8(s string) bool {
+	_, err := verifyDomino8(s, "")
 	return err == nil
 }
