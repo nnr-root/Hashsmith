@@ -1521,6 +1521,74 @@ Conformance: 455 to 458 of 538, with -m 29411, 29431 and 29442 crossing the
 20-second per-record timeout. Ten VeraCrypt modes remain over it, and they are
 the wide ones — the cascade widths that derive 128 or 192 bytes of key.
 
+### hashcat ships its own algorithm definitions, and they are already installed
+
+Worth knowing before implementing any of the remaining modes: this machine's
+hashcat install carries **1,532 OpenCL kernel sources** under
+`/opt/homebrew/share/hashcat/OpenCL/`, including `m<mode>-pure.cl` for every
+mode still unimplemented here. Those files ARE the algorithm — init, loop and
+comp kernels, in readable C. The per-mode record parsers are compiled
+(`share/hashcat/modules/module_<mode>.so`), but they disassemble cleanly:
+`module_hash_decode` is a few hundred bytes of ARM64 and shows the token
+layout, the esalt field offsets and the byte order of every stored buffer.
+
+Three checks that cost little and are worth doing every time:
+
+1. **Confirm hashcat cracks its own example record on this machine first.**
+   It does not always: the OpenCL CPU backend fails to build kernels here
+   (`shared.cl build failed`), so `-D1` reports "No devices found/left" and the
+   default Metal backend must be used instead.
+2. **Mutate one record field at a time and see which mutations break the
+   crack.** This establishes which fields the algorithm actually reads before
+   any code is written.
+3. **When generating candidate records to test an assumption, give each one its
+   own salt.** hashcat deduplicates by (digest, salt), and several modules set
+   the digest from a salt field rather than from the blob — twelve DPAPI
+   records sharing an IV collapsed to `1 unique digests, 1 unique salts`, so
+   eleven assumptions went untested while appearing to be refuted.
+
+### DPAPI master keys: confirmed groundwork, and an unresolved last step
+
+An implementation of 15300/15310/15900/15910 was written and is NOT committed,
+because it does not reproduce hashcat's example vector and a verifier that
+silently never cracks is worse than no support — the same failure the hashcat
+conformance ratchet exists to catch.
+
+**Confirmed, and worth not re-deriving.** The record is
+`$DPAPImk$<version>*<context>*<SID>*<cipher>*<hash>*<rounds>*<iv>*<len>*<blob>`,
+where `<len>` counts HEX CHARACTERS, not bytes: 208 for a v1 blob of 104 bytes,
+288 for a v2 blob of 144. From `module_hash_decode`: the module requires that
+length to be exactly 208 for version 1 and 288 for version 2 and to equal the
+blob token's length; it stores `salt_iter = rounds - 1`, so total PBKDF2
+iterations are `rounds`; and it sets the digest from the IV, which is why
+records differing only in their blob deduplicate.
+
+The decrypted blob is `[0:16]` HMAC salt, `[16:16+macLen]` the stored MAC, and
+the last 64 bytes the master key. Hashcat never decrypts the middle — it needs
+16 bytes of MAC and the trailing key, so the rest only has to chain. v1 is
+3DES-CBC with HMAC-SHA1, v2 is AES-256-CBC with HMAC-SHA512, PBKDF2 output
+split key-then-IV (24+8, 32+16). The check is
+`HMAC(HMAC(userKey, hmacSalt), masterKey)[:16] == plaintext[16:32]`.
+
+From the kernels: context 1 is `SHA1(UTF16LE(password))`, context 2 the NTLM
+hash, context 3 the NTLM hash through PBKDF2-HMAC-SHA256 twice over the SID
+(10,000 rounds to 32 bytes, then 1 round to 16), and context 3 alone hashes the
+SID with `SID_len + 2` where 1 and 2 use `SID_len`.
+
+**Where it stands.** `module_hash_decode` widens the SID to UTF-16LE one byte
+at a time (`strb w11, [x9], #2`), writes `0x80` at offset `2*len+2`, sets
+`SID_len = 2*len+2`, and byte-swaps all 32 words of the 128-byte buffer — so
+the message SHA1 actually consumes is not simply `UTF16LE(SID)`, and the `0x80`
+lands inside it at index 85 rather than past the end. Roughly 250 combinations
+of {password hash, SID encoding and marker, IV byte order, iteration offset,
+CBC IV source, MAC chain} were tried against the real record and none matched,
+so at least one assumption above is still wrong. The DES convention is not it:
+`_des_crypt_keysetup` is OpenSSL's, little-endian key words, equivalent to Go's.
+
+A later attempt should start by settling how `sha1_hmac_update_global` consumes
+that swapped buffer — ideally by instrumenting hashcat itself rather than by
+further inference, since inference has now been exhausted.
+
 ### Still open
 
 - 66 unimplemented hashcat modes. Conformance is 458 of 538 (85.1%) on a quiet
