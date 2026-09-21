@@ -898,6 +898,96 @@ expectation deserves a look at what else is running before it gets an
 explanation — and a background process spawned by a probe is the experimenter's
 responsibility to account for and to clean up.
 
+### SECOND CORRECTION: the correction above also blamed the wrong thing
+
+The section immediately above is right that eight runaway busy-loops
+contaminated the original investigation. It is wrong about what that implied,
+and one sentence in it is a straightforwardly false measurement claim:
+
+> The reference side read 1.84ms against the 3.27ms recorded during the
+> contaminated period, and the full suite now takes 122 seconds where the
+> "normal" baseline had been 180 — so even the runs treated as clean were
+> contaminated.
+
+Four consecutive runs of the package on its own, on a genuinely quiet machine
+(load average 2.0, nothing else running), read:
+
+| | reference (x/crypto) | lane, per candidate | speedup |
+|---|---|---|---|
+| run 1 | 3.259 ms | 1.5266 ms | 2.13x |
+| run 2 | 3.264 ms | 1.5265 ms | 2.14x |
+| run 3 | 3.265 ms | 1.5264 ms | 2.14x |
+| run 4 | 3.254 ms | 1.5268 ms | 2.13x |
+
+The quiet reference is **3.26 ms**, not 1.84 ms — which also means the
+`refQuietBaselineNs = 3.3e6` constant was right all along, and the claim that
+the machine "had been running at roughly half speed" was invented to explain a
+number that never existed in the quiet condition. The 1.84–2.41 ms readings
+that produced it were taken *while a concurrent suite ran*, and were therefore
+FASTER under load than at rest. That inversion is real and reproducible on this
+hardware; the likely cause is macOS placing an otherwise-idle single-threaded
+benchmark on an efficiency core and promoting it to a performance core once the
+machine is busy, but that is a hypothesis and has not been tested, so nothing
+here depends on it.
+
+**The reverted gate was also wrong.** On a demonstrably clean machine, the
+ratchet still failed **2 runs out of 4** under `go test ./...`, at 1.57x and
+1.61x, while passing every single time the package ran alone. So the original
+complaint was not purely an artefact of the runaway processes; it had a real
+component underneath.
+
+**What the real mechanism turned out to be.** In the failing `go test ./...`
+run, the reference side read 3.255 ms — indistinguishable from its 3.259 ms
+quiet reading — while the lane side read 2.075 ms/candidate against 1.527 ms
+quiet. The contention landed almost entirely on one side of the ratio. One
+bcrypt state is a single ~4 KB Blowfish S-box set; four interleaved lanes are
+four of them, so a sibling test binary evicting cache hits the lane side and
+largely misses the reference.
+
+That is fatal to the load guard as it was written. A guard watching the
+reference side's absolute cost sees a perfectly healthy machine in exactly the
+case it exists to catch — and no amount of adjusting its threshold changes
+that, because the quantity it watches does not move.
+
+**The fix: let the measurement judge its own samples.** Contention is bursty
+where a real regression is not, so dispersion across repeated samples of the
+same work separates the two cases cleanly. The statistic is median/min rather
+than max/min, because the result is a best-of-N: it survives one unlucky sample
+intact, and is invalidated only when MOST samples are dirty, which is precisely
+what median/min measures. Five interleaved samples per side, same machine, same
+day:
+
+| | max/min | median/min |
+|---|---|---|
+| quiet, lane | 1.001, 1.001, 1.001 | 1.0005, 1.0006, 1.0004 |
+| quiet, reference | 1.002, 1.013, 1.002 | 1.0009, 1.0007, 1.0007 |
+| contended, lane | 1.091, 1.231, 1.238 | 1.0485, 1.0947, 1.1541 |
+| contended, reference | 1.085, 1.168, 1.274 | 1.0677, 1.0636, 1.2151 |
+
+max/min was tried first and rejected on evidence: a single hiccup on an
+otherwise quiet machine pushed it to 1.047 against a 1.05 ceiling, while the
+same samples read 1.001 by median/min. The ceiling is set at **1.02** — twenty
+times above the quiet cluster, below half the contended one. Unlike
+`refQuietBaselineNs` it is not a hardware constant but a self-consistency check
+on the measurement, so it carries to other runners unchanged.
+
+**And a skip must not become a silent hole.** The obvious failure mode of "skip
+when you cannot measure" is a ratchet that quietly stops ratcheting. So
+`HASHSMITH_RATCHET_REQUIRED=1` turns every skip in that test into a failure —
+the `-short` skip included, since a required measurement a flag can switch off
+is not required — and a dedicated `bcrypt-ratchet` CI job sets it and runs the
+package on its own, retrying up to three times so a noisy shared runner costs a
+retry rather than a red light.
+
+Three things about this episode are worth keeping. The correction above reached
+for one cause that explained most of the evidence and stopped there, when the
+evidence had two causes in it. It asserted a specific measurement (1.84 ms)
+that no one had taken in the condition claimed. And the guard it left in place
+was watching the one quantity that provably could not see the problem — which
+only became visible by logging the two sides separately instead of the ratio
+they produce.
+
+
 ### A timing ratchet that could not be measured where it ran
 
 The bcrypt speedup ratchet failed at 1.10x during a full-suite run, with its

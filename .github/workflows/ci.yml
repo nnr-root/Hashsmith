@@ -68,6 +68,48 @@ jobs:
           go test -timeout 5m -run TestHashcatConformance -v ./cmd/hashsmith \
             | grep -E 'conformance over|CRACKED|REJECTED|NO-SUCH-MODE|NOT-FOUND|WRONG-PLAIN|--- (PASS|FAIL)'
 
+  # The bcrypt speedup ratchet measures a wall-clock RATIO, and that ratio is
+  # only meaningful on a machine that gave the measurement a clean window. It
+  # therefore declines to render a verdict when its own samples show it did not
+  # get one — see internal/bcryptlane/speed_test.go. A guard that can skip is a
+  # guard that can go silently unmeasured forever, so this job exists to make
+  # the measurement actually happen: HASHSMITH_RATCHET_REQUIRED=1 turns every
+  # skip in that test into a failure, and the package is run on its own so no
+  # sibling test binary is competing for cache.
+  #
+  # The retry is because a hosted runner is a shared VM whose neighbours are
+  # not ours to quiet. Three independent attempts, each needing its own clean
+  # window, is forgiving of a noisy minute without ever letting the ratchet
+  # pass unmeasured.
+  #
+  # If this turns out to be flaky on hosted runners anyway, the fix is to move
+  # this job to the nightly `schedule` lane. It is NOT to loosen
+  # quietSpreadCeiling, and it is certainly not to lower bcryptSpeedupFloor:
+  # both of those trade a red CI light for a ratchet that no longer ratchets.
+  bcrypt-ratchet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
+      - name: bcrypt speedup ratchet (must be measured, not skipped)
+        env:
+          HASHSMITH_RATCHET_REQUIRED: "1"
+        run: |
+          cd hashsmith/go_hashsmith
+          for attempt in 1 2 3; do
+            echo "=== attempt $attempt ==="
+            if go test -count=1 -timeout 10m -v \
+                 -run TestSpeedupOverXCrypto ./internal/bcryptlane; then
+              exit 0
+            fi
+            echo "attempt $attempt did not produce a measurement"
+          done
+          echo "no attempt could measure the ratchet on a quiet enough window"
+          exit 1
+
   test-arm64:
     # ubuntu-24.04-arm is GitHub's hosted arm64 runner. This is the only job
     # in this workflow that actually EXECUTES the NEON assembly: the `test`
