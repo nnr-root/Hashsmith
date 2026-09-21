@@ -35,8 +35,15 @@ import (
 //
 // So this harness drives the real binary with NO -t, exactly as someone
 // switching tools would, and classifies every format. Like its hashcat
-// counterpart it is a RATCHET: a format that has ever cracked must keep
+// counterpart it is a RATCHET: a record that has ever cracked must keep
 // cracking, and the residue stays visible rather than rounded into a headline.
+//
+// The corpus is keyed by format AND record shape, not by format alone. John
+// lists several spellings for many formats — a bare digest and a "$SHA512$"
+// envelope, say — and taking one vector per format only ever exercises
+// whichever John happens to list first. That is not hypothetical: envelope
+// support was added here and the count did not move, because every affected
+// format's first vector was the bare spelling.
 //
 // Two things it deliberately does not do. It does not treat a low number as a
 // failure — most of the gap is dialect, not capability, and pretending
@@ -44,6 +51,8 @@ import (
 // And it does not call John: the corpus is checked in, so the test needs no
 // second tool installed.
 
+// johnRecord is one corpus entry. `format` is the key: a John format name,
+// plus its leading $envelope$ when that format has more than one spelling.
 type johnRecord struct{ format, hash, pass string }
 
 type johnOutcome string
@@ -176,7 +185,7 @@ func classifyJohn(bin, dir string, i int, r johnRecord) johnOutcome {
 // TestJohnFormatConformance is the recognition ratchet described above.
 func TestJohnFormatConformance(t *testing.T) {
 	if testing.Short() {
-		t.Skip("john conformance drives the binary once per format; skipped under -short")
+		t.Skip("john conformance drives the binary once per format/spelling; skipped under -short")
 	}
 	corpus := loadJohnCorpus(t)
 	bin := buildTestBinary(t)
@@ -217,7 +226,7 @@ func TestJohnFormatConformance(t *testing.T) {
 
 	sort.Strings(regressions)
 	sort.Strings(newlyPassing)
-	t.Logf("John format-test conformance over %d formats, auto-detected from the record alone:", len(corpus))
+	t.Logf("John format-test conformance over %d format/spelling pairs, auto-detected from the record alone:", len(corpus))
 	for _, k := range []johnOutcome{johnCracked, johnNotDetected, johnNotFound, johnRejected, johnWrongPlain, johnTimeout} {
 		if counts[k] > 0 {
 			t.Logf("  %-13s %4d  (%.1f%%)", k, counts[k], 100*float64(counts[k])/float64(len(corpus)))

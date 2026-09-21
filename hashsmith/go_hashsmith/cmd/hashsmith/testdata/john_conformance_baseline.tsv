@@ -2,494 +2,606 @@
 # Regenerate with `go test -run TestJohnFormatConformance -args -update-john-baseline`.
 descrypt	CRACKED
 bsdicrypt	CRACKED
+md5crypt $1$	CRACKED
+md5crypt $apr1$	CRACKED
 md5crypt	CRACKED
+md5crypt-long $1$	CRACKED
+md5crypt-long $apr1$	CRACKED
 md5crypt-long	CRACKED
-bcrypt	CRACKED
-scrypt	NOT-DETECTED
-LM	CRACKED
-AFS	NOT-DETECTED
+bcrypt $2a$	CRACKED
+bcrypt $2x$	NOT-DETECTED
+bcrypt $2b$	CRACKED
+scrypt $7$	NOT-DETECTED
+scrypt $9$	CRACKED
+scrypt $scryptkdf.pm$	NOT-DETECTED
+LM $lm$	CRACKED
+LM	NOT-FOUND
+AFS $k4$	NOT-DETECTED
 tripcode	NOT-FOUND
-AndroidBackup	CRACKED
-adxcrypt	NOT-DETECTED
-agilekeychain	NOT-DETECTED
+AndroidBackup $ab$	CRACKED
+adxcrypt $adxcrypt$	NOT-DETECTED
+agilekeychain $agilekeychain$	NOT-DETECTED
 aix-ssha1	CRACKED
 aix-ssha256	CRACKED
 aix-ssha512	CRACKED
-andOTP	NOT-DETECTED
-ansible	CRACKED
-argon2	CRACKED
-as400-des	NOT-DETECTED
-as400-ssha1	NOT-DETECTED
-asa-md5	NOT-DETECTED
-AxCrypt	CRACKED
+andOTP $andotp$	NOT-DETECTED
+ansible $ansible$	CRACKED
+argon2 $argon2d$	CRACKED
+argon2 $argon2i$	CRACKED
+as400-des $as400des$	NOT-DETECTED
+as400-ssha1 $as400ssha1$	NOT-DETECTED
+as400-ssha1 $dynamic_1590$	NOT-DETECTED
+asa-md5 $dynamic_20$	NOT-DETECTED
+AxCrypt $axcrypt$	CRACKED
 AzureAD	NOT-DETECTED
-BestCrypt	NOT-DETECTED
+BestCrypt $bestcrypt$	NOT-DETECTED
 bfegg	NOT-DETECTED
-Bitcoin	CRACKED
-BitLocker	CRACKED
-bitshares	NOT-DETECTED
-Bitwarden	CRACKED
-BKS	NOT-DETECTED
-Blackberry-ES10	NOT-DETECTED
+Bitcoin $bitcoin$	CRACKED
+BitLocker $bitlocker$	CRACKED
+bitshares $bitshares$	NOT-DETECTED
+Bitwarden $bitwarden$	CRACKED
+BKS $bks$	NOT-DETECTED
+Blackberry-ES10 $bbes10$	NOT-DETECTED
 WoWSRP	NOT-DETECTED
-Blockchain	CRACKED
-chap	NOT-DETECTED
-Clipperz	NOT-DETECTED
-cloudkeychain	NOT-DETECTED
+WoWSRP $wowsrp$	NOT-DETECTED
+Blockchain $blockchain$	CRACKED
+chap $chap$	NOT-DETECTED
+Clipperz $clipperz$	NOT-DETECTED
+cloudkeychain $cloudkeychain$	NOT-DETECTED
 dynamic=md5($p)	NOT-DETECTED
-cq	NOT-DETECTED
-CRC32	NOT-DETECTED
-sha1crypt	CRACKED
-sha256crypt	CRACKED
-sha512crypt	CRACKED
+cq $cq$	NOT-DETECTED
+CRC32 $crc32$	NOT-DETECTED
+CRC32 $crc32c$	NOT-DETECTED
+sha1crypt $sha1$	CRACKED
+sha256crypt $5$	CRACKED
+sha512crypt $6$	CRACKED
 Citrix_NS10	NOT-FOUND
-dahua	NOT-DETECTED
-dashlane	NOT-DETECTED
-diskcryptor	CRACKED
-Django	CRACKED
+dahua $dahua$	NOT-DETECTED
+dashlane $dashlane$	NOT-DETECTED
+diskcryptor $diskcryptor$	CRACKED
+Django $django$	CRACKED
 django-scrypt	CRACKED
-dmd5	NOT-DETECTED
-dmg	REJECTED
+dmd5 $digest-md5$	NOT-DETECTED
+dmg $dmg$	REJECTED
 dominosec	CRACKED
 dominosec8	CRACKED
-DPAPImk	CRACKED
-dragonfly3-32	NOT-DETECTED
-dragonfly3-64	NOT-DETECTED
-dragonfly4-32	NOT-DETECTED
-dragonfly4-64	NOT-DETECTED
-Drupal7	CRACKED
-eCryptfs	CRACKED
-eigrp	NOT-DETECTED
-electrum	CRACKED
-EncFS	CRACKED
-enpass	NOT-DETECTED
+DPAPImk $dpapimk$	CRACKED
+dragonfly3-32 $3$	NOT-DETECTED
+dragonfly3-64 $3$	NOT-DETECTED
+dragonfly4-32 $4$	NOT-DETECTED
+dragonfly4-64 $4$	NOT-DETECTED
+Drupal7 $s$	CRACKED
+eCryptfs $ecryptfs$	CRACKED
+eigrp $eigrp$	NOT-DETECTED
+electrum $electrum$	CRACKED
+EncFS $encfs$	CRACKED
+enpass $enpass$	NOT-DETECTED
 EPI	NOT-DETECTED
-EPiServer	CRACKED
-ethereum	CRACKED
-fde	CRACKED
+EPiServer $episerver$	CRACKED
+ethereum $ethereum$	CRACKED
+fde $fde$	CRACKED
 Fortigate256	CRACKED
 Fortigate	CRACKED
 FormSpring	NOT-DETECTED
-FVDE	CRACKED
-geli	NOT-DETECTED
+FormSpring $dynamic_61$	NOT-DETECTED
+FVDE $fvde$	CRACKED
+geli $geli$	NOT-DETECTED
 gost	CRACKED
-gpg	CRACKED
+gost $gost$	CRACKED
+gost $gost-cp$	NOT-DETECTED
+gpg $gpg$	CRACKED
 HAVAL-128-4	NOT-FOUND
+HAVAL-128-4 $haval$	NOT-DETECTED
 HAVAL-256-3	NOT-FOUND
-hdaa	NOT-DETECTED
+HAVAL-256-3 $haval$	NOT-DETECTED
+hdaa $response$	NOT-DETECTED
 hMailServer	NOT-DETECTED
-hsrp	NOT-DETECTED
-IKE	NOT-DETECTED
-ipb2	NOT-DETECTED
-itunes-backup	CRACKED
-iwork	CRACKED
-KeePass	REJECTED
-keychain	CRACKED
-keyring	NOT-DETECTED
-keystore	NOT-DETECTED
-known_hosts	NOT-DETECTED
-krb4	NOT-DETECTED
-krb5	NOT-DETECTED
+hsrp $hsrp$	NOT-DETECTED
+IKE $ike$	NOT-DETECTED
+ipb2 $ipb2$	NOT-DETECTED
+itunes-backup $itunes_backup$	CRACKED
+iwork $iwork$	CRACKED
+KeePass $keepass$	REJECTED
+keychain $keychain$	CRACKED
+keyring $keyring$	NOT-DETECTED
+keystore $keystore$	NOT-DETECTED
+known_hosts $known_hosts$	NOT-DETECTED
+krb4 $af$	NOT-DETECTED
+krb5 $krb5$	NOT-DETECTED
 krb5asrep	NOT-DETECTED
-krb5pa-sha1	REJECTED
-krb5tgs	CRACKED
-krb5-17	NOT-DETECTED
+krb5asrep $krb5asrep$	NOT-FOUND
+krb5pa-sha1 $krb5pa$	REJECTED
+krb5tgs $krb5tgs$	CRACKED
+krb5-17 $krb17$	NOT-DETECTED
 krb5-18	NOT-DETECTED
-krb5-3	NOT-DETECTED
-kwallet	NOT-DETECTED
-lp	NOT-DETECTED
-lpcli	NOT-DETECTED
+krb5-18 $krb18$	NOT-DETECTED
+krb5-3 $krb3$	NOT-DETECTED
+kwallet $kwallet$	NOT-DETECTED
+lp $lp$	NOT-DETECTED
+lpcli $lpcli$	NOT-DETECTED
 leet	NOT-DETECTED
 lotus5	NOT-FOUND
 lotus85	NOT-DETECTED
-LUKS	REJECTED
+LUKS $luks$	REJECTED
+MD2 $md2$	CRACKED
 MD2	CRACKED
-mdc2	NOT-DETECTED
-MediaWiki	CRACKED
-monero	CRACKED
-money	NOT-DETECTED
-MongoDB	NOT-DETECTED
-scram	NOT-DETECTED
-Mozilla	CRACKED
+mdc2 $mdc2$	NOT-DETECTED
+mdc2	NOT-FOUND
+MediaWiki $b$	CRACKED
+MediaWiki $dynamic_9$	NOT-DETECTED
+monero $monero$	CRACKED
+money $money$	NOT-DETECTED
+MongoDB $mongodb$	NOT-DETECTED
+scram $scram$	NOT-DETECTED
+Mozilla $mozilla$	CRACKED
 mscash	NOT-FOUND
-mscash2	CRACKED
-MSCHAPv2	NOT-DETECTED
+mscash2	NOT-DETECTED
+mscash2 $dcc2$	CRACKED
+MSCHAPv2 $mschapv2$	NOT-DETECTED
+MSCHAPv2	NOT-FOUND
 mschapv2-naive	NOT-FOUND
-krb5pa-md5	CRACKED
+mschapv2-naive $mschapv2$	NOT-DETECTED
+krb5pa-md5 $krb5pa$	CRACKED
+krb5pa-md5 $mskrb5$	NOT-DETECTED
 mssql	CRACKED
 mssql05	CRACKED
 mssql12	CRACKED
-multibit	CRACKED
-mysqlna	CRACKED
+multibit $multibit$	CRACKED
+mysqlna $mysqlna$	CRACKED
 mysql-sha1	CRACKED
 mysql	CRACKED
-net-ah	NOT-DETECTED
+net-ah $net-ah$	NOT-DETECTED
 nethalflm	NOT-DETECTED
+nethalflm $nethalflm$	NOT-DETECTED
 netlm	NOT-DETECTED
+netlm $netlm$	NOT-DETECTED
 netlmv2	NOT-FOUND
+netlmv2 $netlmv2$	NOT-DETECTED
 net-md5	NOT-DETECTED
+net-md5 $netmd5$	NOT-DETECTED
 netntlmv2	CRACKED
+netntlmv2 $netntlmv2$	NOT-DETECTED
+netntlm $netntlm$	NOT-DETECTED
 netntlm	NOT-DETECTED
 netntlm-naive	NOT-DETECTED
-net-sha1	NOT-DETECTED
-nk	NOT-DETECTED
-notes	CRACKED
+netntlm-naive $netntlm$	NOT-DETECTED
+net-sha1 $netsha1$	NOT-DETECTED
+nk $nk$	NOT-DETECTED
+notes $asn$	CRACKED
 md5ns	CRACKED
-nsec3	CRACKED
+nsec3 $nsec3$	CRACKED
 NT	CRACKED
-o10glogon	NOT-DETECTED
-o3logon	NOT-DETECTED
-o5logon	NOT-DETECTED
-ODF	CRACKED
-Office	CRACKED
-oldoffice	CRACKED
-OpenBSD-SoftRAID	NOT-DETECTED
-openssl-enc	NOT-DETECTED
+NT $nt$	NOT-DETECTED
+o10glogon $o10glogon$	NOT-DETECTED
+o3logon $o3logon$	NOT-DETECTED
+o5logon $o5logon$	NOT-DETECTED
+ODF $odf$	CRACKED
+ODF $sxc$	NOT-DETECTED
+Office $office$	CRACKED
+oldoffice $oldoffice$	CRACKED
+oldoffice	NOT-DETECTED
+OpenBSD-SoftRAID $openbsd-softraid$	NOT-DETECTED
+openssl-enc $openssl$	NOT-DETECTED
 oracle	CRACKED
 oracle11	CRACKED
-Oracle12C	CRACKED
-osc	NOT-DETECTED
-ospf	NOT-DETECTED
-Padlock	NOT-DETECTED
+Oracle12C $oracle12c$	CRACKED
+osc $osc$	NOT-DETECTED
+osc $dynamic_4$	NOT-DETECTED
+ospf $ospf$	NOT-DETECTED
+Padlock $padlock$	NOT-DETECTED
+Palshop $palshop$	NOT-DETECTED
 Palshop	NOT-DETECTED
 Panama	NOT-FOUND
-PBKDF2-HMAC-MD4	CRACKED
-PBKDF2-HMAC-MD5	CRACKED
+Panama $panama$	NOT-DETECTED
+PBKDF2-HMAC-MD4 $pbkdf2-hmac-md4$	CRACKED
+PBKDF2-HMAC-MD5 $pbkdf2-hmac-md5$	CRACKED
+PBKDF2-HMAC-SHA1 $pbkdf2-hmac-sha1$	CRACKED
 PBKDF2-HMAC-SHA1	CRACKED
-PBKDF2-HMAC-SHA256	CRACKED
+PBKDF2-HMAC-SHA1 $p5k2$	NOT-DETECTED
+PBKDF2-HMAC-SHA256 $pbkdf2-sha256$	CRACKED
+PBKDF2-HMAC-SHA256 $8$	CRACKED
+PBKDF2-HMAC-SHA512 $pbkdf2-hmac-sha512$	CRACKED
 PBKDF2-HMAC-SHA512	CRACKED
-PDF	CRACKED
-PEM	CRACKED
-pfx	NOT-DETECTED
-pgpdisk	NOT-DETECTED
-pgpsda	NOT-DETECTED
-pgpwde	NOT-DETECTED
-phpass	CRACKED
-PHPS	CRACKED
-PHPS2	CRACKED
+PBKDF2-HMAC-SHA512 $ml$	CRACKED
+PDF $pdf$	CRACKED
+PEM $pem$	CRACKED
+pfx $pfxng$	NOT-DETECTED
+pgpdisk $pgpdisk$	NOT-DETECTED
+pgpsda $pgpsda$	NOT-DETECTED
+pgpwde $pgpwde$	NOT-DETECTED
+phpass $p$	CRACKED
+phpass $h$	CRACKED
+PHPS $phps$	CRACKED
+PHPS $dynamic_6$	NOT-DETECTED
+PHPS2 $phps$	CRACKED
 pix-md5	CRACKED
-PKZIP	NOT-DETECTED
+pix-md5 $dynamic_19$	NOT-DETECTED
+PKZIP $pkzip$	NOT-DETECTED
+PKZIP $pkzip2$	CRACKED
 po	NOT-FOUND
-postgres	CRACKED
-PST	NOT-DETECTED
-PuTTY	NOT-DETECTED
-pwsafe	CRACKED
+postgres $postgres$	CRACKED
+postgres $postgre$	NOT-DETECTED
+PST $pst$	NOT-DETECTED
+PuTTY $putty$	NOT-DETECTED
+pwsafe $pwsafe$	CRACKED
 qnx	CRACKED
-RACF	CRACKED
-RACF-KDFAES	CRACKED
-radius	NOT-DETECTED
-RAdmin	NOT-DETECTED
-RAKP	NOT-DETECTED
-rar	CRACKED
-RAR5	CRACKED
+RACF $racf$	CRACKED
+RACF-KDFAES $racf$	CRACKED
+radius $radius$	NOT-DETECTED
+RAdmin $radmin2$	NOT-DETECTED
+RAKP $rakp$	NOT-DETECTED
+rar $rar3$	CRACKED
+RAR5 $rar5$	CRACKED
 Raw-SHA512	CRACKED
+Raw-SHA512 $sha512$	CRACKED
 Raw-Blake2	CRACKED
-Raw-Keccak	NOT-DETECTED
+Raw-Blake2 $blake2$	CRACKED
+Raw-Keccak	NOT-FOUND
+Raw-Keccak $keccak$	NOT-DETECTED
 Raw-Keccak-256	CRACKED
+Raw-Keccak-256 $keccak256$	CRACKED
 Raw-MD4	CRACKED
+Raw-MD4 $md4$	CRACKED
 Raw-MD5	CRACKED
+Raw-MD5 $dynamic_0$	NOT-DETECTED
 Raw-MD5u	NOT-FOUND
+Raw-MD5u $dynamic_29$	NOT-DETECTED
 Raw-SHA1	CRACKED
+Raw-SHA1 $dynamic_26$	NOT-DETECTED
 Raw-SHA1-AxCrypt	NOT-FOUND
 Raw-SHA1-Linkedin	NOT-FOUND
+Raw-SHA1-Linkedin $dynamic_26$	NOT-DETECTED
 Raw-SHA224	CRACKED
+Raw-SHA224 $sha224$	CRACKED
 Raw-SHA256	CRACKED
+Raw-SHA256 $sha256$	CRACKED
+Raw-SHA256 $cisco4$	NOT-DETECTED
 Raw-SHA3	CRACKED
 Raw-SHA384	CRACKED
+Raw-SHA384 $sha384$	CRACKED
 ripemd-128	NOT-FOUND
+ripemd-128 $ripemd$	NOT-DETECTED
 ripemd-160	CRACKED
-rsvp	NOT-DETECTED
-Siemens-S7	NOT-DETECTED
+ripemd-160 $ripemd$	NOT-DETECTED
+rsvp $rsvp$	NOT-DETECTED
+Siemens-S7 $siemens-s7$	NOT-DETECTED
 Salted-SHA1	CRACKED
 SSHA512	CRACKED
 sapb	CRACKED
 sapg	CRACKED
 saph	CRACKED
-sappse	NOT-DETECTED
-securezip	CRACKED
-7z	REJECTED
-Signal	CRACKED
-SIP	CRACKED
-skein-256	NOT-DETECTED
-skein-512	NOT-DETECTED
+sappse $pse$	NOT-DETECTED
+securezip $zip3$	CRACKED
+7z $7z$	REJECTED
+Signal $signal$	CRACKED
+SIP $sip$	CRACKED
+skein-256	NOT-FOUND
+skein-256 $skein$	NOT-DETECTED
+skein-512 $skein$	NOT-DETECTED
 skey	NOT-DETECTED
+SL3 $sl3$	NOT-DETECTED
 SL3	NOT-DETECTED
 Snefru-128	NOT-FOUND
-Snefru-256	NOT-DETECTED
-LastPass	NOT-DETECTED
-SNMP	CRACKED
-solarwinds	CRACKED
-SSH	CRACKED
-sspr	CRACKED
-STRIP	NOT-DETECTED
-SunMD5	NOT-DETECTED
+Snefru-128 $snefru$	NOT-DETECTED
+Snefru-256 $snefru$	NOT-DETECTED
+Snefru-256	NOT-FOUND
+LastPass $lastpass$	NOT-DETECTED
+SNMP $snmpv3$	CRACKED
+solarwinds $solarwinds$	CRACKED
+SSH $sshng$	CRACKED
+sspr $sspr$	CRACKED
+STRIP $strip$	NOT-DETECTED
+SunMD5 $md5$	NOT-DETECTED
 SybaseASE	CRACKED
 Sybase-PROP	NOT-DETECTED
-tacacs-plus	CRACKED
-tcp-md5	NOT-DETECTED
-telegram	CRACKED
-tezos	NOT-DETECTED
+tacacs-plus $tacacs-plus$	CRACKED
+tcp-md5 $tcpmd5$	NOT-DETECTED
+telegram $telegram$	CRACKED
+tezos $tezos$	NOT-DETECTED
 Tiger	NOT-DETECTED
+Tiger $tiger$	NOT-DETECTED
 tc_aes_xts	NOT-DETECTED
 tc_ripemd160	NOT-DETECTED
 tc_ripemd160boot	NOT-DETECTED
 tc_sha512	NOT-DETECTED
 tc_whirlpool	NOT-DETECTED
-vdi	NOT-DETECTED
-OpenVMS	NOT-DETECTED
-vmx	REJECTED
-VNC	CRACKED
-vtp	NOT-DETECTED
-wbb3	NOT-DETECTED
+vdi $vdi$	NOT-DETECTED
+OpenVMS $v$	NOT-DETECTED
+vmx $vmx$	REJECTED
+VNC $vnc$	CRACKED
+vtp $vtp$	NOT-DETECTED
+wbb3 $wbb3$	NOT-DETECTED
 whirlpool	NOT-FOUND
+whirlpool $whirlpool$	NOT-FOUND
 whirlpool0	NOT-FOUND
+whirlpool0 $whirlpool$	NOT-FOUND
 whirlpool1	NOT-FOUND
-wpapsk	NOT-DETECTED
-wpapsk-pmk	NOT-DETECTED
-xmpp-scram	CRACKED
+whirlpool1 $whirlpool$	NOT-FOUND
+wpapsk $wpapsk$	NOT-DETECTED
+wpapsk	CRACKED
+wpapsk-pmk $wpapsk$	NOT-DETECTED
+wpapsk-pmk	NOT-FOUND
+xmpp-scram $xmpp-scram$	CRACKED
 xsha	NOT-DETECTED
 xsha512	NOT-DETECTED
-ZIP	CRACKED
-ZipMonster	NOT-DETECTED
-plaintext	NOT-DETECTED
+xsha512 $lion$	NOT-DETECTED
+ZIP $zip2$	CRACKED
+ZipMonster $zipmonster$	NOT-DETECTED
+ZipMonster	NOT-FOUND
+plaintext $0$	NOT-DETECTED
 has-160	NOT-FOUND
 HMAC-MD5	CRACKED
+HMAC-MD5 $cram_md5$	CRACKED
 HMAC-SHA1	CRACKED
 HMAC-SHA224	CRACKED
 HMAC-SHA256	CRACKED
 HMAC-SHA384	CRACKED
 HMAC-SHA512	CRACKED
-sha1crypt-opencl	CRACKED
-KeePass-opencl	REJECTED
-oldoffice-opencl	CRACKED
-PBKDF2-HMAC-MD4-opencl	CRACKED
-PBKDF2-HMAC-MD5-opencl	CRACKED
+sha1crypt-opencl $sha1$	CRACKED
+KeePass-opencl $keepass$	REJECTED
+oldoffice-opencl $oldoffice$	CRACKED
+oldoffice-opencl	NOT-DETECTED
+PBKDF2-HMAC-MD4-opencl $pbkdf2-hmac-md4$	CRACKED
+PBKDF2-HMAC-MD5-opencl $pbkdf2-hmac-md5$	CRACKED
+PBKDF2-HMAC-SHA1-opencl $pbkdf2-hmac-sha1$	CRACKED
 PBKDF2-HMAC-SHA1-opencl	CRACKED
-rar-opencl	CRACKED
-RAR5-opencl	CRACKED
+PBKDF2-HMAC-SHA1-opencl $p5k2$	NOT-DETECTED
+rar-opencl $rar3$	CRACKED
+RAR5-opencl $rar5$	CRACKED
 TrueCrypt-opencl	NOT-DETECTED
 lotus5-opencl	NOT-FOUND
-AndroidBackup-opencl	CRACKED
-agilekeychain-opencl	NOT-DETECTED
-ansible-opencl	CRACKED
-axcrypt-opencl	CRACKED
-axcrypt2-opencl	CRACKED
-bcrypt-opencl	CRACKED
-BitLocker-opencl	CRACKED
-bitwarden-opencl	CRACKED
-blockchain-opencl	CRACKED
-cloudkeychain-opencl	NOT-DETECTED
-md5crypt-opencl	CRACKED
-sha256crypt-opencl	CRACKED
-sha512crypt-opencl	CRACKED
-dashlane-opencl	NOT-DETECTED
+AndroidBackup-opencl $ab$	CRACKED
+agilekeychain-opencl $agilekeychain$	NOT-DETECTED
+ansible-opencl $ansible$	CRACKED
+axcrypt-opencl $axcrypt$	CRACKED
+axcrypt2-opencl $axcrypt$	CRACKED
+bcrypt-opencl $2a$	CRACKED
+bcrypt-opencl $2x$	NOT-DETECTED
+bcrypt-opencl $2b$	CRACKED
+BitLocker-opencl $bitlocker$	CRACKED
+bitwarden-opencl $bitwarden$	CRACKED
+blockchain-opencl $blockchain$	CRACKED
+cloudkeychain-opencl $cloudkeychain$	NOT-DETECTED
+md5crypt-opencl $1$	CRACKED
+md5crypt-opencl $apr1$	CRACKED
+sha256crypt-opencl $5$	CRACKED
+sha512crypt-opencl $6$	CRACKED
+dashlane-opencl $dashlane$	NOT-DETECTED
 descrypt-opencl	CRACKED
-diskcryptor-opencl	CRACKED
-diskcryptor-aes-opencl	CRACKED
-dmg-opencl	REJECTED
-electrum-modern-opencl	CRACKED
-EncFS-opencl	CRACKED
-enpass-opencl	NOT-DETECTED
-ethereum-opencl	CRACKED
-ethereum-presale-opencl	CRACKED
-FVDE-opencl	CRACKED
-geli-opencl	NOT-DETECTED
-gpg-opencl	CRACKED
-iwork-opencl	CRACKED
-keychain-opencl	CRACKED
-keyring-opencl	NOT-DETECTED
-keystore-opencl	NOT-DETECTED
-krb5pa-md5-opencl	CRACKED
-krb5pa-sha1-opencl	REJECTED
-krb5asrep-aes-opencl	REJECTED
-lp-opencl	NOT-DETECTED
-lpcli-opencl	NOT-DETECTED
-LM-opencl	CRACKED
+diskcryptor-opencl $diskcryptor$	CRACKED
+diskcryptor-aes-opencl $diskcryptor$	CRACKED
+dmg-opencl $dmg$	REJECTED
+electrum-modern-opencl $electrum$	CRACKED
+EncFS-opencl $encfs$	CRACKED
+enpass-opencl $enpass$	NOT-DETECTED
+ethereum-opencl $ethereum$	CRACKED
+ethereum-presale-opencl $ethereum$	CRACKED
+FVDE-opencl $fvde$	CRACKED
+geli-opencl $geli$	NOT-DETECTED
+gpg-opencl $gpg$	CRACKED
+iwork-opencl $iwork$	CRACKED
+keychain-opencl $keychain$	CRACKED
+keyring-opencl $keyring$	NOT-DETECTED
+keystore-opencl $keystore$	NOT-DETECTED
+krb5pa-md5-opencl $krb5pa$	CRACKED
+krb5pa-md5-opencl $mskrb5$	NOT-DETECTED
+krb5pa-sha1-opencl $krb5pa$	REJECTED
+krb5asrep-aes-opencl $krb5asrep$	REJECTED
+lp-opencl $lp$	NOT-DETECTED
+lpcli-opencl $lpcli$	NOT-DETECTED
+LM-opencl $lm$	CRACKED
+LM-opencl	NOT-FOUND
 mscash-opencl	NOT-FOUND
-mscash2-opencl	CRACKED
+mscash2-opencl	NOT-DETECTED
+mscash2-opencl $dcc2$	CRACKED
 mysql-sha1-opencl	CRACKED
-notes-opencl	CRACKED
+notes-opencl $asn$	CRACKED
 NT-opencl	CRACKED
+NT-opencl $nt$	NOT-DETECTED
 ntlmv2-opencl	NOT-FOUND
-o5logon-opencl	NOT-DETECTED
-ODF-opencl	CRACKED
-office-opencl	CRACKED
-OpenBSD-SoftRAID-opencl	NOT-DETECTED
-PBKDF2-HMAC-SHA256-opencl	CRACKED
+ntlmv2-opencl $netntlmv2$	NOT-DETECTED
+o5logon-opencl $o5logon$	NOT-DETECTED
+ODF-opencl $odf$	CRACKED
+ODF-opencl $sxc$	NOT-DETECTED
+office-opencl $office$	CRACKED
+OpenBSD-SoftRAID-opencl $openbsd-softraid$	NOT-DETECTED
+PBKDF2-HMAC-SHA256-opencl $pbkdf2-sha256$	CRACKED
+PBKDF2-HMAC-SHA256-opencl $8$	CRACKED
+PBKDF2-HMAC-SHA512-opencl $pbkdf2-hmac-sha512$	CRACKED
 PBKDF2-HMAC-SHA512-opencl	CRACKED
-pem-opencl	CRACKED
-pfx-opencl	NOT-DETECTED
-pgpdisk-opencl	NOT-DETECTED
-pgpsda-opencl	NOT-DETECTED
-pgpwde-opencl	NOT-DETECTED
-PHPass-opencl	CRACKED
-pwsafe-opencl	CRACKED
-RAKP-opencl	NOT-DETECTED
+PBKDF2-HMAC-SHA512-opencl $ml$	CRACKED
+pem-opencl $pem$	CRACKED
+pfx-opencl $pfxng$	NOT-DETECTED
+pgpdisk-opencl $pgpdisk$	NOT-DETECTED
+pgpsda-opencl $pgpsda$	NOT-DETECTED
+pgpwde-opencl $pgpwde$	NOT-DETECTED
+PHPass-opencl $p$	CRACKED
+PHPass-opencl $h$	CRACKED
+pwsafe-opencl $pwsafe$	CRACKED
+RAKP-opencl $rakp$	NOT-DETECTED
 raw-MD4-opencl	CRACKED
+raw-MD4-opencl $md4$	CRACKED
 raw-MD5-opencl	CRACKED
+raw-MD5-opencl $dynamic_0$	NOT-DETECTED
 raw-SHA1-opencl	CRACKED
+raw-SHA1-opencl $dynamic_26$	NOT-DETECTED
 raw-SHA256-opencl	CRACKED
+raw-SHA256-opencl $sha256$	CRACKED
+raw-SHA256-opencl $cisco4$	NOT-DETECTED
 raw-SHA512-free-opencl	CRACKED
+raw-SHA512-free-opencl $sha512$	CRACKED
 raw-SHA512-opencl	CRACKED
+raw-SHA512-opencl $sha512$	CRACKED
 salted-SHA1-opencl	CRACKED
-sappse-opencl	NOT-DETECTED
-7z-opencl	REJECTED
+sappse-opencl $pse$	NOT-DETECTED
+7z-opencl $7z$	REJECTED
+SL3-opencl $sl3$	NOT-DETECTED
 SL3-opencl	NOT-DETECTED
-solarwinds-opencl	CRACKED
-ssh-opencl	CRACKED
-sspr-opencl	CRACKED
-strip-opencl	NOT-DETECTED
-telegram-opencl	CRACKED
-tezos-opencl	NOT-DETECTED
-vmx-opencl	REJECTED
-wpapsk-opencl	NOT-DETECTED
-wpapsk-pmk-opencl	NOT-DETECTED
+solarwinds-opencl $solarwinds$	CRACKED
+ssh-opencl $sshng$	CRACKED
+sspr-opencl $sspr$	CRACKED
+strip-opencl $strip$	NOT-DETECTED
+telegram-opencl $telegram$	CRACKED
+tezos-opencl $tezos$	NOT-DETECTED
+vmx-opencl $vmx$	REJECTED
+wpapsk-opencl $wpapsk$	NOT-DETECTED
+wpapsk-opencl	CRACKED
+wpapsk-pmk-opencl $wpapsk$	NOT-DETECTED
+wpapsk-pmk-opencl	NOT-FOUND
 XSHA512-free-opencl	NOT-DETECTED
+XSHA512-free-opencl $lion$	NOT-DETECTED
 XSHA512-opencl	NOT-DETECTED
-ZIP-opencl	CRACKED
-dynamic_0	NOT-DETECTED
-dynamic_1	NOT-DETECTED
-dynamic_2	NOT-DETECTED
-dynamic_3	NOT-DETECTED
-dynamic_4	NOT-DETECTED
-dynamic_5	NOT-DETECTED
-dynamic_6	NOT-DETECTED
-dynamic_8	NOT-DETECTED
-dynamic_9	NOT-DETECTED
-dynamic_10	NOT-DETECTED
-dynamic_11	NOT-DETECTED
-dynamic_12	NOT-DETECTED
-dynamic_13	NOT-DETECTED
-dynamic_14	NOT-DETECTED
+XSHA512-opencl $lion$	NOT-DETECTED
+ZIP-opencl $zip2$	CRACKED
+dynamic_0 $dynamic_0$	NOT-DETECTED
+dynamic_1 $dynamic_1$	NOT-DETECTED
+dynamic_2 $dynamic_2$	NOT-DETECTED
+dynamic_3 $dynamic_3$	NOT-DETECTED
+dynamic_4 $dynamic_4$	NOT-DETECTED
+dynamic_5 $dynamic_5$	NOT-DETECTED
+dynamic_6 $dynamic_6$	NOT-DETECTED
+dynamic_8 $dynamic_8$	NOT-DETECTED
+dynamic_9 $dynamic_9$	NOT-DETECTED
+dynamic_10 $dynamic_10$	NOT-DETECTED
+dynamic_11 $dynamic_11$	NOT-DETECTED
+dynamic_12 $dynamic_12$	NOT-DETECTED
+dynamic_13 $dynamic_13$	NOT-DETECTED
+dynamic_14 $dynamic_14$	NOT-DETECTED
+dynamic_15 $dynamic_15$	NOT-DETECTED
 dynamic_15	NOT-DETECTED
-dynamic_16	NOT-DETECTED
-dynamic_18	NOT-DETECTED
-dynamic_19	NOT-DETECTED
-dynamic_20	NOT-DETECTED
-dynamic_22	NOT-DETECTED
-dynamic_23	NOT-DETECTED
-dynamic_24	NOT-DETECTED
-dynamic_25	NOT-DETECTED
-dynamic_26	NOT-DETECTED
-dynamic_29	NOT-DETECTED
-dynamic_30	NOT-DETECTED
-dynamic_31	NOT-DETECTED
-dynamic_32	NOT-DETECTED
-dynamic_33	NOT-DETECTED
-dynamic_34	NOT-DETECTED
+dynamic_16 $dynamic_16$	NOT-DETECTED
+dynamic_18 $dynamic_18$	NOT-DETECTED
+dynamic_19 $dynamic_19$	NOT-DETECTED
+dynamic_20 $dynamic_20$	NOT-DETECTED
+dynamic_22 $dynamic_22$	NOT-DETECTED
+dynamic_23 $dynamic_23$	NOT-DETECTED
+dynamic_24 $dynamic_24$	NOT-DETECTED
+dynamic_25 $dynamic_25$	NOT-DETECTED
+dynamic_26 $dynamic_26$	NOT-DETECTED
+dynamic_29 $dynamic_29$	NOT-DETECTED
+dynamic_30 $dynamic_30$	NOT-DETECTED
+dynamic_31 $dynamic_31$	NOT-DETECTED
+dynamic_32 $dynamic_32$	NOT-DETECTED
+dynamic_33 $dynamic_33$	NOT-DETECTED
+dynamic_34 $dynamic_34$	NOT-DETECTED
+dynamic_35 $dynamic_35$	NOT-DETECTED
 dynamic_35	NOT-DETECTED
+dynamic_36 $dynamic_36$	NOT-DETECTED
 dynamic_36	NOT-DETECTED
+dynamic_37 $dynamic_37$	NOT-DETECTED
 dynamic_37	NOT-DETECTED
-dynamic_38	NOT-DETECTED
-dynamic_39	NOT-DETECTED
-dynamic_40	NOT-DETECTED
-dynamic_50	NOT-DETECTED
-dynamic_60	NOT-DETECTED
-dynamic_61	NOT-DETECTED
-dynamic_70	NOT-DETECTED
-dynamic_80	NOT-DETECTED
-dynamic_90	NOT-DETECTED
-dynamic_100	NOT-DETECTED
-dynamic_110	NOT-DETECTED
-dynamic_120	NOT-DETECTED
-dynamic_130	NOT-DETECTED
-dynamic_140	NOT-DETECTED
-dynamic_150	NOT-DETECTED
-dynamic_160	NOT-DETECTED
-dynamic_170	NOT-DETECTED
-dynamic_180	NOT-DETECTED
-dynamic_190	NOT-DETECTED
-dynamic_200	NOT-DETECTED
-dynamic_210	NOT-DETECTED
-dynamic_220	NOT-DETECTED
-dynamic_230	NOT-DETECTED
-dynamic_240	NOT-DETECTED
-dynamic_250	NOT-DETECTED
-dynamic_260	NOT-DETECTED
-dynamic_270	NOT-DETECTED
-dynamic_280	NOT-DETECTED
-dynamic_290	NOT-DETECTED
-dynamic_300	NOT-DETECTED
-dynamic_310	NOT-DETECTED
-dynamic_320	NOT-DETECTED
-dynamic_330	NOT-DETECTED
-dynamic_340	NOT-DETECTED
-dynamic_350	NOT-DETECTED
-dynamic_360	NOT-DETECTED
-dynamic_370	NOT-DETECTED
-dynamic_380	NOT-DETECTED
-dynamic_390	NOT-DETECTED
-dynamic_400	NOT-DETECTED
-dynamic_410	NOT-DETECTED
-dynamic_420	NOT-DETECTED
-dynamic_1001	NOT-DETECTED
-dynamic_1002	NOT-DETECTED
-dynamic_1003	NOT-DETECTED
-dynamic_1004	NOT-DETECTED
-dynamic_1005	NOT-DETECTED
-dynamic_1006	NOT-DETECTED
-dynamic_1007	NOT-DETECTED
-dynamic_1008	NOT-DETECTED
-dynamic_1009	NOT-DETECTED
-dynamic_1010	NOT-DETECTED
-dynamic_1011	NOT-DETECTED
-dynamic_1012	NOT-DETECTED
-dynamic_1013	NOT-DETECTED
-dynamic_1014	NOT-DETECTED
+dynamic_38 $dynamic_38$	NOT-DETECTED
+dynamic_39 $dynamic_39$	NOT-DETECTED
+dynamic_40 $dynamic_40$	NOT-DETECTED
+dynamic_50 $dynamic_50$	NOT-DETECTED
+dynamic_60 $dynamic_60$	NOT-DETECTED
+dynamic_61 $dynamic_61$	NOT-DETECTED
+dynamic_70 $dynamic_70$	NOT-DETECTED
+dynamic_80 $dynamic_80$	NOT-DETECTED
+dynamic_90 $dynamic_90$	NOT-DETECTED
+dynamic_100 $dynamic_100$	NOT-DETECTED
+dynamic_110 $dynamic_110$	NOT-DETECTED
+dynamic_120 $dynamic_120$	NOT-DETECTED
+dynamic_130 $dynamic_130$	NOT-DETECTED
+dynamic_140 $dynamic_140$	NOT-DETECTED
+dynamic_150 $dynamic_150$	NOT-DETECTED
+dynamic_160 $dynamic_160$	NOT-DETECTED
+dynamic_170 $dynamic_170$	NOT-DETECTED
+dynamic_180 $dynamic_180$	NOT-DETECTED
+dynamic_190 $dynamic_190$	NOT-DETECTED
+dynamic_200 $dynamic_200$	NOT-DETECTED
+dynamic_210 $dynamic_210$	NOT-DETECTED
+dynamic_220 $dynamic_220$	NOT-DETECTED
+dynamic_230 $dynamic_230$	NOT-DETECTED
+dynamic_240 $dynamic_240$	NOT-DETECTED
+dynamic_250 $dynamic_250$	NOT-DETECTED
+dynamic_260 $dynamic_260$	NOT-DETECTED
+dynamic_270 $dynamic_270$	NOT-DETECTED
+dynamic_280 $dynamic_280$	NOT-DETECTED
+dynamic_290 $dynamic_290$	NOT-DETECTED
+dynamic_300 $dynamic_300$	NOT-DETECTED
+dynamic_310 $dynamic_310$	NOT-DETECTED
+dynamic_320 $dynamic_320$	NOT-DETECTED
+dynamic_330 $dynamic_330$	NOT-DETECTED
+dynamic_340 $dynamic_340$	NOT-DETECTED
+dynamic_350 $dynamic_350$	NOT-DETECTED
+dynamic_360 $dynamic_360$	NOT-DETECTED
+dynamic_370 $dynamic_370$	NOT-DETECTED
+dynamic_380 $dynamic_380$	NOT-DETECTED
+dynamic_390 $dynamic_390$	NOT-DETECTED
+dynamic_400 $dynamic_400$	NOT-DETECTED
+dynamic_410 $dynamic_410$	NOT-DETECTED
+dynamic_420 $dynamic_420$	NOT-DETECTED
+dynamic_1001 $dynamic_1001$	NOT-DETECTED
+dynamic_1002 $dynamic_1002$	NOT-DETECTED
+dynamic_1003 $dynamic_1003$	NOT-DETECTED
+dynamic_1004 $dynamic_1004$	NOT-DETECTED
+dynamic_1005 $dynamic_1005$	NOT-DETECTED
+dynamic_1006 $dynamic_1006$	NOT-DETECTED
+dynamic_1007 $dynamic_1007$	NOT-DETECTED
+dynamic_1008 $dynamic_1008$	NOT-DETECTED
+dynamic_1009 $dynamic_1009$	NOT-DETECTED
+dynamic_1010 $dynamic_1010$	NOT-DETECTED
+dynamic_1011 $dynamic_1011$	NOT-DETECTED
+dynamic_1012 $dynamic_1012$	NOT-DETECTED
+dynamic_1013 $dynamic_1013$	NOT-DETECTED
+dynamic_1014 $dynamic_1014$	NOT-DETECTED
 dynamic_1015	NOT-DETECTED
-dynamic_1016	NOT-DETECTED
-dynamic_1017	NOT-DETECTED
-dynamic_1018	NOT-DETECTED
-dynamic_1019	NOT-DETECTED
-dynamic_1020	NOT-DETECTED
-dynamic_1021	NOT-DETECTED
-dynamic_1022	NOT-DETECTED
-dynamic_1023	NOT-DETECTED
-dynamic_1024	NOT-DETECTED
-dynamic_1025	NOT-DETECTED
-dynamic_1026	NOT-DETECTED
-dynamic_1027	NOT-DETECTED
-dynamic_1028	NOT-DETECTED
-dynamic_1029	NOT-DETECTED
-dynamic_1030	NOT-DETECTED
-dynamic_1031	NOT-DETECTED
-dynamic_1032	NOT-DETECTED
+dynamic_1015 $dynamic_1015$	NOT-DETECTED
+dynamic_1016 $dynamic_1016$	NOT-DETECTED
+dynamic_1017 $dynamic_1017$	NOT-DETECTED
+dynamic_1018 $dynamic_1018$	NOT-DETECTED
+dynamic_1019 $dynamic_1019$	NOT-DETECTED
+dynamic_1020 $dynamic_1020$	NOT-DETECTED
+dynamic_1021 $dynamic_1021$	NOT-DETECTED
+dynamic_1022 $dynamic_1022$	NOT-DETECTED
+dynamic_1023 $dynamic_1023$	NOT-DETECTED
+dynamic_1024 $dynamic_1024$	NOT-DETECTED
+dynamic_1025 $dynamic_1025$	NOT-DETECTED
+dynamic_1026 $dynamic_1026$	NOT-DETECTED
+dynamic_1027 $dynamic_1027$	NOT-DETECTED
+dynamic_1028 $dynamic_1028$	NOT-DETECTED
+dynamic_1029 $dynamic_1029$	NOT-DETECTED
+dynamic_1030 $dynamic_1030$	NOT-DETECTED
+dynamic_1031 $dynamic_1031$	NOT-DETECTED
+dynamic_1032 $dynamic_1032$	NOT-DETECTED
 dynamic_1034	NOT-DETECTED
-dynamic_1300	NOT-DETECTED
-dynamic_1350	NOT-DETECTED
-dynamic_1400	NOT-DETECTED
+dynamic_1300 $dynamic_1300$	NOT-DETECTED
+dynamic_1350 $dynamic_1350$	NOT-DETECTED
+dynamic_1400 $dynamic_1400$	NOT-DETECTED
 dynamic_1401	NOT-DETECTED
-dynamic_1501	NOT-DETECTED
-dynamic_1502	NOT-DETECTED
-dynamic_1503	NOT-DETECTED
-dynamic_1504	NOT-DETECTED
-dynamic_1505	NOT-DETECTED
+dynamic_1401 $dynamic_1401$	NOT-DETECTED
+dynamic_1501 $dynamic_1501$	NOT-DETECTED
+dynamic_1502 $dynamic_1502$	NOT-DETECTED
+dynamic_1503 $dynamic_1503$	NOT-DETECTED
+dynamic_1504 $dynamic_1504$	NOT-DETECTED
+dynamic_1505 $dynamic_1505$	NOT-DETECTED
 dynamic_1506	NOT-DETECTED
-dynamic_1507	NOT-DETECTED
-dynamic_1518	NOT-DETECTED
-dynamic_1528	NOT-DETECTED
-dynamic_1529	NOT-DETECTED
-dynamic_1550	NOT-DETECTED
-dynamic_1551	NOT-DETECTED
-dynamic_1552	NOT-DETECTED
-dynamic_1560	NOT-DETECTED
-dynamic_1588	NOT-DETECTED
-dynamic_1590	NOT-DETECTED
-dynamic_1592	NOT-DETECTED
-dynamic_1600	NOT-DETECTED
+dynamic_1507 $dynamic_1507$	NOT-DETECTED
+dynamic_1518 $dynamic_1518$	NOT-DETECTED
+dynamic_1528 $dynamic_1528$	NOT-DETECTED
+dynamic_1529 $dynamic_1529$	NOT-DETECTED
+dynamic_1550 $dynamic_1550$	NOT-DETECTED
+dynamic_1551 $dynamic_1551$	NOT-DETECTED
+dynamic_1552 $dynamic_1552$	NOT-DETECTED
+dynamic_1560 $dynamic_1560$	NOT-DETECTED
+dynamic_1588 $dynamic_1588$	NOT-DETECTED
+dynamic_1590 $dynamic_1590$	NOT-DETECTED
+dynamic_1592 $dynamic_1592$	NOT-DETECTED
+dynamic_1600 $dynamic_1600$	NOT-DETECTED
 dynamic_1602	NOT-DETECTED
-dynamic_1608	NOT-DETECTED
-dynamic_2000	NOT-DETECTED
-dynamic_2001	NOT-DETECTED
-dynamic_2002	NOT-DETECTED
-dynamic_2003	NOT-DETECTED
-dynamic_2004	NOT-DETECTED
-dynamic_2005	NOT-DETECTED
-dynamic_2006	NOT-DETECTED
-dynamic_2008	NOT-DETECTED
-dynamic_2009	NOT-DETECTED
-dynamic_2010	NOT-DETECTED
-dynamic_2011	NOT-DETECTED
-dynamic_2014	NOT-DETECTED
-dummy	NOT-DETECTED
+dynamic_1608 $dynamic_1608$	NOT-DETECTED
+dynamic_2000 $dynamic_2000$	NOT-DETECTED
+dynamic_2001 $dynamic_2001$	NOT-DETECTED
+dynamic_2002 $dynamic_2002$	NOT-DETECTED
+dynamic_2003 $dynamic_2003$	NOT-DETECTED
+dynamic_2004 $dynamic_2004$	NOT-DETECTED
+dynamic_2005 $dynamic_2005$	NOT-DETECTED
+dynamic_2006 $dynamic_2006$	NOT-DETECTED
+dynamic_2008 $dynamic_2008$	NOT-DETECTED
+dynamic_2009 $dynamic_2009$	NOT-DETECTED
+dynamic_2010 $dynamic_2010$	NOT-DETECTED
+dynamic_2011 $dynamic_2011$	NOT-DETECTED
+dynamic_2014 $dynamic_2014$	NOT-DETECTED
+dummy $dummy$	NOT-DETECTED
 crypt	CRACKED
