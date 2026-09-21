@@ -90,6 +90,18 @@ func saltedPrototypes() []hashid.Prototype {
 		// gets only the general type. Both are plain literal-prefix checks, so
 		// TierSignature; the more specific "$23$" form is listed first so
 		// table order reproduces the nested precedence.
+		// John-only envelopes. Each names a format whose payload this tool
+		// already reads; without the prototype the record resolves to whatever
+		// its bare payload looks like, which for a 32-hex MD2 digest is MD5.
+		// crack_john_wrappers.go strips the envelope once the type is settled.
+		hasPrefixProto("$md2$", "MD2 (John envelope)", 2,
+			"MD2 is long obsolete, but John writes its digests with this prefix and those records still turn up in old corpora", "md2"),
+		hasPrefixProto("$oracle12c$", "Oracle 12c (John envelope)", 6,
+			"John names the format in the record where hashcat writes a bare digest; both spellings reach Oracle 12c verifiers", "oracle12c"),
+		hasPrefixProto("$django$*", "Django (John envelope)", 8,
+			"John wraps Django's native hasher string, which is otherwise self-describing, in a format envelope", "django"),
+		hasPrefixProto("$LM$", "LM (John envelope)", 6,
+			"John writes a single LM half with this prefix, which is what makes an otherwise ambiguous 16-hex value identifiable", "lm"),
 		hasPrefixProto("$krb5asrep$23$", "Kerberos 5 AS-REP (etype 23, RC4)", 30,
 			"AS-REP roasting via Impacket GetNPUsers/Rubeus requests RC4 (etype 23) by default against accounts with Kerberos pre-authentication disabled, making this the most commonly captured AS-REP shape", "krb5asrep", "krb5asrep-nt"),
 		hasPrefixProto("$krb5asrep$", "Kerberos 5 AS-REP (other etype)", 8,

@@ -6,7 +6,7 @@ md5crypt	CRACKED
 md5crypt-long	CRACKED
 bcrypt	CRACKED
 scrypt	NOT-DETECTED
-LM	NOT-DETECTED
+LM	CRACKED
 AFS	NOT-DETECTED
 tripcode	NOT-FOUND
 AndroidBackup	CRACKED
@@ -46,7 +46,7 @@ Citrix_NS10	NOT-FOUND
 dahua	NOT-DETECTED
 dashlane	NOT-DETECTED
 diskcryptor	CRACKED
-Django	NOT-DETECTED
+Django	CRACKED
 django-scrypt	REJECTED
 dmd5	NOT-DETECTED
 dmg	REJECTED
@@ -103,7 +103,7 @@ leet	NOT-DETECTED
 lotus5	NOT-FOUND
 lotus85	NOT-DETECTED
 LUKS	REJECTED
-MD2	NOT-DETECTED
+MD2	CRACKED
 mdc2	NOT-DETECTED
 MediaWiki	CRACKED
 monero	CRACKED
@@ -147,7 +147,7 @@ OpenBSD-SoftRAID	NOT-DETECTED
 openssl-enc	NOT-DETECTED
 oracle	CRACKED
 oracle11	CRACKED
-Oracle12C	NOT-DETECTED
+Oracle12C	CRACKED
 osc	NOT-DETECTED
 ospf	NOT-DETECTED
 Padlock	NOT-DETECTED
@@ -304,7 +304,7 @@ krb5pa-sha1-opencl	REJECTED
 krb5asrep-aes-opencl	REJECTED
 lp-opencl	NOT-DETECTED
 lpcli-opencl	NOT-DETECTED
-LM-opencl	NOT-DETECTED
+LM-opencl	CRACKED
 mscash-opencl	NOT-DETECTED
 mscash2-opencl	NOT-DETECTED
 mysql-sha1-opencl	CRACKED

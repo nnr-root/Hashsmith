@@ -2321,6 +2321,9 @@ func calcBruteTotalExact(charset string, minLen, maxLen int) (*big.Int, bool) {
 
 func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, error) {
 	algo := canonicalHashType(typ)
+	// John writes some records inside an envelope naming the format; the
+	// payload is what every verifier here expects. See crack_john_wrappers.go.
+	targetHash = stripJohnWrapper(targetHash, algo)
 	// John's "postgres" label covers PostgreSQL challenge/response records,
 	// while Hashsmith also uses postgres for the stored md5(password+user) form.
 	if algo == "postgres" && strings.HasPrefix(targetHash, "$postgres$") {
