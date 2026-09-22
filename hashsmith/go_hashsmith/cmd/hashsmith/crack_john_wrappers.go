@@ -48,6 +48,9 @@ var johnWrappers = []struct {
 	{"$nt$", []string{"ntlm"}},
 	{"$radmin2$", []string{"radmin2"}},
 	{"$whirlpool$", []string{"whirlpool"}},
+	// As with $ripemd$, one envelope covers more than one digest size and the
+	// payload's length settles which.
+	{"$skein$", []string{"skein224", "skein256", "skein384", "skein512"}},
 	// One envelope, two digest sizes: John writes "$ripemd$" for both the
 	// 128- and 160-bit variants and lets the length say which. Both are
 	// offered; the payload length settles it at verification.

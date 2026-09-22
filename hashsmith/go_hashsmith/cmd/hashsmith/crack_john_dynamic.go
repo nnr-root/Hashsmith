@@ -50,6 +50,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/aead/skein"
 	"golang.org/x/crypto/md4"
 	xsha3 "golang.org/x/crypto/sha3"
 )
@@ -309,6 +310,16 @@ func dynDigest(name string) (func([]byte) []byte, bool) {
 	case "keccak_512":
 		return simple(func(b []byte) []byte {
 			h := xsha3.NewLegacyKeccak512()
+			_, _ = h.Write(b)
+			return h.Sum(nil)
+		})
+	case "skein224", "skein256", "skein384", "skein512":
+		// John's skein224 and friends are Skein-512 with a shorter output,
+		// which is the usual reading of "Skein-N" and the one its own test
+		// vectors use.
+		size := map[string]int{"skein224": 28, "skein256": 32, "skein384": 48, "skein512": 64}[name]
+		return simple(func(b []byte) []byte {
+			h := skein.New(size, nil)
 			_, _ = h.Write(b)
 			return h.Sum(nil)
 		})

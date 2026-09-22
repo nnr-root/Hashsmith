@@ -23,6 +23,7 @@ import (
 
 	"crypto/sha3"
 
+	"github.com/aead/skein"
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/blake2b"
@@ -186,6 +187,11 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 			return "", err
 		}
 		return hex.EncodeToString(sum), nil
+	case "skein224", "skein256", "skein384", "skein512":
+		size := map[string]int{"skein224": 28, "skein256": 32, "skein384": 48, "skein512": 64}[algo]
+		h := skein.New(size, nil)
+		_, _ = h.Write([]byte(text))
+		return hex.EncodeToString(h.Sum(nil)), nil
 	case "whirlpool":
 		h := newWhirlpool()
 		_, _ = h.Write([]byte(text))

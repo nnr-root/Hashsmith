@@ -276,8 +276,8 @@ securezip $zip3$	CRACKED
 Signal $signal$	CRACKED
 SIP $sip$	CRACKED
 skein-256	NOT-FOUND
-skein-256 $skein$	NOT-DETECTED
-skein-512 $skein$	NOT-DETECTED
+skein-256 $skein$	CRACKED
+skein-512 $skein$	CRACKED
 skey	NOT-DETECTED
 SL3 $sl3$	NOT-DETECTED
 SL3	NOT-DETECTED
@@ -522,10 +522,10 @@ dynamic_290 $dynamic_290$	NOT-DETECTED
 dynamic_300 $dynamic_300$	NOT-DETECTED
 dynamic_310 $dynamic_310$	CRACKED
 dynamic_320 $dynamic_320$	NOT-DETECTED
-dynamic_330 $dynamic_330$	NOT-DETECTED
-dynamic_340 $dynamic_340$	NOT-DETECTED
-dynamic_350 $dynamic_350$	NOT-DETECTED
-dynamic_360 $dynamic_360$	NOT-DETECTED
+dynamic_330 $dynamic_330$	CRACKED
+dynamic_340 $dynamic_340$	CRACKED
+dynamic_350 $dynamic_350$	CRACKED
+dynamic_360 $dynamic_360$	CRACKED
 dynamic_370 $dynamic_370$	CRACKED
 dynamic_380 $dynamic_380$	CRACKED
 dynamic_390 $dynamic_390$	CRACKED

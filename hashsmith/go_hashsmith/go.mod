@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	ekyu.moe/cryptonight v0.3.0
+	github.com/aead/skein v0.0.0-20160722084837-9365ae6e95d2
 	github.com/atotto/clipboard v0.1.4
 	github.com/fatih/color v1.19.0
 	github.com/schollz/progressbar/v3 v3.19.0
@@ -16,7 +17,6 @@ require (
 )
 
 require (
-	github.com/aead/skein v0.0.0-20160722084837-9365ae6e95d2 // indirect
 	github.com/dchest/blake256 v1.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/golang/snappy v0.0.0-20180518054509-2e65f85255db // indirect
