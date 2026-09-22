@@ -261,22 +261,32 @@ func TestJohnRawDigestEnvelopes(t *testing.T) {
 		{"$SHA224$d63dc919e201d7bc4c825630d2cf25fdc93d4b2f0d46706d29038d01", "password"},
 		{"$SHA256$71c3f65d17745f05235570f1799d75e69795d469d9fcb83e326f82f1afa80dea", "epixoip"},
 		{"$SHA384$a8b64babd0aca91a59bdbb7761b421d4f2bb38280d3a75ba0f21f2bebc45583d446c598660c94ce680c47d19c30783a7", "password"},
+		// One envelope, two digest sizes; the length picks the variant.
+		{"$ripemd$060d8817be332f6e6a9a09a209ea453e", "thisisalongstring"},
+		{"$ripemd$56e11fdd5479b30020fc010551536af074e1b82f", "thisisalongstring"},
 	} {
-		typ, _, ok := johnWrapperFor(tc.record)
+		wrapped, _, ok := johnWrapperFor(tc.record)
 		if !ok {
 			t.Errorf("no envelope recognised in %.28s...", tc.record)
 			continue
 		}
+		// An envelope may name more than one type — "$ripemd$" covers both
+		// digest sizes — so the right one is whichever verifies.
 		types := detectHashTypes(tc.record)
-		if !containsString(types, typ) {
-			t.Errorf("detectHashTypes(%.28s...) = %v, want %q", tc.record, types, typ)
+		verified := false
+		for _, typ := range wrapped {
+			if !containsString(types, typ) {
+				t.Errorf("detectHashTypes(%.28s...) = %v, want it to include %q", tc.record, types, typ)
+			}
+			if got, err := verifyCandidate(tc.password, tc.record, typ, "", "prefix"); err == nil && got {
+				verified = true
+				if bad, _ := verifyCandidate(tc.password+"x", tc.record, typ, "", "prefix"); bad {
+					t.Errorf("%.28s... accepted a wrong password as %s", tc.record, typ)
+				}
+			}
 		}
-		got, err := verifyCandidate(tc.password, tc.record, typ, "", "prefix")
-		if err != nil || !got {
-			t.Errorf("%.28s... rejected the right password: ok=%v err=%v", tc.record, got, err)
-		}
-		if bad, _ := verifyCandidate(tc.password+"x", tc.record, typ, "", "prefix"); bad {
-			t.Errorf("%.28s... accepted a wrong password", tc.record)
+		if !verified {
+			t.Errorf("%.28s... verified under none of %v", tc.record, wrapped)
 		}
 	}
 	// The envelope is matched case-insensitively, since John is not
@@ -284,7 +294,7 @@ func TestJohnRawDigestEnvelopes(t *testing.T) {
 	if _, _, ok := johnWrapperFor("$sha512$aa"); !ok {
 		t.Error("a lower-case $sha512$ envelope was not recognised")
 	}
-	// And an envelope only unwraps for the type it names.
+	// And an envelope only unwraps for a type it names.
 	if got := stripJohnWrapper("$md4$abc", "sha256"); got != "$md4$abc" {
 		t.Errorf("stripJohnWrapper unwrapped for the wrong type: %q", got)
 	}

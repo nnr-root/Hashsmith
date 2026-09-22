@@ -95,7 +95,7 @@ HAVAL-128-4 $haval$	NOT-DETECTED
 HAVAL-256-3	NOT-FOUND
 HAVAL-256-3 $haval$	NOT-DETECTED
 hdaa $response$	NOT-DETECTED
-hMailServer	NOT-DETECTED
+hMailServer	CRACKED
 hsrp $hsrp$	NOT-DETECTED
 IKE $ike$	NOT-DETECTED
 ipb2 $ipb2$	NOT-DETECTED
@@ -260,9 +260,9 @@ Raw-SHA3	CRACKED
 Raw-SHA384	CRACKED
 Raw-SHA384 $sha384$	CRACKED
 ripemd-128	NOT-FOUND
-ripemd-128 $ripemd$	NOT-DETECTED
+ripemd-128 $ripemd$	CRACKED
 ripemd-160	CRACKED
-ripemd-160 $ripemd$	NOT-DETECTED
+ripemd-160 $ripemd$	CRACKED
 rsvp $rsvp$	NOT-DETECTED
 Siemens-S7 $siemens-s7$	NOT-DETECTED
 Salted-SHA1	CRACKED

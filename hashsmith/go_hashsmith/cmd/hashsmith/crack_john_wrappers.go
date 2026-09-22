@@ -28,42 +28,53 @@ import "strings"
 // consistent about it: "$SHA512$" and "$MD4$" are upper case, "$gost$" and
 // "$keccak256$" are lower. Nothing downstream depends on the case, so there is
 // no reason to make a user reproduce it.
-var johnWrappers = []struct{ prefix, typ string }{
+var johnWrappers = []struct {
+	prefix string
+	types  []string
+}{
 	// Raw digests. The envelope is the only thing that makes these
 	// identifiable — a bare 128-hex digest is SHA-512, SHA3-512, BLAKE2b,
 	// Whirlpool, Streebog-512 or Keccak-512 with nothing to choose between
 	// them, and John's records say which.
-	{"$sha224$", "sha224"},
-	{"$sha256$", "sha256"},
-	{"$sha384$", "sha384"},
-	{"$sha512$", "sha512"},
-	{"$md4$", "md4"},
-	{"$md2$", "md2"},
-	{"$gost$", "gost"},
-	{"$keccak256$", "keccak256"},
-	{"$whirlpool$", "whirlpool"},
+	{"$sha224$", []string{"sha224"}},
+	{"$sha256$", []string{"sha256"}},
+	{"$sha384$", []string{"sha384"}},
+	{"$sha512$", []string{"sha512"}},
+	{"$md4$", []string{"md4"}},
+	{"$md2$", []string{"md2"}},
+	{"$gost$", []string{"gost"}},
+	{"$keccak256$", []string{"keccak256"}},
+	{"$whirlpool$", []string{"whirlpool"}},
+	// One envelope, two digest sizes: John writes "$ripemd$" for both the
+	// 128- and 160-bit variants and lets the length say which. Both are
+	// offered; the payload length settles it at verification.
+	{"$ripemd$", []string{"ripemd128", "ripemd160"}},
 	// Structured records whose payload this tool reads under another name.
-	{"$oracle12c$", "oracle12c"},
-	{"$django$*1*", "django"},
-	{"$lm$", "lm"},
+	{"$oracle12c$", []string{"oracle12c"}},
+	{"$django$*1*", []string{"django"}},
+	{"$lm$", []string{"lm"}},
 }
 
-// johnWrapperFor reports the type and payload of a John-enveloped record.
-func johnWrapperFor(target string) (typ, payload string, ok bool) {
+// johnWrapperFor reports the types and payload of a John-enveloped record.
+func johnWrapperFor(target string) (types []string, payload string, ok bool) {
 	for _, w := range johnWrappers {
 		if len(target) >= len(w.prefix) && strings.EqualFold(target[:len(w.prefix)], w.prefix) {
-			return w.typ, target[len(w.prefix):], true
+			return w.types, target[len(w.prefix):], true
 		}
 	}
-	return "", "", false
+	return nil, "", false
 }
 
 // stripJohnWrapper removes a John-only envelope when the record carries one
 // and it belongs to the type being verified. Anything else is returned
 // unchanged, so a record that merely resembles a wrapper is never mangled.
 func stripJohnWrapper(target, typ string) string {
-	if wrapped, payload, ok := johnWrapperFor(target); ok && wrapped == typ {
-		return payload
+	if types, payload, ok := johnWrapperFor(target); ok {
+		for _, t := range types {
+			if t == typ {
+				return payload
+			}
+		}
 	}
 	return target
 }
@@ -82,9 +93,11 @@ func johnWrappedTypes() []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, w := range johnWrappers {
-		if !seen[w.typ] {
-			seen[w.typ] = true
-			out = append(out, w.typ)
+		for _, t := range w.types {
+			if !seen[t] {
+				seen[t] = true
+				out = append(out, t)
+			}
 		}
 	}
 	return out

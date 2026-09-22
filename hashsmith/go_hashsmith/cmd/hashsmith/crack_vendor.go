@@ -180,7 +180,7 @@ func verifyHMailServer(targetHash, candidate string) (bool, error) {
 }
 
 func isHMailServer(s string) bool {
-	if len(s) != 70 || !isHex(s[6:]) || isHex(s[:6]) {
+	if len(s) != 70 || !isHex(s[6:]) {
 		return false
 	}
 	// A record opening with a format envelope this tool recognises is that
