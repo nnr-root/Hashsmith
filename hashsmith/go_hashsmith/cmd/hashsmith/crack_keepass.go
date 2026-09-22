@@ -146,9 +146,13 @@ func verifyKeePass1(p []string, candidate string) (bool, error) {
 		return false, errors.New("invalid keepass1 hash format")
 	}
 	rounds := atoiDefault(p[2], 0)
-	algo := atoiDefault(p[3], 0)
-	if algo != 0 {
-		return false, errors.New("keepass1: only AES (algo 0) is supported")
+	// The cipher selector is only ever 0 (AES) or 1 (Twofish); John puts 124
+	// there — the size of a KDB1 header — and its own parser reads anything
+	// that is not 1 as AES. Following that exactly costs nothing: the check
+	// below compares all 32 bytes of a SHA-256, so a mis-read cipher can only
+	// fail to crack, never name a wrong password.
+	if atoiDefault(p[3], 0) == 1 {
+		return false, errors.New("keepass1: only AES is supported, and this record names Twofish")
 	}
 	masterSeed, e1 := hex.DecodeString(p[4])
 	transformSeed, e2 := hex.DecodeString(p[5])

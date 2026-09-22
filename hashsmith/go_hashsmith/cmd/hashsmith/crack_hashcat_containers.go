@@ -140,20 +140,38 @@ func verifyJKSPrivateKey(target, candidate string) (bool, error) {
 	return bytesEqualCT(got[:], want), nil
 }
 
+// verifyVMX reads both spellings of a VMware VMX keystore record.
+//
+// hashcat writes "$vmx$0$<iterations>$<salt>$<32 bytes>"; John writes
+// "$vmx$<v>$<n>$<n>$<iterations>$<salt>$<the whole ciphertext>" — three
+// leading fields instead of one, and the complete encrypted keystore rather
+// than the prefix needed to check it. The trailing three fields mean the
+// same thing in both, and only the first 32 bytes of the ciphertext are
+// consulted: an IV and one AES block, which is all the "type=key:cipher="
+// test needs.
 func verifyVMX(target, candidate string) (bool, error) {
 	parts := strings.Split(target, "$")
-	if len(parts) != 6 || parts[1] != "vmx" || parts[2] != "0" {
+	var iterField, saltField, ctField string
+	switch {
+	case len(parts) == 6 && parts[1] == "vmx" && parts[2] == "0":
+		iterField, saltField, ctField = parts[3], parts[4], parts[5]
+	case len(parts) == 8 && parts[1] == "vmx":
+		iterField, saltField, ctField = parts[5], parts[6], parts[7]
+	default:
 		return false, errors.New("invalid VMware VMX record")
 	}
-	iter, err := boundedPositiveInt(parts[3], "VMX iteration count", 100000000)
+	iter, err := boundedPositiveInt(iterField, "VMX iteration count", 100000000)
 	if err != nil {
 		return false, err
 	}
-	salt, err := decodeExactHex(parts[4], 16, "VMX salt")
+	salt, err := decodeExactHex(saltField, 16, "VMX salt")
 	if err != nil {
 		return false, err
 	}
-	ct, err := decodeExactHex(parts[5], 32, "VMX ciphertext")
+	if len(ctField) < 64 {
+		return false, errors.New("VMX ciphertext is too short")
+	}
+	ct, err := decodeExactHex(ctField[:64], 32, "VMX ciphertext")
 	if err != nil {
 		return false, err
 	}

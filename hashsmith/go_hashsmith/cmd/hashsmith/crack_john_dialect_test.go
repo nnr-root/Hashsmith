@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestEncodingGuessDoesNotOutrankAHashMatch pins the rule that a crack target
 // which already reads as a hash is never rewritten as an encoded digest.
@@ -411,5 +414,163 @@ func TestMSCashJohnSpelling(t *testing.T) {
 	if u, d, ok := johnMSCashFields("M$do#main\\user#48f84e6f73d6d5305f6558a33fa2c9bb"); !ok ||
 		u != "do#main\\user" || d != "48f84e6f73d6d5305f6558a33fa2c9bb" {
 		t.Errorf("split at the wrong '#': %q %q %v", u, d, ok)
+	}
+}
+
+// TestVMXJohnSpelling pins John's VMware VMX spelling. John prefixes three
+// fields where hashcat writes one, and stores the whole encrypted keystore
+// rather than the 32 bytes the check consults; the trailing iterations, salt
+// and ciphertext-prefix agree, so both records answer the same question.
+func TestVMXJohnSpelling(t *testing.T) {
+	const record = "$vmx$1$0$0$10000$514fb565d74db333352661023874f07d$81dc8986e299d55dee724198a572619b87de0b96501dd2285fbe928c831446fb92c056e02e6ca0119213e9cf094222c0e4d0df6f014615c915412cb0c892d4528070ead0d2443d0c457a7db445fd17b060899033a5c69d43315abd3d262ad3570379c12c97fc2490d7a42b04f99a24386f27aa56"
+	if types := detectHashTypes(record); !containsString(types, "vmware-vmx") {
+		t.Errorf("detectHashTypes did not offer vmware-vmx: %v", types)
+	}
+	if ok, err := verifyVMX(record, "openwall"); err != nil || !ok {
+		t.Errorf("rejected the right password: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyVMX(record, "openwal1"); bad {
+		t.Error("accepted a wrong password")
+	}
+	// hashcat's own spelling must keep working.
+	if ok, err := verifyVMX("$vmx$0$10000$264bbab02fdf7c1a793651120bec3723$cbb368564d8dfb99f509d4922f4693413f3816af713f0e76bc2409ff9336935d", "hashcat"); err != nil || !ok {
+		t.Errorf("hashcat's VMX record regressed: ok=%v err=%v", ok, err)
+	}
+	// A record with neither field count is still refused.
+	if _, err := verifyVMX("$vmx$0$10000$514fb565d74db333352661023874f07d", "x"); err == nil {
+		t.Error("accepted a truncated record")
+	}
+}
+
+// johnVector returns the record John itself ships for a format, so a dialect
+// test pins the exact bytes the conformance ratchet measures rather than a
+// hand-copied excerpt of them. Several of these records run to kilobytes.
+func johnVector(t *testing.T, format string) (hash, pass string) {
+	t.Helper()
+	for _, r := range loadJohnCorpus(t) {
+		if r.format == format {
+			return r.hash, r.pass
+		}
+	}
+	t.Fatalf("the John corpus has no %q", format)
+	return "", ""
+}
+
+// Test7zJohnSpelling pins John's 7-Zip record, whose type field says 128 —
+// "the stream is truncated" — where Hashsmith's extractor writes the padding
+// length. Both records are checked the same way, by the padding the two size
+// fields imply.
+func Test7zJohnSpelling(t *testing.T) {
+	record, pass := johnVector(t, "7z $7z$")
+	if types := detectHashTypes(record); !containsString(types, "7z") {
+		t.Errorf("detectHashTypes did not offer 7z: %v", types)
+	}
+	if ok, err := verify7z(record, pass); err != nil || !ok {
+		t.Errorf("rejected the right password: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verify7z(record, pass+"x"); bad {
+		t.Error("accepted a wrong password")
+	}
+	// hashcat's own type-0 record, checked by its CRC, must keep working.
+	const hc = "$7z$0$14$0$$11$33363437353138333138300000000000$2365089182$16$12$d00321533b483f54a523f624a5f63269"
+	if ok, err := verify7z(hc, "hashcat"); err != nil || !ok {
+		t.Errorf("hashcat's 7z record regressed: ok=%v err=%v", ok, err)
+	}
+	// A compressed stream with no padding left offers no check at all, and is
+	// refused rather than answered.
+	if _, err := verify7z("$7z$1$14$0$$11$33363437353138333138300000000000$2365089182$16$16$d00321533b483f54a523f624a5f63269", "hashcat"); err == nil {
+		t.Error("answered a record that carries nothing to check")
+	}
+}
+
+// TestDMGJohnSpelling pins John's Apple disk-image record, which stops at the
+// sparse-image flag where Hashsmith's carries the iteration count after it.
+func TestDMGJohnSpelling(t *testing.T) {
+	record, pass := johnVector(t, "dmg $dmg$")
+	if types := detectHashTypes(record); !containsString(types, "dmg") {
+		t.Errorf("detectHashTypes did not offer dmg: %v", types)
+	}
+	if ok, err := verifyDMG(record, pass); err != nil || !ok {
+		t.Errorf("rejected the right password: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyDMG(record, pass+"x"); bad {
+		t.Error("accepted a wrong password")
+	}
+	// Spelling the same record Hashsmith's way — the default made explicit —
+	// must mean the same thing.
+	if ok, err := verifyDMG(record+"*1000", pass); err != nil || !ok {
+		t.Errorf("rejected its own spelling of the same record: ok=%v err=%v", ok, err)
+	}
+	// And an explicit count that is not the default must still be honoured.
+	if bad, _ := verifyDMG(record+"*999", pass); bad {
+		t.Error("ignored an explicit iteration count")
+	}
+}
+
+// TestKeePassJohnSpelling pins John's KDB1 record, whose cipher field holds
+// 124 — the size of a KDB1 header — rather than a cipher id.
+func TestKeePassJohnSpelling(t *testing.T) {
+	record, pass := johnVector(t, "KeePass $keepass$")
+	if types := detectHashTypes(record); !containsString(types, "keepass") {
+		t.Errorf("detectHashTypes did not offer keepass: %v", types)
+	}
+	if ok, err := verifyKeePass(record, pass); err != nil || !ok {
+		t.Errorf("rejected the right password: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyKeePass(record, pass+"x"); bad {
+		t.Error("accepted a wrong password")
+	}
+	// hashcat's spelling of the same field, 0 for AES, means the same thing.
+	f := strings.Split(record, "*")
+	f[3] = "0"
+	if ok, err := verifyKeePass(strings.Join(f, "*"), pass); err != nil || !ok {
+		t.Errorf("rejected hashcat's spelling of the cipher field: ok=%v err=%v", ok, err)
+	}
+	// Twofish is the one value that still has to be refused, because it names
+	// a cipher Hashsmith does not run for KDB1.
+	f[3] = "1"
+	if _, err := verifyKeePass(strings.Join(f, "*"), pass); err == nil {
+		t.Error("claimed to check a Twofish KDB1 record")
+	}
+}
+
+// TestLUKSJohnSpelling pins John's LUKS record, which ships the partition
+// header verbatim instead of the fields taken out of it.
+func TestLUKSJohnSpelling(t *testing.T) {
+	record, pass := johnVector(t, "LUKS $luks$")
+	if types := detectHashTypes(record); !containsString(types, "luks") {
+		t.Errorf("detectHashTypes did not offer luks: %v", types)
+	}
+	p, err := parseLUKSHash(record)
+	if err != nil {
+		t.Fatalf("parsing John's header: %v", err)
+	}
+	// Everything the other spellings state explicitly, read out of the header.
+	if p.hashSpec != "sha1" || p.cipherName != "aes" || p.cipherMode != "cbc-essiv:sha256" {
+		t.Errorf("read the wrong cipher suite: %s/%s/%s", p.hashSpec, p.cipherName, p.cipherMode)
+	}
+	if p.keyBytes != 16 || p.stripes != 4000 || p.mkIter != 68375 || p.slotIter != 274677 {
+		t.Errorf("read the wrong parameters: keyBytes=%d stripes=%d mkIter=%d slotIter=%d",
+			p.keyBytes, p.stripes, p.mkIter, p.slotIter)
+	}
+	if ok, err := verifyLUKS(record, pass); err != nil || !ok {
+		t.Errorf("rejected the right password: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyLUKS(record, pass+"x"); bad {
+		t.Error("accepted a wrong password")
+	}
+	// Selecting a mode still has to prove the record matches it.
+	if ok, err := verifyLUKSMode(record, pass, luksModeSpecs["luks-sha1-aes"]); err != nil || !ok {
+		t.Errorf("the matching mode rejected it: ok=%v err=%v", ok, err)
+	}
+	if _, err := verifyLUKSMode(record, pass, luksModeSpecs["luks-sha256-aes"]); err == nil {
+		t.Error("a mode the record contradicts was accepted")
+	}
+	// The record states the master-key digest twice; disagreement is refused
+	// rather than resolved in favour of either copy.
+	f := strings.Split(record, "$")
+	f[7] = strings.Repeat("00", 20)
+	if _, err := verifyLUKS(strings.Join(f, "$"), pass); err == nil {
+		t.Error("accepted a record whose two digests disagree")
 	}
 }

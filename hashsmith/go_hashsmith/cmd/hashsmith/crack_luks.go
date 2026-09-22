@@ -102,16 +102,20 @@ func parseLUKSHash(target string) (*luksParams, error) {
 		return nil, errors.New("invalid LUKS hash (missing $luks$1$ prefix)")
 	}
 	f := strings.Split(target[len("$luks$"):], "$")
-	// Two record shapes share the $luks$1$ prefix and are told apart by field
-	// count. Hashcat's luks2hashcat.py emits nine fields; Hashsmith's own
-	// luks2smith emits twelve. Both are accepted — see parseLUKSHashcat for
-	// what each can and cannot verify.
+	// Three record shapes share the $luks$1$ prefix and are told apart by
+	// field count. John dumps the raw header in five or six; hashcat's
+	// luks2hashcat.py emits nine; Hashsmith's own luks2smith emits twelve. All
+	// are accepted — see parseLUKSJohn for the first and parseLUKSHashcat for
+	// what each of the others can and cannot verify.
+	if len(f) == 5 || len(f) == 6 {
+		return parseLUKSJohn(f)
+	}
 	if len(f) == 9 {
 		return parseLUKSHashcat(f)
 	}
 	// f: [1, hash, cipher, mode, keyBytes, mkDigest, mkSalt, mkIter, slotIter, slotSalt, stripes, keyMaterial]
 	if len(f) != 12 {
-		return nil, errors.New("invalid LUKS hash (need 9 fields for a hashcat record or 12 for a luks2smith record, got " + strconv.Itoa(len(f)) + ")")
+		return nil, errors.New("invalid LUKS hash (need 6 fields for a John record, 9 for a hashcat record or 12 for a luks2smith record, got " + strconv.Itoa(len(f)) + ")")
 	}
 	atoi := func(name, s string) (int, error) {
 		n, err := strconv.Atoi(s)

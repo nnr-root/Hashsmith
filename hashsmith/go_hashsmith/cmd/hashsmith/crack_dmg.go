@@ -72,9 +72,16 @@ func verifyDMGV1(fields []string, candidate string) (bool, error) {
 	return true, nil
 }
 
+// dmgDefaultIterations is what a v2 record means when it omits its iteration
+// count, as John's does. Apple's encrypted-disk-image header has carried 1000
+// since the format appeared, and John hard-codes the same number.
+const dmgDefaultIterations = 1000
+
 func verifyDMGV2(fields []string, candidate string) (bool, error) {
 	// scp=0 omits zchunk; scp=1 carries a second 4096-byte encrypted sample.
-	if len(fields) != 12 && len(fields) != 13 {
+	// The trailing iteration count is Hashsmith's and hashcat's; John stops at
+	// the sparse-image flag, so a record one field shorter is that spelling.
+	if len(fields) < 11 || len(fields) > 13 {
 		return false, errors.New("invalid DMG v2 record")
 	}
 	salt, err := dmgSizedHex(fields[1], fields[2], 1, 64)
@@ -106,22 +113,29 @@ func verifyDMGV2(fields []string, candidate string) (bool, error) {
 		return false, errors.New("invalid DMG sparse-image flag")
 	}
 	var zeroChunk []byte
-	iterationField := 11
+	iterationField := -1
 	if scp == 1 {
-		if len(fields) != 13 {
+		if len(fields) < 12 {
 			return false, errors.New("missing DMG sparse-image chunk")
 		}
 		zeroChunk, err = hex.DecodeString(fields[11])
 		if err != nil || len(zeroChunk) != 4096 || len(zeroChunk)%aes.BlockSize != 0 {
 			return false, errors.New("invalid DMG sparse-image chunk")
 		}
-		iterationField = 12
-	} else if len(fields) != 12 {
+		if len(fields) == 13 {
+			iterationField = 12
+		}
+	} else if len(fields) == 12 {
+		iterationField = 11
+	} else if len(fields) != 11 {
 		return false, errors.New("unexpected DMG sparse-image chunk")
 	}
-	iterations, err := strconv.Atoi(fields[iterationField])
-	if err != nil || iterations < 1 || iterations > maxKDFIterations {
-		return false, errors.New("invalid DMG iteration count")
+	iterations := dmgDefaultIterations
+	if iterationField >= 0 {
+		iterations, err = strconv.Atoi(fields[iterationField])
+		if err != nil || iterations < 1 || iterations > maxKDFIterations {
+			return false, errors.New("invalid DMG iteration count")
+		}
 	}
 
 	derived := pbkdf2.Key([]byte(candidate), salt, iterations, 32, sha1.New)

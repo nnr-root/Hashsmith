@@ -3306,18 +3306,20 @@ func verifyMSSQL2012(targetHash, candidate string) (bool, error) {
 //	        <unpackSize> bytes, compare. This is hashcat's own record, and
 //	        hashcat -m 11600 cracks the ones Hashsmith writes.
 //
-//	type N  N > 0 is the number of zero-padding bytes 7-Zip appended to round
-//	        the AES stream up to a block boundary, which is the check when the
-//	        chain compresses and the CRC therefore covers bytes only an LZMA
-//	        decoder could produce. Decrypt and require the last N bytes to be
-//	        zero: a wrong key leaves each of them random, so four bytes is
+//	type N  Anything else means the AES output is compressed, so the CRC
+//	        covers bytes only an LZMA decoder could produce. What remains is
+//	        the zero padding 7-Zip appended to round the stream up to a block
+//	        boundary: dataLen - unpackSize bytes, which must all decrypt to
+//	        zero. A wrong key leaves each of them random, so four bytes is
 //	        already one false positive in four billion and a real archive
-//	        offers far more.
+//	        offers more.
 //
-// Hashcat keeps a codec discriminator in that field rather than a length, so
-// a type-N record is one hashcat rejects with a parse error. That is the
-// point: a wrong-but-loadable record would silently never crack, and hashcat's
-// own compressed-7z form was tried against v7.1.2 and did not verify.
+// The type field is a codec discriminator, not a length. Hashsmith's own
+// extractor writes the padding count there, which is why reading it as a
+// length worked; John writes 128 for a truncated stream, and the padding is
+// taken from the two sizes instead so both records mean the same thing. A
+// compressed record whose stream happens to be block-aligned offers no check
+// at all, and is refused rather than answered.
 //
 // Hashsmith's earlier abbreviated extractor format is accepted for backward
 // compatibility, but canonical records are verified with their CRC or their
@@ -3333,9 +3335,8 @@ func verify7z(targetHash, candidate string) (bool, error) {
 	var unpackSize, padding int
 	canonical := len(parts) == 12
 	if canonical {
-		var err error
-		padding, err = strconv.Atoi(parts[2])
-		if err != nil || padding < 0 {
+		dataType, err := strconv.Atoi(parts[2])
+		if err != nil || dataType < 0 {
 			return false, errors.New("unsupported 7z data type")
 		}
 		cyclesField, saltField, ivField, dataField = parts[3], parts[5], parts[7], parts[11]
@@ -3355,21 +3356,34 @@ func verify7z(targetHash, candidate string) (bool, error) {
 		if err != nil || unpackSize < 0 || unpackSize > dataLen {
 			return false, errors.New("invalid 7z unpack size")
 		}
-		// A padding record states its own padding length twice — once as the
-		// type field and once as dataLen-unpackSize — so a record whose two
-		// halves disagree is rejected rather than checked against whichever
-		// one happens to be right.
-		if padding > 0 && dataLen-unpackSize != padding {
-			return false, errors.New("7z padding length disagrees with the data and unpack sizes")
-		}
-		if padding >= aes.BlockSize {
-			return false, errors.New("invalid 7z padding length")
+		// The padding length is the difference between the two sizes; the
+		// type field says only whether the CRC is reachable. Reading it as a
+		// length happened to work on Hashsmith's own records, because the
+		// extractor writes that same difference there — but John writes 128
+		// for a truncated stream, and the two readings then disagree.
+		if dataType != 0 {
+			padding = dataLen - unpackSize
+			if padding == 0 {
+				return false, errors.New("this 7z record's encrypted stream is compressed and " +
+					"block-aligned, so neither the recorded CRC nor a padding byte can tell a " +
+					"right password from a wrong one; re-extract the archive with Hashsmith's 7z2smith")
+			}
+			if padding >= aes.BlockSize {
+				return false, errors.New("invalid 7z padding length")
+			}
 		}
 		wantCRC, err = strconv.ParseUint(parts[8], 10, 32)
 		if err != nil {
 			return false, errors.New("invalid 7z CRC")
 		}
-		if len(saltField) != saltLen*2 || len(ivField) < ivLen*2 || len(dataField) != dataLen*2 {
+		// A zero salt length means there is no salt, whatever the salt field
+		// holds: John leaves a stale value in it rather than emptying it.
+		if saltLen == 0 {
+			saltField = ""
+		} else if len(saltField) != saltLen*2 {
+			return false, errors.New("7z field length mismatch")
+		}
+		if len(ivField) < ivLen*2 || len(dataField) != dataLen*2 {
 			return false, errors.New("7z field length mismatch")
 		}
 	} else if len(parts) == 8 {

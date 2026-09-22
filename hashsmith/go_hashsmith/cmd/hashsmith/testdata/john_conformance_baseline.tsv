@@ -62,7 +62,7 @@ diskcryptor $diskcryptor$	CRACKED
 Django $django$	CRACKED
 django-scrypt	CRACKED
 dmd5 $digest-md5$	NOT-DETECTED
-dmg $dmg$	REJECTED
+dmg $dmg$	CRACKED
 dominosec	CRACKED
 dominosec8	CRACKED
 DPAPImk $dpapimk$	CRACKED
@@ -101,7 +101,7 @@ IKE $ike$	NOT-DETECTED
 ipb2 $ipb2$	NOT-DETECTED
 itunes-backup $itunes_backup$	CRACKED
 iwork $iwork$	CRACKED
-KeePass $keepass$	REJECTED
+KeePass $keepass$	CRACKED
 keychain $keychain$	CRACKED
 keyring $keyring$	NOT-DETECTED
 keystore $keystore$	NOT-DETECTED
@@ -122,7 +122,7 @@ lpcli $lpcli$	NOT-DETECTED
 leet	NOT-DETECTED
 lotus5	NOT-FOUND
 lotus85	NOT-DETECTED
-LUKS $luks$	REJECTED
+LUKS $luks$	CRACKED
 MD2 $md2$	CRACKED
 MD2	CRACKED
 mdc2 $mdc2$	NOT-DETECTED
@@ -272,7 +272,7 @@ sapg	CRACKED
 saph	CRACKED
 sappse $pse$	NOT-DETECTED
 securezip $zip3$	CRACKED
-7z $7z$	REJECTED
+7z $7z$	CRACKED
 Signal $signal$	CRACKED
 SIP $sip$	CRACKED
 skein-256	NOT-FOUND
@@ -307,7 +307,7 @@ tc_sha512	NOT-DETECTED
 tc_whirlpool	NOT-DETECTED
 vdi $vdi$	NOT-DETECTED
 OpenVMS $v$	NOT-DETECTED
-vmx $vmx$	REJECTED
+vmx $vmx$	CRACKED
 VNC $vnc$	CRACKED
 vtp $vtp$	NOT-DETECTED
 wbb3 $wbb3$	NOT-DETECTED
@@ -338,7 +338,7 @@ HMAC-SHA256	CRACKED
 HMAC-SHA384	CRACKED
 HMAC-SHA512	CRACKED
 sha1crypt-opencl $sha1$	CRACKED
-KeePass-opencl $keepass$	REJECTED
+KeePass-opencl $keepass$	CRACKED
 oldoffice-opencl $oldoffice$	CRACKED
 oldoffice-opencl	NOT-DETECTED
 PBKDF2-HMAC-MD4-opencl $pbkdf2-hmac-md4$	CRACKED
@@ -370,7 +370,7 @@ dashlane-opencl $dashlane$	NOT-DETECTED
 descrypt-opencl	CRACKED
 diskcryptor-opencl $diskcryptor$	CRACKED
 diskcryptor-aes-opencl $diskcryptor$	CRACKED
-dmg-opencl $dmg$	REJECTED
+dmg-opencl $dmg$	CRACKED
 electrum-modern-opencl $electrum$	CRACKED
 EncFS-opencl $encfs$	CRACKED
 enpass-opencl $enpass$	NOT-DETECTED
@@ -434,7 +434,7 @@ raw-SHA512-opencl	CRACKED
 raw-SHA512-opencl $sha512$	CRACKED
 salted-SHA1-opencl	CRACKED
 sappse-opencl $pse$	NOT-DETECTED
-7z-opencl $7z$	REJECTED
+7z-opencl $7z$	CRACKED
 SL3-opencl $sl3$	NOT-DETECTED
 SL3-opencl	NOT-DETECTED
 solarwinds-opencl $solarwinds$	CRACKED
@@ -443,7 +443,7 @@ sspr-opencl $sspr$	CRACKED
 strip-opencl $strip$	NOT-DETECTED
 telegram-opencl $telegram$	CRACKED
 tezos-opencl $tezos$	NOT-DETECTED
-vmx-opencl $vmx$	REJECTED
+vmx-opencl $vmx$	CRACKED
 wpapsk-opencl $wpapsk$	NOT-DETECTED
 wpapsk-opencl	CRACKED
 wpapsk-pmk-opencl $wpapsk$	NOT-DETECTED
