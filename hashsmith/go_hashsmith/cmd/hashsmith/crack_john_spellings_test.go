@@ -457,3 +457,59 @@ func TestRAKPAndPMKIDSpellings(t *testing.T) {
 		t.Error("claimed hashcat's colon-separated record as John's")
 	}
 }
+
+// TestWPAPSKBlob covers John's WPA record, which encodes the whole handshake
+// as one structure rather than naming its fields.
+func TestWPAPSKBlob(t *testing.T) {
+	record, pass := johnVector(t, "wpapsk $wpapsk$")
+	types := detectHashTypes(record)
+	for _, want := range []string{"wpa", "wpa-pmk"} {
+		if !containsString(types, want) {
+			t.Errorf("detectHashTypes did not offer %s: %v", want, types)
+		}
+	}
+	if ok, err := verifyCandidate(pass, record, "wpa", "", "prefix"); err != nil || !ok {
+		t.Errorf("rejected the right passphrase: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyCandidate(pass+"x", record, "wpa", "", "prefix"); bad {
+		t.Error("accepted a wrong passphrase")
+	}
+	// The same capture answers for a PMK given directly.
+	pmkRecord, pmk := johnVector(t, "wpapsk-pmk $wpapsk$")
+	if ok, err := verifyCandidate(pmk, pmkRecord, "wpa-pmk", "", "prefix"); err != nil || !ok {
+		t.Errorf("rejected the right PMK: ok=%v err=%v", ok, err)
+	}
+
+	// The two readings of the encoding both produce 356 bytes, so the thing
+	// that settles which is right is where the EAPOL frame lands. Pin the
+	// decode by checking the rewritten record's fields rather than trusting
+	// that it happened to verify.
+	rewritten, ok := johnWPAPSKRecord(record)
+	if !ok {
+		t.Fatal("the record did not read")
+	}
+	f := strings.Split(rewritten, "*")
+	if len(f) != 9 || f[0] != "WPA" || f[1] != "02" {
+		t.Fatalf("rewritten as %q", rewritten)
+	}
+	if f[8] != "2" {
+		t.Errorf("key version read as %q, want 2", f[8])
+	}
+	eapol, err := hex.DecodeString(f[7])
+	if err != nil || len(eapol) < 4 {
+		t.Fatalf("EAPOL frame: %v", err)
+	}
+	// A valid 802.1X EAPOL-Key frame: version 1 or 2, type 3, then a length
+	// that accounts for the rest of the frame.
+	if (eapol[0] != 1 && eapol[0] != 2) || eapol[1] != 3 {
+		t.Errorf("EAPOL frame starts %x, which is not an 802.1X key frame", eapol[:4])
+	}
+	if got := int(eapol[2])<<8 | int(eapol[3]); got+4 != len(eapol) {
+		t.Errorf("EAPOL declares %d bytes, frame is %d", got+4, len(eapol))
+	}
+	// The station's nonce appears inside the frame; the one the record names
+	// is the access point's, so they must differ.
+	if strings.Contains(f[7], f[6]) {
+		t.Error("the nonce named in the record is the one inside the frame")
+	}
+}

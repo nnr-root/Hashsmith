@@ -17,8 +17,13 @@ import (
 )
 
 func verifyWPAPMKID(target, candidate string, candidateIsPMK bool) (bool, error) {
-	// John joins the same four fields with stars.
+	// John joins the same four fields with stars, and writes a handshake as
+	// one encoded blob; either becomes hashcat's spelling before anything
+	// else looks at it.
 	if rewritten, ok := johnWPAPMKIDRecord(target); ok {
+		target = rewritten
+	}
+	if rewritten, ok := johnWPAPSKRecord(target); ok {
 		target = rewritten
 	}
 	// Hashcat 22001 accepts the modern WPA*01/WPA*02 representation and uses a

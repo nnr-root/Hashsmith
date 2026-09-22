@@ -36,6 +36,12 @@ func walletsPrototypes() []hashid.Prototype {
 		// reading is second because a passphrase is what is usually held, and
 		// it rejects anything that is not 64 hex characters at once, so
 		// offering it costs almost nothing.
+		// John's own spelling of the same capture: the handshake as one
+		// base64 blob rather than named fields. Same two readings.
+		predicateProtoShared(isJohnWPAPSK, "WPA/WPA2 handshake (John $WPAPSK$)", hashid.TierSignature,
+			"record prefix $WPAPSK$ carrying a network name and an encoded handshake",
+			20, "$WPAPSK$ is what wpapcap2john writes, so it is the spelling a capture converted with John's own tooling arrives in",
+			"wpa", "wpa-pmk"),
 		{
 			Types: []string{"wpa", "wpa-pmk"}, Display: "WPA/WPA2 PMKID and EAPOL (hc22000)",
 			Tier: hashid.TierStructural, Exclusive: true,

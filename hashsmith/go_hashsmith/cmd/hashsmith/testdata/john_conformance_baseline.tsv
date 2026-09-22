@@ -317,9 +317,9 @@ whirlpool0	NOT-FOUND
 whirlpool0 $whirlpool$	NOT-FOUND
 whirlpool1	NOT-FOUND
 whirlpool1 $whirlpool$	NOT-FOUND
-wpapsk $wpapsk$	NOT-DETECTED
+wpapsk $wpapsk$	CRACKED
 wpapsk	CRACKED
-wpapsk-pmk $wpapsk$	NOT-DETECTED
+wpapsk-pmk $wpapsk$	CRACKED
 wpapsk-pmk	CRACKED
 xmpp-scram $xmpp-scram$	CRACKED
 xsha	CRACKED
@@ -444,9 +444,9 @@ strip-opencl $strip$	NOT-DETECTED
 telegram-opencl $telegram$	CRACKED
 tezos-opencl $tezos$	NOT-DETECTED
 vmx-opencl $vmx$	CRACKED
-wpapsk-opencl $wpapsk$	NOT-DETECTED
+wpapsk-opencl $wpapsk$	CRACKED
 wpapsk-opencl	CRACKED
-wpapsk-pmk-opencl $wpapsk$	NOT-DETECTED
+wpapsk-pmk-opencl $wpapsk$	CRACKED
 wpapsk-pmk-opencl	CRACKED
 XSHA512-free-opencl	CRACKED
 XSHA512-free-opencl $lion$	CRACKED

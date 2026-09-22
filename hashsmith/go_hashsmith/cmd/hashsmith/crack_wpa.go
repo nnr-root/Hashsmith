@@ -44,6 +44,12 @@ type wpaHash struct {
 
 // parseWPAHash decodes a 22000 or legacy-16800 WPA line.
 func parseWPAHash(target string) (*wpaHash, error) {
+	// John encodes the whole handshake as one blob; see crack_wpa_john.go.
+	if rewritten, ok := johnWPAPSKRecord(target); ok {
+		target = rewritten
+	} else if err := johnWPAPSKError(target); err != nil {
+		return nil, err
+	}
 	t := strings.TrimSpace(target)
 	f := strings.Split(t, "*")
 
