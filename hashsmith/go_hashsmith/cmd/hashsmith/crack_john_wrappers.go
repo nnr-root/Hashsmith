@@ -44,6 +44,8 @@ var johnWrappers = []struct {
 	{"$md2$", []string{"md2"}},
 	{"$mdc2$", []string{"mdc2"}},
 	{"$gost$", []string{"gost"}},
+	// The same hash under the other parameter set, which John names.
+	{"$gost-cp$", []string{"gost-cryptopro"}},
 	{"$keccak256$", []string{"keccak256"}},
 	{"$keccak$", []string{"keccak512"}},
 	{"$nt$", []string{"ntlm"}},
@@ -69,6 +71,15 @@ var johnWrappers = []struct {
 	{"$ripemd$", []string{"ripemd128", "ripemd160"}},
 	{"$tiger$", []string{"tiger"}},
 	{"$panama$", []string{"panama"}},
+	// Dahua's eight-character token, which hashcat reads bare and John wraps.
+	{"$dahua$", []string{"dahua-auth-md5"}},
+	// Cisco's PIX and ASA hashes are dynamic_19 and dynamic_20 in John's
+	// numbering, but the dynamic engine cannot read them: the digest is in
+	// PIX's own base64, not the hex every dynamic expression produces. So the
+	// number is an envelope here and nothing more, and the reader behind it is
+	// the one hashcat's -m 2400/2410 records already use.
+	{"$dynamic_19$", []string{"cisco-pix"}},
+	{"$dynamic_20$", []string{"cisco-asa"}},
 	// One envelope, two widths again: John writes "$snefru$" for both Snefru
 	// sizes and lets the payload length say which.
 	{"$snefru$", []string{"snefru128", "snefru256"}},

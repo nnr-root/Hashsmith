@@ -234,6 +234,75 @@ func saltedPrototypes() []hashid.Prototype {
 		predicateProto(isKnownHosts, "OpenSSH hashed known_hosts entry", hashid.TierSignature,
 			"the |1|<salt>|<digest> shape HashKnownHosts writes",
 			12, "HashKnownHosts is the default on several distributions, so these turn up in any home directory that has been collected", "known-hosts"),
+		// Both word-size variants are offered for each scheme: the record
+		// cannot say which build made it, and the two are different digests.
+		{
+			Types: []string{"dragonfly3-32", "dragonfly3-64"}, Display: "DragonFly BSD SHA-256 crypt",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "record prefix $3$ with a 44-character digest", isDragonfly3(in.Normalized)
+			},
+			Prevalence: 4,
+			Rationale:  "DragonFly BSD is a small platform and this scheme is unsalted and uniterated, so a record is worth about as much as a bare SHA-256",
+		},
+		{
+			Types: []string{"dragonfly4-32", "dragonfly4-64"}, Display: "DragonFly BSD SHA-512 crypt",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "record prefix $4$ with an 84-character digest", isDragonfly4(in.Normalized)
+			},
+			Prevalence: 4,
+			Rationale:  "the same scheme at 512 bits, and the same absence of any work factor",
+		},
+		hasPrefixProto("$hsrp$", "Cisco HSRP MD5 authentication", 8,
+			"a captured HSRP hello; the key is configured identically on every router in the standby group", "hsrp"),
+		hasPrefixProto("$vtp$", "Cisco VTP authentication", 6,
+			"a captured VTP summary advertisement; unlike its neighbours in this family it stretches the password first, so a candidate costs nearly a megabyte of MD5", "vtp"),
+		hasPrefixProto("$cq$", "Rational ClearQuest", 3,
+			"an IBM change-management product; the stored verifier is a 32-bit sum with no avalanche, so a match names a family of passwords rather than one", "clearquest"),
+		hasPrefixProto("$nk$", "Nuked-Klan portal", 3,
+			"a PHP portal of the early 2000s; its site key is shared by every account, so it peppers rather than salts", "nukedklan"),
+		hasPrefixProto("$siemens-s7$", "Siemens S7 PLC challenge/response", 8,
+			"an industrial controller's authentication exchange, captured from the link; the password protects a PLC rather than an account", "siemens-s7"),
+		hasPrefixProto("$BitShares$", "BitShares wallet", 5,
+			"a cryptocurrency wallet whose type-0 records encrypt under SHA-512 of the password with no iteration at all, so a candidate costs one hash", "bitshares"),
+		{
+			Types: []string{"palshop"}, Display: "Palshop",
+			Tier: hashid.TierStructural, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "fifty-one hex characters, which is not a whole number of bytes", isPalshop(in.Normalized)
+			},
+			Prevalence: 3,
+			Rationale:  "the odd length is the signature: no digest is twenty-five and a half bytes, so nothing else writes a record this shape",
+		},
+		hasPrefixProto("$sl3$", "Nokia SL3 operator unlock code", 4,
+			"SL3 locking belongs to Nokia handsets of the Symbian era; the code is always fifteen digits, so the keyspace is fixed and exhaustible", "sl3"),
+		hasPrefixProto("$adxcrypt$", "ADX point-of-sale terminal password", 3,
+			"a 32-bit fold printed as eight digits, whose own reference vectors include a collision noted as working on a real terminal", "adxcrypt"),
+		{
+			Types: []string{"epi"}, Display: "EPI salted SHA-1",
+			Tier: hashid.TierStructural, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "two 0x-prefixed hex fields, a 30-byte salt and a SHA-1", isEPI(in.Normalized)
+			},
+			Prevalence: 3,
+			Rationale:  "a single vendor's presentation software; nothing else writes a record in this shape",
+		},
+		{
+			Types: []string{"leet"}, Display: "leet: SHA-512 XOR Whirlpool",
+			Tier: hashid.TierShape,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "a salt, a dollar and a 512-bit digest", isLeet(in.Normalized)
+			},
+			Prevalence: 3,
+			Rationale:  "the shape is what a plain salted SHA-512 looks like, so this is offered alongside that reading rather than instead of it",
+		},
+		hasPrefixProto("$pst$", "Outlook personal-folders password", 8,
+			"a .pst from any Outlook of the last twenty years can carry one, and the check behind it is a 32-bit CRC rather than a password hash", "pst"),
+		hasPrefixProto("$money$", "Microsoft Money file password", 4,
+			"Money was discontinued in 2009; the files that survive are personal archives", "money"),
+		hasPrefixProto("$radius$", "RADIUS shared secret", 10,
+			"what is recovered is the secret between a RADIUS client and its server, not the user's password — that is written in the record", "radius"),
 		hasPrefixProto("$zipmonster$", "ZipMonster", 3,
 			"ZipMonster is a single Windows archiving tool with a small user base", "zipmonster"),
 		predicateProto(isDummy, "John's dummy format", hashid.TierSignature,

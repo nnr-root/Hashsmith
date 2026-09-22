@@ -19,7 +19,7 @@ LM	CRACKED
 AFS $k4$	NOT-DETECTED
 tripcode	CRACKED
 AndroidBackup $ab$	CRACKED
-adxcrypt $adxcrypt$	NOT-DETECTED
+adxcrypt $adxcrypt$	CRACKED
 agilekeychain $agilekeychain$	CRACKED
 aix-ssha1	CRACKED
 aix-ssha256	CRACKED
@@ -31,14 +31,14 @@ argon2 $argon2i$	CRACKED
 as400-des $as400des$	CRACKED
 as400-ssha1 $as400ssha1$	CRACKED
 as400-ssha1 $dynamic_1590$	CRACKED
-asa-md5 $dynamic_20$	NOT-DETECTED
+asa-md5 $dynamic_20$	CRACKED
 AxCrypt $axcrypt$	CRACKED
 AzureAD	CRACKED
 BestCrypt $bestcrypt$	NOT-DETECTED
 bfegg	NOT-DETECTED
 Bitcoin $bitcoin$	CRACKED
 BitLocker $bitlocker$	CRACKED
-bitshares $bitshares$	NOT-DETECTED
+bitshares $bitshares$	CRACKED
 Bitwarden $bitwarden$	CRACKED
 BKS $bks$	NOT-DETECTED
 Blackberry-ES10 $bbes10$	CRACKED
@@ -49,14 +49,14 @@ chap $chap$	CRACKED
 Clipperz $clipperz$	NOT-DETECTED
 cloudkeychain $cloudkeychain$	CRACKED
 dynamic=md5($p)	CRACKED
-cq $cq$	NOT-DETECTED
+cq $cq$	CRACKED
 CRC32 $crc32$	CRACKED
 CRC32 $crc32c$	CRACKED
 sha1crypt $sha1$	CRACKED
 sha256crypt $5$	CRACKED
 sha512crypt $6$	CRACKED
 Citrix_NS10	CRACKED
-dahua $dahua$	NOT-DETECTED
+dahua $dahua$	CRACKED
 dashlane $dashlane$	NOT-DETECTED
 diskcryptor $diskcryptor$	CRACKED
 Django $django$	CRACKED
@@ -66,17 +66,17 @@ dmg $dmg$	CRACKED
 dominosec	CRACKED
 dominosec8	CRACKED
 DPAPImk $dpapimk$	CRACKED
-dragonfly3-32 $3$	NOT-DETECTED
-dragonfly3-64 $3$	NOT-DETECTED
-dragonfly4-32 $4$	NOT-DETECTED
-dragonfly4-64 $4$	NOT-DETECTED
+dragonfly3-32 $3$	CRACKED
+dragonfly3-64 $3$	CRACKED
+dragonfly4-32 $4$	CRACKED
+dragonfly4-64 $4$	CRACKED
 Drupal7 $s$	CRACKED
 eCryptfs $ecryptfs$	CRACKED
 eigrp $eigrp$	CRACKED
 electrum $electrum$	CRACKED
 EncFS $encfs$	CRACKED
 enpass $enpass$	CRACKED
-EPI	NOT-DETECTED
+EPI	CRACKED
 EPiServer $episerver$	CRACKED
 ethereum $ethereum$	CRACKED
 fde $fde$	CRACKED
@@ -88,7 +88,7 @@ FVDE $fvde$	CRACKED
 geli $geli$	NOT-DETECTED
 gost	CRACKED
 gost $gost$	CRACKED
-gost $gost-cp$	NOT-DETECTED
+gost $gost-cp$	CRACKED
 gpg $gpg$	CRACKED
 HAVAL-128-4	CRACKED
 HAVAL-128-4 $haval$	CRACKED
@@ -96,7 +96,7 @@ HAVAL-256-3	CRACKED
 HAVAL-256-3 $haval$	CRACKED
 hdaa $response$	CRACKED
 hMailServer	CRACKED
-hsrp $hsrp$	NOT-DETECTED
+hsrp $hsrp$	CRACKED
 IKE $ike$	CRACKED
 ipb2 $ipb2$	CRACKED
 itunes-backup $itunes_backup$	CRACKED
@@ -108,18 +108,18 @@ keystore $keystore$	CRACKED
 known_hosts $known_hosts$	CRACKED
 krb4 $af$	NOT-DETECTED
 krb5 $krb5$	NOT-DETECTED
-krb5asrep	NOT-DETECTED
+krb5asrep	CRACKED
 krb5asrep $krb5asrep$	CRACKED
 krb5pa-sha1 $krb5pa$	CRACKED
 krb5tgs $krb5tgs$	CRACKED
 krb5-17 $krb17$	CRACKED
-krb5-18	NOT-DETECTED
+krb5-18	CRACKED
 krb5-18 $krb18$	CRACKED
 krb5-3 $krb3$	NOT-DETECTED
 kwallet $kwallet$	NOT-DETECTED
 lp $lp$	NOT-DETECTED
 lpcli $lpcli$	NOT-DETECTED
-leet	NOT-DETECTED
+leet	CRACKED
 lotus5	CRACKED
 lotus85	NOT-DETECTED
 LUKS $luks$	CRACKED
@@ -130,12 +130,12 @@ mdc2	CRACKED
 MediaWiki $b$	CRACKED
 MediaWiki $dynamic_9$	CRACKED
 monero $monero$	CRACKED
-money $money$	NOT-DETECTED
+money $money$	CRACKED
 MongoDB $mongodb$	CRACKED
 scram $scram$	CRACKED
 Mozilla $mozilla$	CRACKED
 mscash	CRACKED
-mscash2	NOT-DETECTED
+mscash2	CRACKED
 mscash2 $dcc2$	CRACKED
 MSCHAPv2 $mschapv2$	CRACKED
 MSCHAPv2	CRACKED
@@ -157,7 +157,7 @@ netlm	CRACKED
 netlm $netlm$	CRACKED
 netlmv2	CRACKED
 netlmv2 $netlmv2$	CRACKED
-net-md5	NOT-DETECTED
+net-md5	CRACKED
 net-md5 $netmd5$	CRACKED
 netntlmv2	CRACKED
 netntlmv2 $netntlmv2$	CRACKED
@@ -166,7 +166,7 @@ netntlm	CRACKED
 netntlm-naive	CRACKED
 netntlm-naive $netntlm$	CRACKED
 net-sha1 $netsha1$	CRACKED
-nk $nk$	NOT-DETECTED
+nk $nk$	CRACKED
 notes $asn$	CRACKED
 md5ns	CRACKED
 nsec3 $nsec3$	CRACKED
@@ -189,8 +189,8 @@ osc $osc$	CRACKED
 osc $dynamic_4$	CRACKED
 ospf $ospf$	CRACKED
 Padlock $padlock$	NOT-DETECTED
-Palshop $palshop$	NOT-DETECTED
-Palshop	NOT-DETECTED
+Palshop $palshop$	CRACKED
+Palshop	CRACKED
 Panama	CRACKED
 Panama $panama$	CRACKED
 PBKDF2-HMAC-MD4 $pbkdf2-hmac-md4$	CRACKED
@@ -215,19 +215,19 @@ PHPS $phps$	CRACKED
 PHPS $dynamic_6$	CRACKED
 PHPS2 $phps$	CRACKED
 pix-md5	CRACKED
-pix-md5 $dynamic_19$	NOT-DETECTED
+pix-md5 $dynamic_19$	CRACKED
 PKZIP $pkzip$	NOT-DETECTED
 PKZIP $pkzip2$	CRACKED
 po	CRACKED
 postgres $postgres$	CRACKED
 postgres $postgre$	CRACKED
-PST $pst$	NOT-DETECTED
+PST $pst$	CRACKED
 PuTTY $putty$	CRACKED
 pwsafe $pwsafe$	CRACKED
 qnx	CRACKED
 RACF $racf$	CRACKED
 RACF-KDFAES $racf$	CRACKED
-radius $radius$	NOT-DETECTED
+radius $radius$	CRACKED
 RAdmin $radmin2$	CRACKED
 RAKP $rakp$	CRACKED
 rar $rar3$	CRACKED
@@ -264,7 +264,7 @@ ripemd-128 $ripemd$	CRACKED
 ripemd-160	CRACKED
 ripemd-160 $ripemd$	CRACKED
 rsvp $rsvp$	CRACKED
-Siemens-S7 $siemens-s7$	NOT-DETECTED
+Siemens-S7 $siemens-s7$	CRACKED
 Salted-SHA1	CRACKED
 SSHA512	CRACKED
 sapb	CRACKED
@@ -279,7 +279,7 @@ skein-256	CRACKED
 skein-256 $skein$	CRACKED
 skein-512 $skein$	CRACKED
 skey	NOT-DETECTED
-SL3 $sl3$	NOT-DETECTED
+SL3 $sl3$	CRACKED
 SL3	NOT-DETECTED
 Snefru-128	CRACKED
 Snefru-128 $snefru$	CRACKED
@@ -309,7 +309,7 @@ vdi $vdi$	CRACKED
 OpenVMS $v$	NOT-DETECTED
 vmx $vmx$	CRACKED
 VNC $vnc$	CRACKED
-vtp $vtp$	NOT-DETECTED
+vtp $vtp$	CRACKED
 wbb3 $wbb3$	CRACKED
 whirlpool	CRACKED
 whirlpool $whirlpool$	CRACKED
@@ -392,7 +392,7 @@ lpcli-opencl $lpcli$	NOT-DETECTED
 LM-opencl $lm$	CRACKED
 LM-opencl	CRACKED
 mscash-opencl	CRACKED
-mscash2-opencl	NOT-DETECTED
+mscash2-opencl	CRACKED
 mscash2-opencl $dcc2$	CRACKED
 mysql-sha1-opencl	CRACKED
 notes-opencl $asn$	CRACKED
@@ -435,7 +435,7 @@ raw-SHA512-opencl $sha512$	CRACKED
 salted-SHA1-opencl	CRACKED
 sappse-opencl $pse$	NOT-DETECTED
 7z-opencl $7z$	CRACKED
-SL3-opencl $sl3$	NOT-DETECTED
+SL3-opencl $sl3$	CRACKED
 SL3-opencl	NOT-DETECTED
 solarwinds-opencl $solarwinds$	CRACKED
 ssh-opencl $sshng$	CRACKED
@@ -471,8 +471,8 @@ dynamic_15 $dynamic_15$	CRACKED
 dynamic_15	CRACKED
 dynamic_16 $dynamic_16$	CRACKED
 dynamic_18 $dynamic_18$	CRACKED
-dynamic_19 $dynamic_19$	NOT-DETECTED
-dynamic_20 $dynamic_20$	NOT-DETECTED
+dynamic_19 $dynamic_19$	CRACKED
+dynamic_20 $dynamic_20$	CRACKED
 dynamic_22 $dynamic_22$	CRACKED
 dynamic_23 $dynamic_23$	CRACKED
 dynamic_24 $dynamic_24$	CRACKED

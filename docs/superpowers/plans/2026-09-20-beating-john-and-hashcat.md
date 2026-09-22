@@ -2374,3 +2374,171 @@ amount of hashing will supply it.
 Everything left is a container format with no reader: PGP disk, GELI, OpenBSD
 softraid, GNOME keyring, KDE wallet, Dashlane, SAP's PSE, Nokia SL3. There is
 no remaining record that Hashsmith can read and cannot answer.
+
+## The undetected column, and what reading beats guessing at
+
+With the NOT-FOUND column emptied, everything left was NOT-DETECTED: eighty-one
+records with no reader. A sweep of every registered type against every one of
+them returned nothing, which settled that none of them was another
+already-implemented format in disguise — or so it seemed. Nine of them were
+exactly that.
+
+### Records John writes without a marker
+
+John writes several formats bare, in a spelling that carries no prefix at all,
+and Hashsmith reads the same formats under a marker. Neither tool is wrong;
+the record simply has two spellings and only one was read:
+
+| John writes | Hashsmith read |
+|---|---|
+| `<packet>$<digest>` | `$netmd5$<packet>$<digest>` |
+| `<user>:<digest>` | `$DCC2$10240#<user>#<digest>` |
+| `<realm+user>$<key>` | `$krb18$<realm+user>$<key>` |
+| `<checksum>$<encrypted>` | `$krb5asrep$23$…` |
+| `$dynamic_19$…`, `$dynamic_20$…` | Cisco PIX and ASA |
+| `$gost-cp$…` | the CryptoPro parameter set |
+
+The rewrite happens once, in `verifyCandidate`, so the attack loop, the batch
+path and the potfile check all see the same record. Each shape is deliberately
+narrow: "two fields with a dollar between them" is half the catalogue read
+loosely, so the net-md5 reader wants a packet forty hex characters or longer,
+the Kerberos one wants a salt that is *not* hex, and the AS-REP one wants an
+encrypted part longer than any digest. These are the cases `hash_compat.go`'s
+salt rule already declines with "both halves hex means another format's two
+fields" — and this is that other format.
+
+The mscash2 spelling leaves the iteration count implicit, so it is read as
+Windows' default of 10,240 and the code says so. A domain configured otherwise
+needs the spelling that states it, which is a reason to prefer that spelling
+and not a reason to refuse this one.
+
+### Ten formats read from their sources
+
+Post.Office was settled by search. The ten after it were not, and one of them
+explains why.
+
+An earlier pass put `$palshop$` through a bounded sweep of orderings and
+separators and found nothing, and that result is recorded where its reader
+would have gone. It was true and it was uninformative, because the
+construction is this: MD5 and SHA-1 of the password laid end to end, the hex of
+bytes 5 through 30 of that taken *starting from the low nibble of byte 5* so
+the string begins mid-byte, the last character overwritten with a nibble from
+the front, and the resulting fifty-one characters hashed again. No sweep of
+orderings reaches a thing like that. Reading the source does, and it took ten
+minutes.
+
+That is the lesson worth keeping from this batch. A search that returns
+nothing bounds what was searched and says nothing about the rest — which was
+always the claim, and Palshop is what it looks like when the rest is where the
+answer was.
+
+The ten: **Outlook .pst**, whose password check is a CRC-32 with neither of
+the conventions that make the usual CRC-32, and which is not a password hash
+at all — thirty-two bits, unsalted, millions of passwords to a value.
+**Microsoft Money**, which upper-cases the password and hashes forty bytes of
+buffer rather than the password's own length, so both the case-folding and the
+trailing zeros are inside the digest and invisible in the record. **RADIUS**,
+where what is recovered is the shared secret between a client and its server —
+the user's password is written in the record, because knowing it is what makes
+the secret recoverable at all. **EPI**, whose digest contains a NUL because the
+C that wrote it measured the key with its terminator. **leet**, which XORs
+SHA-512 and Whirlpool over the same two strings in opposite orders. **Nokia
+SL3**, whose fifteen-digit unlock code is hashed as the numbers zero to nine
+rather than the characters, and whose IMEI is read as hex. **ADX**, a 32-bit
+fold printed as eight digits whose own reference vectors include a collision
+its author noted as working on a real terminal. **Siemens S7**, an HMAC-SHA1
+keyed on SHA-1 of the password, over a challenge anyone on the link to the PLC
+can capture. **BitShares**, AES-256-CBC under an unsalted, uniterated SHA-512
+— one hash per candidate, on a wallet. And **Palshop**.
+
+BitShares is worth one more line. Its check is the PKCS#7 padding block, and
+the block to decrypt is the LAST one with the one before it as the IV — not
+the first two, which is what reading the record as "IV then ciphertext"
+suggests. Decrypting the first block of the published vector gives
+`4c1900745ecfb143…`; the last gives sixteen 0x10 bytes. The padding is at the
+end of a message, so the end is where to look.
+
+### DragonFly BSD, and a bug that made two formats out of one
+
+`$3$` and `$4$` are DragonFly's SHA-256 and SHA-512 crypt schemes: the
+password, a tag, the salt, hashed once. No iteration count and no stretching —
+the shape of sha256crypt with none of its work factor.
+
+Each is two formats because the buffer holding the tag was not the length the
+code filling it assumed. On a 32-bit build the bytes after `"$3$\0"` were
+nothing; on a 64-bit build they were the next eight bytes of the neighbouring
+string — `sha5` for the SHA-256 scheme, `/etc` for the SHA-512 one. Those four
+characters are inside the digest, the record cannot say which build wrote it,
+so both are offered and either may answer.
+
+The digest encoding carries a second bug of the same family. SHA-512 is 64
+bytes and DragonFly's base64 loop emits 62, so two bytes of every `$4$` digest
+are simply not in the record. Comparing all 64 fails against every correct
+password; comparing the 62 that are there is what the format stores.
+
+One more thing cost twenty minutes and is worth writing down: the file was
+first called `crack_dragonfly.go`, and Go reads a trailing `_dragonfly` as a
+build constraint for the DragonFly BSD operating system. It dropped the file
+from every other build silently, and the failure surfaced as "undefined" at
+the call sites, naming functions plainly present in a file plainly in the
+package.
+
+### Two checks that are not hashes
+
+Two more formats were read from source in the same pass, and both are worth
+naming for what they are rather than for the work of adding them.
+
+**Nuked-Klan** interleaves the forty hex characters of SHA-1(password), one at
+a time, with bytes of a twenty-byte site key read cyclically from a stored
+offset, and MD5s the eighty bytes that result. The site key is the same for
+every account, so it peppers rather than salts — two users with the same
+password have the same record — and the offset is one hex digit. What the
+elaboration buys over `md5(sha1(password))` is work for the defender.
+
+**Rational ClearQuest** stores a 32-bit sum: table entries indexed by position
+plus character, added up over the username and then the password. Nothing
+about it is one-way by design — no avalanche, contributions commute, and a
+password of the right length can be walked character by character to any
+target. Its own reference vectors sit four to a username. A match names an
+enormous family of passwords the server would also accept, which for getting
+in is sufficient and is precisely why a checksum is not a password.
+
+Outlook's `.pst` belongs in the same paragraph, and so does ADX. Four of the
+formats added in this pass are verifiers rather than hashes, and the code says
+so at each of them — not as a disclaimer, but because "cracked" means
+something different when thirty-two bits are all that stand behind the answer.
+
+### HSRP and VTP: what was outside the space searched
+
+Two records were written down earlier as searched and not found. The note in
+`crack_routing_auth.go` said a bounded sweep of every hash of the packet and
+the key in either order, the key NUL-padded to nine lengths, HMAC under each
+of those keys, and for HSRP the key written over the packet at every two-byte
+offset, had reproduced neither vector — and that a search says nothing about
+the space outside the one searched.
+
+That was exactly right, and here is what was outside it.
+
+**HSRP** prefixes the packet with the key MD-**padded**: the key, a 0x80,
+zeros, and the key's bit length at byte 56 — the precise sixty-four-byte block
+MD5 would have produced had the key been the whole message. Then the packet,
+then the key again. No sweep of orderings and paddings reaches a construction
+with a length field inside it.
+
+**VTP** does not hash the password at all. It repeats it cyclically across
+1,563 sixty-four-byte blocks — very nearly a megabyte — and MD5s that down to
+a sixteen-byte secret, and it is the secret that brackets the packet. A sweep
+over the password was searching the wrong string. VTP also zeroes three fields
+of the captured advertisement before signing it: the follower count, the
+update timestamp and the checksum, because a switch cannot sign a checksum it
+has not written yet.
+
+Both were settled in under an hour by reading John's source, after a search
+that had cost considerably more and correctly concluded nothing. The old note
+stays where it is, with the answer now attached to it.
+
+### Where it stands
+
+Of 605 records: **554 crack**, 50 are not detected, 1 is detected and
+deliberately not guessed. That is up from 523 at the last entry and 217 when
+the ratchet was built.

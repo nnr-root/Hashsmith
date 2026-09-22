@@ -2373,6 +2373,11 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 	// John writes some records inside an envelope naming the format; the
 	// payload is what every verifier here expects. See crack_john_wrappers.go.
 	targetHash = stripJohnWrapper(targetHash, algo)
+	// And writes others with no envelope at all, in a spelling this tool
+	// reads under a marker. The rewrite is here rather than in each verifier
+	// so that every caller — the attack loop, the batch path, the potfile
+	// check — sees the same record. See crack_john_bare_spellings.go.
+	targetHash = canonicalBareSpelling(targetHash, algo)
 	// John's "postgres" label covers PostgreSQL challenge/response records,
 	// while Hashsmith also uses postgres for the stored md5(password+user) form.
 	if algo == "postgres" && strings.HasPrefix(targetHash, "$postgres$") {
@@ -2599,6 +2604,36 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyZipMonster(targetHash, candidate)
 	case "postoffice":
 		return verifyPostOffice(targetHash, candidate)
+	case "pst":
+		return verifyPSTPassword(targetHash, candidate)
+	case "money":
+		return verifyMoney(targetHash, candidate)
+	case "radius":
+		return verifyRadius(targetHash, candidate)
+	case "epi":
+		return verifyEPI(targetHash, candidate)
+	case "leet":
+		return verifyLeet(targetHash, candidate)
+	case "sl3":
+		return verifySL3(targetHash, candidate)
+	case "adxcrypt":
+		return verifyADX(targetHash, candidate)
+	case "siemens-s7":
+		return verifySiemensS7(targetHash, candidate)
+	case "bitshares":
+		return verifyBitShares(targetHash, candidate)
+	case "palshop":
+		return verifyPalshop(targetHash, candidate)
+	case "dragonfly3-32", "dragonfly3-64", "dragonfly4-32", "dragonfly4-64":
+		return verifyDragonfly(targetHash, candidate, algo)
+	case "nukedklan":
+		return verifyNukedKlan(targetHash, candidate)
+	case "clearquest":
+		return verifyClearQuest(targetHash, candidate)
+	case "hsrp":
+		return verifyHSRP(targetHash, candidate)
+	case "vtp":
+		return verifyVTP(targetHash, candidate)
 	case "dummy":
 		return verifyDummy(targetHash, candidate)
 	case "p5k2":

@@ -50,7 +50,14 @@ func johnLabelSeed() map[string]string {
 		"whirlpool0": "whirlpool0", "whirlpool1": "whirlpool1",
 		"panama":     "Panama",
 		"postoffice": "po",
-		"whirlpool":  "whirlpool", "sm3": "sm3",
+		"pst":        "PST", "money": "money", "radius": "radius",
+		"epi": "EPI", "leet": "leet", "sl3": "SL3", "adxcrypt": "adxcrypt",
+		"siemens-s7": "Siemens-S7", "bitshares": "bitshares", "palshop": "Palshop",
+		"dragonfly3-32": "dragonfly3-32", "dragonfly3-64": "dragonfly3-64",
+		"dragonfly4-32": "dragonfly4-32", "dragonfly4-64": "dragonfly4-64",
+		"nukedklan": "nk", "clearquest": "cq",
+		"hsrp": "hsrp", "vtp": "vtp",
+		"whirlpool": "whirlpool", "sm3": "sm3",
 
 		// Windows
 		"ntlm": "NT", "lm": "LM",

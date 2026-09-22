@@ -36,6 +36,7 @@ func prototypeTable() []hashid.Prototype {
 		prototypeTableVal = append(prototypeTableVal, kdfPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, saltedPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, johnDynamicEnvelopePrototypes()...)
+		prototypeTableVal = append(prototypeTableVal, johnBareSpellingPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, tailPrototypes()...)
 		prototypeTableVal = append(prototypeTableVal, shapePrototypes()...)
 		// Non-hash recognitions (Base64, Morse, Bech32, UUID, ...) go last:

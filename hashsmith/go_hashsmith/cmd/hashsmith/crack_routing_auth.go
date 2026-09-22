@@ -17,13 +17,17 @@ package main
 // anyone on the path could collect, and the key it protects is typically
 // configured identically on every device in the routing domain.
 //
-// Two members of the family are NOT here. John's $hsrp$ and $vtp$ records
-// were put through the same search that settled these three — every hash of
-// the packet and the key in either order, the key NUL-padded and repeated to
-// nine different lengths, HMAC under each of those keys, and for HSRP the key
-// written over the packet at every two-byte offset — and nothing reproduced
-// either vector. Both evidently mix the key in somewhere the packet does not
-// show, and a search cannot find a construction outside the space searched.
+// Two members of the family are not here but in crack_cisco_hsrp_vtp.go.
+// John's $hsrp$ and $vtp$ records were first put through the same search that
+// settled these three — every hash of the packet and the key in either order,
+// the key NUL-padded and repeated to nine different lengths, HMAC under each
+// of those keys, and for HSRP the key written over the packet at every
+// two-byte offset — and nothing reproduced either vector. The conclusion drawn
+// then was that a search cannot find a construction outside the space
+// searched, and that turned out to be exactly right: HSRP prefixes the packet
+// with the key MD-PADDED, length field and all, and VTP does not hash the
+// password at all but a secret stretched from it over nearly a megabyte. Both
+// are now read, from their sources rather than by search.
 
 import (
 	"crypto/hmac"
