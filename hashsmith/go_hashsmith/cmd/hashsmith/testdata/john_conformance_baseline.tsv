@@ -134,7 +134,7 @@ money $money$	NOT-DETECTED
 MongoDB $mongodb$	NOT-DETECTED
 scram $scram$	NOT-DETECTED
 Mozilla $mozilla$	CRACKED
-mscash	NOT-FOUND
+mscash	CRACKED
 mscash2	NOT-DETECTED
 mscash2 $dcc2$	CRACKED
 MSCHAPv2 $mschapv2$	NOT-DETECTED
@@ -391,7 +391,7 @@ lp-opencl $lp$	NOT-DETECTED
 lpcli-opencl $lpcli$	NOT-DETECTED
 LM-opencl $lm$	CRACKED
 LM-opencl	NOT-FOUND
-mscash-opencl	NOT-FOUND
+mscash-opencl	CRACKED
 mscash2-opencl	NOT-DETECTED
 mscash2-opencl $dcc2$	CRACKED
 mysql-sha1-opencl	CRACKED

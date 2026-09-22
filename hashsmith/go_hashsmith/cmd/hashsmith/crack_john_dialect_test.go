@@ -375,3 +375,31 @@ func TestNetNTLMJohnSpellings(t *testing.T) {
 		t.Errorf("hashcat's NetNTLMv2 record regressed: ok=%v err=%v", ok, err)
 	}
 }
+
+// TestMSCashJohnSpelling pins John's "M$<user>#<md4>" spelling against
+// hashcat's "<md4>:<user>". John's vector also happens to use a non-ASCII
+// password, which exercises the UTF-16 path the derivation depends on.
+func TestMSCashJohnSpelling(t *testing.T) {
+	const record = "M$ü#48f84e6f73d6d5305f6558a33fa2c9bb"
+	if !isJohnMSCash(record) {
+		t.Fatal("John's MS Cache spelling was not recognised")
+	}
+	if types := detectHashTypes(record); !containsString(types, "dcc") {
+		t.Errorf("detectHashTypes did not offer dcc: %v", types)
+	}
+	if ok, err := verifyDCC(record, "ü"); err != nil || !ok {
+		t.Errorf("rejected the right password: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyDCC(record, "u"); bad {
+		t.Error("accepted a wrong password")
+	}
+	// hashcat's spelling must keep working.
+	if ok, err := verifyDCC("4dd8965d1d476fa0d026722989a6b772:3060147285011", "hashcat"); err != nil || !ok {
+		t.Errorf("hashcat's DCC record regressed: ok=%v err=%v", ok, err)
+	}
+	// A username containing '#' still splits at the LAST one.
+	if u, d, ok := johnMSCashFields("M$do#main\\user#48f84e6f73d6d5305f6558a33fa2c9bb"); !ok ||
+		u != "do#main\\user" || d != "48f84e6f73d6d5305f6558a33fa2c9bb" {
+		t.Errorf("split at the wrong '#': %q %q %v", u, d, ok)
+	}
+}

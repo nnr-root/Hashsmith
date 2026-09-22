@@ -90,6 +90,13 @@ func saltedPrototypes() []hashid.Prototype {
 		// gets only the general type. Both are plain literal-prefix checks, so
 		// TierSignature; the more specific "$23$" form is listed first so
 		// table order reproduces the nested precedence.
+		// John's spelling of a Domain Cached Credentials record. hashcat
+		// writes "<md4>:<username>"; John writes "M$<username>#<md4>", which
+		// nothing else claims.
+		predicateProtoShared(isJohnMSCash, "MS Cache (John M$user#hash spelling)", hashid.TierSignature,
+			"an M$-prefixed record ending in '#' and a 32-character hex digest",
+			10, "cached domain credentials are a routine Windows forensics artefact, and John's tooling writes this spelling",
+			"dcc"),
 		// John's self-describing NetNTLM envelopes. The pwdump-shaped form
 		// lines up with hashcat's field for field; these do not, and without a
 		// prototype they resolve to nothing at all.
