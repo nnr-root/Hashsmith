@@ -190,13 +190,25 @@ jobs:
       # a lane where they cannot be meaningful is the correct trade, applied
       # consistently. Races in this file's code are still covered by the
       # other tests in this lane.
+      #
+      # The two ETA tests are excluded for the same reason, and the evidence
+      # is on record: this lane failed nightly for weeks on
+      # TestBatchFeasibilityETAThroughRunCrack at 6.4x-7.8x against a 4x
+      # tolerance, every attempt, always in the PESSIMISTIC direction. Both
+      # tests compare a prediction extrapolated from a short probe against a
+      # long real run, and race instrumentation does not weigh those two the
+      # same: the probe is cold and instrumented, the run warms up and
+      # amortises. The distortion is systematic rather than noisy, which is
+      # why retries inside the tests never rescued it. They do their real job
+      # in the `test` and `test-arm64` lanes, where the prediction and the run
+      # are measured on the same terms.
       - name: Test (race detector)
         env:
           HASHSMITH_REQUIRE_AVX2: "1"   # amd64 runner: see the `test` job's note
         run: |
           cd hashsmith/go_hashsmith
           go test -race -timeout 20m \
-            -skip 'TestBenchTypeRespectsBudgetForSlowKDF|TestFastVectorsStayWithinBudget|TestSpeedupOverXCrypto' ./...
+            -skip 'TestBenchTypeRespectsBudgetForSlowKDF|TestFastVectorsStayWithinBudget|TestSpeedupOverXCrypto|TestBatchFeasibilityETAThroughRunCrack|TestFeasibilityETAThroughRunCrack' ./...
 
   # An sdist or wheel that omits a file the Go build needs is not detectably
   # broken until a user installs it: the tree looks complete, and `go build`
