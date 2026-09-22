@@ -103,7 +103,10 @@ func batchAPrototypes() []hashid.Prototype {
 		hasPrefixProto("$1$", "md5crypt", 60, "the historic Unix crypt default; still widespread on legacy systems", "md5crypt"),
 		hasPrefixProto("$apr1$", "Apache apr1", 45, "the Apache htpasswd default before bcrypt", "apr1"),
 		hasPrefixProto("$5$", "sha256crypt", 55, "common on Linux distributions that predate the yescrypt default", "sha256crypt"),
-		hasPrefixProto("$6$", "sha512crypt", 80, "the default /etc/shadow scheme on most Linux distributions", "sha512crypt"),
+		hasPrefixProto("$6$", "sha512crypt", 75, "the /etc/shadow default on Linux distributions released before yescrypt took over", "sha512crypt"),
+		predicateProto(isYescrypt, "yescrypt", hashid.TierSignature,
+			"record prefix $y$ with a parameter field, a salt and a hash",
+			85, "the default /etc/shadow scheme on Debian 12, Ubuntu 22.04 and later, Fedora 35 and later, and Kali — so it is what a shadow file from any current system holds", "yescrypt"),
 		{
 			Display: "BLAKE2 family", Tier: hashid.TierSignature, Exclusive: true,
 			Compute: func(in hashid.Input) ([]string, bool) {

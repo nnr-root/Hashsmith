@@ -383,10 +383,14 @@ func classifyCryptHash(h string) (label string, crackable, recognised bool) {
 		return "bcrypt", true, true
 	case looksLikeDescrypt(h):
 		return "descrypt", true, true
-	case strings.HasPrefix(h, "$y$") || strings.HasPrefix(h, "$gy$"):
-		return "yescrypt (unsupported)", false, true
+	case strings.HasPrefix(h, "$y$"):
+		return "yescrypt", true, true
+	case strings.HasPrefix(h, "$gy$"):
+		// gost-yescrypt puts Streebog where yescrypt uses SHA-256, so it is
+		// a different hash rather than a spelling of this one.
+		return "gost-yescrypt (unsupported)", false, true
 	case strings.HasPrefix(h, "$7$"):
-		return "scrypt-shadow (unsupported)", false, true
+		return "scrypt", true, true
 	case strings.HasPrefix(h, "$md5$") || strings.HasPrefix(h, "$sha1$"):
 		return "Sun crypt (unsupported)", false, true
 	}

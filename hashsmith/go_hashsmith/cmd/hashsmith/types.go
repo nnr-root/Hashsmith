@@ -263,6 +263,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"apr1", "Apache apr1 ($apr1$, .htpasswd MD5)"},
 			{"sha256crypt", "$5$ SHA-256 crypt"},
 			{"sha512crypt", "$6$ SHA-512 crypt"},
+			{"yescrypt", "yescrypt ($y$), the default /etc/shadow scheme on current Linux"},
 			{"sha1crypt", "$sha1$ NetBSD / Juniper HMAC-SHA1 crypt (Hashcat 15100)"},
 			{"sm3crypt", "$sm3$ SM3 crypt (Hashcat 35100 / John sm3crypt)"},
 			{"bcrypt", "$2a$/$2b$/$2y$ bcrypt"},

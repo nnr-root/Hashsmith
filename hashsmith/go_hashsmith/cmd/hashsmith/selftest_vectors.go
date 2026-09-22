@@ -91,6 +91,12 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"apr1", "hashsmith", "", "$apr1$abcdefgh$U1gIt51iVe84gztna6VnP0", srcCrosschecked},
 		{"sha256crypt", "password", "", "$5$abcdefgh$ZLdkj8mkc2XVSrPVjskDAgZPGjtj1VGVaa1aUkrMTU/", srcPublished},
 		{"sha512crypt", "password", "", "$6$abcdefgh$yVfUwsw5T.JApa8POvClA1pQ5peiq97DUNyXCZN5IrF.BMSkiaLQ5kvpuEm/VQ1Tvh/KV2TcaWh8qinoW5dhA1", srcPublished},
+		// yescrypt's own published vector, from the reference distribution.
+		{"yescrypt", "pleaseletmein", "", "$y$j9T$e8R9q85ZuzUkArEUurdtS.$esON.7y6H.u3UCPVCpbRFueRpAut2n2cMf1EhpjbuiC", srcPublished},
+		// A second setting, pinned as a regression rather than claimed as
+		// published: the digest is what this implementation produces, so it
+		// proves only that an upgrade cannot change the answer silently.
+		{"yescrypt", "openwall", "", "$y$j9T$AAt9R641xPvCI9nXw1HHW/$cuQRBMN3N/f8IcmVN.4YrZ1bHMOiLOoz9/XQMKV/v0A", srcRegression},
 		{"descrypt", "password", "", "abJnggxhB/yWI", srcPublished},
 
 		// ── Windows ─────────────────────────────────────────────────────────────

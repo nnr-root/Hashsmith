@@ -2536,6 +2536,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyOpenSSLEnc(targetHash, candidate)
 	case "putty":
 		return verifyPutty(targetHash, candidate)
+	case "yescrypt":
+		return verifyYescrypt(targetHash, candidate)
 	case "bbes10":
 		return verifyBlackberryES10(targetHash, candidate)
 	case "tezos":
