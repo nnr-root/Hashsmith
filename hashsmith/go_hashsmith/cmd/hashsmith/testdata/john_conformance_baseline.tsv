@@ -285,7 +285,7 @@ Snefru-128	NOT-FOUND
 Snefru-128 $snefru$	NOT-DETECTED
 Snefru-256 $snefru$	NOT-DETECTED
 Snefru-256	NOT-FOUND
-LastPass $lastpass$	NOT-DETECTED
+LastPass $lastpass$	CRACKED
 SNMP $snmpv3$	CRACKED
 solarwinds $solarwinds$	CRACKED
 SSH $sshng$	CRACKED

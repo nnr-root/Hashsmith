@@ -4,6 +4,7 @@ package main
 // single text line. Implementations follow Hashcat's published test modules.
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/hmac"
 	"crypto/md5"
@@ -86,7 +87,69 @@ func verifyFortiGate(target, candidate string) (bool, error) {
 	return bytesEqualCT(h.Sum(nil), want), nil
 }
 
+// johnLastPassFields reads John's "$lastpass$<email>$<iterations>$<base64>".
+//
+// It is the same derivation as hashcat's record and a different check. Both
+// derive the key from the password with the account's email address as the
+// salt; hashcat then encrypts one block of the email under an IV the record
+// carries, while John encrypts the whole email, PKCS#7-padded, in ECB with no
+// IV at all — which is what the LastPass client actually sends as its
+// verifier.
+func johnLastPassFields(target string) (email string, iterations int, want []byte, ok bool) {
+	const prefix = "$lastpass$"
+	t := strings.TrimSpace(target)
+	if !strings.HasPrefix(t, prefix) {
+		return "", 0, nil, false
+	}
+	f := strings.Split(t[len(prefix):], "$")
+	if len(f) != 3 || f[0] == "" {
+		return "", 0, nil, false
+	}
+	n, err := strconv.Atoi(f[1])
+	if err != nil || n < 1 || n > maxKDFIterations {
+		return "", 0, nil, false
+	}
+	b, err := base64.StdEncoding.DecodeString(f[2])
+	if err != nil || len(b) == 0 || len(b)%aes.BlockSize != 0 {
+		return "", 0, nil, false
+	}
+	return f[0], n, b, true
+}
+
+// verifyLastPassJohn checks John's spelling of a LastPass verifier.
+func verifyLastPassJohn(target, candidate string) (bool, error) {
+	email, iterations, want, ok := johnLastPassFields(target)
+	if !ok {
+		return false, errors.New("invalid LastPass record")
+	}
+	key := pbkdf2.Key([]byte(candidate), []byte(email), iterations, 32, sha256.New)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return false, err
+	}
+	// The plaintext is the email address with PKCS#7 padding, encrypted a
+	// block at a time with no chaining.
+	pad := aes.BlockSize - len(email)%aes.BlockSize
+	plain := append([]byte(email), bytes.Repeat([]byte{byte(pad)}, pad)...)
+	if len(plain) < len(want) {
+		return false, nil
+	}
+	got := make([]byte, len(plain))
+	for i := 0; i < len(plain); i += aes.BlockSize {
+		block.Encrypt(got[i:i+aes.BlockSize], plain[i:i+aes.BlockSize])
+	}
+	return bytesEqualCT(got[:len(want)], want), nil
+}
+
+func isJohnLastPass(target string) bool {
+	_, _, _, ok := johnLastPassFields(target)
+	return ok
+}
+
 func verifyLastPass(target, candidate string) (bool, error) {
+	if isJohnLastPass(target) {
+		return verifyLastPassJohn(target, candidate)
+	}
 	parts := strings.Split(target, ":")
 	if len(parts) != 4 || len(parts[0]) != 32 || !isHex(parts[0]) || len(parts[3]) != 32 || !isHex(parts[3]) {
 		return false, errors.New("invalid LastPass record")

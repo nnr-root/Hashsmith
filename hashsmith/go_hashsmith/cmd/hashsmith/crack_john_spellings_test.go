@@ -744,3 +744,29 @@ func TestDigestAuthentication(t *testing.T) {
 		t.Error("the hex reading of the first stage also matches, so the two mechanisms are not distinguished")
 	}
 }
+
+// TestLastPassBothSpellings covers John's LastPass verifier and hashcat's,
+// which share a derivation and differ in what they encrypt with it: hashcat
+// encrypts one block of the address under an IV the record carries, John the
+// whole address with PKCS#7 padding and no chaining.
+func TestLastPassBothSpellings(t *testing.T) {
+	record, pass := johnVector(t, "LastPass $lastpass$")
+	if types := detectHashTypes(record); !containsString(types, "lastpass") {
+		t.Errorf("detectHashTypes did not offer lastpass: %v", types)
+	}
+	if ok, err := verifyLastPass(record, pass); err != nil || !ok {
+		t.Errorf("rejected the right password: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyLastPass(record, pass+"x"); bad {
+		t.Error("accepted a wrong password")
+	}
+	// hashcat's spelling must keep working.
+	const hc = "02eb97e869e0ddc7dc760fc633b4b54d:100100:pmix@trash-mail.com:9b071db7b8e265d4cadd3eb65ac0864a"
+	if ok, err := verifyLastPass(hc, "hashcat"); err != nil || !ok {
+		t.Errorf("hashcat's LastPass record regressed: ok=%v err=%v", ok, err)
+	}
+	// A record whose verifier is not a whole number of blocks is not one.
+	if isJohnLastPass("$lastpass$a@b$500$YWJj") {
+		t.Error("claimed a record whose verifier is not block-aligned")
+	}
+}
