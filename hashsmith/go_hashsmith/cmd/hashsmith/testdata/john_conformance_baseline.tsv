@@ -41,7 +41,7 @@ BitLocker $bitlocker$	CRACKED
 bitshares $bitshares$	NOT-DETECTED
 Bitwarden $bitwarden$	CRACKED
 BKS $bks$	NOT-DETECTED
-Blackberry-ES10 $bbes10$	NOT-DETECTED
+Blackberry-ES10 $bbes10$	CRACKED
 WoWSRP	NOT-DETECTED
 WoWSRP $wowsrp$	NOT-DETECTED
 Blockchain $blockchain$	CRACKED
@@ -297,7 +297,7 @@ Sybase-PROP	NOT-DETECTED
 tacacs-plus $tacacs-plus$	CRACKED
 tcp-md5 $tcpmd5$	CRACKED
 telegram $telegram$	CRACKED
-tezos $tezos$	NOT-DETECTED
+tezos $tezos$	CRACKED
 Tiger	NOT-FOUND
 Tiger $tiger$	NOT-DETECTED
 tc_aes_xts	CRACKED
@@ -442,7 +442,7 @@ ssh-opencl $sshng$	CRACKED
 sspr-opencl $sspr$	CRACKED
 strip-opencl $strip$	NOT-DETECTED
 telegram-opencl $telegram$	CRACKED
-tezos-opencl $tezos$	NOT-DETECTED
+tezos-opencl $tezos$	CRACKED
 vmx-opencl $vmx$	CRACKED
 wpapsk-opencl $wpapsk$	CRACKED
 wpapsk-opencl	CRACKED

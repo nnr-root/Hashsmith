@@ -518,6 +518,8 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"enpass", "Enpass password manager (SQLCipher page MAC), John enpass"},
 			{"openssl-enc", "File written by `openssl enc` (padding + text check), John openssl-enc"},
 			{"putty", "PuTTY private key (.ppk) passphrase, John PuTTY"},
+			{"bbes10", "BlackBerry Enterprise Server 10 (100 rounds of SHA-512)"},
+			{"tezos", "Tezos fundraiser wallet (mnemonic + email + password)"},
 			{"vdi", "VirtualBox encrypted disk image, John vdi"},
 			{"oracle-o5logon", "Oracle 11g captured logon exchange, John o5logon"},
 			{"krb5-key", "Kerberos KDC long-term AES key, John $krb17$ / $krb18$"},

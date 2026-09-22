@@ -2536,6 +2536,10 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyOpenSSLEnc(targetHash, candidate)
 	case "putty":
 		return verifyPutty(targetHash, candidate)
+	case "bbes10":
+		return verifyBlackberryES10(targetHash, candidate)
+	case "tezos":
+		return verifyTezos(targetHash, candidate)
 	case "vdi":
 		return verifyVDI(targetHash, candidate)
 	case "oracle-o5logon":

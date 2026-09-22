@@ -3,15 +3,18 @@ package main
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"strconv"
 	"strings"
 	"testing"
 
+	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/pbkdf2"
 )
 
@@ -768,5 +771,73 @@ func TestLastPassBothSpellings(t *testing.T) {
 	// A record whose verifier is not a whole number of blocks is not one.
 	if isJohnLastPass("$lastpass$a@b$500$YWJj") {
 		t.Error("claimed a record whose verifier is not block-aligned")
+	}
+}
+
+// TestTezosFundraiser covers the 2017 fundraiser wallet, and pins the twist
+// that separates its derivation from ordinary BIP-39: the password goes into
+// the SALT, after the literal "mnemonic" and the email address, rather than
+// into the passphrase. Reading it the BIP-39 way produces a valid-looking
+// wallet that is not this one.
+func TestTezosFundraiser(t *testing.T) {
+	record, pass := johnVector(t, "tezos $tezos$")
+	if types := detectHashTypes(record); !containsString(types, "tezos") {
+		t.Errorf("detectHashTypes did not offer tezos: %v", types)
+	}
+	if ok, err := verifyTezos(record, pass); err != nil || !ok {
+		t.Errorf("rejected the right password: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyTezos(record, pass+"x"); bad {
+		t.Error("accepted a wrong password")
+	}
+	r, err := parseTezos(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.keyHash) != 20 {
+		t.Fatalf("key hash is %d bytes, want 20", len(r.keyHash))
+	}
+	// BIP-39's own reading — password as the passphrase, salt just
+	// "mnemonic" — must not reproduce the wallet.
+	seed := pbkdf2.Key([]byte(r.mnemonic), []byte("mnemonic"+pass), r.iterations, 64, sha512.New)
+	pub := ed25519.NewKeyFromSeed(seed[:32]).Public().(ed25519.PublicKey)
+	h, _ := blake2b.New(20, nil)
+	h.Write(pub)
+	if hmac.Equal(h.Sum(nil), r.keyHash) {
+		t.Error("the plain BIP-39 reading also matches, so the email is not part of the salt")
+	}
+}
+
+// TestBlackberryES10 covers BES10, and pins the shape of its work factor: the
+// salt is mixed in once and then never again, so the ninety-nine rounds that
+// follow hash nothing but the digest. Re-appending the salt each round — the
+// obvious alternative reading — gives a different answer.
+func TestBlackberryES10(t *testing.T) {
+	record, pass := johnVector(t, "Blackberry-ES10 $bbes10$")
+	if types := detectHashTypes(record); !containsString(types, "bbes10") {
+		t.Errorf("detectHashTypes did not offer bbes10: %v", types)
+	}
+	if ok, err := verifyBlackberryES10(record, pass); err != nil || !ok {
+		t.Errorf("rejected the right password: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyBlackberryES10(record, pass+"x"); bad {
+		t.Error("accepted a wrong password")
+	}
+	_, salt, want, err := blackberryFields(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := sha512.New()
+	h.Write([]byte(pass))
+	h.Write([]byte(salt))
+	d := h.Sum(nil)
+	for i := 1; i < 100; i++ {
+		h.Reset()
+		h.Write(d)
+		h.Write([]byte(salt)) // the reading this test rules out
+		d = h.Sum(nil)
+	}
+	if hmac.Equal(d, want) {
+		t.Error("re-salting each round also matches, so the rounds are not over the digest alone")
 	}
 }
