@@ -15,7 +15,7 @@ scrypt $7$	CRACKED
 scrypt $9$	CRACKED
 scrypt $scryptkdf.pm$	CRACKED
 LM $lm$	CRACKED
-LM	NOT-FOUND
+LM	CRACKED
 AFS $k4$	NOT-DETECTED
 tripcode	NOT-FOUND
 AndroidBackup $ab$	CRACKED
@@ -55,7 +55,7 @@ CRC32 $crc32c$	CRACKED
 sha1crypt $sha1$	CRACKED
 sha256crypt $5$	CRACKED
 sha512crypt $6$	CRACKED
-Citrix_NS10	NOT-FOUND
+Citrix_NS10	CRACKED
 dahua $dahua$	NOT-DETECTED
 dashlane $dashlane$	NOT-DETECTED
 diskcryptor $diskcryptor$	CRACKED
@@ -236,7 +236,7 @@ Raw-SHA512	CRACKED
 Raw-SHA512 $sha512$	CRACKED
 Raw-Blake2	CRACKED
 Raw-Blake2 $blake2$	CRACKED
-Raw-Keccak	NOT-FOUND
+Raw-Keccak	CRACKED
 Raw-Keccak $keccak$	CRACKED
 Raw-Keccak-256	CRACKED
 Raw-Keccak-256 $keccak256$	CRACKED
@@ -311,8 +311,8 @@ vmx $vmx$	CRACKED
 VNC $vnc$	CRACKED
 vtp $vtp$	NOT-DETECTED
 wbb3 $wbb3$	CRACKED
-whirlpool	NOT-FOUND
-whirlpool $whirlpool$	NOT-FOUND
+whirlpool	CRACKED
+whirlpool $whirlpool$	CRACKED
 whirlpool0	NOT-FOUND
 whirlpool0 $whirlpool$	NOT-FOUND
 whirlpool1	NOT-FOUND
@@ -390,7 +390,7 @@ krb5asrep-aes-opencl $krb5asrep$	CRACKED
 lp-opencl $lp$	NOT-DETECTED
 lpcli-opencl $lpcli$	NOT-DETECTED
 LM-opencl $lm$	CRACKED
-LM-opencl	NOT-FOUND
+LM-opencl	CRACKED
 mscash-opencl	CRACKED
 mscash2-opencl	NOT-DETECTED
 mscash2-opencl $dcc2$	CRACKED

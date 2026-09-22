@@ -129,7 +129,7 @@ func gpuDictAttackWithBackend(ctx context.Context, b gpuMD5Batcher, wordlistPath
 		atomic.AddInt64(atomicAttempts, int64(len(candidates)))
 		for i := range out {
 			if out[i] == target {
-				return crackedResult{password: candidates[i], ruleLabel: labels[i]}, true, nil
+				return crackedResult{password: candidates[i], ruleLabel: labels[i], found: true}, true, nil
 			}
 		}
 		candidates = candidates[:0]
@@ -148,7 +148,7 @@ func gpuDictAttackWithBackend(ctx context.Context, b gpuMD5Batcher, wordlistPath
 			}
 			atomic.AddInt64(atomicAttempts, 1)
 			if md5.Sum([]byte(candidate)) == target {
-				return crackedResult{password: candidate, ruleLabel: ruleLabel}, true, nil
+				return crackedResult{password: candidate, ruleLabel: ruleLabel, found: true}, true, nil
 			}
 			return crackedResult{}, false, nil
 		}
@@ -163,10 +163,8 @@ func gpuDictAttackWithBackend(ctx context.Context, b gpuMD5Batcher, wordlistPath
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
 	for scanner.Scan() {
-		word := strings.TrimSpace(scanner.Text())
-		if word == "" {
-			continue
-		}
+		// Verbatim, empty lines included — see wordlist.go.
+		word := scanner.Text()
 		if result, found, err := add(word, ""); found || err != nil {
 			return result, err
 		}

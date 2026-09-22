@@ -133,6 +133,12 @@ func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *ses
 type crackedResult struct {
 	password  string
 	ruleLabel string
+	// found says whether a password was recovered, which a non-empty password
+	// cannot: the empty password is a real answer. An account with no password
+	// at all is the weakest finding an audit can make, and reading "" as "no
+	// result" meant Hashsmith verified it, stopped the run, and then reported
+	// "Not found" — the one password it could never name.
+	found bool
 }
 
 // crackCtx carries cross-cutting run state — the potfile (skip / record cracked
@@ -1447,7 +1453,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
 				sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, saltMode, targetHash, verifyFn)
 		}
-		result = crackedResult{password: pw}
+		result = crackedResult{password: pw, found: pw != ""}
 	case "mask":
 		if mc == nil {
 			tickCancel()
@@ -1488,7 +1494,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			pw, interrupted, err = runBruteOrMaskLayout(runCtx, layout,
 				sess, resumeFrom, limit, workers, &atomicAttempts, typ, salt, saltMode, targetHash, verifyFn)
 		}
-		result = crackedResult{password: pw}
+		result = crackedResult{password: pw, found: pw != ""}
 	case "markov":
 		if minLen < 1 || maxLen < minLen {
 			tickCancel()
@@ -1502,7 +1508,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		var pw string
 		pw, interrupted, err = runSessionLayout(runCtx, markovLayout(model, minLen, maxLen),
 			sess, resumeFrom, limit, workers, &atomicAttempts, verifyFn)
-		result = crackedResult{password: pw}
+		result = crackedResult{password: pw, found: pw != ""}
 	case "hybrid":
 		if mc == nil {
 			tickCancel()
@@ -1521,7 +1527,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		var pw string
 		pw, interrupted, err = runSessionLayout(runCtx, hybridLayout(words, sets, mc.maskFirst),
 			sess, resumeFrom, limit, workers, &atomicAttempts, verifyFn)
-		result = crackedResult{password: pw}
+		result = crackedResult{password: pw, found: pw != ""}
 	case "combinator":
 		if cc == nil || cc.wordlist2 == "" {
 			tickCancel()
@@ -1540,14 +1546,14 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		var pw string
 		pw, interrupted, err = runSessionLayout(runCtx, combinatorLayout(left, right),
 			sess, resumeFrom, limit, workers, &atomicAttempts, verifyFn)
-		result = crackedResult{password: pw}
+		result = crackedResult{password: pw, found: pw != ""}
 	case "prince":
 		// princeLay was built above (before the progress bar), so any refusal
 		// has already been reported; it is never nil here.
 		var pw string
 		pw, interrupted, err = runSessionLayout(runCtx, princeLay,
 			sess, resumeFrom, limit, workers, &atomicAttempts, verifyFn)
-		result = crackedResult{password: pw}
+		result = crackedResult{password: pw, found: pw != ""}
 	default:
 		tickCancel()
 		return false, errors.New("unknown mode: use dict, brute, mask, markov, hybrid, combinator or prince")
@@ -1567,7 +1573,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 		rate = float64(attempts) / elapsed
 	}
 
-	found := result.password != ""
+	found := result.found
 	if found && cc != nil {
 		cc.pot.add(targetHash, result.password)
 		cc.recordPlain(result.password)
@@ -1607,10 +1613,18 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	if found {
 		emitStdoutResult(cc, targetHash, result.password)
 		clrGreen.Fprint(os.Stderr, "Found: ")
+		// The empty password prints as nothing at all, which on a terminal
+		// reads as a bug rather than as the answer. Only this line is
+		// changed: the potfile, the -o file and the stdout result all still
+		// carry the password itself, which is the empty string.
+		shown := result.password
+		if shown == "" {
+			shown = "(the empty password — this account has none set)"
+		}
 		if result.ruleLabel != "" {
-			fmt.Fprintf(os.Stderr, "%s (via rule: %s)\n", result.password, result.ruleLabel)
+			fmt.Fprintf(os.Stderr, "%s (via rule: %s)\n", shown, result.ruleLabel)
 		} else {
-			fmt.Fprintln(os.Stderr, result.password)
+			fmt.Fprintln(os.Stderr, shown)
 		}
 		if u := cc.usernameFor(targetHash); u != "" {
 			clrGreen.Fprintf(os.Stderr, "  user: %s\n", u)
@@ -1881,10 +1895,8 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 		cur := make(batch, 0, dictBatchSize)
 		var idx int64
 		for scanner.Scan() {
-			word := strings.TrimSpace(scanner.Text())
-			if word == "" {
-				continue
-			}
+			// Verbatim, empty lines included — see wordlist.go.
+			word := scanner.Text()
 			i := idx
 			idx++
 			if i < skip {
@@ -1971,7 +1983,7 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 				for i, ok := range outBuf[:len(buf)] {
 					if ok {
 						select {
-						case resultCh <- crackedResult{password: buf[i].pw, ruleLabel: buf[i].ruleLabel}:
+						case resultCh <- crackedResult{password: buf[i].pw, ruleLabel: buf[i].ruleLabel, found: true}:
 						default:
 						}
 						cancel()
@@ -1994,7 +2006,7 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 						return false
 					}
 					select {
-					case resultCh <- crackedResult{password: pw, ruleLabel: ruleLabel}:
+					case resultCh <- crackedResult{password: pw, ruleLabel: ruleLabel, found: true}:
 					default:
 					}
 					cancel()

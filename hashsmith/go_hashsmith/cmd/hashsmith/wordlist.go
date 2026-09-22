@@ -195,9 +195,26 @@ func countWordlistLines(path string) (int64, error) {
 	scanner := bufio.NewScanner(rc)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
 	for scanner.Scan() {
-		if strings.TrimSpace(scanner.Text()) != "" {
-			n++
-		}
+		n++
 	}
 	return n, scanner.Err()
 }
+
+// A wordlist line is the candidate it spells, and every line is one.
+//
+// Hashsmith used to trim each line and skip the ones that came out empty.
+// That cost two kinds of password. " secret" and "secret " are not "secret",
+// and a list that contains them was being asked about a word it does not
+// hold. And the empty line is the empty password — an account with no
+// password at all, which is the weakest finding there is and the one an audit
+// most wants reported; trimming it away meant Hashsmith answered "not found"
+// for it, every time.
+//
+// Nothing needs removing: bufio's line scanner already drops the newline and
+// a carriage return before it, so a list written on Windows reads the same as
+// one written anywhere else. This comment stands in for the code that is no
+// longer here, so that neither trim comes back as a tidying-up.
+//
+// Counting follows the same rule, because the count is what --skip, --limit
+// and --keyspace slice: a reader and a counter that disagree about which
+// lines exist would hand two machines overlapping slices of one keyspace.

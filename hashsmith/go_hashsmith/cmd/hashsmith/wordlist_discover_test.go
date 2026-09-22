@@ -562,8 +562,11 @@ func TestCountWordlistLinesOnGzip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("pass %d: %v", i, err)
 		}
-		if n != 3 {
-			t.Fatalf("pass %d: count = %d, want 3 (blank lines skipped, decompressed)", i, n)
+		// Four, not three: the blank line is a candidate — the empty
+		// password — and the count is what --skip and --limit slice, so it
+		// has to agree with the reader about which lines exist.
+		if n != 4 {
+			t.Fatalf("pass %d: count = %d, want 4 (every decompressed line, blank included)", i, n)
 		}
 	}
 	// The stream the attack needs is still intact after counting.

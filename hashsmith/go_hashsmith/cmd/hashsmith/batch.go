@@ -1049,10 +1049,8 @@ func batchDictAttack(parent context.Context, wordlistPath string, skip, limit in
 		cur := make([]string, 0, dictBatchSize)
 		var idx int64
 		for scanner.Scan() {
-			word := strings.TrimSpace(scanner.Text())
-			if word == "" {
-				continue
-			}
+			// Verbatim, empty lines included — see wordlist.go.
+			word := scanner.Text()
 			i := idx
 			idx++
 			if i < skip {

@@ -12,7 +12,6 @@ package main
 
 import (
 	"bufio"
-	"strings"
 )
 
 // loadWordlistSlice reads an entire wordlist into memory (trimmed, blanks
@@ -27,9 +26,8 @@ func loadWordlistSlice(path string) ([]string, string, error) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
-		if w := strings.TrimSpace(sc.Text()); w != "" {
-			out = append(out, w)
-		}
+		// Verbatim, empty lines included — see wordlist.go.
+		out = append(out, sc.Text())
 	}
 	return out, label, sc.Err()
 }
