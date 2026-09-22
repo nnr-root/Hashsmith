@@ -2634,6 +2634,24 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyHSRP(targetHash, candidate)
 	case "vtp":
 		return verifyVTP(targetHash, candidate)
+	case "keyring":
+		return verifyKeyring(targetHash, candidate)
+	case "strip":
+		return verifyStrip(targetHash, candidate)
+	case "lastpass-lp":
+		return verifyLastPassLP(targetHash, candidate)
+	case "lastpass-cli":
+		return verifyLastPassCLI(targetHash, candidate)
+	case "wowsrp":
+		return verifyWoWSRP(targetHash, candidate)
+	case "bfegg":
+		return verifyBFEgg(targetHash, candidate)
+	case "openbsd-softraid":
+		return verifySoftraid(targetHash, candidate)
+	case "andotp":
+		return verifyAndOTP(targetHash, candidate)
+	case "clipperz":
+		return verifyClipperz(targetHash, candidate)
 	case "dummy":
 		return verifyDummy(targetHash, candidate)
 	case "p5k2":

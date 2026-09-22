@@ -2537,8 +2537,67 @@ Both were settled in under an hour by reading John's source, after a search
 that had cost considerably more and correctly concluded nothing. The old note
 stays where it is, with the answer now attached to it.
 
+### Containers, vaults, and two more the search had missed
+
+Seven more, all read from source.
+
+**GNOME keyring** derives its key by hashing the password and salt once and
+then re-hashing the digest alone for the remaining rounds — weaker than PBKDF2
+at the same count, and the count is in the record. The plaintext carries its
+own MD5 in its first sixteen bytes, so a correct password is a correct
+password rather than a collision.
+
+**STRIP** is SQLCipher, and the check is the SQLite header: a correct key
+decrypts eight bytes at offset 16 into a page size that is a power of two, a
+write-format byte of at most 2, and three bytes SQLite has written as
+`40 20 20` since version 3. That is worth about thirty bits — a wrong password
+passes about once in a billion, and John checks exactly the same eight bytes.
+
+**LastPass**, in both the browser extension's `$lp$` and the `lpass` command
+line tool's `$lpcli$`. Both salt PBKDF2-HMAC-SHA256 with the account's EMAIL
+ADDRESS — public, shared across devices, never rotated — and then encrypt a
+fixed string. The extension encrypts the literal `lastpass rocks` followed by
+two 0x02 bytes, which is PKCS#7 padding written into the constant rather than
+computed; the CLI encrypts the first sixteen bytes of "`lpass` was written by
+LastPass.\n" in CBC under a stored IV. A third LastPass shape, the sniffed
+exchange, was already read. The iteration count in an `$lp$` record dates it:
+LastPass's default went 500, then 5,000, then 100,100.
+
+**World of Warcraft's SRP-6 verifier** and **Eggdrop's bot password** were both
+on the earlier searched-and-not-found list, and neither is a hash of the
+password in any arrangement. WoW stores g^x mod N with
+x = SHA-1(salt ‖ SHA-1(USER:PASS)) — modular exponentiation, not a digest, and
+the account name is part of x, which is why the record carries it. Eggdrop
+runs Blowfish keyed on the password and encrypts a fixed 64-bit block: the
+password is the KEY and the record is a ciphertext.
+
+Eggdrop cost an hour longer than it should have, and the reason is worth
+writing down. The cipher is ordinary Blowfish; what is not ordinary is the
+encoding. Eggdrop's base64 alphabet is crypt(3)'s sixty-four characters in a
+different order — lower case before upper, where crypt puts upper first — and
+decoding with crypt's ordering yields plausible bytes that never match. Two
+wrong theories about the cipher were chased and discarded before the alphabet
+was checked.
+
+**OpenBSD softraid** came last in this batch and is the clearest example of a
+design choice showing through the record. The disk's real keys — thirty-two
+AES-XTS-256 keys, two kilobytes of them — are not derived from the passphrase
+at all; they sit on disk encrypted under a key that is, in ECB with no
+chaining. Changing the passphrase re-masks those two kilobytes rather than
+re-encrypting the volume, which is why it takes no time. The check is an
+HMAC-SHA1 over the unmasked keys keyed on the SHA-1 of the masking key, so
+twenty bytes agree or nothing does.
+
+Two vaults finished the batch, at opposite ends of the care taken.
+**andOTP** encrypts its backup — every TOTP secret its owner has — under one
+unsalted, uniterated SHA-256 of the password, so a candidate costs one hash
+and one GCM tag check. **Clipperz** goes four SHA-256s deep with the account
+name and salt both folded in, and then exponentiates, but its modulus is 256
+bits. Neither extreme changes the answer much: the tag and the verifier both
+say yes or no exactly, and the work factor is the only thing between them.
+
 ### Where it stands
 
-Of 605 records: **554 crack**, 50 are not detected, 1 is detected and
-deliberately not guessed. That is up from 523 at the last entry and 217 when
-the ratchet was built.
+Of 605 records: **571 crack**, 33 are not detected, 1 is detected and
+deliberately not guessed. That is up from 523 two entries ago and 217 when the
+ratchet was built.

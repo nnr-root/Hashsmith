@@ -147,6 +147,15 @@ func johnBareSpellingPrototypes() []hashid.Prototype {
 			Rationale:  "AS-REP roasting produces these in quantity against accounts with Kerberos pre-authentication disabled",
 		},
 		{
+			Types: []string{"sl3"}, Display: "Nokia SL3 unlock code, as IMEI:digest",
+			Tier: hashid.TierStructural,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "a 14- or 15-digit IMEI, a colon and a SHA-1", isBareSL3(in.Normalized)
+			},
+			Prevalence: 4,
+			Rationale:  "the same shape as a numeric username beside a SHA-1, so it is offered as one more reading of that rather than asserted",
+		},
+		{
 			Types: []string{"krb5-key"}, Display: "Kerberos AES database key (bare)",
 			Tier: hashid.TierShape,
 			Match: func(in hashid.Input) (hashid.Evidence, bool) {
@@ -202,6 +211,42 @@ func dynamicCiscoASA(target string) (string, bool) {
 	return digest + ":" + user, true
 }
 
+// ── Nokia SL3 written as IMEI:digest ──────────────────────────────────────────
+//
+// John also accepts an SL3 record in the shape a dump produces: the IMEI in
+// the username field and the digest after a colon. The IMEI may be fifteen
+// digits there rather than fourteen, because a full IMEI carries a Luhn check
+// digit — and the hash uses only the first fourteen, so the fifteenth is along
+// for the ride.
+//
+// John refuses a fifteen-digit IMEI whose check digit does not validate. That
+// is not copied here, for a reason worth recording: the fifteen-digit value in
+// John's own published format listing is 112233445566778, whose Luhn digit is
+// wrong — the source says 112233445566773 — and the digest verifies against
+// the first fourteen digits either way. Refusing the record would mean
+// refusing one John itself prints, to enforce a check on a digit that does not
+// reach the hash. So the check digit is ignored, and the shape stays narrow on
+// the two things that do matter: the IMEI is digits and the digest is a SHA-1.
+
+func bareSL3(target string) (string, bool) {
+	t := strings.TrimSpace(target)
+	imei, digest, ok := strings.Cut(t, ":")
+	if !ok || len(digest) != 40 || !isHex(digest) {
+		return "", false
+	}
+	if len(imei) != 14 && len(imei) != 15 {
+		return "", false
+	}
+	for i := 0; i < len(imei); i++ {
+		if imei[i] < '0' || imei[i] > '9' {
+			return "", false
+		}
+	}
+	return sl3Prefix + imei[:14] + "$" + digest, true
+}
+
+func isBareSL3(target string) bool { _, ok := bareSL3(target); return ok }
+
 // canonicalBareSpelling rewrites a record John wrote without a marker into
 // the spelling the verifier for that type reads. A record that is already in
 // that spelling, or that does not match the bare shape, is returned unchanged.
@@ -218,6 +263,8 @@ func canonicalBareSpelling(target, algo string) string {
 		rewrite = bareKrb5ASREP
 	case "cisco-asa":
 		rewrite = dynamicCiscoASA
+	case "sl3":
+		rewrite = bareSL3
 	default:
 		return target
 	}

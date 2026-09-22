@@ -56,7 +56,10 @@ func johnLabelSeed() map[string]string {
 		"dragonfly3-32": "dragonfly3-32", "dragonfly3-64": "dragonfly3-64",
 		"dragonfly4-32": "dragonfly4-32", "dragonfly4-64": "dragonfly4-64",
 		"nukedklan": "nk", "clearquest": "cq",
-		"hsrp": "hsrp", "vtp": "vtp",
+		"hsrp": "hsrp", "vtp": "vtp", "keyring": "keyring", "strip": "STRIP",
+		"lastpass-lp": "lp", "lastpass-cli": "lpcli",
+		"wowsrp": "WoWSRP", "bfegg": "bfegg", "openbsd-softraid": "OpenBSD-SoftRAID",
+		"andotp": "andOTP", "clipperz": "Clipperz",
 		"whirlpool": "whirlpool", "sm3": "sm3",
 
 		// Windows

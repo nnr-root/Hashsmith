@@ -254,6 +254,38 @@ func saltedPrototypes() []hashid.Prototype {
 			Prevalence: 4,
 			Rationale:  "the same scheme at 512 bits, and the same absence of any work factor",
 		},
+		{
+			Types: []string{"wowsrp"}, Display: "World of Warcraft SRP-6 verifier",
+			Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "an account name and a $WoWSRP$ verifier", isWoWSRP(in.Raw)
+			},
+			Prevalence: 4,
+			Rationale:  "a private-server account database; the account name is part of the verifier, so the record carries it",
+		},
+		{
+			Types: []string{"bfegg"}, Display: "Eggdrop IRC bot password",
+			Tier: hashid.TierStructural, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "a plus and twelve base64 characters", isBFEgg(in.Normalized)
+			},
+			Prevalence: 3,
+			Rationale:  "Eggdrop's userfile; the leading plus is its own marker for an encrypted password, which nothing else in this table uses",
+		},
+		hasPrefixProto("$andotp$", "andOTP encrypted backup", 5,
+			"an Android authenticator's backup file, encrypted under one unsalted SHA-256 of the password and holding every TOTP secret its owner has", "andotp"),
+		hasPrefixProto("$clipperz$", "Clipperz SRP-6a verifier", 3,
+			"a web password manager's login verifier; the account name and salt are both inside it", "clipperz"),
+		hasPrefixProto("$openbsd-softraid$", "OpenBSD softraid CRYPTO volume", 5,
+			"full-disk encryption on OpenBSD; the passphrase masks the volume keys rather than encrypting the volume, which is why changing it is instant", "openbsd-softraid"),
+		hasPrefixProto("$lpcli$", "LastPass command-line agent", 5,
+			"the lpass tool's local agent key; the salt is the account's email address, so it is public and never rotated", "lastpass-cli"),
+		hasPrefixProto("$lp$", "LastPass browser extension", 8,
+			"the extension's vault key, salted with the account's email address; the iteration count in the record dates it, since LastPass raised its default from 500 to 5,000 to 100,100 over the years", "lastpass-lp"),
+		hasPrefixProto("$keyring$", "GNOME keyring", 10,
+			"the default credential store on GNOME desktops, so a Linux workstation image usually has one", "keyring"),
+		hasPrefixProto("$strip$", "STRIP password manager", 4,
+			"an iPhone password manager backed by SQLCipher; the record is the first page of the database", "strip"),
 		hasPrefixProto("$hsrp$", "Cisco HSRP MD5 authentication", 8,
 			"a captured HSRP hello; the key is configured identically on every router in the standby group", "hsrp"),
 		hasPrefixProto("$vtp$", "Cisco VTP authentication", 6,

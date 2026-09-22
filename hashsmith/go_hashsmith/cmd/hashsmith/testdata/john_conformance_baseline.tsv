@@ -24,7 +24,7 @@ agilekeychain $agilekeychain$	CRACKED
 aix-ssha1	CRACKED
 aix-ssha256	CRACKED
 aix-ssha512	CRACKED
-andOTP $andotp$	NOT-DETECTED
+andOTP $andotp$	CRACKED
 ansible $ansible$	CRACKED
 argon2 $argon2d$	CRACKED
 argon2 $argon2i$	CRACKED
@@ -35,18 +35,18 @@ asa-md5 $dynamic_20$	CRACKED
 AxCrypt $axcrypt$	CRACKED
 AzureAD	CRACKED
 BestCrypt $bestcrypt$	NOT-DETECTED
-bfegg	NOT-DETECTED
+bfegg	CRACKED
 Bitcoin $bitcoin$	CRACKED
 BitLocker $bitlocker$	CRACKED
 bitshares $bitshares$	CRACKED
 Bitwarden $bitwarden$	CRACKED
 BKS $bks$	NOT-DETECTED
 Blackberry-ES10 $bbes10$	CRACKED
-WoWSRP	NOT-DETECTED
-WoWSRP $wowsrp$	NOT-DETECTED
+WoWSRP	CRACKED
+WoWSRP $wowsrp$	CRACKED
 Blockchain $blockchain$	CRACKED
 chap $chap$	CRACKED
-Clipperz $clipperz$	NOT-DETECTED
+Clipperz $clipperz$	CRACKED
 cloudkeychain $cloudkeychain$	CRACKED
 dynamic=md5($p)	CRACKED
 cq $cq$	CRACKED
@@ -103,7 +103,7 @@ itunes-backup $itunes_backup$	CRACKED
 iwork $iwork$	CRACKED
 KeePass $keepass$	CRACKED
 keychain $keychain$	CRACKED
-keyring $keyring$	NOT-DETECTED
+keyring $keyring$	CRACKED
 keystore $keystore$	CRACKED
 known_hosts $known_hosts$	CRACKED
 krb4 $af$	NOT-DETECTED
@@ -117,8 +117,8 @@ krb5-18	CRACKED
 krb5-18 $krb18$	CRACKED
 krb5-3 $krb3$	NOT-DETECTED
 kwallet $kwallet$	NOT-DETECTED
-lp $lp$	NOT-DETECTED
-lpcli $lpcli$	NOT-DETECTED
+lp $lp$	CRACKED
+lpcli $lpcli$	CRACKED
 leet	CRACKED
 lotus5	CRACKED
 lotus85	NOT-DETECTED
@@ -180,7 +180,7 @@ ODF $sxc$	NOT-DETECTED
 Office $office$	CRACKED
 oldoffice $oldoffice$	CRACKED
 oldoffice	CRACKED
-OpenBSD-SoftRAID $openbsd-softraid$	NOT-DETECTED
+OpenBSD-SoftRAID $openbsd-softraid$	CRACKED
 openssl-enc $openssl$	CRACKED
 oracle	CRACKED
 oracle11	CRACKED
@@ -280,7 +280,7 @@ skein-256 $skein$	CRACKED
 skein-512 $skein$	CRACKED
 skey	NOT-DETECTED
 SL3 $sl3$	CRACKED
-SL3	NOT-DETECTED
+SL3	CRACKED
 Snefru-128	CRACKED
 Snefru-128 $snefru$	CRACKED
 Snefru-256 $snefru$	CRACKED
@@ -290,7 +290,7 @@ SNMP $snmpv3$	CRACKED
 solarwinds $solarwinds$	CRACKED
 SSH $sshng$	CRACKED
 sspr $sspr$	CRACKED
-STRIP $strip$	NOT-DETECTED
+STRIP $strip$	CRACKED
 SunMD5 $md5$	NOT-DETECTED
 SybaseASE	CRACKED
 Sybase-PROP	NOT-DETECTED
@@ -381,14 +381,14 @@ geli-opencl $geli$	NOT-DETECTED
 gpg-opencl $gpg$	CRACKED
 iwork-opencl $iwork$	CRACKED
 keychain-opencl $keychain$	CRACKED
-keyring-opencl $keyring$	NOT-DETECTED
+keyring-opencl $keyring$	CRACKED
 keystore-opencl $keystore$	CRACKED
 krb5pa-md5-opencl $krb5pa$	CRACKED
 krb5pa-md5-opencl $mskrb5$	CRACKED
 krb5pa-sha1-opencl $krb5pa$	CRACKED
 krb5asrep-aes-opencl $krb5asrep$	CRACKED
-lp-opencl $lp$	NOT-DETECTED
-lpcli-opencl $lpcli$	NOT-DETECTED
+lp-opencl $lp$	CRACKED
+lpcli-opencl $lpcli$	CRACKED
 LM-opencl $lm$	CRACKED
 LM-opencl	CRACKED
 mscash-opencl	CRACKED
@@ -404,7 +404,7 @@ o5logon-opencl $o5logon$	CRACKED
 ODF-opencl $odf$	CRACKED
 ODF-opencl $sxc$	NOT-DETECTED
 office-opencl $office$	CRACKED
-OpenBSD-SoftRAID-opencl $openbsd-softraid$	NOT-DETECTED
+OpenBSD-SoftRAID-opencl $openbsd-softraid$	CRACKED
 PBKDF2-HMAC-SHA256-opencl $pbkdf2-sha256$	CRACKED
 PBKDF2-HMAC-SHA256-opencl $8$	CRACKED
 PBKDF2-HMAC-SHA512-opencl $pbkdf2-hmac-sha512$	CRACKED
@@ -436,11 +436,11 @@ salted-SHA1-opencl	CRACKED
 sappse-opencl $pse$	NOT-DETECTED
 7z-opencl $7z$	CRACKED
 SL3-opencl $sl3$	CRACKED
-SL3-opencl	NOT-DETECTED
+SL3-opencl	CRACKED
 solarwinds-opencl $solarwinds$	CRACKED
 ssh-opencl $sshng$	CRACKED
 sspr-opencl $sspr$	CRACKED
-strip-opencl $strip$	NOT-DETECTED
+strip-opencl $strip$	CRACKED
 telegram-opencl $telegram$	CRACKED
 tezos-opencl $tezos$	CRACKED
 vmx-opencl $vmx$	CRACKED
