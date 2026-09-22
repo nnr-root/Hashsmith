@@ -313,6 +313,18 @@ func dynDigest(name string) (func([]byte) []byte, bool) {
 			_, _ = h.Write(b)
 			return h.Sum(nil)
 		})
+	case "haval128_3", "haval128_4", "haval128_5",
+		"haval160_3", "haval160_4", "haval160_5",
+		"haval192_3", "haval192_4", "haval192_5",
+		"haval224_3", "haval224_4", "haval224_5",
+		"haval256_3", "haval256_4", "haval256_5":
+		// Every combination of five output sizes and three pass counts is a
+		// format of its own in John's table, and the name says which.
+		size, passes, ok := havalParams(name)
+		if !ok {
+			return nil, false
+		}
+		return simple(func(b []byte) []byte { return havalSum(b, size, passes) })
 	case "skein224", "skein256", "skein384", "skein512":
 		// John's skein224 and friends are Skein-512 with a shorter output,
 		// which is the usual reading of "Skein-N" and the one its own test

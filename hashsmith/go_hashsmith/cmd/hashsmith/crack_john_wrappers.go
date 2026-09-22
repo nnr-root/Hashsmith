@@ -51,6 +51,15 @@ var johnWrappers = []struct {
 	// As with $ripemd$, one envelope covers more than one digest size and the
 	// payload's length settles which.
 	{"$skein$", []string{"skein224", "skein256", "skein384", "skein512"}},
+	// $haval$ names neither the size nor the pass count; the payload's length
+	// settles the size, and all three pass counts for it are offered.
+	{"$haval$", []string{
+		"haval128-3", "haval128-4", "haval128-5",
+		"haval160-3", "haval160-4", "haval160-5",
+		"haval192-3", "haval192-4", "haval192-5",
+		"haval224-3", "haval224-4", "haval224-5",
+		"haval256-3", "haval256-4", "haval256-5",
+	}},
 	// One envelope, two digest sizes: John writes "$ripemd$" for both the
 	// 128- and 160-bit variants and lets the length say which. Both are
 	// offered; the payload length settles it at verification.

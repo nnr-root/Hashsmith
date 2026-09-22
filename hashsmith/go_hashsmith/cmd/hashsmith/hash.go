@@ -187,6 +187,13 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 			return "", err
 		}
 		return hex.EncodeToString(sum), nil
+	case "haval128-3", "haval128-4", "haval128-5",
+		"haval160-3", "haval160-4", "haval160-5",
+		"haval192-3", "haval192-4", "haval192-5",
+		"haval224-3", "haval224-4", "haval224-5",
+		"haval256-3", "haval256-4", "haval256-5":
+		size, passes, _ := havalParams(strings.ReplaceAll(algo, "-", "_"))
+		return hex.EncodeToString(havalSum([]byte(text), size, passes)), nil
 	case "skein224", "skein256", "skein384", "skein512":
 		size := map[string]int{"skein224": 28, "skein256": 32, "skein384": 48, "skein512": 64}[algo]
 		h := skein.New(size, nil)

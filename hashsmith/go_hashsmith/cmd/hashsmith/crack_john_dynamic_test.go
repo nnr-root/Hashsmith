@@ -13,7 +13,7 @@ import (
 // The count is pinned so that a change which quietly stops reading a family of
 // expressions is a failing test rather than a smaller number nobody notices.
 func TestJohnDynamicCorpus(t *testing.T) {
-	const wantClaimed = 140
+	const wantClaimed = 155
 	re := regexp.MustCompile(`\$dynamic_\d+\$`)
 	claimed := 0
 	for _, r := range loadJohnCorpus(t) {
@@ -129,11 +129,11 @@ func TestJohnDynamicSpecTable(t *testing.T) {
 	if parsed+unsupported != len(johnDynamicSpecs) {
 		t.Fatal("the spec table lost entries")
 	}
-	// 291 of John's 446 expressions are built from hashes Hashsmith has; the
-	// rest name tiger, panama or haval, or a constant John keeps in its
-	// configuration file. Adding one of those hashes raises this number —
-	// that is the point of pinning it, and adding Skein raised it by 36.
-	if parsed != 291 {
-		t.Errorf("%d of %d expressions parse, want 291", parsed, len(johnDynamicSpecs))
+	// 426 of John's 446 expressions are built from hashes Hashsmith has. What
+	// is left names tiger or panama, or a constant John keeps in its
+	// configuration file. Adding a hash raises this number — that is the
+	// point of pinning it: Skein raised it by 36 and HAVAL by 135.
+	if parsed != 426 {
+		t.Errorf("%d of %d expressions parse, want 426", parsed, len(johnDynamicSpecs))
 	}
 }

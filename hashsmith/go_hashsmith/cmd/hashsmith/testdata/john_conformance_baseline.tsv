@@ -91,9 +91,9 @@ gost $gost$	CRACKED
 gost $gost-cp$	NOT-DETECTED
 gpg $gpg$	CRACKED
 HAVAL-128-4	NOT-FOUND
-HAVAL-128-4 $haval$	NOT-DETECTED
+HAVAL-128-4 $haval$	CRACKED
 HAVAL-256-3	NOT-FOUND
-HAVAL-256-3 $haval$	NOT-DETECTED
+HAVAL-256-3 $haval$	CRACKED
 hdaa $response$	NOT-DETECTED
 hMailServer	CRACKED
 hsrp $hsrp$	NOT-DETECTED
@@ -226,7 +226,7 @@ PuTTY $putty$	CRACKED
 pwsafe $pwsafe$	CRACKED
 qnx	CRACKED
 RACF $racf$	CRACKED
-RACF-KDFAES $racf$	TIMEOUT
+RACF-KDFAES $racf$	CRACKED
 radius $radius$	NOT-DETECTED
 RAdmin $radmin2$	CRACKED
 RAKP $rakp$	CRACKED
@@ -505,21 +505,21 @@ dynamic_120 $dynamic_120$	CRACKED
 dynamic_130 $dynamic_130$	CRACKED
 dynamic_140 $dynamic_140$	CRACKED
 dynamic_150 $dynamic_150$	CRACKED
-dynamic_160 $dynamic_160$	NOT-DETECTED
-dynamic_170 $dynamic_170$	NOT-DETECTED
-dynamic_180 $dynamic_180$	NOT-DETECTED
-dynamic_190 $dynamic_190$	NOT-DETECTED
-dynamic_200 $dynamic_200$	NOT-DETECTED
-dynamic_210 $dynamic_210$	NOT-DETECTED
-dynamic_220 $dynamic_220$	NOT-DETECTED
-dynamic_230 $dynamic_230$	NOT-DETECTED
-dynamic_240 $dynamic_240$	NOT-DETECTED
-dynamic_250 $dynamic_250$	NOT-DETECTED
-dynamic_260 $dynamic_260$	NOT-DETECTED
-dynamic_270 $dynamic_270$	NOT-DETECTED
-dynamic_280 $dynamic_280$	NOT-DETECTED
-dynamic_290 $dynamic_290$	NOT-DETECTED
-dynamic_300 $dynamic_300$	NOT-DETECTED
+dynamic_160 $dynamic_160$	CRACKED
+dynamic_170 $dynamic_170$	CRACKED
+dynamic_180 $dynamic_180$	CRACKED
+dynamic_190 $dynamic_190$	CRACKED
+dynamic_200 $dynamic_200$	CRACKED
+dynamic_210 $dynamic_210$	CRACKED
+dynamic_220 $dynamic_220$	CRACKED
+dynamic_230 $dynamic_230$	CRACKED
+dynamic_240 $dynamic_240$	CRACKED
+dynamic_250 $dynamic_250$	CRACKED
+dynamic_260 $dynamic_260$	CRACKED
+dynamic_270 $dynamic_270$	CRACKED
+dynamic_280 $dynamic_280$	CRACKED
+dynamic_290 $dynamic_290$	CRACKED
+dynamic_300 $dynamic_300$	CRACKED
 dynamic_310 $dynamic_310$	CRACKED
 dynamic_320 $dynamic_320$	NOT-DETECTED
 dynamic_330 $dynamic_330$	CRACKED
