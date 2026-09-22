@@ -205,7 +205,7 @@ PBKDF2-HMAC-SHA512	CRACKED
 PBKDF2-HMAC-SHA512 $ml$	CRACKED
 PDF $pdf$	CRACKED
 PEM $pem$	CRACKED
-pfx $pfxng$	NOT-DETECTED
+pfx $pfxng$	CRACKED
 pgpdisk $pgpdisk$	NOT-DETECTED
 pgpsda $pgpsda$	NOT-DETECTED
 pgpwde $pgpwde$	NOT-DETECTED
@@ -305,7 +305,7 @@ tc_ripemd160	CRACKED
 tc_ripemd160boot	CRACKED
 tc_sha512	CRACKED
 tc_whirlpool	CRACKED
-vdi $vdi$	NOT-DETECTED
+vdi $vdi$	CRACKED
 OpenVMS $v$	NOT-DETECTED
 vmx $vmx$	CRACKED
 VNC $vnc$	CRACKED
@@ -411,7 +411,7 @@ PBKDF2-HMAC-SHA512-opencl $pbkdf2-hmac-sha512$	CRACKED
 PBKDF2-HMAC-SHA512-opencl	CRACKED
 PBKDF2-HMAC-SHA512-opencl $ml$	CRACKED
 pem-opencl $pem$	CRACKED
-pfx-opencl $pfxng$	NOT-DETECTED
+pfx-opencl $pfxng$	CRACKED
 pgpdisk-opencl $pgpdisk$	NOT-DETECTED
 pgpsda-opencl $pgpsda$	NOT-DETECTED
 pgpwde-opencl $pgpwde$	NOT-DETECTED

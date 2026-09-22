@@ -493,6 +493,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"tcp-md5", "TCP MD5 signature (RFC 2385, BGP), John $tcpmd5$"},
 			{"eigrp", "EIGRP MD5 routing authentication, John $eigrp$"},
 			{"jks-keystore", "Java keystore password (the store's own SHA-1), John keystore"},
+			{"vdi", "VirtualBox encrypted disk image, John vdi"},
 			{"oracle-o5logon", "Oracle 11g captured logon exchange, John o5logon"},
 			{"krb5-key", "Kerberos KDC long-term AES key, John $krb17$ / $krb18$"},
 			{"net-ah", "IPsec AH HMAC-MD5-96 / HMAC-SHA1-96, John $net-ah$"},

@@ -555,3 +555,42 @@ func TestZeroedDigestShapes(t *testing.T) {
 		}
 	}
 }
+
+// TestDiskAndCertificateRecords covers a VirtualBox image and John's PKCS#12
+// spelling.
+func TestDiskAndCertificateRecords(t *testing.T) {
+	for _, tc := range []struct{ typ, format string }{
+		{"vdi", "vdi $vdi$"},
+		{"pfx", "pfx $pfxng$"},
+	} {
+		record, pass := johnVector(t, tc.format)
+		if types := detectHashTypes(record); !containsString(types, tc.typ) {
+			t.Errorf("%s: detectHashTypes did not offer %s: %v", tc.format, tc.typ, types)
+		}
+		if ok, err := verifyCandidate(pass, record, tc.typ, "", "prefix"); err != nil || !ok {
+			t.Errorf("%s: rejected the right password: ok=%v err=%v", tc.format, ok, err)
+		}
+		if bad, _ := verifyCandidate("x"+pass, record, tc.typ, "", "prefix"); bad {
+			t.Errorf("%s: accepted a wrong password", tc.format)
+		}
+	}
+
+	// A VirtualBox image costs BOTH iteration counts per candidate, because
+	// the password protects a key and the key is what the stored hash covers.
+	// Pin that the second derivation is really consulted: a record whose
+	// final hash is wrong must not verify even though the first half is
+	// untouched.
+	record, pass := johnVector(t, "vdi $vdi$")
+	r, err := parseVDI(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.keyIter < 1 || r.endIter < 1 {
+		t.Error("both iteration counts must be read")
+	}
+	f := strings.Split(record, "$")
+	f[len(f)-1] = strings.Repeat("00", len(r.want))
+	if bad, _ := verifyVDI(strings.Join(f, "$"), pass); bad {
+		t.Error("verified a record whose final hash is wrong")
+	}
+}

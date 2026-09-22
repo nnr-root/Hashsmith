@@ -111,7 +111,50 @@ type pkcs12Hash struct {
 	data       []byte
 }
 
+// johnPFXNGRecord reads John's spelling of the same MAC check.
+//
+//	$pfxng$<mac algorithm>$<mac length>$<iterations>$<salt length>$<salt>$<data>$<mac>
+//
+// The fields are the same ones, in a different order and with their lengths
+// stated beside them; the algorithm is a number rather than a name, and the
+// MAC's own length says which hash it is, so the two are required to agree.
+func johnPFXNGRecord(target string) (string, bool) {
+	const prefix = "$pfxng$"
+	t := strings.TrimSpace(target)
+	if !strings.HasPrefix(t, prefix) {
+		return "", false
+	}
+	f := strings.Split(t[len(prefix):], "$")
+	if len(f) != 7 {
+		return "", false
+	}
+	macLen, err := strconv.Atoi(f[1])
+	if err != nil {
+		return "", false
+	}
+	name, ok := map[int]string{20: "sha1", 32: "sha256", 48: "sha384", 64: "sha512"}[macLen]
+	if !ok || len(f[6]) != macLen*2 {
+		return "", false
+	}
+	saltLen, err := strconv.Atoi(f[3])
+	if err != nil || len(f[4]) != saltLen*2 {
+		return "", false
+	}
+	if _, err := strconv.Atoi(f[2]); err != nil {
+		return "", false
+	}
+	for _, x := range []string{f[4], f[5], f[6]} {
+		if x == "" || !isHex(x) {
+			return "", false
+		}
+	}
+	return "$pfx$*" + name + "*" + f[2] + "*" + f[4] + "*" + f[6] + "*" + f[5], true
+}
+
 func parsePKCS12Hash(target string) (*pkcs12Hash, error) {
+	if rewritten, ok := johnPFXNGRecord(target); ok {
+		target = rewritten
+	}
 	if !strings.HasPrefix(target, "$pfx$*") {
 		return nil, errors.New("invalid PKCS#12 hash (missing $pfx$ prefix)")
 	}
