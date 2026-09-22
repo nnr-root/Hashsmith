@@ -112,9 +112,9 @@ krb5asrep	NOT-DETECTED
 krb5asrep $krb5asrep$	CRACKED
 krb5pa-sha1 $krb5pa$	CRACKED
 krb5tgs $krb5tgs$	CRACKED
-krb5-17 $krb17$	NOT-DETECTED
+krb5-17 $krb17$	CRACKED
 krb5-18	NOT-DETECTED
-krb5-18 $krb18$	NOT-DETECTED
+krb5-18 $krb18$	CRACKED
 krb5-3 $krb3$	NOT-DETECTED
 kwallet $kwallet$	NOT-DETECTED
 lp $lp$	NOT-DETECTED
@@ -142,7 +142,7 @@ MSCHAPv2	CRACKED
 mschapv2-naive	CRACKED
 mschapv2-naive $mschapv2$	CRACKED
 krb5pa-md5 $krb5pa$	CRACKED
-krb5pa-md5 $mskrb5$	NOT-DETECTED
+krb5pa-md5 $mskrb5$	CRACKED
 mssql	CRACKED
 mssql05	CRACKED
 mssql12	CRACKED
@@ -384,7 +384,7 @@ keychain-opencl $keychain$	CRACKED
 keyring-opencl $keyring$	NOT-DETECTED
 keystore-opencl $keystore$	NOT-DETECTED
 krb5pa-md5-opencl $krb5pa$	CRACKED
-krb5pa-md5-opencl $mskrb5$	NOT-DETECTED
+krb5pa-md5-opencl $mskrb5$	CRACKED
 krb5pa-sha1-opencl $krb5pa$	CRACKED
 krb5asrep-aes-opencl $krb5asrep$	CRACKED
 lp-opencl $lp$	NOT-DETECTED

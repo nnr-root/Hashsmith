@@ -286,3 +286,75 @@ func TestAHIsTruncated(t *testing.T) {
 		t.Error("the record holds a whole MAC, so the truncation is not real")
 	}
 }
+
+// TestKerberosDatabaseKeys covers the long-term keys a KDC stores, which are
+// the key itself rather than something encrypted with it.
+func TestKerberosDatabaseKeys(t *testing.T) {
+	for _, tc := range []struct {
+		format string
+		size   int
+	}{
+		{"krb5-17 $krb17$", 16},
+		{"krb5-18 $krb18$", 32},
+	} {
+		record, pass := johnVector(t, tc.format)
+		if types := detectHashTypes(record); !containsString(types, "krb5-key") {
+			t.Errorf("%s: detectHashTypes did not offer krb5-key: %v", tc.format, types)
+		}
+		etype, salt, key, err := krbDBKeyFields(record)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.format, err)
+		}
+		if len(key) != tc.size {
+			t.Errorf("%s: key is %d bytes, want %d", tc.format, len(key), tc.size)
+		}
+		// The salt is the principal with no separator, so it is neither hex
+		// nor random — worth pinning, because reading it as either would
+		// silently change every derivation.
+		if salt == "" || isHex(salt) {
+			t.Errorf("%s: salt %q does not look like a principal", tc.format, salt)
+		}
+		if ok, err := verifyKrbDBKey(record, pass); err != nil || !ok {
+			t.Errorf("%s: rejected the right password: ok=%v err=%v", tc.format, ok, err)
+		}
+		if bad, _ := verifyKrbDBKey(record, pass+"x"); bad {
+			t.Errorf("%s: accepted a wrong password", tc.format)
+		}
+		// The two etypes differ only in key length, so a record must not
+		// verify under the other one's reading.
+		other := map[string]string{"krb17": "krb18", "krb18": "krb17"}[etype]
+		swapped := strings.Replace(record, "$"+etype+"$", "$"+other+"$", 1)
+		if _, err := verifyKrbDBKey(swapped, pass); err == nil {
+			t.Errorf("%s: read as %s as well", tc.format, other)
+		}
+	}
+}
+
+// TestMSKrb5Spelling pins John's spelling of an etype-23 pre-authentication
+// record, which writes the checksum before the encrypted timestamp where
+// hashcat runs the two together with the checksum last.
+func TestMSKrb5Spelling(t *testing.T) {
+	record, pass := johnVector(t, "krb5pa-md5 $mskrb5$")
+	if types := detectHashTypes(record); !containsString(types, "krb5pa") {
+		t.Errorf("detectHashTypes did not offer krb5pa: %v", types)
+	}
+	rewritten, ok := johnMSKrb5Record(record)
+	if !ok {
+		t.Fatal("the record did not read")
+	}
+	if !strings.HasPrefix(rewritten, "$krb5pa$23$") {
+		t.Errorf("rewritten as %q", rewritten)
+	}
+	if ok, err := verifyKrb5(record, pass); err != nil || !ok {
+		t.Errorf("rejected the right password: ok=%v err=%v", ok, err)
+	}
+	// A record whose fields are the wrong length is not this format.
+	for _, bad := range []string{
+		"$mskrb5$$$958db4ddb514a6cc8be1b1ccf82b0191",
+		"$mskrb5$$$958db4ddb514a6cc8be1b1ccf82b01$0904",
+	} {
+		if isJohnMSKrb5(bad) {
+			t.Errorf("%q: claimed", bad)
+		}
+	}
+}

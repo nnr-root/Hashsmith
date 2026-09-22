@@ -2522,6 +2522,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyPHPS(targetHash, candidate)
 	case "dynamic":
 		return verifyJohnDynamic(targetHash, candidate)
+	case "krb5-key":
+		return verifyKrbDBKey(targetHash, candidate)
 	case "net-ah":
 		return verifyNetAH(targetHash, candidate)
 	case "rsvp":

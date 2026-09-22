@@ -24,6 +24,9 @@ import (
 // verifyKrb5 dispatches on the $krb5asrep$ / $krb5tgs$ / $krb5pa$ prefix. AES
 // etypes (17/18) route to the AES-CTS engine; etype 23 is RC4-HMAC below.
 func verifyKrb5(targetHash, candidate string) (bool, error) {
+	if rewritten, ok := johnMSKrb5Record(targetHash); ok {
+		targetHash = rewritten
+	}
 	if strings.HasPrefix(targetHash, "$krb5pa$23$") {
 		return verifyKrb5PreauthRC4(targetHash, candidate)
 	}
