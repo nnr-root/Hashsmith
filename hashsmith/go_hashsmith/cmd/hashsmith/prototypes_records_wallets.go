@@ -147,7 +147,7 @@ func walletsPrototypes() []hashid.Prototype {
 		// in the encoding that expression produces. All three are structural,
 		// so TierSignature.
 		predicateProto(isJohnDynamic, "John dynamic expression format", hashid.TierSignature,
-			"record prefix $dynamic_<n>$ naming a known expression",
+			"record prefix $dynamic_<n>$, or @dynamic=<expression>@, naming an expression this engine can run",
 			4, "the $dynamic_<n>$ spelling is John's own; the schemes behind it are common, but a record is usually met in the tool's native spelling instead", "dynamic"),
 		// isPHPS is a literal prefix check ("$PHPS$"), nothing more, so
 		// TierSignature.

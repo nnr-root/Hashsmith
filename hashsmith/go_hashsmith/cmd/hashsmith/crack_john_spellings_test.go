@@ -52,3 +52,100 @@ func TestJohnSpellingsRefused(t *testing.T) {
 		}
 	}
 }
+
+// TestMacOSLegacyHashes covers the two hashes macOS used before PBKDF2. Both
+// are a salt and a digest run together, so the length is the signature.
+func TestMacOSLegacyHashes(t *testing.T) {
+	for _, tc := range []struct{ typ, format string }{
+		{"xsha", "xsha"},
+		{"xsha512", "xsha512"},
+		{"xsha512", "xsha512 $lion$"},
+		{"xsha512", "XSHA512-opencl"},
+		{"xsha512", "XSHA512-free-opencl $lion$"},
+	} {
+		record, pass := johnVector(t, tc.format)
+		if types := detectHashTypes(record); !containsString(types, tc.typ) {
+			t.Errorf("%s: detectHashTypes did not offer %s: %v", tc.format, tc.typ, types)
+		}
+		if ok, err := verifyCandidate(pass, record, tc.typ, "", "prefix"); err != nil || !ok {
+			t.Errorf("%s: rejected the right password: ok=%v err=%v", tc.format, ok, err)
+		}
+		if bad, _ := verifyCandidate(pass+"x", record, tc.typ, "", "prefix"); bad {
+			t.Errorf("%s: accepted a wrong password", tc.format)
+		}
+	}
+	// A record of the wrong length is not one of these, whatever it contains.
+	for _, bad := range []string{
+		"12345678F9083C7F66F46A0A102E4CC17EC08C8AF12057",    // a hex digit short
+		"12345678F9083C7F66F46A0A102E4CC17EC08C8AF120571BB", // one too many
+		"f9083c7f66f46a0a102e4cc17ec08c8af120571b",          // a bare SHA-1
+	} {
+		if isXSHA(bad) || isXSHA512(bad) {
+			t.Errorf("%q: claimed as a macOS hash", bad)
+		}
+	}
+}
+
+// TestTrueCryptJohnSpelling covers John's TrueCrypt records, which name the
+// derivation in the prefix and then write the header as hashcat does.
+func TestTrueCryptJohnSpelling(t *testing.T) {
+	for _, tc := range []struct{ typ, format string }{
+		{"truecrypt-ripemd160", "tc_ripemd160"},
+		{"truecrypt-sha512", "tc_sha512"},
+		{"truecrypt-whirlpool", "tc_whirlpool"},
+		{"truecrypt-ripemd160-boot-xts512", "tc_ripemd160boot"},
+	} {
+		record, pass := johnVector(t, tc.format)
+		if types := detectHashTypes(record); !containsString(types, tc.typ) {
+			t.Errorf("%s: detectHashTypes did not offer %s: %v", tc.format, tc.typ, types)
+		}
+		if ok, err := verifyCandidate(pass, record, tc.typ, "", "prefix"); err != nil || !ok {
+			t.Errorf("%s: rejected the right password: ok=%v err=%v", tc.format, ok, err)
+		}
+		if bad, _ := verifyCandidate(pass+"x", record, tc.typ, "", "prefix"); bad {
+			t.Errorf("%s: accepted a wrong password", tc.format)
+		}
+	}
+}
+
+// TestInlineDynamicExpression covers John's spelling for an expression given
+// on the spot rather than chosen from its table — which is also how a scheme
+// this tool has never heard of can be cracked without writing any code.
+func TestInlineDynamicExpression(t *testing.T) {
+	for _, tc := range []struct{ name, record, pass string }{
+		{"John's own vector", "@dynamic=md5($p)@900150983cd24fb0d6963f7d28e17f72", "abc"},
+		{"a salted expression", "@dynamic=sha256($s.md5($p))@7fe4ed912863a25e8209de72f19b21535951cd77be956a3cd11f3474f54c261b$NaCl", "secret"},
+	} {
+		if types := detectHashTypes(tc.record); !containsString(types, "dynamic") {
+			t.Errorf("%s: detectHashTypes did not offer dynamic: %v", tc.name, types)
+		}
+		if ok, err := verifyJohnDynamic(tc.record, tc.pass); err != nil || !ok {
+			t.Errorf("%s: rejected the right password: ok=%v err=%v", tc.name, ok, err)
+		}
+		if bad, _ := verifyJohnDynamic(tc.record, tc.pass+"x"); bad {
+			t.Errorf("%s: accepted a wrong password", tc.name)
+		}
+	}
+	// An expression naming a hash this engine does not have is refused rather
+	// than claimed, exactly as a numbered record naming one would be.
+	if isJohnDynamic("@dynamic=tiger($p)@c099bbd00faf33027ab55bfb4c3a67f19ecd8eb950078ed2") {
+		t.Error("claimed an expression it cannot run")
+	}
+	if isJohnDynamic("@dynamic=md5($p)900150983cd24fb0d6963f7d28e17f72") {
+		t.Error("claimed an expression that was never closed")
+	}
+}
+
+// TestCisco4Envelope covers John's $cisco4$ spelling of a Cisco type 4 hash.
+func TestCisco4Envelope(t *testing.T) {
+	record, pass := johnVector(t, "Raw-SHA256 $cisco4$")
+	if types := detectHashTypes(record); !containsString(types, "cisco4") {
+		t.Errorf("detectHashTypes did not offer cisco4: %v", types)
+	}
+	if ok, err := verifyCandidate(pass, record, "cisco4", "", "prefix"); err != nil || !ok {
+		t.Errorf("rejected the right password: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyCandidate(pass+"x", record, "cisco4", "", "prefix"); bad {
+		t.Error("accepted a wrong password")
+	}
+}

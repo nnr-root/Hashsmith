@@ -54,7 +54,12 @@ import (
 	xsha3 "golang.org/x/crypto/sha3"
 )
 
-const johnDynamicPrefix = "$dynamic_"
+const (
+	johnDynamicPrefix = "$dynamic_"
+	// John's spelling for an expression given on the spot rather than chosen
+	// from its table.
+	johnDynamicInlinePrefix = "@dynamic="
+)
 
 // johnDynamicMaxField bounds every field read out of a record, so a malformed
 // line cannot ask for an unbounded allocation.
@@ -428,34 +433,53 @@ type dynCompiled struct {
 	err   error
 }
 
-var dynCompiledCache sync.Map // int -> *dynCompiled
+var dynCompiledCache sync.Map // expression string -> *dynCompiled
 
-func compileDynamic(number int) *dynCompiled {
-	if c, ok := dynCompiledCache.Load(number); ok {
+// compileDynamicExpr parses one expression, once. A crack runs the same
+// expression for every candidate, so the parse is cached by its text — which
+// also means a record carrying its own expression costs no more than a
+// numbered one.
+func compileDynamicExpr(spec string) *dynCompiled {
+	if c, ok := dynCompiledCache.Load(spec); ok {
 		return c.(*dynCompiled)
 	}
 	c := &dynCompiled{enc: 'h'}
-	spec, ok := johnDynamicSpecs[number]
-	if !ok {
-		c.err = errors.New("dynamic_" + strconv.Itoa(number) + " is not a format John defines")
-	} else if terms, err := parseDynExpr(spec); err != nil {
+	if terms, err := parseDynExpr(spec); err != nil {
 		c.err = err
 	} else if len(terms) != 1 || terms[0].kind != dynCall {
-		c.err = errors.New("dynamic_" + strconv.Itoa(number) + " is not a single digest")
+		c.err = errors.New("a dynamic expression must be one digest over its operands, not " + spec)
 	} else {
 		c.terms, c.enc, c.outer = terms, terms[0].enc, terms[0].fn
 	}
-	dynCompiledCache.Store(number, c)
+	dynCompiledCache.Store(spec, c)
 	return c
+}
+
+func compileDynamic(number int) *dynCompiled {
+	spec, ok := johnDynamicSpecs[number]
+	if !ok {
+		return &dynCompiled{enc: 'h',
+			err: errors.New("dynamic_" + strconv.Itoa(number) + " is not a format John defines")}
+	}
+	return compileDynamicExpr(spec)
 }
 
 // ── records ───────────────────────────────────────────────────────────────────
 
 // dynRecord is one parsed $dynamic_N$ line.
 type dynRecord struct {
-	number int
+	number int    // the format number, or -1 when the record carries its own
+	expr   string // the expression itself, for a record that names one
 	digest string
 	env    dynEnv
+}
+
+// compiled returns the expression this record asks for.
+func (r *dynRecord) compiled() *dynCompiled {
+	if r.number < 0 {
+		return compileDynamicExpr(r.expr)
+	}
+	return compileDynamic(r.number)
 }
 
 // parseJohnDynamic reads a record. Beyond the number and the stored digest, a
@@ -469,27 +493,45 @@ type dynRecord struct {
 func parseJohnDynamic(target string) (*dynRecord, error) {
 	s := strings.TrimSpace(target)
 	var login string
-	if i := strings.Index(s, ":"+johnDynamicPrefix); i >= 0 {
-		login, s = s[:i], s[i+1:]
+	for _, prefix := range []string{":" + johnDynamicPrefix, ":" + johnDynamicInlinePrefix} {
+		if i := strings.Index(s, prefix); i >= 0 {
+			login, s = s[:i], s[i+1:]
+			break
+		}
 	}
-	if !strings.HasPrefix(s, johnDynamicPrefix) {
+	// A record may name its expression instead of a number, which is how
+	// John lets one be given on the spot rather than chosen from its table:
+	// "@dynamic=md5($p)@<digest>". The expression is read by the same parser
+	// and compiled by the same cache, so nothing else changes.
+	var number int
+	var expr, rest string
+	switch {
+	case strings.HasPrefix(s, johnDynamicInlinePrefix):
+		body := s[len(johnDynamicInlinePrefix):]
+		end := strings.IndexByte(body, '@')
+		if end <= 0 {
+			return nil, errors.New("an inline dynamic expression must be closed with '@'")
+		}
+		number, expr, rest = -1, body[:end], body[end+1:]
+	case strings.HasPrefix(s, johnDynamicPrefix):
+		body := s[len(johnDynamicPrefix):]
+		end := strings.IndexByte(body, '$')
+		if end <= 0 {
+			return nil, errors.New("a John dynamic record must name a format number")
+		}
+		n, err := strconv.Atoi(body[:end])
+		if err != nil || n < 0 {
+			return nil, errors.New("invalid John dynamic format number")
+		}
+		number, rest = n, body[end+1:]
+	default:
 		return nil, errors.New("not a John dynamic record")
 	}
-	s = s[len(johnDynamicPrefix):]
-	end := strings.IndexByte(s, '$')
-	if end <= 0 {
-		return nil, errors.New("a John dynamic record must name a format number")
-	}
-	number, err := strconv.Atoi(s[:end])
-	if err != nil || number < 0 {
-		return nil, errors.New("invalid John dynamic format number")
-	}
-	rest := s[end+1:]
 	if len(rest) > johnDynamicMaxField {
 		return nil, errors.New("John dynamic record is too long")
 	}
 
-	rec := &dynRecord{number: number}
+	rec := &dynRecord{number: number, expr: expr}
 	rec.env.user = []byte(login)
 
 	tail := ""
@@ -571,7 +613,7 @@ func isJohnDynamic(target string) bool {
 	if err != nil {
 		return false
 	}
-	c := compileDynamic(rec.number)
+	c := rec.compiled()
 	if c.err != nil {
 		return false
 	}
@@ -588,7 +630,7 @@ func verifyJohnDynamic(target, candidate string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	c := compileDynamic(rec.number)
+	c := rec.compiled()
 	if c.err != nil {
 		return false, c.err
 	}

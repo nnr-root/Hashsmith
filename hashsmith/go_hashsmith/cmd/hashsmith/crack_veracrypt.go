@@ -203,6 +203,13 @@ func parseCryptHeader(targetHash string) ([]byte, error) {
 	}
 	t = strings.TrimPrefix(t, "veracrypt:")
 	t = strings.TrimPrefix(t, "truecrypt:")
+	// John names the PRF in the prefix and then writes the header exactly as
+	// hashcat does, only without the split into salt and body:
+	// "truecrypt_SHA_512$<512 bytes of hex>". The name is what selects the
+	// type, so by the time the header is parsed it has already been used.
+	if name, rest, ok := strings.Cut(t, "$"); ok && strings.HasPrefix(name, "truecrypt_") {
+		t = rest
+	}
 	return decodeHexHeader(t)
 }
 

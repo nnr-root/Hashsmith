@@ -320,6 +320,8 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"mediawiki", "MediaWiki ($B$)"},
 			{"vbulletin", "vBulletin (md5:salt)"},
 			{"redmine", "Redmine (sha1:salt)"},
+			{"xsha", "macOS 10.4-10.6 salted SHA-1, Hashcat 122 / John xsha"},
+			{"xsha512", "macOS 10.7 salted SHA-512, Hashcat 1722 / John xsha512"},
 			{"cisco8", "Cisco-IOS type 8 ($8$, PBKDF2-SHA256)"},
 			{"cisco9", "Cisco-IOS type 9 ($9$, scrypt)"},
 			{"cisco4", "Cisco-IOS type 4 (SHA-256 + Cisco Base64)"},

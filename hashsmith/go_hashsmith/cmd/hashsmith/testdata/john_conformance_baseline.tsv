@@ -48,7 +48,7 @@ Blockchain $blockchain$	CRACKED
 chap $chap$	CRACKED
 Clipperz $clipperz$	NOT-DETECTED
 cloudkeychain $cloudkeychain$	NOT-DETECTED
-dynamic=md5($p)	NOT-DETECTED
+dynamic=md5($p)	CRACKED
 cq $cq$	NOT-DETECTED
 CRC32 $crc32$	CRACKED
 CRC32 $crc32c$	CRACKED
@@ -255,7 +255,7 @@ Raw-SHA224	CRACKED
 Raw-SHA224 $sha224$	CRACKED
 Raw-SHA256	CRACKED
 Raw-SHA256 $sha256$	CRACKED
-Raw-SHA256 $cisco4$	NOT-DETECTED
+Raw-SHA256 $cisco4$	CRACKED
 Raw-SHA3	CRACKED
 Raw-SHA384	CRACKED
 Raw-SHA384 $sha384$	CRACKED
@@ -298,13 +298,13 @@ tacacs-plus $tacacs-plus$	CRACKED
 tcp-md5 $tcpmd5$	CRACKED
 telegram $telegram$	CRACKED
 tezos $tezos$	NOT-DETECTED
-Tiger	NOT-DETECTED
+Tiger	NOT-FOUND
 Tiger $tiger$	NOT-DETECTED
-tc_aes_xts	NOT-DETECTED
-tc_ripemd160	NOT-DETECTED
-tc_ripemd160boot	NOT-DETECTED
-tc_sha512	NOT-DETECTED
-tc_whirlpool	NOT-DETECTED
+tc_aes_xts	CRACKED
+tc_ripemd160	CRACKED
+tc_ripemd160boot	CRACKED
+tc_sha512	CRACKED
+tc_whirlpool	CRACKED
 vdi $vdi$	NOT-DETECTED
 OpenVMS $v$	NOT-DETECTED
 vmx $vmx$	CRACKED
@@ -322,9 +322,9 @@ wpapsk	CRACKED
 wpapsk-pmk $wpapsk$	NOT-DETECTED
 wpapsk-pmk	NOT-FOUND
 xmpp-scram $xmpp-scram$	CRACKED
-xsha	NOT-DETECTED
-xsha512	NOT-DETECTED
-xsha512 $lion$	NOT-DETECTED
+xsha	CRACKED
+xsha512	CRACKED
+xsha512 $lion$	CRACKED
 ZIP $zip2$	CRACKED
 ZipMonster $zipmonster$	NOT-DETECTED
 ZipMonster	NOT-FOUND
@@ -348,7 +348,7 @@ PBKDF2-HMAC-SHA1-opencl	CRACKED
 PBKDF2-HMAC-SHA1-opencl $p5k2$	NOT-DETECTED
 rar-opencl $rar3$	CRACKED
 RAR5-opencl $rar5$	CRACKED
-TrueCrypt-opencl	NOT-DETECTED
+TrueCrypt-opencl	CRACKED
 lotus5-opencl	NOT-FOUND
 AndroidBackup-opencl $ab$	CRACKED
 agilekeychain-opencl $agilekeychain$	NOT-DETECTED
@@ -427,7 +427,7 @@ raw-SHA1-opencl	CRACKED
 raw-SHA1-opencl $dynamic_26$	CRACKED
 raw-SHA256-opencl	CRACKED
 raw-SHA256-opencl $sha256$	CRACKED
-raw-SHA256-opencl $cisco4$	NOT-DETECTED
+raw-SHA256-opencl $cisco4$	CRACKED
 raw-SHA512-free-opencl	CRACKED
 raw-SHA512-free-opencl $sha512$	CRACKED
 raw-SHA512-opencl	CRACKED
@@ -448,10 +448,10 @@ wpapsk-opencl $wpapsk$	NOT-DETECTED
 wpapsk-opencl	CRACKED
 wpapsk-pmk-opencl $wpapsk$	NOT-DETECTED
 wpapsk-pmk-opencl	NOT-FOUND
-XSHA512-free-opencl	NOT-DETECTED
-XSHA512-free-opencl $lion$	NOT-DETECTED
-XSHA512-opencl	NOT-DETECTED
-XSHA512-opencl $lion$	NOT-DETECTED
+XSHA512-free-opencl	CRACKED
+XSHA512-free-opencl $lion$	CRACKED
+XSHA512-opencl	CRACKED
+XSHA512-opencl $lion$	CRACKED
 ZIP-opencl $zip2$	CRACKED
 dynamic_0 $dynamic_0$	CRACKED
 dynamic_1 $dynamic_1$	CRACKED

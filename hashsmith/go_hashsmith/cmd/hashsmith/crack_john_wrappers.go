@@ -53,6 +53,9 @@ var johnWrappers = []struct {
 	// offered; the payload length settles it at verification.
 	{"$ripemd$", []string{"ripemd128", "ripemd160"}},
 	// Structured records whose payload this tool reads under another name.
+	{"$cisco4$", []string{"cisco4"}},
+	// "Lion" is 10.7, the one release that used a salted SHA-512.
+	{"$LION$", []string{"xsha512"}},
 	{"$oracle12c$", []string{"oracle12c"}},
 	{"$django$*1*", []string{"django"}},
 	{"$lm$", []string{"lm"}},

@@ -168,6 +168,42 @@ func saltedPrototypes() []hashid.Prototype {
 			"an AES-encrypted (etype 17/18) service ticket only appears once RC4 has been disabled for the target SPN's service account, a minority of AD environments today", "krb5tgs"),
 		hasPrefixProto("$krb5pa$", "Kerberos 5 pre-authentication", 6,
 			"$krb5pa$ pre-authentication hashes require an active network capture of the AS-REQ exchange rather than an LDAP/DCSync-style offline dump, a narrower collection scenario than AS-REP or Kerberoast hashes above", "krb5pa"),
+		// John's TrueCrypt spelling names the PRF in the prefix, so each of
+		// these resolves to one type rather than to the generic reader that
+		// tries all three derivations per candidate.
+		hasPrefixProto("truecrypt_RIPEMD_160_BOOT$", "TrueCrypt boot volume, RIPEMD-160 (John)", 8,
+			"a boot-mode header comes from a system-encrypted volume, which is a smaller share of TrueCrypt volumes than data volumes", "truecrypt-ripemd160-boot-xts512"),
+		hasPrefixProto("truecrypt_RIPEMD_160$", "TrueCrypt, RIPEMD-160 (John)", 20,
+			"RIPEMD-160 was TrueCrypt's default derivation, so most volumes in circulation use it", "truecrypt-ripemd160"),
+		hasPrefixProto("truecrypt_SHA_512$", "TrueCrypt, SHA-512 (John)", 12,
+			"SHA-512 was an option rather than the default, chosen by users who changed it deliberately", "truecrypt-sha512"),
+		hasPrefixProto("truecrypt_WHIRLPOOL$", "TrueCrypt, Whirlpool (John)", 8,
+			"Whirlpool was the least chosen of TrueCrypt's three derivations", "truecrypt-whirlpool"),
+		// The two macOS hashes that predate PBKDF2 are a salt and a digest
+		// run together, so their length is the whole signature — and a length
+		// is not proof. Forty-eight hex characters is also a Tiger-192
+		// digest, and neither tool can tell those apart either: hashcat wants
+		// -m 122 and John wants --format=xsha. So these are offered rather
+		// than asserted, and left NOT exclusive, so that naming this shape
+		// does not silence whatever else could claim it.
+		{
+			Types: []string{"xsha"}, Display: "macOS 10.4-10.6 salted SHA-1",
+			Tier: hashid.TierStructural,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "48 hex characters: a four-byte salt followed by a SHA-1 — the length of a Tiger-192 digest too", isXSHA(in.Normalized)
+			},
+			Prevalence: 10,
+			Rationale:  "these come from machines running 10.6 or older, or from backups of them, rather than from anything current",
+		},
+		{
+			Types: []string{"xsha512"}, Display: "macOS 10.7 salted SHA-512",
+			Tier: hashid.TierStructural,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "136 hex characters: a four-byte salt followed by a SHA-512", isXSHA512(in.Normalized)
+			},
+			Prevalence: 10,
+			Rationale:  "10.7 used this for one release before 10.8 replaced it with PBKDF2, so the window it comes from is narrow",
+		},
 		// John's envelopes for the same four exchanges. Each is a literal
 		// prefix plus a field count that has to be right, so a record that
 		// merely starts with the name is not claimed.

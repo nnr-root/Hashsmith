@@ -2522,6 +2522,10 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyPHPS(targetHash, candidate)
 	case "dynamic":
 		return verifyJohnDynamic(targetHash, candidate)
+	case "xsha":
+		return verifyXSHA(targetHash, candidate)
+	case "xsha512":
+		return verifyXSHA512(targetHash, candidate)
 	case "netlm":
 		return verifyNetLM(targetHash, candidate)
 	case "nethalflm":
