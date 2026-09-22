@@ -343,3 +343,35 @@ func TestAS400JohnSpellings(t *testing.T) {
 		t.Errorf("hashcat's AS/400 DES record regressed: ok=%v err=%v", ok, err)
 	}
 }
+
+// TestNetNTLMJohnSpellings pins John's two NetNTLM forms.
+//
+// The envelope form matters most for NTLMv2: its identity is upper(user)
+// plus domain, and John stores it ALREADY CONCATENATED. Re-uppercasing that
+// would be wrong, because the spec uppercases the user and takes the domain
+// verbatim, so an identity with a lower-case domain half must not be folded.
+func TestNetNTLMJohnSpellings(t *testing.T) {
+	for _, tc := range []struct{ name, record, password, typ string }{
+		{"v1 envelope", "$NETNTLM$1122334455667788$BFCCAF26128EC95F9999C9792F49434267A1D9B0EF89BFFB", "g3rg3g3rg3g3rg3", "netntlmv1"},
+		{"v2 envelope", "$NETNTLMv2$NTLMV2TESTWORKGROUP$1122334455667788$07659A550D5E9D02996DFD95C87EC1D5$0101000000000000006CF6385B74CA01B3610B02D99732DD000000000200120057004F0052004B00470052004F00550050000100200044004100540041002E00420049004E0043002D0053004500430055005200490000000000", "password", "netntlmv2"},
+		// John's pwdump-shaped form writes the literal text "lm-hash" where
+		// it has no LM response. That field is only consulted to detect
+		// extended session security, so the placeholder is a real record.
+		{"v1 pwdump, lm placeholder", "User:::lm-hash:BFCCAF26128EC95F9999C9792F49434267A1D9B0EF89BFFB:1122334455667788", "g3rg3g3rg3g3rg3", "netntlmv1"},
+	} {
+		if types := detectHashTypes(tc.record); !containsString(types, tc.typ) {
+			t.Errorf("%s: detectHashTypes did not offer %q: %v", tc.name, tc.typ, types)
+		}
+		ok, err := verifyCandidate(tc.password, tc.record, tc.typ, "", "prefix")
+		if err != nil || !ok {
+			t.Errorf("%s: rejected the right password: ok=%v err=%v", tc.name, ok, err)
+		}
+		if bad, _ := verifyCandidate(tc.password+"x", tc.record, tc.typ, "", "prefix"); bad {
+			t.Errorf("%s: accepted a wrong password", tc.name)
+		}
+	}
+	// hashcat's own spelling must keep working.
+	if ok, err := verifyNetNTLMv2("0UL5G37JOI0SX::6VB1IS0KA74:ebe1afa18b7fbfa6:aab8bf8675658dd2a939458a1077ba08:010100000000000031c8aa092510945398b9f7b7dde1a9fb00000000f7876f2b04b700", "hashcat"); err != nil || !ok {
+		t.Errorf("hashcat's NetNTLMv2 record regressed: ok=%v err=%v", ok, err)
+	}
+}

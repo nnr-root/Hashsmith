@@ -90,6 +90,13 @@ func saltedPrototypes() []hashid.Prototype {
 		// gets only the general type. Both are plain literal-prefix checks, so
 		// TierSignature; the more specific "$23$" form is listed first so
 		// table order reproduces the nested precedence.
+		// John's self-describing NetNTLM envelopes. The pwdump-shaped form
+		// lines up with hashcat's field for field; these do not, and without a
+		// prototype they resolve to nothing at all.
+		predicateProtoShared(isJohnNetNTLMRecord, "NetNTLM (John envelope)", hashid.TierSignature,
+			"a $NETNTLM$ or $NETNTLMv2$ record with hex challenge and response fields",
+			12, "captured NetNTLM responses are routine in Windows network assessments, and John's spelling is what its tooling emits",
+			johnNetNTLMTypes()...),
 		// John's HMAC spelling, `<message>#<digest>`. The HMAC types are
 		// otherwise undetectable by design — a bare HMAC-MD5 digest is a bare
 		// MD5 digest — but this spelling carries the message with it, which

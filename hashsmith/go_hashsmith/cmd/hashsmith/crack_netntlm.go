@@ -32,12 +32,21 @@ func ntHash(password string) []byte {
 
 // isNetNTLMLine reports whether s has the shape user::domain:hex:hex:hex, the
 // common structure of both NetNTLMv1 and NetNTLMv2 captures.
+//
+// Field 3 is allowed to be a non-hex placeholder. It is the LM response, and
+// John writes the literal text "lm-hash" there when it has none to record —
+// which is a real record, not a malformed one. The last two fields still have
+// to be hex, so the shape stays specific: a line of six colon-separated parts
+// with an empty second field and two hex tails is not something else.
 func isNetNTLMLine(s string) bool {
 	f := strings.Split(s, ":")
 	if len(f) != 6 || f[1] != "" {
 		return false
 	}
-	for _, part := range f[3:] {
+	if f[3] == "" {
+		return false
+	}
+	for _, part := range f[4:] {
 		if part == "" || !isHex(part) {
 			return false
 		}
@@ -54,7 +63,15 @@ func verifyNetNTLMv2(targetHash, candidate string) (bool, error) {
 // Hashcat mode 27100 exposes this input directly, while mode 5600 calls it
 // through verifyNetNTLMv2 after deriving MD4(UTF-16LE(password)).
 func verifyNetNTLMv2NTHash(targetHash string, nt []byte) (bool, error) {
+	// John's envelope carries the identity already concatenated, so it is
+	// used verbatim; see crack_netntlm_john.go for why re-uppercasing it
+	// would be wrong.
+	identStr := ""
 	fields := strings.Split(targetHash, ":")
+	if ident, chal, proof, blob, ok := johnNetNTLMv2(strings.TrimSpace(targetHash)); ok {
+		identStr = ident
+		fields = []string{"", "", "", chal, proof, blob}
+	}
 	if len(fields) != 6 {
 		return false, errors.New("invalid NetNTLMv2 format (want user::domain:srvchal:ntproof:blob)")
 	}
@@ -75,6 +92,9 @@ func verifyNetNTLMv2NTHash(targetHash string, nt []byte) (bool, error) {
 	// NTLMv2 key = HMAC-MD5(NThash, UTF16LE(UPPER(user) + domain)).
 	// The username is uppercased; the domain is used verbatim.
 	ident := utf16le(strings.ToUpper(user) + domain)
+	if identStr != "" {
+		ident = utf16le(identStr)
+	}
 	mac := hmac.New(md5.New, nt)
 	mac.Write(ident)
 	v2key := mac.Sum(nil)
@@ -105,13 +125,23 @@ func verifyNetNTLMv1NTHash(targetHash string, nt []byte) (bool, error) {
 	if len(nt) != 16 {
 		return false, errors.New("invalid NT hash (need 16 bytes)")
 	}
+	if normalized, ok := johnNetNTLMv1(strings.TrimSpace(targetHash)); ok {
+		targetHash = normalized
+	}
 	fields := strings.Split(targetHash, ":")
 	if len(fields) != 6 {
 		return false, errors.New("invalid NetNTLMv1 format (want user::domain:lm:nt:srvchal)")
 	}
+	// John writes the literal text "lm-hash" in this field when it has no LM
+	// response to record. The field is only consulted to detect extended
+	// session security, so a placeholder reads as "no LM response" rather
+	// than as a malformed record.
 	lmResp, err := hex.DecodeString(fields[3])
 	if err != nil {
-		return false, errors.New("invalid NetNTLMv1 LM response")
+		if isHex(fields[3]) {
+			return false, errors.New("invalid NetNTLMv1 LM response")
+		}
+		lmResp = nil
 	}
 	ntResp, err := hex.DecodeString(fields[4])
 	if err != nil || len(ntResp) != 24 {
