@@ -91,7 +91,7 @@ func verifyNetNTLMv2NTHash(targetHash string, nt []byte) (bool, error) {
 
 	// NTLMv2 key = HMAC-MD5(NThash, UTF16LE(UPPER(user) + domain)).
 	// The username is uppercased; the domain is used verbatim.
-	ident := utf16le(strings.ToUpper(user) + domain)
+	ident := utf16le(netIdentity(user, domain))
 	if identStr != "" {
 		ident = utf16le(identStr)
 	}

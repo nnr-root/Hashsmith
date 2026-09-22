@@ -137,10 +137,10 @@ Mozilla $mozilla$	CRACKED
 mscash	CRACKED
 mscash2	NOT-DETECTED
 mscash2 $dcc2$	CRACKED
-MSCHAPv2 $mschapv2$	NOT-DETECTED
-MSCHAPv2	NOT-FOUND
-mschapv2-naive	NOT-FOUND
-mschapv2-naive $mschapv2$	NOT-DETECTED
+MSCHAPv2 $mschapv2$	CRACKED
+MSCHAPv2	CRACKED
+mschapv2-naive	CRACKED
+mschapv2-naive $mschapv2$	CRACKED
 krb5pa-md5 $krb5pa$	CRACKED
 krb5pa-md5 $mskrb5$	NOT-DETECTED
 mssql	CRACKED
@@ -151,12 +151,12 @@ mysqlna $mysqlna$	CRACKED
 mysql-sha1	CRACKED
 mysql	CRACKED
 net-ah $net-ah$	NOT-DETECTED
-nethalflm	NOT-DETECTED
-nethalflm $nethalflm$	NOT-DETECTED
-netlm	NOT-DETECTED
-netlm $netlm$	NOT-DETECTED
-netlmv2	NOT-FOUND
-netlmv2 $netlmv2$	NOT-DETECTED
+nethalflm	CRACKED
+nethalflm $nethalflm$	CRACKED
+netlm	CRACKED
+netlm $netlm$	CRACKED
+netlmv2	CRACKED
+netlmv2 $netlmv2$	CRACKED
 net-md5	NOT-DETECTED
 net-md5 $netmd5$	CRACKED
 netntlmv2	CRACKED
@@ -226,7 +226,7 @@ PuTTY $putty$	NOT-DETECTED
 pwsafe $pwsafe$	CRACKED
 qnx	CRACKED
 RACF $racf$	CRACKED
-RACF-KDFAES $racf$	TIMEOUT
+RACF-KDFAES $racf$	CRACKED
 radius $radius$	NOT-DETECTED
 RAdmin $radmin2$	CRACKED
 RAKP $rakp$	NOT-DETECTED
@@ -398,7 +398,7 @@ mysql-sha1-opencl	CRACKED
 notes-opencl $asn$	CRACKED
 NT-opencl	CRACKED
 NT-opencl $nt$	CRACKED
-ntlmv2-opencl	NOT-FOUND
+ntlmv2-opencl	CRACKED
 ntlmv2-opencl $netntlmv2$	CRACKED
 o5logon-opencl $o5logon$	NOT-DETECTED
 ODF-opencl $odf$	CRACKED

@@ -168,15 +168,41 @@ func saltedPrototypes() []hashid.Prototype {
 			"an AES-encrypted (etype 17/18) service ticket only appears once RC4 has been disabled for the target SPN's service account, a minority of AD environments today", "krb5tgs"),
 		hasPrefixProto("$krb5pa$", "Kerberos 5 pre-authentication", 6,
 			"$krb5pa$ pre-authentication hashes require an active network capture of the AS-REQ exchange rather than an LDAP/DCSync-style offline dump, a narrower collection scenario than AS-REP or Kerberoast hashes above", "krb5pa"),
-		// isNetNTLMLine has no fixed prefix — it only checks a 6-field colon
-		// split, an empty second field, and hex composition of the last three
-		// fields — so TierStructural. It always returns both types in this
-		// fixed order (v2 before v1), so a plain predicateProto with two
-		// Types suffices; there is no conditional output to express with
-		// Compute.
-		predicateProto(isNetNTLMLine, "NetNTLM captured challenge/response", hashid.TierStructural,
-			"user::domain:hex:hex:hex — 6 colon-delimited fields with an empty second field and the last three hex",
-			25, "NetNTLM captures from Responder/relay tooling remain a routine finding in internal network penetration tests, with NetNTLMv2 the modern default most current Windows clients negotiate", "netntlmv2", "netntlmv1"),
+		// John's envelopes for the same four exchanges. Each is a literal
+		// prefix plus a field count that has to be right, so a record that
+		// merely starts with the name is not claimed.
+		predicateProto(func(s string) bool { _, ok := johnNetEnvelope(s, "$NETLM$", 2); return ok },
+			"NetLM captured LM response (John $NETLM$)", hashid.TierSignature,
+			"record prefix $NETLM$ carrying a challenge and a 24-byte response",
+			8, "an LM response means a client old enough to still send one, which on a modern network is a misconfiguration rather than the default", "netlm"),
+		predicateProto(func(s string) bool { _, ok := johnNetEnvelope(s, "$NETHALFLM$", 2); return ok },
+			"NetHalfLM captured half response (John $NETHALFLM$)", hashid.TierSignature,
+			"record prefix $NETHALFLM$ carrying a challenge and a response",
+			6, "the half response is what a capture yields when only the first eight bytes survived, a narrower case than the full one", "nethalflm"),
+		predicateProto(func(s string) bool { _, ok := johnNetEnvelope(s, "$NETLMv2$", 4); return ok },
+			"NetLMv2 captured LMv2 response (John $NETLMv2$)", hashid.TierSignature,
+			"record prefix $NETLMv2$ carrying an identity, a challenge, a response and a client challenge",
+			10, "LMv2 is sent alongside NTLMv2 by clients configured for both, so a capture of one often carries the other", "netlmv2"),
+		predicateProto(func(s string) bool { _, ok := johnNetEnvelope(s, "$MSCHAPv2$", 4); return ok },
+			"MS-CHAPv2 (John $MSCHAPv2$)", hashid.TierSignature,
+			"record prefix $MSCHAPv2$ carrying two challenges, a response and a username",
+			14, "MS-CHAPv2 is the authentication behind PPTP and behind PEAP-MSCHAPv2 on enterprise wireless, so it is captured from the air as well as from the wire", "mschapv2"),
+		// A captured line has no fixed prefix — six colon-separated fields
+		// with an empty second one — so TierStructural. Six formats share
+		// that layout and the field lengths are what tell them apart, which
+		// is a calculated answer rather than a fixed one, so Compute rather
+		// than Types. See netCaptureTypes for the readings and for what it
+		// does with a shape that leaves a real ambiguity.
+		{
+			Display: "NetNTLM captured challenge/response", Tier: hashid.TierStructural,
+			Exclusive: true,
+			Compute: func(in hashid.Input) ([]string, bool) {
+				types := netCaptureTypes(in.Normalized)
+				return types, len(types) > 0
+			},
+			Prevalence: 25,
+			Rationale:  "NetNTLM captures from Responder/relay tooling remain a routine finding in internal network penetration tests, with NetNTLMv2 the modern default most current Windows clients negotiate",
+		},
 		// reBcrypt, reArgon2, reScrypt, rePostgres and reMySQL41 are compiled
 		// regexps rather than predicate functions, but a *regexp.Regexp's
 		// MatchString method already has the func(string) bool shape

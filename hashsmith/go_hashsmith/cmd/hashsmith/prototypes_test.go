@@ -380,7 +380,8 @@ func TestTableCoverageBatchH(t *testing.T) {
 
 		{"krb5pa", `$krb5pa$17$hashcat$HASHCATDOMAIN.COM$a17776abe5383236c58582f515843e029ecbff43706d177651b7b6cdb2713b17597ddb35b1c9c470c281589fd1d51cca125414d19e40e333`, []string{"krb5pa"}},
 
-		{"netntlmv2,netntlmv1", `0UL5G37JOI0SX::6VB1IS0KA74:ebe1afa18b7fbfa6:aab8bf8675658dd2a939458a1077ba08:010100000000000031c8aa092510945398b9f7b7dde1a9fb00000000f7876f2b04b700`, []string{"netntlmv2", "netntlmv1"}},
+		// A blob longer than a challenge can only be v2, so only v2 is offered.
+		{"netntlmv2", `0UL5G37JOI0SX::6VB1IS0KA74:ebe1afa18b7fbfa6:aab8bf8675658dd2a939458a1077ba08:010100000000000031c8aa092510945398b9f7b7dde1a9fb00000000f7876f2b04b700`, []string{"netntlmv2"}},
 
 		{"bcrypt", `$2a$05$/VT2Xs2dMd8GJKfrXhjYP.DkTjOVrY12yDN7/6I8ZV0q/1lEohLru`, []string{"bcrypt"}},
 		{"argon2", `$argon2id$v=19$m=102400,t=2,p=8$ASNFZ4mrze8$yIAnV4Et+Xm1JEUGQXyTKomcQaV1AmA2RumwR4wxWy8`, []string{"argon2"}},
