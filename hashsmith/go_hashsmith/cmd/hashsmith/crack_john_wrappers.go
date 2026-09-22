@@ -44,6 +44,9 @@ var johnWrappers = []struct {
 	{"$md2$", []string{"md2"}},
 	{"$gost$", []string{"gost"}},
 	{"$keccak256$", []string{"keccak256"}},
+	{"$keccak$", []string{"keccak512"}},
+	{"$nt$", []string{"ntlm"}},
+	{"$radmin2$", []string{"radmin2"}},
 	{"$whirlpool$", []string{"whirlpool"}},
 	// One envelope, two digest sizes: John writes "$ripemd$" for both the
 	// 128- and 160-bit variants and lets the length say which. Both are

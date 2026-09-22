@@ -2510,6 +2510,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyPHPS(targetHash, candidate)
 	case "dynamic":
 		return verifyJohnDynamic(targetHash, candidate)
+	case "ipb2", "osc", "wbb3", "net-md5", "net-sha1", "tcp-md5", "eigrp":
+		return verifyJohnDynamicEnvelope(algo, targetHash, candidate)
 	case "md5-salt1-upper-md5-salt2-pass":
 		return verifyDualSaltMD5(targetHash, candidate, "upper-inner")
 	case "md5-triple-dual-salt":

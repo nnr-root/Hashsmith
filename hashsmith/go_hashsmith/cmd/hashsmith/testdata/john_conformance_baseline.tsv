@@ -72,7 +72,7 @@ dragonfly4-32 $4$	NOT-DETECTED
 dragonfly4-64 $4$	NOT-DETECTED
 Drupal7 $s$	CRACKED
 eCryptfs $ecryptfs$	CRACKED
-eigrp $eigrp$	NOT-DETECTED
+eigrp $eigrp$	CRACKED
 electrum $electrum$	CRACKED
 EncFS $encfs$	CRACKED
 enpass $enpass$	NOT-DETECTED
@@ -98,7 +98,7 @@ hdaa $response$	NOT-DETECTED
 hMailServer	CRACKED
 hsrp $hsrp$	NOT-DETECTED
 IKE $ike$	NOT-DETECTED
-ipb2 $ipb2$	NOT-DETECTED
+ipb2 $ipb2$	CRACKED
 itunes-backup $itunes_backup$	CRACKED
 iwork $iwork$	CRACKED
 KeePass $keepass$	CRACKED
@@ -158,20 +158,20 @@ netlm $netlm$	NOT-DETECTED
 netlmv2	NOT-FOUND
 netlmv2 $netlmv2$	NOT-DETECTED
 net-md5	NOT-DETECTED
-net-md5 $netmd5$	NOT-DETECTED
+net-md5 $netmd5$	CRACKED
 netntlmv2	CRACKED
 netntlmv2 $netntlmv2$	CRACKED
 netntlm $netntlm$	CRACKED
 netntlm	CRACKED
 netntlm-naive	CRACKED
 netntlm-naive $netntlm$	CRACKED
-net-sha1 $netsha1$	NOT-DETECTED
+net-sha1 $netsha1$	CRACKED
 nk $nk$	NOT-DETECTED
 notes $asn$	CRACKED
 md5ns	CRACKED
 nsec3 $nsec3$	CRACKED
 NT	CRACKED
-NT $nt$	NOT-DETECTED
+NT $nt$	CRACKED
 o10glogon $o10glogon$	NOT-DETECTED
 o3logon $o3logon$	NOT-DETECTED
 o5logon $o5logon$	NOT-DETECTED
@@ -185,7 +185,7 @@ openssl-enc $openssl$	NOT-DETECTED
 oracle	CRACKED
 oracle11	CRACKED
 Oracle12C $oracle12c$	CRACKED
-osc $osc$	NOT-DETECTED
+osc $osc$	CRACKED
 osc $dynamic_4$	CRACKED
 ospf $ospf$	NOT-DETECTED
 Padlock $padlock$	NOT-DETECTED
@@ -226,9 +226,9 @@ PuTTY $putty$	NOT-DETECTED
 pwsafe $pwsafe$	CRACKED
 qnx	CRACKED
 RACF $racf$	CRACKED
-RACF-KDFAES $racf$	TIMEOUT
+RACF-KDFAES $racf$	CRACKED
 radius $radius$	NOT-DETECTED
-RAdmin $radmin2$	NOT-DETECTED
+RAdmin $radmin2$	CRACKED
 RAKP $rakp$	NOT-DETECTED
 rar $rar3$	CRACKED
 RAR5 $rar5$	CRACKED
@@ -237,7 +237,7 @@ Raw-SHA512 $sha512$	CRACKED
 Raw-Blake2	CRACKED
 Raw-Blake2 $blake2$	CRACKED
 Raw-Keccak	NOT-FOUND
-Raw-Keccak $keccak$	NOT-DETECTED
+Raw-Keccak $keccak$	CRACKED
 Raw-Keccak-256	CRACKED
 Raw-Keccak-256 $keccak256$	CRACKED
 Raw-MD4	CRACKED
@@ -295,7 +295,7 @@ SunMD5 $md5$	NOT-DETECTED
 SybaseASE	CRACKED
 Sybase-PROP	NOT-DETECTED
 tacacs-plus $tacacs-plus$	CRACKED
-tcp-md5 $tcpmd5$	NOT-DETECTED
+tcp-md5 $tcpmd5$	CRACKED
 telegram $telegram$	CRACKED
 tezos $tezos$	NOT-DETECTED
 Tiger	NOT-DETECTED
@@ -310,7 +310,7 @@ OpenVMS $v$	NOT-DETECTED
 vmx $vmx$	CRACKED
 VNC $vnc$	CRACKED
 vtp $vtp$	NOT-DETECTED
-wbb3 $wbb3$	NOT-DETECTED
+wbb3 $wbb3$	CRACKED
 whirlpool	NOT-FOUND
 whirlpool $whirlpool$	NOT-FOUND
 whirlpool0	NOT-FOUND
@@ -397,7 +397,7 @@ mscash2-opencl $dcc2$	CRACKED
 mysql-sha1-opencl	CRACKED
 notes-opencl $asn$	CRACKED
 NT-opencl	CRACKED
-NT-opencl $nt$	NOT-DETECTED
+NT-opencl $nt$	CRACKED
 ntlmv2-opencl	NOT-FOUND
 ntlmv2-opencl $netntlmv2$	CRACKED
 o5logon-opencl $o5logon$	NOT-DETECTED
