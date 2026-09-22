@@ -38,6 +38,8 @@ import (
 	"golang.org/x/crypto/scrypt"
 
 	"hashsmith-go/internal/bcryptlane"
+
+	"hashsmith-go/internal/hashid"
 )
 
 const (
@@ -1808,25 +1810,43 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 		}
 	}
 
-	var types []string
+	var ranked []hashid.Ranked
 	if explicitType != "" && !strings.EqualFold(explicitType, "auto") {
-		types = []string{strings.ToLower(explicitType)}
+		ranked = []hashid.Ranked{{Type: strings.ToLower(explicitType)}}
 	} else {
-		types = detectHashTypes(target)
-		if len(types) == 0 {
+		ranked = detectRankedFromTable(target)
+		if len(ranked) == 0 {
 			return false, fmt.Errorf("could not auto-detect hash type — specify it with -t "+
 				"(try 'hashsmith identify -i %s' for analysis)", target)
 		}
-		if len(types) == 1 {
+		types, rare := splitRanked(ranked)
+		switch {
+		case len(types) == 1 && len(rare) == 0:
 			clrGreen.Fprintf(os.Stderr, "Detected hash type: %s\n", types[0])
-		} else {
+		default:
 			clrYellow.Fprintf(os.Stderr,
 				"Ambiguous hash — trying candidate types: %s\n", strings.Join(types, ", "))
+			if len(rare) > 0 {
+				// Named up front rather than sprung later: the run is about to
+				// take several times as long as its first pass suggests, and
+				// the way to opt out is one flag.
+				clrYellow.Fprintf(os.Stderr,
+					"  then, only if those all fail, %d scarce digest%s of the same width: %s\n"+
+						"  (pass -t to attack one type and skip the rest)\n",
+					len(rare), map[bool]string{true: "", false: "s"}[len(rare) == 1], strings.Join(rare, ", "))
+			}
 		}
 	}
 
-	for _, t := range types {
-		if len(types) > 1 {
+	announcedRare := false
+	for _, r := range ranked {
+		t := r.Type
+		if len(ranked) > 1 {
+			if r.Rare() && !announcedRare {
+				announcedRare = true
+				clrYellow.Fprintln(os.Stderr,
+					"\nEvery likely type failed. Now the scarce digests of this width.")
+			}
 			color.New(themeAttr, color.Bold).Fprintf(os.Stderr, "\n→ Attempting as %s\n", t)
 		}
 		found, err := doCrack(target, t, mode, wordlist, charset,
@@ -1837,7 +1857,7 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 			// same grounds. Swallowing it here and moving on would end the run
 			// with "Not found", which is the exact lie the guard exists to
 			// prevent, so it aborts the whole run instead.
-			if len(types) == 1 || isFeasibilityRefusal(err) {
+			if len(ranked) == 1 || isFeasibilityRefusal(err) {
 				return false, err
 			}
 			// One candidate's hash format may be invalid; keep trying the rest.
@@ -2577,6 +2597,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyKnownHosts(targetHash, candidate)
 	case "zipmonster":
 		return verifyZipMonster(targetHash, candidate)
+	case "postoffice":
+		return verifyPostOffice(targetHash, candidate)
 	case "dummy":
 		return verifyDummy(targetHash, candidate)
 	case "p5k2":

@@ -2277,3 +2277,100 @@ plaintext alone, and for those the check returns an error rather than a
 verdict. Treating "could not check" as "wrong" would withhold a correct
 answer — a wrong report of the other kind — so it is reported as exactly what
 it is: an answer nobody here could confirm.
+
+## Nineteen formats that were already implemented, or nearly
+
+The John ratchet's two failure modes say different things. NOT-DETECTED means
+there is no reader for the record. NOT-FOUND means the record WAS read, a
+type was offered for it, and the password was not found — which for a bare
+digest can only mean the right algorithm was never among the candidates.
+
+Nineteen records sat in that second column, and a sweep of every registered
+type against each one settled what was actually wrong with them in a single
+pass. Seven needed nothing at all: HAVAL-128-4, HAVAL-256-3, RIPEMD-128,
+MDC-2, MD5-of-UTF-16LE, Lotus Notes/Domino 5 and Skein-512-256 were all
+implemented, correct, and simply not among the types a bare digest of their
+width was offered as. Twelve needed a hash this tool did not have.
+
+### Attack order was table order
+
+Fixing the first group meant putting scarce algorithms into the shape table,
+and that exposed something worth fixing on its own: detection returned
+candidates in the order the prototype table happens to list them, and the
+crack loop attacked them in that order. The table is grouped by family for a
+reader's benefit, so a 32-character hex string was attacked as MD5, then MD4,
+then MD2, then NTLM — with MD2, which no living system emits, tried ahead of
+the digest behind every Windows domain.
+
+Candidates are now ordered by the strength of the evidence behind them:
+structural readings before shape readings, and within a tier the commonest
+algorithm first. That alone makes every ambiguous auto-attack faster, and it
+gives the scarce digests somewhere to go — the bottom.
+
+The cost is real and is stated rather than hidden. A 32-character digest now
+has twelve candidate types instead of five, so a run that finds nothing takes
+longer. The run says so before it starts, names the scarce types it will come
+to, and says that `-t` skips them. ZipMonster is the one format deliberately
+left out of that list: it is fifty thousand MD5s per password, four orders of
+magnitude past everything else of its width, and belongs behind a flag rather
+than at the end of every unsuccessful MD5 attack. Its bare spelling is read
+now; it is just not guessed.
+
+### Six hashes, and how each was checked
+
+Tiger, HAS-160, Snefru-128, Snefru-256, Whirlpool-0, Whirlpool-T and PANAMA.
+
+**Tiger** needs four tables of 256 64-bit words that the specification does
+not print — it prints a program that produces them, seeded on a sentence from
+the paper and shuffled by Tiger's own compression function using the table it
+is in the middle of rewriting. Running that generator is forty lines;
+transcribing four thousand constants is four thousand chances to mistype one.
+
+**HAS-160** is SHA-1 with a different schedule: four groups of twenty steps
+over thirty-two words, sixteen of them derived by XOR. The schedule was
+transcribed from an eighty-line macro expansion and then checked for the
+regularity the specification claims — that the rotation amounts repeat across
+all four groups, and that the five registers advance one place per step — so
+a mistyped entry would have to survive that as well as the vectors.
+
+**Snefru** is the odd one structurally: no separate compression function, and
+the digest width changes the BLOCK size, 48 bytes of message per block at 128
+bits and 32 at 256. Its S-boxes came from a table of random numbers rather
+than a formula, so there is no generator and all 4,096 constants are carried.
+
+**Whirlpool-0 and Whirlpool-T** are the 2000 and 2001 revisions the ISO
+version replaced — one changed the S-box, the next the diffusion matrix, and
+nothing else. So they are one round function over different constants, and
+what is stored is constants.
+
+**PANAMA** is not a Merkle-Damgård hash at all but the state machine Daemen
+later reworked into Keccak's sponge: absorb, then thirty-two blank rounds,
+then read eight words out. It carries no message length, because the pull
+phase and not the padding is what separates one message from another.
+
+Every one of them was checked twice. Published vectors where they exist, and
+then the other direction: Hashsmith computed digests for messages John had
+never seen, and John was asked to crack them under the matching format. It
+recovered every plaintext. That second check is worth more than a transcribed
+constant for exactly the hashes where the constants are generated — three of
+my own recollected "published" vectors turned out to be wrong, and the
+cross-check is what said so rather than the implementation.
+
+**Post.Office** was settled by search rather than by reading: a bounded sweep
+of orderings and single-byte separators against John's vector returned
+`md5(salt || 'Y' || password || 0xF7 || salt)` and nothing else.
+
+### Where it stands
+
+Of 605 records: **523 crack**, 81 are not detected, 1 is detected and
+deliberately not guessed, none are refused. That is up from 217 when the John
+ratchet was built and 499 at the last entry.
+
+445 of John's 446 dynamic expressions now parse. The one that does not is
+dynamic_1507, whose `$const` John keeps in its configuration file rather than
+in the expression — the expression alone does not determine a digest, and no
+amount of hashing will supply it.
+
+Everything left is a container format with no reader: PGP disk, GELI, OpenBSD
+softraid, GNOME keyring, KDE wallet, Dashlane, SAP's PSE, Nokia SL3. There is
+no remaining record that Hashsmith can read and cannot answer.

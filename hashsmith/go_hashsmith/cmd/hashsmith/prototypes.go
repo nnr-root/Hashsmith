@@ -180,15 +180,47 @@ func identifyCandidates(text string) []hashid.Candidate {
 // filter inside hashid.DetectTypes itself: identifyCandidates above must keep
 // seeing the full, unfiltered candidate set.
 func detectTypesFromTable(text string) ([]string, bool) {
+	ranked := detectRankedFromTable(text)
+	if len(ranked) == 0 {
+		return nil, false
+	}
+	types := make([]string, len(ranked))
+	for i, r := range ranked {
+		types[i] = r.Type
+	}
+	return types, true
+}
+
+// detectRankedFromTable is the same detection with the evidence strength kept,
+// so an attack can say when it has run out of plausible candidates and is into
+// the scarce ones.
+func detectRankedFromTable(text string) []hashid.Ranked {
 	in := hashid.Input{Raw: strings.TrimSpace(text)}
 	in.Normalized = stripShadowUsername(in.Raw)
-	types := hashid.DetectTypes(prototypeTable(), in)
-	kept := types[:0]
-	for _, t := range types {
-		if universalHashRegistry.crackable(t) {
-			kept = append(kept, t)
+	ranked := hashid.DetectRanked(prototypeTable(), in)
+	kept := ranked[:0]
+	for _, r := range ranked {
+		if universalHashRegistry.crackable(r.Type) {
+			kept = append(kept, r)
 		}
 	}
-	types = kept
-	return types, len(types) > 0
+	return kept
+}
+
+// splitRanked divides detected candidates into the ones worth naming as
+// guesses and the ones offered only because the width allows them.
+func splitRanked(ranked []hashid.Ranked) (likely, rare []string) {
+	for _, r := range ranked {
+		if r.Rare() {
+			rare = append(rare, r.Type)
+		} else {
+			likely = append(likely, r.Type)
+		}
+	}
+	// A hash whose every candidate is scarce has no likelier list to try
+	// first, so the whole set is simply the candidate set.
+	if len(likely) == 0 {
+		return rare, nil
+	}
+	return likely, rare
 }

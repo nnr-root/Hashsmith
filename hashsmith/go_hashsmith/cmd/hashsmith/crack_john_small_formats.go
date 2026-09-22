@@ -132,14 +132,23 @@ const (
 // verifyZipMonster checks a ZipMonster password: MD5, then MD5 again over the
 // upper-case hex of the result, fifty thousand times in all. The case matters
 // — the same loop over lower-case hex produces a different answer.
+//
+// The "$zipmonster$" prefix is this tool's own; John writes the digest bare,
+// so both spellings are read. The bare one is accepted only when -t names
+// this type, and ZipMonster is deliberately NOT among the types a bare
+// 32-character digest is offered as.
+//
+// That is a judgement about cost, not about likelihood. Every other candidate
+// for that width is one hash per password; this is fifty thousand. Adding it
+// to the shape table would end every unsuccessful auto-attack on an MD5-shaped
+// digest — the common case — in a run four orders of magnitude slower than
+// the ones before it, or in a feasibility refusal. Naming the type is one
+// flag, and it is the right place for that decision to be made.
 func verifyZipMonster(target, candidate string) (bool, error) {
 	t := strings.TrimSpace(target)
-	if !strings.HasPrefix(t, zipMonsterPrefix) {
-		return false, errors.New("not a ZipMonster record")
-	}
-	want := t[len(zipMonsterPrefix):]
+	want := strings.TrimPrefix(t, zipMonsterPrefix)
 	if len(want) != 2*md5.Size || !isHex(want) {
-		return false, errors.New("a ZipMonster record is one MD5")
+		return false, errors.New("a ZipMonster record is one MD5, with or without the $zipmonster$ prefix")
 	}
 	sum := md5.Sum([]byte(candidate))
 	h := strings.ToUpper(hex.EncodeToString(sum[:]))
@@ -170,4 +179,63 @@ func isDummy(target string) bool {
 	t := strings.TrimSpace(target)
 	return strings.HasPrefix(t, dummyPrefix) && isHex(t[len(dummyPrefix):]) &&
 		len(t) > len(dummyPrefix) && len(t)%2 == len(dummyPrefix)%2
+}
+
+// ── Post.Office ───────────────────────────────────────────────────────────────
+
+// Post.Office was Software.com's mail server through the late 1990s, and the
+// one still in the wild is a preserved installation rather than a running
+// product. Its password record is a digest and a salt run together with no
+// separator at all:
+//
+//	<32 hex digest><32-character salt>
+//
+// which is indistinguishable from a bare SHA-256 by shape, so it is offered
+// as one more scarce reading of that width rather than asserted.
+//
+// The construction is
+//
+//	md5(salt || 'Y' || password || 0xF7 || salt)
+//
+// and the two separators are the whole of what makes it its own format. They
+// were settled by search rather than taken on trust: a bounded sweep of
+// orderings and single-byte separators against John's own vector returned
+// this one and nothing else. The salt is used as the ASCII it is, not
+// hex-decoded, even though John's vector happens to be all 'a'.
+const postOfficeSaltLen = 32
+
+func postOfficeFields(target string) (digest, salt string, err error) {
+	t := strings.TrimSpace(target)
+	if len(t) != 2*md5.Size+postOfficeSaltLen {
+		return "", "", errors.New("a Post.Office record is a 32-character digest followed by a 32-character salt")
+	}
+	digest, salt = t[:2*md5.Size], t[2*md5.Size:]
+	if !isHex(digest) {
+		return "", "", errors.New("a Post.Office record starts with an MD5")
+	}
+	for i := 0; i < len(salt); i++ {
+		if salt[i] < 0x20 || salt[i] > 0x7e {
+			return "", "", errors.New("a Post.Office salt is printable ASCII")
+		}
+	}
+	return digest, salt, nil
+}
+
+func verifyPostOffice(target, candidate string) (bool, error) {
+	digest, salt, err := postOfficeFields(target)
+	if err != nil {
+		return false, err
+	}
+	h := md5.New()
+	_, _ = h.Write([]byte(salt))
+	_, _ = h.Write([]byte{'Y'})
+	_, _ = h.Write([]byte(candidate))
+	_, _ = h.Write([]byte{0xF7})
+	_, _ = h.Write([]byte(salt))
+	return strings.EqualFold(hex.EncodeToString(h.Sum(nil)), digest), nil
+}
+
+func isPostOffice(target string) bool {
+	_, _, err := postOfficeFields(target)
+	return err == nil
 }

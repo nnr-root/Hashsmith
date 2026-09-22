@@ -335,7 +335,7 @@ func dynDigest(name string) (func([]byte) []byte, bool) {
 			_, _ = h.Write(b)
 			return h.Sum(nil)
 		})
-	case "ripemd128", "ripemd160", "ripemd256", "ripemd320", "whirlpool", "gost":
+	case "ripemd128", "ripemd160", "ripemd256", "ripemd320", "whirlpool", "gost", "tiger", "panama":
 		ctor := map[string]func() hash.Hash{
 			"ripemd128": func() hash.Hash { return newRIPEMD128() },
 			"ripemd160": func() hash.Hash { return newRIPEMD160() },
@@ -343,6 +343,8 @@ func dynDigest(name string) (func([]byte) []byte, bool) {
 			"ripemd320": func() hash.Hash { return newRIPEMD320() },
 			"whirlpool": func() hash.Hash { return newWhirlpool() },
 			"gost":      func() hash.Hash { return newGOST94() },
+			"tiger":     newTiger,
+			"panama":    newPanama,
 		}[name]
 		return simple(func(b []byte) []byte {
 			h := ctor()

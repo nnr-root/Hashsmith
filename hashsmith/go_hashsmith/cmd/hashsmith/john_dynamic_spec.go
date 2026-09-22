@@ -20,9 +20,10 @@ package main
 // typo in the listing, not a different expression; the balanced form is what
 // John computes, and is what appears below.
 //
-// An expression naming a hash Hashsmith does not implement (tiger, panama,
-// haval, skein) simply does not resolve, and a record asking for one is left
-// alone rather than claimed and failed.
+// Every hash name in the table now resolves. The one expression that still
+// does not is dynamic_1507, whose $const John keeps in its configuration file
+// rather than in the expression; a record asking for it is left alone rather
+// than claimed and failed, as any unresolvable expression is.
 
 var johnDynamicSpecs = map[int]string{
 	0:    `md5($p)`,      // raw-md5

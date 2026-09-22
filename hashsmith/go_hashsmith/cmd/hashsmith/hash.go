@@ -128,6 +128,29 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		h := newRIPEMD160()
 		_, _ = h.Write([]byte(text))
 		return hex.EncodeToString(h.Sum(nil)), nil
+	case "tiger":
+		h := newTiger()
+		_, _ = h.Write([]byte(text))
+		return hex.EncodeToString(h.Sum(nil)), nil
+	case "has160":
+		h := newHAS160()
+		_, _ = h.Write([]byte(text))
+		return hex.EncodeToString(h.Sum(nil)), nil
+	case "panama":
+		h := newPanama()
+		_, _ = h.Write([]byte(text))
+		return hex.EncodeToString(h.Sum(nil)), nil
+	case "whirlpool0", "whirlpool1":
+		h := newWhirlpool0()
+		if algo == "whirlpool1" {
+			h = newWhirlpoolT()
+		}
+		_, _ = h.Write([]byte(text))
+		return hex.EncodeToString(h.Sum(nil)), nil
+	case "snefru128", "snefru256":
+		h := newSnefru(map[string]int{"snefru128": 16, "snefru256": 32}[algo])
+		_, _ = h.Write([]byte(text))
+		return hex.EncodeToString(h.Sum(nil)), nil
 	case "ripemd128":
 		h := newRIPEMD128()
 		_, _ = h.Write([]byte(text))

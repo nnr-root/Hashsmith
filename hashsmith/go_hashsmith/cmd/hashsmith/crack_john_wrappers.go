@@ -48,7 +48,9 @@ var johnWrappers = []struct {
 	{"$keccak$", []string{"keccak512"}},
 	{"$nt$", []string{"ntlm"}},
 	{"$radmin2$", []string{"radmin2"}},
-	{"$whirlpool$", []string{"whirlpool"}},
+	// John writes "$whirlpool$" for all three revisions of Whirlpool and
+	// nothing in the record says which, so all three are offered.
+	{"$whirlpool$", []string{"whirlpool", "whirlpool0", "whirlpool1"}},
 	// As with $ripemd$, one envelope covers more than one digest size and the
 	// payload's length settles which.
 	{"$skein$", []string{"skein224", "skein256", "skein384", "skein512"}},
@@ -65,6 +67,11 @@ var johnWrappers = []struct {
 	// 128- and 160-bit variants and lets the length say which. Both are
 	// offered; the payload length settles it at verification.
 	{"$ripemd$", []string{"ripemd128", "ripemd160"}},
+	{"$tiger$", []string{"tiger"}},
+	{"$panama$", []string{"panama"}},
+	// One envelope, two widths again: John writes "$snefru$" for both Snefru
+	// sizes and lets the payload length say which.
+	{"$snefru$", []string{"snefru128", "snefru256"}},
 	// Structured records whose payload this tool reads under another name.
 	{"$cisco4$", []string{"cisco4"}},
 	// "Lion" is 10.7, the one release that used a salted SHA-512.

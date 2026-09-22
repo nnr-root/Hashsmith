@@ -90,9 +90,9 @@ gost	CRACKED
 gost $gost$	CRACKED
 gost $gost-cp$	NOT-DETECTED
 gpg $gpg$	CRACKED
-HAVAL-128-4	NOT-FOUND
+HAVAL-128-4	CRACKED
 HAVAL-128-4 $haval$	CRACKED
-HAVAL-256-3	NOT-FOUND
+HAVAL-256-3	CRACKED
 HAVAL-256-3 $haval$	CRACKED
 hdaa $response$	CRACKED
 hMailServer	CRACKED
@@ -120,13 +120,13 @@ kwallet $kwallet$	NOT-DETECTED
 lp $lp$	NOT-DETECTED
 lpcli $lpcli$	NOT-DETECTED
 leet	NOT-DETECTED
-lotus5	NOT-FOUND
+lotus5	CRACKED
 lotus85	NOT-DETECTED
 LUKS $luks$	CRACKED
 MD2 $md2$	CRACKED
 MD2	CRACKED
 mdc2 $mdc2$	CRACKED
-mdc2	NOT-FOUND
+mdc2	CRACKED
 MediaWiki $b$	CRACKED
 MediaWiki $dynamic_9$	CRACKED
 monero $monero$	CRACKED
@@ -191,8 +191,8 @@ ospf $ospf$	CRACKED
 Padlock $padlock$	NOT-DETECTED
 Palshop $palshop$	NOT-DETECTED
 Palshop	NOT-DETECTED
-Panama	NOT-FOUND
-Panama $panama$	NOT-DETECTED
+Panama	CRACKED
+Panama $panama$	CRACKED
 PBKDF2-HMAC-MD4 $pbkdf2-hmac-md4$	CRACKED
 PBKDF2-HMAC-MD5 $pbkdf2-hmac-md5$	CRACKED
 PBKDF2-HMAC-SHA1 $pbkdf2-hmac-sha1$	CRACKED
@@ -218,7 +218,7 @@ pix-md5	CRACKED
 pix-md5 $dynamic_19$	NOT-DETECTED
 PKZIP $pkzip$	NOT-DETECTED
 PKZIP $pkzip2$	CRACKED
-po	NOT-FOUND
+po	CRACKED
 postgres $postgres$	CRACKED
 postgres $postgre$	CRACKED
 PST $pst$	NOT-DETECTED
@@ -244,7 +244,7 @@ Raw-MD4	CRACKED
 Raw-MD4 $md4$	CRACKED
 Raw-MD5	CRACKED
 Raw-MD5 $dynamic_0$	CRACKED
-Raw-MD5u	NOT-FOUND
+Raw-MD5u	CRACKED
 Raw-MD5u $dynamic_29$	CRACKED
 Raw-SHA1	CRACKED
 Raw-SHA1 $dynamic_26$	CRACKED
@@ -259,7 +259,7 @@ Raw-SHA256 $cisco4$	CRACKED
 Raw-SHA3	CRACKED
 Raw-SHA384	CRACKED
 Raw-SHA384 $sha384$	CRACKED
-ripemd-128	NOT-FOUND
+ripemd-128	CRACKED
 ripemd-128 $ripemd$	CRACKED
 ripemd-160	CRACKED
 ripemd-160 $ripemd$	CRACKED
@@ -275,16 +275,16 @@ securezip $zip3$	CRACKED
 7z $7z$	CRACKED
 Signal $signal$	CRACKED
 SIP $sip$	CRACKED
-skein-256	NOT-FOUND
+skein-256	CRACKED
 skein-256 $skein$	CRACKED
 skein-512 $skein$	CRACKED
 skey	NOT-DETECTED
 SL3 $sl3$	NOT-DETECTED
 SL3	NOT-DETECTED
-Snefru-128	NOT-FOUND
-Snefru-128 $snefru$	NOT-DETECTED
-Snefru-256 $snefru$	NOT-DETECTED
-Snefru-256	NOT-FOUND
+Snefru-128	CRACKED
+Snefru-128 $snefru$	CRACKED
+Snefru-256 $snefru$	CRACKED
+Snefru-256	CRACKED
 LastPass $lastpass$	CRACKED
 SNMP $snmpv3$	CRACKED
 solarwinds $solarwinds$	CRACKED
@@ -298,8 +298,8 @@ tacacs-plus $tacacs-plus$	CRACKED
 tcp-md5 $tcpmd5$	CRACKED
 telegram $telegram$	CRACKED
 tezos $tezos$	CRACKED
-Tiger	NOT-FOUND
-Tiger $tiger$	NOT-DETECTED
+Tiger	CRACKED
+Tiger $tiger$	CRACKED
 tc_aes_xts	CRACKED
 tc_ripemd160	CRACKED
 tc_ripemd160boot	CRACKED
@@ -313,10 +313,10 @@ vtp $vtp$	NOT-DETECTED
 wbb3 $wbb3$	CRACKED
 whirlpool	CRACKED
 whirlpool $whirlpool$	CRACKED
-whirlpool0	NOT-FOUND
-whirlpool0 $whirlpool$	NOT-FOUND
-whirlpool1	NOT-FOUND
-whirlpool1 $whirlpool$	NOT-FOUND
+whirlpool0	CRACKED
+whirlpool0 $whirlpool$	CRACKED
+whirlpool1	CRACKED
+whirlpool1 $whirlpool$	CRACKED
 wpapsk $wpapsk$	CRACKED
 wpapsk	CRACKED
 wpapsk-pmk $wpapsk$	CRACKED
@@ -329,7 +329,7 @@ ZIP $zip2$	CRACKED
 ZipMonster $zipmonster$	CRACKED
 ZipMonster	NOT-FOUND
 plaintext $0$	CRACKED
-has-160	NOT-FOUND
+has-160	CRACKED
 HMAC-MD5	CRACKED
 HMAC-MD5 $cram_md5$	CRACKED
 HMAC-SHA1	CRACKED
@@ -349,7 +349,7 @@ PBKDF2-HMAC-SHA1-opencl $p5k2$	CRACKED
 rar-opencl $rar3$	CRACKED
 RAR5-opencl $rar5$	CRACKED
 TrueCrypt-opencl	CRACKED
-lotus5-opencl	NOT-FOUND
+lotus5-opencl	CRACKED
 AndroidBackup-opencl $ab$	CRACKED
 agilekeychain-opencl $agilekeychain$	CRACKED
 ansible-opencl $ansible$	CRACKED
@@ -500,7 +500,7 @@ dynamic_70 $dynamic_70$	CRACKED
 dynamic_80 $dynamic_80$	CRACKED
 dynamic_90 $dynamic_90$	CRACKED
 dynamic_100 $dynamic_100$	CRACKED
-dynamic_110 $dynamic_110$	NOT-DETECTED
+dynamic_110 $dynamic_110$	CRACKED
 dynamic_120 $dynamic_120$	CRACKED
 dynamic_130 $dynamic_130$	CRACKED
 dynamic_140 $dynamic_140$	CRACKED
@@ -521,7 +521,7 @@ dynamic_280 $dynamic_280$	CRACKED
 dynamic_290 $dynamic_290$	CRACKED
 dynamic_300 $dynamic_300$	CRACKED
 dynamic_310 $dynamic_310$	CRACKED
-dynamic_320 $dynamic_320$	NOT-DETECTED
+dynamic_320 $dynamic_320$	CRACKED
 dynamic_330 $dynamic_330$	CRACKED
 dynamic_340 $dynamic_340$	CRACKED
 dynamic_350 $dynamic_350$	CRACKED

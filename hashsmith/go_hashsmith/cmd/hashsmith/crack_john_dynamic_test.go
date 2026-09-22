@@ -13,7 +13,7 @@ import (
 // The count is pinned so that a change which quietly stops reading a family of
 // expressions is a failing test rather than a smaller number nobody notices.
 func TestJohnDynamicCorpus(t *testing.T) {
-	const wantClaimed = 156
+	const wantClaimed = 158
 	re := regexp.MustCompile(`\$dynamic_\d+\$`)
 	claimed := 0
 	for _, r := range loadJohnCorpus(t) {
@@ -88,8 +88,6 @@ func TestJohnDynamicExpressions(t *testing.T) {
 // then failed, so each of these must be refused at detection.
 func TestJohnDynamicDeclines(t *testing.T) {
 	for _, tc := range []struct{ name, record string }{
-		// A digest Hashsmith does not implement.
-		{"tiger", "$dynamic_110$c099bbd00faf33027ab55bfb4c3a67f19ecd8eb95007b1e327845f"},
 		// An expression whose constant lives in John's configuration file.
 		{"a configured constant", "$dynamic_1507$d4eaf666d09316f9d61b14753353a73d5fbcf048"},
 		// A number John does not define.
@@ -129,11 +127,14 @@ func TestJohnDynamicSpecTable(t *testing.T) {
 	if parsed+unsupported != len(johnDynamicSpecs) {
 		t.Fatal("the spec table lost entries")
 	}
-	// 427 of John's 446 expressions are built from hashes Hashsmith has. What
-	// is left names tiger or panama, or a constant John keeps in its
-	// configuration file. Adding a hash raises this number — that is the
-	// point of pinning it: Skein raised it by 36 and HAVAL by 135.
-	if parsed != 427 {
-		t.Errorf("%d of %d expressions parse, want 427", parsed, len(johnDynamicSpecs))
+	// 445 of John's 446 expressions now parse. The one that does not is
+	// dynamic_1507, whose $const is a value John keeps in its configuration
+	// file rather than in the expression, so the expression alone does not
+	// determine a digest and no amount of hashing will supply it.
+	//
+	// Every other name in the table resolves: Skein raised this number by 36,
+	// HAVAL by 135, Tiger by 9 and Panama by the last 9.
+	if parsed != 445 {
+		t.Errorf("%d of %d expressions parse, want 445", parsed, len(johnDynamicSpecs))
 	}
 }

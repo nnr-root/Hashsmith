@@ -45,7 +45,12 @@ func johnLabelSeed() map[string]string {
 		"sha224": "raw-sha224", "sha256": "raw-sha256",
 		"sha384": "raw-sha384", "sha512": "raw-sha512",
 		"ripemd128": "ripemd-128", "ripemd160": "ripemd-160",
-		"whirlpool": "whirlpool", "sm3": "sm3",
+		"tiger": "Tiger", "has160": "has-160",
+		"snefru128": "Snefru-128", "snefru256": "Snefru-256",
+		"whirlpool0": "whirlpool0", "whirlpool1": "whirlpool1",
+		"panama":     "Panama",
+		"postoffice": "po",
+		"whirlpool":  "whirlpool", "sm3": "sm3",
 
 		// Windows
 		"ntlm": "NT", "lm": "LM",

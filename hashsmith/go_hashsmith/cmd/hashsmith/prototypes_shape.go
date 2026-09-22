@@ -73,12 +73,41 @@ func shapePrototypes() []hashid.Prototype {
 			"obsolete since Vista but still found in old NTDS dumps",
 			lowercaseRulesOutLM, "lm"),
 
+		// The scarce digests of each width.
+		//
+		// None of these is a plausible first guess, and that is exactly why
+		// they belong here: a bare digest carries no evidence at all beyond
+		// its length, so the only question is whether the tool is willing to
+		// try an algorithm nothing rules out. John will, if you name the
+		// format; hashcat has no mode for most of them. Every one below is
+		// under the extinct-prevalence bar, which means it is reported as
+		// "unlikely" with its reason and attacked only after every likelier
+		// candidate of the same width has failed.
+		hexShapeProto(32, "RIPEMD-128", 5,
+			"RIPEMD-128 is the narrow member of a family whose 160-bit version is the one anything actually uses", nil, "ripemd128"),
+		hexShapeProto(32, "MDC-2", 3,
+			"a hash built out of DES because its designers had no hash function; it survives in older banking and smartcard stacks", nil, "mdc2"),
+		hexShapeProto(32, "MD5 of UTF-16LE", 6,
+			"the same MD5 over the password as Windows stores it, which several web applications ported from a .NET original emit", nil, "md5-utf16le"),
+		hexShapeProto(32, "Lotus Notes/Domino 5", 4,
+			"a proprietary digest from a product line that peaked in the 1990s, still present in preserved Domino directories", nil, "domino5"),
+		hexShapeProto(32, "Snefru-128", 3,
+			"broken at two passes in 1990 and repaired by raising it to eight; the repaired version is what survives, in very little", nil, "snefru128"),
+		hexShapeProto(32, "HAVAL-128", 3,
+			"HAVAL is parameterised by pass count and output width, and nothing in a bare digest says which; all three pass counts are offered because a run that tried one would miss two thirds of the format", nil,
+			"haval128-3", "haval128-4", "haval128-5"),
+
 		hexShapeProto(40, "SHA-1", 80,
 			"the second most common raw digest after MD5", nil, "sha1"),
 		hexShapeProto(40, "SHA-0", 5,
 			"withdrawn in 1995; effectively never encountered", nil, "sha0"),
 		hexShapeProto(40, "RIPEMD-160", 20,
 			"mainly seen via Bitcoin address derivation", nil, "ripemd160"),
+		hexShapeProto(40, "HAS-160", 4,
+			"the Korean national standard's hash, which appears where KCDSA does and essentially nowhere else", nil, "has160"),
+		hexShapeProto(40, "HAVAL-160", 3,
+			"the 160-bit HAVAL width, in all three pass counts for the reason the 128-bit one lists", nil,
+			"haval160-3", "haval160-4", "haval160-5"),
 		// Three shapes that say a little more than a length, and still not
 		// much: a run of zeros where a dump or a truncation put them, and
 		// ten characters of crypt(3) output. All three stay TierShape and
@@ -117,6 +146,23 @@ func shapePrototypes() []hashid.Prototype {
 		hexShapeProto(56, "SHA-512/224", 10, "rare truncated variant", nil, "sha512_224"),
 		hexShapeProto(56, "SHA3-224", 10, "rare; SHA-3 adoption is thin", nil, "sha3_224"),
 		hexShapeProto(56, "Keccak-224", 10, "rare outside Ethereum tooling", nil, "keccak224"),
+		hexShapeProto(56, "HAVAL-224", 3,
+			"the 224-bit HAVAL width, in all three pass counts", nil,
+			"haval224-3", "haval224-4", "haval224-5"),
+		hexShapeProto(56, "Skein-512-224", 4,
+			"a SHA-3 finalist that lost; it is implemented widely enough to appear and chosen rarely enough to surprise", nil, "skein224"),
+
+		// Forty-eight hex characters is a 192-bit digest, and until now the
+		// only reading this table offered for it was macOS 10.4's salt and
+		// SHA-1 run together — whose own note in prototypes_records_salted.go
+		// says, correctly, that the same length is a Tiger digest and that
+		// neither John nor hashcat can tell the two apart. The hash half of
+		// that pair is now here.
+		hexShapeProto(48, "Tiger", 8,
+			"Tiger is the commonest thing that produces a 192-bit digest, which is not saying much; it survives in file-sharing checksums and in a handful of older applications", nil, "tiger"),
+		hexShapeProto(48, "HAVAL-192", 3,
+			"the 192-bit HAVAL width, in all three pass counts", nil,
+			"haval192-3", "haval192-4", "haval192-5"),
 
 		hexShapeProto(60, "Oracle 11g", 25, "legacy Oracle; still present in old databases", nil, "oracle11g"),
 		hexShapeProto(160, "Oracle 12c", 25, "current Oracle password verifier", nil, "oracle12c"),
@@ -138,6 +184,24 @@ func shapePrototypes() []hashid.Prototype {
 		hexShapeProto(64, "Keccak-256", 20, "common in Ethereum tooling", nil, "keccak256"),
 		hexShapeProto(64, "SHAKE128-256", 5, "rare XOF output", nil, "shake128-256"),
 		hexShapeProto(64, "BLAKE2b-256", 10, "uncommon truncated BLAKE2b", nil, "blake2b256"),
+		{
+			Types: []string{"postoffice"}, Display: "Post.Office mail server",
+			Tier: hashid.TierShape,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "32 hex characters followed by a 32-character printable salt", isPostOffice(in.Normalized)
+			},
+			Prevalence: 3,
+			Rationale:  "a mail server discontinued around 2000; the records that survive are in preserved installations, and the shape is the same 64 characters a SHA-256 is",
+		},
+		hexShapeProto(64, "PANAMA", 3,
+			"broken as a hash in 2001 and again in 2007, so nothing has emitted one deliberately since", nil, "panama"),
+		hexShapeProto(64, "Snefru-256", 3,
+			"the wide Snefru, as scarce as the narrow one", nil, "snefru256"),
+		hexShapeProto(64, "HAVAL-256", 3,
+			"the 256-bit HAVAL width, in all three pass counts", nil,
+			"haval256-3", "haval256-4", "haval256-5"),
+		hexShapeProto(64, "Skein-512-256", 4,
+			"Skein truncated to 256 bits; John calls this one \"Skein 256\"", nil, "skein256"),
 
 		// Task 15: this 80-char (40-byte) bucket was simply missing —
 		// ripemd320's own self-test vector is a bare 80-hex digest with no
@@ -152,6 +216,7 @@ func shapePrototypes() []hashid.Prototype {
 		hexShapeProto(96, "SHA3-384", 10, "thin SHA-3 adoption", nil, "sha3_384"),
 		hexShapeProto(96, "BLAKE2b-384", 5, "rare truncated BLAKE2b", nil, "blake2b384"),
 		hexShapeProto(96, "Keccak-384", 5, "rare outside Ethereum tooling", nil, "keccak384"),
+		hexShapeProto(96, "Skein-512-384", 4, "Skein truncated to 384 bits", nil, "skein384"),
 
 		hexShapeProto(128, "SHA-512", 80, "the common choice for a long digest", nil, "sha512"),
 		hexShapeProto(128, "SHA3-512", 10, "thin SHA-3 adoption", nil, "sha3_512"),
@@ -160,6 +225,10 @@ func shapePrototypes() []hashid.Prototype {
 		hexShapeProto(128, "Streebog-512", 10, "regionally concentrated", nil, "streebog512"),
 		hexShapeProto(128, "Keccak-512", 10, "rare outside Ethereum tooling", nil, "keccak512"),
 		hexShapeProto(128, "SHAKE256-512", 5, "rare XOF output", nil, "shake256-512"),
+		hexShapeProto(128, "Skein-512", 4, "Skein at its full width", nil, "skein512"),
+		hexShapeProto(128, "Whirlpool, withdrawn revisions", 3,
+			"anything hashed before the 2003 revision was hashed with one of these two, and nothing in a bare digest says which", nil,
+			"whirlpool0", "whirlpool1"),
 		hexShapeProto(128, "Cisco ISE", 10, "single-product format", nil, "cisco-ise"),
 	}
 }

@@ -427,12 +427,30 @@ func TestTableCoverageTail(t *testing.T) {
 	})
 }
 
+// The order here is the attack order, and it is asserted rather than sorted
+// out of the way: a bare digest has nothing but its width to go on, so the
+// only thing separating a useful run from a slow one is trying MD5 before
+// HAVAL-128 with four passes. The scarce entries trail their bucket, which is
+// where the crack loop announces them and where a user who does not want them
+// stops reading.
 func TestTableCoverageShapeFallback(t *testing.T) {
 	runTableCoverage(t, []tableCoverageCase{
 		{"16 hex", "0123456789abcdef", []string{"mysql323", "cisco-pix", "half-md5"}},
-		{"32 hex", "5f4dcc3b5aa765d61d8327deb882cf99", []string{"md5", "md4", "md2", "ntlm", "lm"}},
-		{"40 hex", "da39a3ee5e6b4b0d3255bfef95601890afd80709", []string{"sha1", "sha0", "ripemd160"}},
-		{"56 hex", "d14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f", []string{"sha224", "sha512_224", "sha3_224", "keccak224"}},
+		{"32 hex", "5f4dcc3b5aa765d61d8327deb882cf99", []string{
+			"md5", "ntlm", "lm", "md4",
+			"md5-utf16le", "md2", "ripemd128", "domino5", "mdc2",
+			"snefru128", "haval128-3", "haval128-4", "haval128-5"}},
+		{"40 hex", "da39a3ee5e6b4b0d3255bfef95601890afd80709", []string{
+			"sha1", "ripemd160", "sha0", "has160",
+			"haval160-3", "haval160-4", "haval160-5"}},
+		// xsha is macOS 10.4's salt-and-SHA-1 pair, which is the same width;
+		// it leads because a structural reading outranks a bare shape, not
+		// because it is likelier.
+		{"48 hex", "3293ac630c13f0245f92bbb1766e16167a4e58492dde73f3", []string{
+			"xsha", "tiger", "haval192-3", "haval192-4", "haval192-5"}},
+		{"56 hex", "d14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f", []string{
+			"sha224", "sha512_224", "sha3_224", "keccak224", "skein224",
+			"haval224-3", "haval224-4", "haval224-5"}},
 	})
 }
 

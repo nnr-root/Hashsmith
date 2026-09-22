@@ -66,6 +66,31 @@ var batchableTypes = map[string]bool{
 	"mysql323": true, "mysql41": true, "mssql2000": true,
 	"md5-md5": true, "sha1-sha1": true, "sha256-sha256": true,
 	"sha512-sha512": true, "sha3_256-sha3_256": true,
+
+	// The scarce digests the shape table now offers for each width. Every
+	// one is a function of the candidate alone, which is the only thing this
+	// map asserts — it does not say a type is likely, and nothing reaches
+	// here that detection did not already put forward for this target.
+	//
+	// Leaving them out was not a decision, it was the list not having been
+	// revisited: a 32-hex target whose candidates included one of them
+	// dropped out of batch mode entirely and was attacked one hash at a time.
+	"ripemd128": true, "ripemd256": true, "ripemd320": true,
+	"mdc2": true, "domino5": true, "md5-utf16le": true,
+	"sha1-utf16le": true, "sha256-utf16le": true,
+	"sha384-utf16le": true, "sha512-utf16le": true,
+	"tiger": true, "has160": true,
+	"whirlpool0": true, "whirlpool1": true,
+	"panama":    true,
+	"snefru128": true, "snefru256": true,
+	"skein224": true, "skein256": true, "skein384": true, "skein512": true,
+	"keccak224": true, "keccak384": true,
+	"gost": true, "gost-cryptopro": true,
+	"haval128-3": true, "haval128-4": true, "haval128-5": true,
+	"haval160-3": true, "haval160-4": true, "haval160-5": true,
+	"haval192-3": true, "haval192-4": true, "haval192-5": true,
+	"haval224-3": true, "haval224-4": true, "haval224-5": true,
+	"haval256-3": true, "haval256-4": true, "haval256-5": true,
 }
 
 // rawDigest returns a candidate→lowercase-hex function for a batchable type.

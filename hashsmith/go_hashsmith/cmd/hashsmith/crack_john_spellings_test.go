@@ -144,7 +144,7 @@ func TestInlineDynamicExpression(t *testing.T) {
 	}
 	// An expression naming a hash this engine does not have is refused rather
 	// than claimed, exactly as a numbered record naming one would be.
-	if isJohnDynamic("@dynamic=tiger($p)@c099bbd00faf33027ab55bfb4c3a67f19ecd8eb950078ed2") {
+	if isJohnDynamic("@dynamic=sha1(utf16($const.$p))@da39a3ee5e6b4b0d3255bfef95601890afd80709") {
 		t.Error("claimed an expression it cannot run")
 	}
 	if isJohnDynamic("@dynamic=md5($p)900150983cd24fb0d6963f7d28e17f72") {
