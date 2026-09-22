@@ -1710,7 +1710,7 @@ func emitResult(cc *crackCtx, origKey, pw, outFile string, copyResult bool) {
 
 // showPotEntry implements --show: report the potfile plaintext for a hash, if
 // one has been recorded, without running any attack.
-func showPotEntry(cc *crackCtx, origKey, target, outFile string, copyResult bool) (bool, error) {
+func showPotEntry(cc *crackCtx, origKey, target, explicitType, salt, saltMode, outFile string, copyResult bool) (bool, error) {
 	// Both call sites today gate on cc != nil before reaching here, but that's
 	// an invariant this function shouldn't have to trust — a nil cc has no
 	// potfile to look anything up in, so it's simply "not in potfile", not a
@@ -1719,12 +1719,21 @@ func showPotEntry(cc *crackCtx, origKey, target, outFile string, copyResult bool
 		clrYellow.Fprintln(os.Stderr, "Not in potfile")
 		return false, nil
 	}
-	if pw, ok := cc.pot.lookup(target); ok {
+	pw, status := cc.pot.verifiedPlain(target, explicitType, salt, saltMode)
+	switch status {
+	case potVerified, potUnchecked:
 		emitStdoutResult(cc, target, pw)
 		clrGreen.Fprint(os.Stderr, "Found (potfile): ")
-		fmt.Fprintln(os.Stderr, pw)
+		fmt.Fprint(os.Stderr, pw)
+		if status == potUnchecked {
+			fmt.Fprint(os.Stderr, potUncheckedNote)
+		}
+		fmt.Fprintln(os.Stderr)
 		emitResult(cc, origKey, pw, outFile, copyResult)
 		return true, nil
+	case potStale:
+		clrYellow.Fprintln(os.Stderr, potStaleMessage(explicitType))
+		return false, nil
 	}
 	clrYellow.Fprintln(os.Stderr, "Not in potfile")
 	return false, nil
@@ -1778,16 +1787,24 @@ func crackWithDetection(rawTarget, explicitType, mode, wordlist, charset string,
 
 	// --show reports the potfile entry (if any) for this hash and stops.
 	if cc != nil && cc.showOnly {
-		return showPotEntry(cc, origKey, target, outFile, copyResult)
+		return showPotEntry(cc, origKey, target, explicitType, salt, saltMode, outFile, copyResult)
 	}
 	// A hash already in the potfile is reported without re-running the attack.
 	if cc != nil {
-		if pw, ok := cc.pot.lookup(target); ok {
+		pw, status := cc.pot.verifiedPlain(target, explicitType, salt, saltMode)
+		switch status {
+		case potVerified, potUnchecked:
 			emitStdoutResult(cc, target, pw)
 			clrGreen.Fprint(os.Stderr, "Already cracked (potfile): ")
-			fmt.Fprintln(os.Stderr, pw)
+			fmt.Fprint(os.Stderr, pw)
+			if status == potUnchecked {
+				fmt.Fprint(os.Stderr, potUncheckedNote)
+			}
+			fmt.Fprintln(os.Stderr)
 			emitResult(cc, origKey, pw, outFile, copyResult)
 			return true, nil
+		case potStale:
+			clrYellow.Fprintln(os.Stderr, potStaleMessage(explicitType))
 		}
 	}
 

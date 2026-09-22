@@ -219,14 +219,22 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 		}
 		// Potfile hits are reported immediately and never re-attacked.
 		if cc != nil {
-			if pw, ok := cc.pot.lookup(target); ok {
+			pw, status := cc.pot.verifiedPlain(target, typ, salt, saltMode)
+			if status == potVerified || status == potUnchecked {
 				emitStdoutResult(cc, target, pw)
-				clrGreen.Fprintf(os.Stderr, "  %s  =>  %s  (potfile)\n", target, pw)
+				note := "  (potfile)"
+				if status == potUnchecked {
+					note = potUncheckedNote
+				}
+				clrGreen.Fprintf(os.Stderr, "  %s  =>  %s%s\n", target, pw, note)
 				if u := cc.usernameFor(origKey); u != "" {
 					clrGreen.Fprintf(os.Stderr, "    user: %s\n", u)
 				}
 				cc.markFound(origKey)
 				continue
+			}
+			if status == potStale {
+				clrYellow.Fprintf(os.Stderr, "  %s  %s\n", target, potStaleMessage(typ))
 			}
 		}
 		if saltedTyp != "" {

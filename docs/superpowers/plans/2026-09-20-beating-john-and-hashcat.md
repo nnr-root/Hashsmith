@@ -2243,3 +2243,37 @@ not parse), and the records deliberately declined with the evidence written
 down.
 
 Still true after every change: no entry has ever reported a WRONG password.
+
+## The one place a wrong password could still be reported
+
+That last line was true of the cracking engine and false of the cache in
+front of it.
+
+The potfile records `hash<TAB>plaintext` and is keyed by the target string
+alone. A 32-character hex digest is a well-formed MD5, a well-formed NTLM, a
+well-formed MD4 and a well-formed LM half all at once, so one string can
+honestly have four different answers — and the potfile could hold only one of
+them. Cracking `8846f7eaee8fb117ad06bdd830b7586c` as NTLM wrote
+`password`; asking `--show -t md5` for the same string then answered
+`password`, when MD5's preimage for that digest is not known to anybody and
+certainly is not that. The salt does the same thing from the other side: one
+digest, two `-s` values, two different plaintexts, one cache key.
+
+Neither John nor hashcat has this problem, because both write the format into
+the pot line. Copying that would have been the obvious fix and the weaker one:
+it repairs nothing already on disk, and a recorded format is only what the
+cracking run *believed* at the time.
+
+So every potfile hit is now re-derived before it is reported —
+`verifiedPlain` runs the stored plaintext back through `verifyCandidate` for
+the type asked for, or for each detected type when none was given. One hash
+per hit, which is nothing beside the attack it skips, and it fixes potfiles
+that already exist.
+
+The third outcome is the one worth naming. A hit that re-derives is reported;
+a hit that verifiably does not is refused with the reason said out loud
+rather than silently dropped. But some records cannot be checked from the
+plaintext alone, and for those the check returns an error rather than a
+verdict. Treating "could not check" as "wrong" would withhold a correct
+answer — a wrong report of the other kind — so it is reported as exactly what
+it is: an answer nobody here could confirm.
