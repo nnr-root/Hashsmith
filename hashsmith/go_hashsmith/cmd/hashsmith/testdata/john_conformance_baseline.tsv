@@ -30,7 +30,7 @@ argon2 $argon2d$	CRACKED
 argon2 $argon2i$	CRACKED
 as400-des $as400des$	CRACKED
 as400-ssha1 $as400ssha1$	CRACKED
-as400-ssha1 $dynamic_1590$	NOT-DETECTED
+as400-ssha1 $dynamic_1590$	CRACKED
 asa-md5 $dynamic_20$	NOT-DETECTED
 AxCrypt $axcrypt$	CRACKED
 AzureAD	NOT-DETECTED
@@ -83,7 +83,7 @@ fde $fde$	CRACKED
 Fortigate256	CRACKED
 Fortigate	CRACKED
 FormSpring	NOT-DETECTED
-FormSpring $dynamic_61$	NOT-DETECTED
+FormSpring $dynamic_61$	CRACKED
 FVDE $fvde$	CRACKED
 geli $geli$	NOT-DETECTED
 gost	CRACKED
@@ -128,7 +128,7 @@ MD2	CRACKED
 mdc2 $mdc2$	NOT-DETECTED
 mdc2	NOT-FOUND
 MediaWiki $b$	CRACKED
-MediaWiki $dynamic_9$	NOT-DETECTED
+MediaWiki $dynamic_9$	CRACKED
 monero $monero$	CRACKED
 money $money$	NOT-DETECTED
 MongoDB $mongodb$	NOT-DETECTED
@@ -186,7 +186,7 @@ oracle	CRACKED
 oracle11	CRACKED
 Oracle12C $oracle12c$	CRACKED
 osc $osc$	NOT-DETECTED
-osc $dynamic_4$	NOT-DETECTED
+osc $dynamic_4$	CRACKED
 ospf $ospf$	NOT-DETECTED
 Padlock $padlock$	NOT-DETECTED
 Palshop $palshop$	NOT-DETECTED
@@ -212,7 +212,7 @@ pgpwde $pgpwde$	NOT-DETECTED
 phpass $p$	CRACKED
 phpass $h$	CRACKED
 PHPS $phps$	CRACKED
-PHPS $dynamic_6$	NOT-DETECTED
+PHPS $dynamic_6$	CRACKED
 PHPS2 $phps$	CRACKED
 pix-md5	CRACKED
 pix-md5 $dynamic_19$	NOT-DETECTED
@@ -243,14 +243,14 @@ Raw-Keccak-256 $keccak256$	CRACKED
 Raw-MD4	CRACKED
 Raw-MD4 $md4$	CRACKED
 Raw-MD5	CRACKED
-Raw-MD5 $dynamic_0$	NOT-DETECTED
+Raw-MD5 $dynamic_0$	CRACKED
 Raw-MD5u	NOT-FOUND
-Raw-MD5u $dynamic_29$	NOT-DETECTED
+Raw-MD5u $dynamic_29$	CRACKED
 Raw-SHA1	CRACKED
-Raw-SHA1 $dynamic_26$	NOT-DETECTED
+Raw-SHA1 $dynamic_26$	CRACKED
 Raw-SHA1-AxCrypt	NOT-FOUND
 Raw-SHA1-Linkedin	NOT-FOUND
-Raw-SHA1-Linkedin $dynamic_26$	NOT-DETECTED
+Raw-SHA1-Linkedin $dynamic_26$	CRACKED
 Raw-SHA224	CRACKED
 Raw-SHA224 $sha224$	CRACKED
 Raw-SHA256	CRACKED
@@ -422,9 +422,9 @@ RAKP-opencl $rakp$	NOT-DETECTED
 raw-MD4-opencl	CRACKED
 raw-MD4-opencl $md4$	CRACKED
 raw-MD5-opencl	CRACKED
-raw-MD5-opencl $dynamic_0$	NOT-DETECTED
+raw-MD5-opencl $dynamic_0$	CRACKED
 raw-SHA1-opencl	CRACKED
-raw-SHA1-opencl $dynamic_26$	NOT-DETECTED
+raw-SHA1-opencl $dynamic_26$	CRACKED
 raw-SHA256-opencl	CRACKED
 raw-SHA256-opencl $sha256$	CRACKED
 raw-SHA256-opencl $cisco4$	NOT-DETECTED
@@ -453,58 +453,58 @@ XSHA512-free-opencl $lion$	NOT-DETECTED
 XSHA512-opencl	NOT-DETECTED
 XSHA512-opencl $lion$	NOT-DETECTED
 ZIP-opencl $zip2$	CRACKED
-dynamic_0 $dynamic_0$	NOT-DETECTED
-dynamic_1 $dynamic_1$	NOT-DETECTED
-dynamic_2 $dynamic_2$	NOT-DETECTED
-dynamic_3 $dynamic_3$	NOT-DETECTED
-dynamic_4 $dynamic_4$	NOT-DETECTED
-dynamic_5 $dynamic_5$	NOT-DETECTED
-dynamic_6 $dynamic_6$	NOT-DETECTED
-dynamic_8 $dynamic_8$	NOT-DETECTED
-dynamic_9 $dynamic_9$	NOT-DETECTED
-dynamic_10 $dynamic_10$	NOT-DETECTED
-dynamic_11 $dynamic_11$	NOT-DETECTED
-dynamic_12 $dynamic_12$	NOT-DETECTED
-dynamic_13 $dynamic_13$	NOT-DETECTED
-dynamic_14 $dynamic_14$	NOT-DETECTED
-dynamic_15 $dynamic_15$	NOT-DETECTED
-dynamic_15	NOT-DETECTED
-dynamic_16 $dynamic_16$	NOT-DETECTED
-dynamic_18 $dynamic_18$	NOT-DETECTED
+dynamic_0 $dynamic_0$	CRACKED
+dynamic_1 $dynamic_1$	CRACKED
+dynamic_2 $dynamic_2$	CRACKED
+dynamic_3 $dynamic_3$	CRACKED
+dynamic_4 $dynamic_4$	CRACKED
+dynamic_5 $dynamic_5$	CRACKED
+dynamic_6 $dynamic_6$	CRACKED
+dynamic_8 $dynamic_8$	CRACKED
+dynamic_9 $dynamic_9$	CRACKED
+dynamic_10 $dynamic_10$	CRACKED
+dynamic_11 $dynamic_11$	CRACKED
+dynamic_12 $dynamic_12$	CRACKED
+dynamic_13 $dynamic_13$	CRACKED
+dynamic_14 $dynamic_14$	CRACKED
+dynamic_15 $dynamic_15$	CRACKED
+dynamic_15	CRACKED
+dynamic_16 $dynamic_16$	CRACKED
+dynamic_18 $dynamic_18$	CRACKED
 dynamic_19 $dynamic_19$	NOT-DETECTED
 dynamic_20 $dynamic_20$	NOT-DETECTED
-dynamic_22 $dynamic_22$	NOT-DETECTED
-dynamic_23 $dynamic_23$	NOT-DETECTED
-dynamic_24 $dynamic_24$	NOT-DETECTED
-dynamic_25 $dynamic_25$	NOT-DETECTED
-dynamic_26 $dynamic_26$	NOT-DETECTED
-dynamic_29 $dynamic_29$	NOT-DETECTED
-dynamic_30 $dynamic_30$	NOT-DETECTED
-dynamic_31 $dynamic_31$	NOT-DETECTED
-dynamic_32 $dynamic_32$	NOT-DETECTED
-dynamic_33 $dynamic_33$	NOT-DETECTED
-dynamic_34 $dynamic_34$	NOT-DETECTED
-dynamic_35 $dynamic_35$	NOT-DETECTED
-dynamic_35	NOT-DETECTED
-dynamic_36 $dynamic_36$	NOT-DETECTED
-dynamic_36	NOT-DETECTED
-dynamic_37 $dynamic_37$	NOT-DETECTED
-dynamic_37	NOT-DETECTED
-dynamic_38 $dynamic_38$	NOT-DETECTED
-dynamic_39 $dynamic_39$	NOT-DETECTED
-dynamic_40 $dynamic_40$	NOT-DETECTED
-dynamic_50 $dynamic_50$	NOT-DETECTED
-dynamic_60 $dynamic_60$	NOT-DETECTED
-dynamic_61 $dynamic_61$	NOT-DETECTED
-dynamic_70 $dynamic_70$	NOT-DETECTED
-dynamic_80 $dynamic_80$	NOT-DETECTED
-dynamic_90 $dynamic_90$	NOT-DETECTED
-dynamic_100 $dynamic_100$	NOT-DETECTED
+dynamic_22 $dynamic_22$	CRACKED
+dynamic_23 $dynamic_23$	CRACKED
+dynamic_24 $dynamic_24$	CRACKED
+dynamic_25 $dynamic_25$	CRACKED
+dynamic_26 $dynamic_26$	CRACKED
+dynamic_29 $dynamic_29$	CRACKED
+dynamic_30 $dynamic_30$	CRACKED
+dynamic_31 $dynamic_31$	CRACKED
+dynamic_32 $dynamic_32$	CRACKED
+dynamic_33 $dynamic_33$	CRACKED
+dynamic_34 $dynamic_34$	CRACKED
+dynamic_35 $dynamic_35$	CRACKED
+dynamic_35	CRACKED
+dynamic_36 $dynamic_36$	CRACKED
+dynamic_36	CRACKED
+dynamic_37 $dynamic_37$	CRACKED
+dynamic_37	CRACKED
+dynamic_38 $dynamic_38$	CRACKED
+dynamic_39 $dynamic_39$	CRACKED
+dynamic_40 $dynamic_40$	CRACKED
+dynamic_50 $dynamic_50$	CRACKED
+dynamic_60 $dynamic_60$	CRACKED
+dynamic_61 $dynamic_61$	CRACKED
+dynamic_70 $dynamic_70$	CRACKED
+dynamic_80 $dynamic_80$	CRACKED
+dynamic_90 $dynamic_90$	CRACKED
+dynamic_100 $dynamic_100$	CRACKED
 dynamic_110 $dynamic_110$	NOT-DETECTED
-dynamic_120 $dynamic_120$	NOT-DETECTED
-dynamic_130 $dynamic_130$	NOT-DETECTED
-dynamic_140 $dynamic_140$	NOT-DETECTED
-dynamic_150 $dynamic_150$	NOT-DETECTED
+dynamic_120 $dynamic_120$	CRACKED
+dynamic_130 $dynamic_130$	CRACKED
+dynamic_140 $dynamic_140$	CRACKED
+dynamic_150 $dynamic_150$	CRACKED
 dynamic_160 $dynamic_160$	NOT-DETECTED
 dynamic_170 $dynamic_170$	NOT-DETECTED
 dynamic_180 $dynamic_180$	NOT-DETECTED
@@ -520,88 +520,88 @@ dynamic_270 $dynamic_270$	NOT-DETECTED
 dynamic_280 $dynamic_280$	NOT-DETECTED
 dynamic_290 $dynamic_290$	NOT-DETECTED
 dynamic_300 $dynamic_300$	NOT-DETECTED
-dynamic_310 $dynamic_310$	NOT-DETECTED
+dynamic_310 $dynamic_310$	CRACKED
 dynamic_320 $dynamic_320$	NOT-DETECTED
 dynamic_330 $dynamic_330$	NOT-DETECTED
 dynamic_340 $dynamic_340$	NOT-DETECTED
 dynamic_350 $dynamic_350$	NOT-DETECTED
 dynamic_360 $dynamic_360$	NOT-DETECTED
-dynamic_370 $dynamic_370$	NOT-DETECTED
-dynamic_380 $dynamic_380$	NOT-DETECTED
-dynamic_390 $dynamic_390$	NOT-DETECTED
-dynamic_400 $dynamic_400$	NOT-DETECTED
-dynamic_410 $dynamic_410$	NOT-DETECTED
-dynamic_420 $dynamic_420$	NOT-DETECTED
-dynamic_1001 $dynamic_1001$	NOT-DETECTED
-dynamic_1002 $dynamic_1002$	NOT-DETECTED
-dynamic_1003 $dynamic_1003$	NOT-DETECTED
-dynamic_1004 $dynamic_1004$	NOT-DETECTED
-dynamic_1005 $dynamic_1005$	NOT-DETECTED
-dynamic_1006 $dynamic_1006$	NOT-DETECTED
-dynamic_1007 $dynamic_1007$	NOT-DETECTED
-dynamic_1008 $dynamic_1008$	NOT-DETECTED
-dynamic_1009 $dynamic_1009$	NOT-DETECTED
-dynamic_1010 $dynamic_1010$	NOT-DETECTED
-dynamic_1011 $dynamic_1011$	NOT-DETECTED
-dynamic_1012 $dynamic_1012$	NOT-DETECTED
+dynamic_370 $dynamic_370$	CRACKED
+dynamic_380 $dynamic_380$	CRACKED
+dynamic_390 $dynamic_390$	CRACKED
+dynamic_400 $dynamic_400$	CRACKED
+dynamic_410 $dynamic_410$	CRACKED
+dynamic_420 $dynamic_420$	CRACKED
+dynamic_1001 $dynamic_1001$	CRACKED
+dynamic_1002 $dynamic_1002$	CRACKED
+dynamic_1003 $dynamic_1003$	CRACKED
+dynamic_1004 $dynamic_1004$	CRACKED
+dynamic_1005 $dynamic_1005$	CRACKED
+dynamic_1006 $dynamic_1006$	CRACKED
+dynamic_1007 $dynamic_1007$	CRACKED
+dynamic_1008 $dynamic_1008$	CRACKED
+dynamic_1009 $dynamic_1009$	CRACKED
+dynamic_1010 $dynamic_1010$	CRACKED
+dynamic_1011 $dynamic_1011$	CRACKED
+dynamic_1012 $dynamic_1012$	CRACKED
 dynamic_1013 $dynamic_1013$	NOT-DETECTED
-dynamic_1014 $dynamic_1014$	NOT-DETECTED
-dynamic_1015	NOT-DETECTED
-dynamic_1015 $dynamic_1015$	NOT-DETECTED
-dynamic_1016 $dynamic_1016$	NOT-DETECTED
-dynamic_1017 $dynamic_1017$	NOT-DETECTED
-dynamic_1018 $dynamic_1018$	NOT-DETECTED
-dynamic_1019 $dynamic_1019$	NOT-DETECTED
-dynamic_1020 $dynamic_1020$	NOT-DETECTED
-dynamic_1021 $dynamic_1021$	NOT-DETECTED
-dynamic_1022 $dynamic_1022$	NOT-DETECTED
-dynamic_1023 $dynamic_1023$	NOT-DETECTED
-dynamic_1024 $dynamic_1024$	NOT-DETECTED
-dynamic_1025 $dynamic_1025$	NOT-DETECTED
-dynamic_1026 $dynamic_1026$	NOT-DETECTED
-dynamic_1027 $dynamic_1027$	NOT-DETECTED
-dynamic_1028 $dynamic_1028$	NOT-DETECTED
-dynamic_1029 $dynamic_1029$	NOT-DETECTED
-dynamic_1030 $dynamic_1030$	NOT-DETECTED
-dynamic_1031 $dynamic_1031$	NOT-DETECTED
-dynamic_1032 $dynamic_1032$	NOT-DETECTED
-dynamic_1034	NOT-DETECTED
-dynamic_1300 $dynamic_1300$	NOT-DETECTED
-dynamic_1350 $dynamic_1350$	NOT-DETECTED
-dynamic_1400 $dynamic_1400$	NOT-DETECTED
-dynamic_1401	NOT-DETECTED
-dynamic_1401 $dynamic_1401$	NOT-DETECTED
-dynamic_1501 $dynamic_1501$	NOT-DETECTED
-dynamic_1502 $dynamic_1502$	NOT-DETECTED
-dynamic_1503 $dynamic_1503$	NOT-DETECTED
-dynamic_1504 $dynamic_1504$	NOT-DETECTED
-dynamic_1505 $dynamic_1505$	NOT-DETECTED
-dynamic_1506	NOT-DETECTED
+dynamic_1014 $dynamic_1014$	CRACKED
+dynamic_1015	CRACKED
+dynamic_1015 $dynamic_1015$	CRACKED
+dynamic_1016 $dynamic_1016$	CRACKED
+dynamic_1017 $dynamic_1017$	CRACKED
+dynamic_1018 $dynamic_1018$	CRACKED
+dynamic_1019 $dynamic_1019$	CRACKED
+dynamic_1020 $dynamic_1020$	CRACKED
+dynamic_1021 $dynamic_1021$	CRACKED
+dynamic_1022 $dynamic_1022$	CRACKED
+dynamic_1023 $dynamic_1023$	CRACKED
+dynamic_1024 $dynamic_1024$	CRACKED
+dynamic_1025 $dynamic_1025$	CRACKED
+dynamic_1026 $dynamic_1026$	CRACKED
+dynamic_1027 $dynamic_1027$	CRACKED
+dynamic_1028 $dynamic_1028$	CRACKED
+dynamic_1029 $dynamic_1029$	CRACKED
+dynamic_1030 $dynamic_1030$	CRACKED
+dynamic_1031 $dynamic_1031$	CRACKED
+dynamic_1032 $dynamic_1032$	CRACKED
+dynamic_1034	CRACKED
+dynamic_1300 $dynamic_1300$	CRACKED
+dynamic_1350 $dynamic_1350$	CRACKED
+dynamic_1400 $dynamic_1400$	CRACKED
+dynamic_1401	CRACKED
+dynamic_1401 $dynamic_1401$	CRACKED
+dynamic_1501 $dynamic_1501$	CRACKED
+dynamic_1502 $dynamic_1502$	CRACKED
+dynamic_1503 $dynamic_1503$	CRACKED
+dynamic_1504 $dynamic_1504$	CRACKED
+dynamic_1505 $dynamic_1505$	CRACKED
+dynamic_1506	CRACKED
 dynamic_1507 $dynamic_1507$	NOT-DETECTED
-dynamic_1518 $dynamic_1518$	NOT-DETECTED
-dynamic_1528 $dynamic_1528$	NOT-DETECTED
-dynamic_1529 $dynamic_1529$	NOT-DETECTED
-dynamic_1550 $dynamic_1550$	NOT-DETECTED
-dynamic_1551 $dynamic_1551$	NOT-DETECTED
-dynamic_1552 $dynamic_1552$	NOT-DETECTED
-dynamic_1560 $dynamic_1560$	NOT-DETECTED
-dynamic_1588 $dynamic_1588$	NOT-DETECTED
-dynamic_1590 $dynamic_1590$	NOT-DETECTED
-dynamic_1592 $dynamic_1592$	NOT-DETECTED
-dynamic_1600 $dynamic_1600$	NOT-DETECTED
-dynamic_1602	NOT-DETECTED
-dynamic_1608 $dynamic_1608$	NOT-DETECTED
-dynamic_2000 $dynamic_2000$	NOT-DETECTED
-dynamic_2001 $dynamic_2001$	NOT-DETECTED
-dynamic_2002 $dynamic_2002$	NOT-DETECTED
-dynamic_2003 $dynamic_2003$	NOT-DETECTED
-dynamic_2004 $dynamic_2004$	NOT-DETECTED
-dynamic_2005 $dynamic_2005$	NOT-DETECTED
-dynamic_2006 $dynamic_2006$	NOT-DETECTED
-dynamic_2008 $dynamic_2008$	NOT-DETECTED
-dynamic_2009 $dynamic_2009$	NOT-DETECTED
-dynamic_2010 $dynamic_2010$	NOT-DETECTED
-dynamic_2011 $dynamic_2011$	NOT-DETECTED
-dynamic_2014 $dynamic_2014$	NOT-DETECTED
+dynamic_1518 $dynamic_1518$	CRACKED
+dynamic_1528 $dynamic_1528$	CRACKED
+dynamic_1529 $dynamic_1529$	CRACKED
+dynamic_1550 $dynamic_1550$	CRACKED
+dynamic_1551 $dynamic_1551$	CRACKED
+dynamic_1552 $dynamic_1552$	CRACKED
+dynamic_1560 $dynamic_1560$	CRACKED
+dynamic_1588 $dynamic_1588$	CRACKED
+dynamic_1590 $dynamic_1590$	CRACKED
+dynamic_1592 $dynamic_1592$	CRACKED
+dynamic_1600 $dynamic_1600$	CRACKED
+dynamic_1602	CRACKED
+dynamic_1608 $dynamic_1608$	CRACKED
+dynamic_2000 $dynamic_2000$	CRACKED
+dynamic_2001 $dynamic_2001$	CRACKED
+dynamic_2002 $dynamic_2002$	CRACKED
+dynamic_2003 $dynamic_2003$	CRACKED
+dynamic_2004 $dynamic_2004$	CRACKED
+dynamic_2005 $dynamic_2005$	CRACKED
+dynamic_2006 $dynamic_2006$	CRACKED
+dynamic_2008 $dynamic_2008$	CRACKED
+dynamic_2009 $dynamic_2009$	CRACKED
+dynamic_2010 $dynamic_2010$	CRACKED
+dynamic_2011 $dynamic_2011$	CRACKED
+dynamic_2014 $dynamic_2014$	CRACKED
 dummy $dummy$	NOT-DETECTED
 crypt	CRACKED

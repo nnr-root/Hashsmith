@@ -2508,6 +2508,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyAuthMeSHA256(targetHash, candidate)
 	case "phps":
 		return verifyPHPS(targetHash, candidate)
+	case "dynamic":
+		return verifyJohnDynamic(targetHash, candidate)
 	case "md5-salt1-upper-md5-salt2-pass":
 		return verifyDualSaltMD5(targetHash, candidate, "upper-inner")
 	case "md5-triple-dual-salt":

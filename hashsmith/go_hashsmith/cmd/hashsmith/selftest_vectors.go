@@ -368,6 +368,7 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"dane-sha256", "hashcat", "", "127e6fbfe24a750e72930c220a8e138275656b8e5d8f48a98c3c92df", srcPublished},
 		{"md5-md5salt-md5-md5pass", "hashcat", "", "e13bb4b8e5a98db7277df344aa3363cf:28945624531", srcPublished},
 		{"netiq-pbkdf2", "hashcat", "", "$pbkdf2-hmac-sha1$100000$7134180503252384106490944216249411431665011151428170747164626720$990e0c5f62b1384d48cbe3660329b9741c4a8473", srcPublished},
+		{"dynamic", "qwerty", "", "$dynamic_9$de2874e33da25313d808d2a8cbf31485$113-", srcCrosschecked},
 		{"phps", "hashcat", "", "$PHPS$34323438373734$5b07e065b9d78d69603e71201c6cf29f", srcPublished},
 		{"samsung-android", "hashcat", "", "0223b799d526b596fe4ba5628b9e65068227e68e:f6d45822728ddb2c", srcPublished},
 		{"sspr", "hashcat", "", "$sspr$0$100000$NONE$2c8586ef492e3c3dd3795395507dc14f", srcPublished},

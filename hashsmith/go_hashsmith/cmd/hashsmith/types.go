@@ -173,6 +173,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"sha1-md5-md5pass", "sha1(md5(md5($pass))), hex at each boundary (Hashcat 18500)"},
 		}},
 		{"Hashcat / John generic salted formats (accept hash:salt or -s)", [][2]string{
+			{"dynamic", "John $dynamic_<n>$ records, the expression named by <n> (-t john-dynamic also works)"},
 			{"md5-pass-salt", "md5($pass.$salt), Hashcat 10 / John dynamic_1"},
 			{"md5-salt-pass", "md5($salt.$pass), Hashcat 20 / John dynamic_4"},
 			{"md5-utf16le-pass-salt", "md5(utf16le($pass).$salt), Hashcat 30"},

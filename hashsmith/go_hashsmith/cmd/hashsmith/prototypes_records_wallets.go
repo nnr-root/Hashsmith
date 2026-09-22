@@ -141,6 +141,14 @@ func walletsPrototypes() []hashid.Prototype {
 		predicateProto(isAuthMeSHA256, "AuthMe SHA-256", hashid.TierSignature,
 			"record prefix $SHA$",
 			8, "AuthMe is one of several competing Minecraft server authentication plugins (alongside LoginSecurity and others), limiting its share of Minecraft-server credential dumps", "authme-sha256"),
+		// isJohnDynamic is a prefix check that goes on to read the record:
+		// the format number must be one John defines, its expression must be
+		// built from hashes Hashsmith implements, and the stored field must be
+		// in the encoding that expression produces. All three are structural,
+		// so TierSignature.
+		predicateProto(isJohnDynamic, "John dynamic expression format", hashid.TierSignature,
+			"record prefix $dynamic_<n>$ naming a known expression",
+			4, "the $dynamic_<n>$ spelling is John's own; the schemes behind it are common, but a record is usually met in the tool's native spelling instead", "dynamic"),
 		// isPHPS is a literal prefix check ("$PHPS$"), nothing more, so
 		// TierSignature.
 		predicateProto(isPHPS, "PHPS md5(md5($pass).$salt)", hashid.TierSignature,
