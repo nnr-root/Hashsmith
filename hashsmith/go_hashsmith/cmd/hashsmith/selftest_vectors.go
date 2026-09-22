@@ -369,6 +369,8 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"md5-md5salt-md5-md5pass", "hashcat", "", "e13bb4b8e5a98db7277df344aa3363cf:28945624531", srcPublished},
 		{"netiq-pbkdf2", "hashcat", "", "$pbkdf2-hmac-sha1$100000$7134180503252384106490944216249411431665011151428170747164626720$990e0c5f62b1384d48cbe3660329b9741c4a8473", srcPublished},
 		{"dynamic", "qwerty", "", "$dynamic_9$de2874e33da25313d808d2a8cbf31485$113-", srcCrosschecked},
+		{"http-digest", "nocode", "", "$response$679066476e67b5c7c4e88f04be567f8b$user$myrealm$GET$/$8c12bd8f728afe56d45a0ce846b70e5a$00000001$4b61913cec32e2c9$auth", srcCrosschecked},
+		{"digest-md5", "secret", "", "$DIGEST-MD5$chris$elwood.innosoft.com$OA6MG9tEQGm2hh$imap/elwood.innosoft.com$OA6MHXh6VqTrRk$00000001$auth$d388dad90d4bbd760a152321f2143af7", srcCrosschecked},
 		{"haval128-4", "abc", "", "$haval$6f2132867c9648419adcd5013e532fa2", srcCrosschecked},
 		{"haval256-3", "HAVAL", "", "$haval$91850C6487C9829E791FC5B58E98E372F3063256BB7D313A93F1F83B426AEDCC", srcCrosschecked},
 		{"skein256", "abc", "", "$skein$0977b339c3c85927071805584d5460d8f20da8389bbe97c59b1cfac291fe9527", srcCrosschecked},

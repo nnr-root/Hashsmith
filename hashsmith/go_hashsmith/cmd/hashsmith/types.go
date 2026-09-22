@@ -500,6 +500,8 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"ldap-pbkdf2", "Red Hat 389-DS {PBKDF2_SHA256}"},
 			{"aix", "AIX {smd5}/{ssha1}/{ssha256}/{ssha512}"},
 			{"as400-ssha1", "IBM AS/400 username-salted SHA-1 (Hashcat 35200)"},
+			{"http-digest", "HTTP Digest authentication (RFC 2617), John hdaa"},
+			{"digest-md5", "SASL DIGEST-MD5 (RFC 2831), John dmd5"},
 			{"sip", "SIP digest authentication (HTTP Digest MD5)"},
 			{"netlm", "NetLM captured LM response (John netlm)"},
 			{"nethalflm", "NetHalfLM: the first half of a captured LM response (John nethalflm)"},

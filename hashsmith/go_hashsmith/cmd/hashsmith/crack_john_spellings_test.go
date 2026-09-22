@@ -708,3 +708,39 @@ func TestEnpassIsAPageMAC(t *testing.T) {
 		}
 	}
 }
+
+// TestDigestAuthentication covers the two digest mechanisms, and pins the one
+// place they differ: HTTP Digest hashes the credentials to hex and uses that,
+// while SASL's mixes the raw sixteen bytes with the nonces. Reading either as
+// the other builds a plausible chain that never matches, so the test checks
+// that swapping them fails.
+func TestDigestAuthentication(t *testing.T) {
+	for _, tc := range []struct{ typ, format string }{
+		{"http-digest", "hdaa $response$"},
+		{"digest-md5", "dmd5 $digest-md5$"},
+	} {
+		record, pass := johnVector(t, tc.format)
+		if types := detectHashTypes(record); !containsString(types, tc.typ) {
+			t.Errorf("%s: detectHashTypes did not offer %s: %v", tc.format, tc.typ, types)
+		}
+		if ok, err := verifyCandidate(pass, record, tc.typ, "", "prefix"); err != nil || !ok {
+			t.Errorf("%s: rejected the right password: ok=%v err=%v", tc.format, ok, err)
+		}
+		if bad, _ := verifyCandidate(pass+"x", record, tc.typ, "", "prefix"); bad {
+			t.Errorf("%s: accepted a wrong password", tc.format)
+		}
+	}
+
+	// The SASL vector is RFC 2831's own example, so the hex reading of its
+	// first stage is worth ruling out explicitly.
+	record, pass := johnVector(t, "dmd5 $digest-md5$")
+	d, err := parseSASLDigest(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ha1Hex := md5HexOf(md5HexOf(d.user, d.realm, pass), d.nonce, d.cnonce)
+	ha2 := md5HexOf("AUTHENTICATE", d.uri)
+	if strings.EqualFold(md5HexOf(ha1Hex, d.nonce, d.nc, d.cnonce, d.qop, ha2), d.response) {
+		t.Error("the hex reading of the first stage also matches, so the two mechanisms are not distinguished")
+	}
+}

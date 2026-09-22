@@ -61,7 +61,7 @@ dashlane $dashlane$	NOT-DETECTED
 diskcryptor $diskcryptor$	CRACKED
 Django $django$	CRACKED
 django-scrypt	CRACKED
-dmd5 $digest-md5$	NOT-DETECTED
+dmd5 $digest-md5$	CRACKED
 dmg $dmg$	CRACKED
 dominosec	CRACKED
 dominosec8	CRACKED
@@ -94,7 +94,7 @@ HAVAL-128-4	NOT-FOUND
 HAVAL-128-4 $haval$	CRACKED
 HAVAL-256-3	NOT-FOUND
 HAVAL-256-3 $haval$	CRACKED
-hdaa $response$	NOT-DETECTED
+hdaa $response$	CRACKED
 hMailServer	CRACKED
 hsrp $hsrp$	NOT-DETECTED
 IKE $ike$	CRACKED

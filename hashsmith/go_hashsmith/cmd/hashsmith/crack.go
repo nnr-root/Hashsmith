@@ -2526,6 +2526,10 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyKeystore(targetHash, candidate)
 	case "sha1-linkedin":
 		return verifySHA1LinkedIn(targetHash, candidate)
+	case "http-digest":
+		return verifyHTTPDigest(targetHash, candidate)
+	case "digest-md5":
+		return verifySASLDigest(targetHash, candidate)
 	case "enpass":
 		return verifyEnpass(targetHash, candidate)
 	case "openssl-enc":
