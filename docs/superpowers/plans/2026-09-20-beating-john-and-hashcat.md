@@ -2142,12 +2142,71 @@ machines), `zipmonster`, and John's `dummy`. Plus macOS's two pre-PBKDF2 hashes,
 which are offered rather than asserted because their length is the whole
 signature and forty-eight hex characters is also a Tiger-192 digest.
 
+### And then the formats themselves
+
+At 436 the not-detected column held no more spellings, so the rest was
+implementation. A mechanical check made that precise and is worth keeping: for
+every record John ships that Hashsmith did not recognise, try its known
+password against every type this tool has. **Nothing cracked.** So there was
+no detection gap left anywhere — each remaining entry was a format with
+nothing behind it.
+
+What followed was one loop, repeated: read the record, form a hypothesis about
+the construction, test it against John's own vector, implement it if it
+matched and record the failure if it did not. The password is known for every
+vector, which turns "what is this format" from a research question into a
+measurement.
+
+It settled, among others: the Kerberos KDC's stored keys (which are the key
+rather than a ticket encrypted with it); Java keystores (whose password is
+checked by one SHA-1 over the whole store, Sun's "Mighty Aphrodite" constant
+included); 1Password's two vault formats; VirtualBox images (where a candidate
+costs BOTH iteration counts, because the password protects a key and a second
+hash of that key is what the record compares); PuTTY keys (no salt, no
+iterations — which is what makes a collected .ppk cheap); Oracle's logon
+exchange; Enpass, which is a SQLCipher page MAC and needs nothing decrypted;
+HTTP Digest and SASL DIGEST-MD5, which differ in exactly one place; and
+LastPass's verifier.
+
+Two of those deserve their own note.
+
+**`openssl enc` is the one place a check had to be strengthened rather than
+implemented.** The format has no authentication at all, so the only available
+test is that the last CBC block ends in valid PKCS#7 padding — and a wrong key
+produces valid-looking padding about once in 256 tries, which over a ten
+million candidate run stops on a wrong answer with near certainty. Hashsmith
+requires the padding AND that what precedes it is text. A test measures the
+difference rather than asserting it: of twenty thousand wrong passwords, 84
+produce valid padding and none are accepted. The cost — a file whose first
+bytes are binary is not recoverable from a sixteen-byte sample — is the honest
+trade.
+
+**And two hashes were worth more than their obscurity.** Skein was already in
+the dependency tree; having it made 36 more of John's expressions evaluable.
+HAVAL — five output sizes, three work levels, fifteen of John's formats, and
+no Go library anywhere — was implemented from the specification and verified
+against John's vectors for all fifteen. It made 135 more expressions
+evaluable, taking the parseable count from 291 to 426 of 446.
+
+HAVAL's shape is worth stating because two parts of it invite a wrong
+"simplification". Its state is eight words whatever the output size, and a
+shorter digest is FOLDED out of all eight rather than truncated — so no short
+digest is a prefix of a long one, which a test pins. And its padding records
+the parameters, so two HAVALs differing only in pass count differ from the
+padding onwards. Its constants are the fractional part of pi, computed rather
+than copied: the first eight words are a published value (they are Blowfish's
+too), which checks the other 128.
+
 ### Where it stands
 
-Of 605 records: **436 crack**, 144 are not detected, 24 are detected and fail,
-none are refused. Nothing in the not-detected column is a spelling any more —
-what is left is formats with no implementation (password managers, PGP disk,
-PuTTY and PST keys, Kerberos's older exchanges) and a dozen hashes this tool
-does not have (tiger, panama, haval, skein, snefru, has-160, MDC-2).
+Of 605 records: **493 crack**, 93 are not detected, 19 are detected and fail,
+none are refused. That is up from 217 when the John ratchet was built.
+
+What is left is a long tail of container formats with no implementation — PGP
+disk, GELI, OpenBSD softraid, GNOME keyring, KDE wallet, Dashlane, tezos,
+Nokia SL3 — plus three hashes this tool still lacks (tiger, panama, MDC-2,
+has-160) and a handful of records deliberately declined with the evidence
+written down: `$sxc$`, `$hsrp$`, `$vtp$`, `$lp$`, `$lpcli$`, bcrypt's `$2x$`,
+`$gost-cp$`, and John's bare `user:hash` mscash2 line.
 
 Still true after every change: no entry has ever reported a WRONG password.
