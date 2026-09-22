@@ -2524,6 +2524,10 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyJohnDynamic(targetHash, candidate)
 	case "jks-keystore":
 		return verifyKeystore(targetHash, candidate)
+	case "sha1-linkedin":
+		return verifySHA1LinkedIn(targetHash, candidate)
+	case "oracle-o5logon":
+		return verifyOracleLogon(targetHash, candidate)
 	case "krb5-key":
 		return verifyKrbDBKey(targetHash, candidate)
 	case "net-ah":

@@ -513,3 +513,45 @@ func TestWPAPSKBlob(t *testing.T) {
 		t.Error("the nonce named in the record is the one inside the frame")
 	}
 }
+
+// TestZeroedDigestShapes covers three records whose shape says more than
+// their length: two SHA-1s with a run of zeros where a dump or a truncation
+// put them, and an Oracle logon capture.
+func TestZeroedDigestShapes(t *testing.T) {
+	for _, tc := range []struct{ typ, format string }{
+		{"sha1-linkedin", "Raw-SHA1-Linkedin"},
+		{"axcrypt-sha1", "Raw-SHA1-AxCrypt"},
+		{"tripcode", "tripcode"},
+		{"oracle-o5logon", "o5logon $o5logon$"},
+	} {
+		record, pass := johnVector(t, tc.format)
+		if types := detectHashTypes(record); !containsString(types, tc.typ) {
+			t.Errorf("%s: detectHashTypes did not offer %s: %v", tc.format, tc.typ, types)
+		}
+		if ok, err := verifyCandidate(pass, record, tc.typ, "", "prefix"); err != nil || !ok {
+			t.Errorf("%s: rejected the right password: ok=%v err=%v", tc.format, ok, err)
+		}
+		if bad, _ := verifyCandidate("x"+pass, record, tc.typ, "", "prefix"); bad {
+			t.Errorf("%s: accepted a wrong password", tc.format)
+		}
+	}
+
+	// The plain readings are still offered: a real SHA-1 can begin with five
+	// zeros or end with eight, so neither shape may suppress them.
+	for _, rec := range []string{
+		"000007f070b64a50e9d31ac3f9eda35120e29d6c",
+		"e5b1b15baef2fc90a5673262440a959200000000",
+	} {
+		if types := detectHashTypes(rec); !containsString(types, "sha1") {
+			t.Errorf("%s: sha1 was suppressed: %v", rec, types)
+		}
+	}
+
+	// And an ordinary SHA-1 is not claimed as either.
+	const plain = "a9993e364706816aba3e25717850c26c9cd0d89d"
+	for _, unwanted := range []string{"sha1-linkedin", "axcrypt-sha1"} {
+		if types := detectHashTypes(plain); containsString(types, unwanted) {
+			t.Errorf("an ordinary SHA-1 was claimed as %s", unwanted)
+		}
+	}
+}

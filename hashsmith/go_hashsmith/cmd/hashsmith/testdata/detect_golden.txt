@@ -397,7 +397,7 @@ $zipmonster$e0f68d6f40c5f157c169e9ca0a6f09fe	zipmonster
 63f63d7f82d4a4cb6b9ff37a6bc7c5ec39faaf9c9078551f5cbf7960e76ded87b643d37ac53c45bc544325e7ff83a1f2:93362	sha384-pass-salt,sha384-salt-pass,sha384-utf16le-pass-salt,sha384-salt-utf16le-pass
 65c1f848fe38cce6:4260950400318054	murmur64a,crc64-jones
 662c0d7b4cd66ef4e64da9b7b20d247d37a1d7bd	sha1,sha0,ripemd160
-66a75cb059	stuffit5
+66a75cb059	stuffit5,tripcode
 66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0	sha256,sha3_256,sm3,blake2s,streebog256,gost,gost-cryptopro,sha512_256,keccak256,shake128-256,blake2b256
 67445496c838e96c1424a8dae4b146f0fc247c8c34ef33feffeb1e4412018512wZGtBMeN84XZE2LoOKwTGvA4Ee4m7PR1lDGIdWUV6OSUZKRiKFx9tlrnZLt8r8OfOzbwUS2a2Uo+nrrP6F85fh4eHstwPJw0KwzHWB8br58=	terra-wallet
 67744bf0ad8a06ccc73359acf47a469430958dc95ea59dc92651466fd5708740077b21d59dad321aa61f7feafe2a92c75521745a4ee2fedcc7912b7e3ccf6c67	sha512,sha3_512,blake2b,whirlpool,streebog512,keccak512,shake256-512,cisco-ise
@@ -586,7 +586,7 @@ not a hash at all
 otm_sha256:1000:1234567890:S5Q9Kc0ETY6ZPyQU+JYY60oFjaJuZZaSinggmzU8PC4=	oracle-otm
 pbkdf2(1000,20,sha512)$744943$c5f8cdef76e3327c908d8d96d4abdb3d8caba14c	web2py-pbkdf2
 pbkdf2:sha256:1000$salty$f7d97f4feac0e0ce7a184eb5617dc5091632e8cd8933bdde1a4495a9bc208036	werkzeug
-pfaRCwDe0U	
+pfaRCwDe0U	tripcode
 pi6a89u8tca930h8mvolklmesefc5gmn:.fnmlbsik.net:35537886:1	dnssec-nsec3
 root:$6$salt$hash	sha512crypt
 sha256:1000:MTc3MTA0MTQwMjQxNzY=:PYjCU215Mi57AYPKva9j7mvF4Rc5bCnt	pbkdf2

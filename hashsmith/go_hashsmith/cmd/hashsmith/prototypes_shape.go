@@ -37,6 +37,21 @@ func lowercaseRulesOutLM(in hashid.Input) (string, bool) {
 	return "", false
 }
 
+// isTripcodeShape reports the only thing a tripcode has to show for itself:
+// ten characters from crypt(3)'s alphabet.
+func isTripcodeShape(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) != 10 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if strings.IndexByte(itoa64, s[i]) < 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func shapePrototypes() []hashid.Prototype {
 	return []hashid.Prototype{
 		hexShapeProto(10, "StuffIt5", 5,
@@ -64,6 +79,39 @@ func shapePrototypes() []hashid.Prototype {
 			"withdrawn in 1995; effectively never encountered", nil, "sha0"),
 		hexShapeProto(40, "RIPEMD-160", 20,
 			"mainly seen via Bitcoin address derivation", nil, "ripemd160"),
+		// Three shapes that say a little more than a length, and still not
+		// much: a run of zeros where a dump or a truncation put them, and
+		// ten characters of crypt(3) output. All three stay TierShape and
+		// non-exclusive like everything else here, because a real SHA-1 can
+		// begin or end with those zeros and ten crypt characters are ten
+		// crypt characters. They add a reading; they do not take one away.
+		{
+			Types: []string{"sha1-linkedin"}, Display: "SHA-1, LinkedIn dump (first five digits zeroed)",
+			Tier: hashid.TierShape,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "forty hex characters beginning with five zeros", isSHA1LinkedIn(in.Normalized)
+			},
+			Prevalence: 15,
+			Rationale:  "the 2012 LinkedIn dump is six and a half million hashes and is still circulated in that form, which is the only reason this shape has a name",
+		},
+		{
+			Types: []string{"axcrypt-sha1"}, Display: "AxCrypt 1 in-memory SHA-1 (truncated, zero-padded)",
+			Tier: hashid.TierShape,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "forty hex characters ending in eight zeros", isBareAxCryptSHA1(in.Normalized)
+			},
+			Prevalence: 8,
+			Rationale:  "AxCrypt keeps only the first sixteen bytes, and a genuine SHA-1 ends in eight zero digits once in four billion",
+		},
+		{
+			Types: []string{"tripcode"}, Display: "Japanese imageboard tripcode",
+			Tier: hashid.TierShape,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "ten characters from crypt(3)'s alphabet", isTripcodeShape(in.Normalized)
+			},
+			Prevalence: 6,
+			Rationale:  "a tripcode is ten characters of crypt(3) output with nothing else to go on, so it is offered as a possibility rather than asserted",
+		},
 
 		hexShapeProto(56, "SHA-224", 30, "uncommon; SHA-256 is chosen instead", nil, "sha224"),
 		hexShapeProto(56, "SHA-512/224", 10, "rare truncated variant", nil, "sha512_224"),
