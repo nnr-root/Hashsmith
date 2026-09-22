@@ -667,3 +667,44 @@ func TestOpenSSLEncRejectsPaddingAlone(t *testing.T) {
 		t.Errorf("the right password stopped verifying: ok=%v err=%v", ok, err)
 	}
 }
+
+// TestEnpassIsAPageMAC covers Enpass, and pins that the check is SQLCipher's
+// page MAC rather than a decryption: nothing is decrypted, and the MAC key
+// comes from the encryption key with its own salt rather than from the
+// password.
+func TestEnpassIsAPageMAC(t *testing.T) {
+	record, pass := johnVector(t, "enpass $enpass$")
+	if types := detectHashTypes(record); !containsString(types, "enpass") {
+		t.Errorf("detectHashTypes did not offer enpass: %v", types)
+	}
+	if ok, err := verifyEnpass(record, pass); err != nil || !ok {
+		t.Errorf("rejected the right password: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyEnpass(record, pass+"x"); bad {
+		t.Error("accepted a wrong password")
+	}
+	r, err := parseEnpass(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deriving the MAC key straight from the password, or from the encryption
+	// key without the XORed salt, must NOT reproduce the page's MAC — those
+	// are the two plausible simplifications, and both are wrong.
+	salt := r.page[:sqlCipherSaltLen]
+	key := pbkdf2.Key([]byte(pass), salt, r.iterations, 32, sha1.New)
+	n := len(r.page)
+	want := r.page[n-sqlCipherReserve+16 : n-sqlCipherReserve+16+sha1.Size]
+	for name, hmacKey := range map[string][]byte{
+		"from the password": pbkdf2.Key([]byte(pass), salt, 2, 32, sha1.New),
+		"same salt":         pbkdf2.Key(key, salt, 2, 32, sha1.New),
+		"the key itself":    key,
+	} {
+		mac := hmac.New(sha1.New, hmacKey)
+		mac.Write(r.page[sqlCipherSaltLen : n-sqlCipherReserve])
+		mac.Write(r.page[n-sqlCipherReserve : n-sqlCipherReserve+16])
+		mac.Write([]byte{1, 0, 0, 0})
+		if hmac.Equal(mac.Sum(nil), want) {
+			t.Errorf("the MAC key derived %s also matches, so the derivation is not what it claims", name)
+		}
+	}
+}

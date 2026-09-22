@@ -75,7 +75,7 @@ eCryptfs $ecryptfs$	CRACKED
 eigrp $eigrp$	CRACKED
 electrum $electrum$	CRACKED
 EncFS $encfs$	CRACKED
-enpass $enpass$	NOT-DETECTED
+enpass $enpass$	CRACKED
 EPI	NOT-DETECTED
 EPiServer $episerver$	CRACKED
 ethereum $ethereum$	CRACKED
@@ -226,7 +226,7 @@ PuTTY $putty$	CRACKED
 pwsafe $pwsafe$	CRACKED
 qnx	CRACKED
 RACF $racf$	CRACKED
-RACF-KDFAES $racf$	CRACKED
+RACF-KDFAES $racf$	TIMEOUT
 radius $radius$	NOT-DETECTED
 RAdmin $radmin2$	CRACKED
 RAKP $rakp$	CRACKED
@@ -373,7 +373,7 @@ diskcryptor-aes-opencl $diskcryptor$	CRACKED
 dmg-opencl $dmg$	CRACKED
 electrum-modern-opencl $electrum$	CRACKED
 EncFS-opencl $encfs$	CRACKED
-enpass-opencl $enpass$	NOT-DETECTED
+enpass-opencl $enpass$	CRACKED
 ethereum-opencl $ethereum$	CRACKED
 ethereum-presale-opencl $ethereum$	CRACKED
 FVDE-opencl $fvde$	CRACKED
