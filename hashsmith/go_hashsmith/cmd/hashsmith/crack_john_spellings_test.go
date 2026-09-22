@@ -1,11 +1,14 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -592,5 +595,75 @@ func TestDiskAndCertificateRecords(t *testing.T) {
 	f[len(f)-1] = strings.Repeat("00", len(r.want))
 	if bad, _ := verifyVDI(strings.Join(f, "$"), pass); bad {
 		t.Error("verified a record whose final hash is wrong")
+	}
+}
+
+// TestPuttyAndOpenSSLEnc covers a PuTTY key and an `openssl enc` file.
+func TestPuttyAndOpenSSLEnc(t *testing.T) {
+	for _, tc := range []struct{ typ, format string }{
+		{"putty", "PuTTY $putty$"},
+		{"openssl-enc", "openssl-enc $openssl$"},
+	} {
+		record, pass := johnVector(t, tc.format)
+		if types := detectHashTypes(record); !containsString(types, tc.typ) {
+			t.Errorf("%s: detectHashTypes did not offer %s: %v", tc.format, tc.typ, types)
+		}
+		if ok, err := verifyCandidate(pass, record, tc.typ, "", "prefix"); err != nil || !ok {
+			t.Errorf("%s: rejected the right password: ok=%v err=%v", tc.format, ok, err)
+		}
+		if bad, _ := verifyCandidate("x"+pass, record, tc.typ, "", "prefix"); bad {
+			t.Errorf("%s: accepted a wrong password", tc.format)
+		}
+	}
+
+	// A PuTTY key with an unprotected private half has no passphrase to find,
+	// and saying so beats returning false for every candidate.
+	record, _ := johnVector(t, "PuTTY $putty$")
+	if _, err := verifyPutty(strings.Replace(record, "aes256-cbc", "none", 1), "x"); err == nil {
+		t.Error("claimed to check an unencrypted PuTTY key")
+	}
+}
+
+// TestOpenSSLEncRejectsPaddingAlone pins the reason `openssl enc` needs more
+// than a padding check. Valid padding happens by chance about once in 256
+// tries, so a run of that length would stop on a wrong answer; requiring the
+// plaintext to be text as well is what makes the check mean something.
+func TestOpenSSLEncRejectsPaddingAlone(t *testing.T) {
+	record, pass := johnVector(t, "openssl-enc $openssl$")
+	r, err := parseOpenSSLEnc(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var paddingOnly, accepted int
+	for i := 0; i < 20000; i++ {
+		guess := "wrong-" + strconv.Itoa(i)
+		key, iv := evpBytesToKey(r.newHash, []byte(guess), r.salt, 1, r.keyLen, 16)
+		block, _ := aes.NewCipher(key)
+		plain := make([]byte, len(r.sample))
+		cipher.NewCBCDecrypter(block, iv).CryptBlocks(plain, r.sample)
+		n := int(plain[len(plain)-1])
+		ok := n >= 1 && n <= 16 && n <= len(plain)
+		for j := 0; ok && j < n; j++ {
+			if int(plain[len(plain)-1-j]) != n {
+				ok = false
+			}
+		}
+		if ok {
+			paddingOnly++
+		}
+		if got, _ := verifyOpenSSLEnc(record, guess); got {
+			accepted++
+		}
+	}
+	if paddingOnly == 0 {
+		t.Error("twenty thousand wrong passwords produced no valid padding at all, so this test is not measuring what it claims")
+	}
+	if accepted != 0 {
+		t.Errorf("%d wrong passwords were accepted", accepted)
+	}
+	t.Logf("of 20000 wrong passwords, %d produced valid padding and %d were accepted", paddingOnly, accepted)
+	// And the right one still verifies.
+	if ok, err := verifyOpenSSLEnc(record, pass); err != nil || !ok {
+		t.Errorf("the right password stopped verifying: ok=%v err=%v", ok, err)
 	}
 }

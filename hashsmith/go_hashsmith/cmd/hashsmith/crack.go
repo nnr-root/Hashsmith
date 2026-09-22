@@ -2526,6 +2526,10 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyKeystore(targetHash, candidate)
 	case "sha1-linkedin":
 		return verifySHA1LinkedIn(targetHash, candidate)
+	case "openssl-enc":
+		return verifyOpenSSLEnc(targetHash, candidate)
+	case "putty":
+		return verifyPutty(targetHash, candidate)
 	case "vdi":
 		return verifyVDI(targetHash, candidate)
 	case "oracle-o5logon":
