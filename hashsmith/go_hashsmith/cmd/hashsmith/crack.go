@@ -2771,7 +2771,16 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		// this string" with "did the verifier agree", and this one removes the
 		// second half. Constant-time comparison anyway, because nothing here
 		// should be the one place that leaks timing.
-		return equalConst([]byte(candidate), []byte(targetHash)), nil
+		//
+		// John writes the same thing as "$0$<password>". A target spelled that
+		// way is read both ways, because nothing can tell a John record from a
+		// password that happens to begin with "$0$", and answering only one
+		// reading would miss the other.
+		if equalConst([]byte(candidate), []byte(targetHash)) {
+			return true, nil
+		}
+		return strings.HasPrefix(targetHash, "$0$") &&
+			equalConst([]byte(candidate), []byte(targetHash[len("$0$"):])), nil
 	case "pdf":
 		return verifyPDF(targetHash, candidate)
 	case "ssh":
@@ -3215,6 +3224,9 @@ func verifyWinZipAESRecord(targetHash, candidate string) (bool, error) {
 }
 
 func verifyScrypt(targetHash, candidate string) (bool, error) {
+	if rewritten, ok := johnScryptRecord(targetHash); ok {
+		targetHash = rewritten
+	}
 	var fields []string
 	var hashcatFormat bool
 	if strings.HasPrefix(strings.ToUpper(targetHash), "SCRYPT:") {

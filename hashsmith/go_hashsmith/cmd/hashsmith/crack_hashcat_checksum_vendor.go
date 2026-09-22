@@ -30,6 +30,9 @@ func verifyMurmur3Seeded(target, candidate string) (bool, error) {
 }
 
 func verifyCRC32CSeeded(target, candidate string) (bool, error) {
+	if rewritten, ok := johnSeededChecksum(target, "$crc32c$"); ok {
+		target = rewritten
+	}
 	parts := strings.Split(target, ":")
 	if len(parts) != 2 || len(parts[0]) != 8 || !isHex(parts[0]) || len(parts[1]) != 8 || !isHex(parts[1]) ||
 		len([]byte(candidate)) > 256 {

@@ -66,6 +66,9 @@ func crc32HashcatHex(text, initial string) (string, error) {
 }
 
 func verifyCRC32Hashcat(target, candidate, initial string) (bool, error) {
+	if rewritten, ok := johnSeededChecksum(target, "$crc32$"); ok {
+		target, initial = rewritten, ""
+	}
 	want := target
 	if initial == "" {
 		f := strings.Split(target, ":")

@@ -11,9 +11,9 @@ md5crypt-long	CRACKED
 bcrypt $2a$	CRACKED
 bcrypt $2x$	NOT-DETECTED
 bcrypt $2b$	CRACKED
-scrypt $7$	NOT-DETECTED
+scrypt $7$	CRACKED
 scrypt $9$	CRACKED
-scrypt $scryptkdf.pm$	NOT-DETECTED
+scrypt $scryptkdf.pm$	CRACKED
 LM $lm$	CRACKED
 LM	NOT-FOUND
 AFS $k4$	NOT-DETECTED
@@ -45,13 +45,13 @@ Blackberry-ES10 $bbes10$	NOT-DETECTED
 WoWSRP	NOT-DETECTED
 WoWSRP $wowsrp$	NOT-DETECTED
 Blockchain $blockchain$	CRACKED
-chap $chap$	NOT-DETECTED
+chap $chap$	CRACKED
 Clipperz $clipperz$	NOT-DETECTED
 cloudkeychain $cloudkeychain$	NOT-DETECTED
 dynamic=md5($p)	NOT-DETECTED
 cq $cq$	NOT-DETECTED
-CRC32 $crc32$	NOT-DETECTED
-CRC32 $crc32c$	NOT-DETECTED
+CRC32 $crc32$	CRACKED
+CRC32 $crc32c$	CRACKED
 sha1crypt $sha1$	CRACKED
 sha256crypt $5$	CRACKED
 sha512crypt $6$	CRACKED
@@ -131,8 +131,8 @@ MediaWiki $b$	CRACKED
 MediaWiki $dynamic_9$	CRACKED
 monero $monero$	CRACKED
 money $money$	NOT-DETECTED
-MongoDB $mongodb$	NOT-DETECTED
-scram $scram$	NOT-DETECTED
+MongoDB $mongodb$	CRACKED
+scram $scram$	CRACKED
 Mozilla $mozilla$	CRACKED
 mscash	CRACKED
 mscash2	NOT-DETECTED
@@ -226,7 +226,7 @@ PuTTY $putty$	NOT-DETECTED
 pwsafe $pwsafe$	CRACKED
 qnx	CRACKED
 RACF $racf$	CRACKED
-RACF-KDFAES $racf$	CRACKED
+RACF-KDFAES $racf$	TIMEOUT
 radius $radius$	NOT-DETECTED
 RAdmin $radmin2$	CRACKED
 RAKP $rakp$	NOT-DETECTED
@@ -328,7 +328,7 @@ xsha512 $lion$	NOT-DETECTED
 ZIP $zip2$	CRACKED
 ZipMonster $zipmonster$	NOT-DETECTED
 ZipMonster	NOT-FOUND
-plaintext $0$	NOT-DETECTED
+plaintext $0$	CRACKED
 has-160	NOT-FOUND
 HMAC-MD5	CRACKED
 HMAC-MD5 $cram_md5$	CRACKED

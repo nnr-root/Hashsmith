@@ -120,6 +120,37 @@ func saltedPrototypes() []hashid.Prototype {
 		// for a 128-hex Whirlpool digest is SHA-512. crack_john_wrappers.go
 		// strips the envelope once the type is settled, and only for the type
 		// the envelope names, so offering the whole set here is safe.
+		// John's spellings of records Hashsmith already reads. Each is a
+		// literal prefix plus a field layout that has to parse, so a record
+		// that merely starts with the prefix is not claimed — see
+		// crack_john_spellings.go, where the same readers rewrite the record
+		// for the verifier once the type is settled.
+		predicateProto(func(s string) bool { _, ok := johnSeededChecksum(s, "$crc32$"); return ok },
+			"CRC-32 with a seed (John $crc32$)", hashid.TierSignature,
+			"record prefix $crc32$ carrying a seed and a checksum",
+			3, "a CRC is a checksum rather than a password hash, and meets a cracker only when someone has used one as a password check anyway", "crc32-hashcat"),
+		predicateProto(func(s string) bool { _, ok := johnSeededChecksum(s, "$crc32c$"); return ok },
+			"CRC-32C with a seed (John $crc32c$)", hashid.TierSignature,
+			"record prefix $crc32c$ carrying a seed and a checksum",
+			3, "the Castagnoli polynomial is rarer than the ordinary CRC-32 outside storage checksums", "crc32c-hashcat"),
+		predicateProto(func(s string) bool { _, ok := johnChapRecord(s); return ok },
+			"iSCSI CHAP (John $chap$)", hashid.TierSignature,
+			"record prefix $chap$ carrying an id, a challenge and a response",
+			5, "CHAP is still the authentication most iSCSI targets are configured with, and the exchange is visible to anyone on the storage network", "chap"),
+		predicateProto(func(s string) bool { _, ok := johnScryptRecord(s); return ok },
+			"scrypt (John $7$ / $ScryptKDF.pm$)", hashid.TierSignature,
+			"a $7$ or $ScryptKDF.pm$ record whose parameters parse",
+			6, "scrypt's own crypt(3) spelling is what Colin Percival's reference implementation writes, so it appears wherever scrypt was adopted directly rather than through a framework", "scrypt"),
+		predicateProto(func(s string) bool { _, ok := johnMongoDBSCRAM(s); return ok },
+			"MongoDB SCRAM-SHA-1 (John $scram$)", hashid.TierSignature,
+			"record prefix $scram$ carrying a user, an iteration count, a salt and a key",
+			6, "SCRAM-SHA-1 is what MongoDB 3.0 through 3.6 stored, and those releases are still widely deployed", "mongodb"),
+		predicateProto(func(s string) bool { _, _, ok := johnMongoDBLegacy(s); return ok },
+			"MongoDB MONGODB-CR (John $mongodb$)", hashid.TierSignature,
+			"record prefix $mongodb$0$ carrying a user and an MD5",
+			5, "MONGODB-CR was removed in MongoDB 4.0, so these records come from older deployments and their dumps", "mongodb"),
+		hasPrefixProto("$0$", "plaintext (John $0$)", 2,
+			"John writes a known password as $0$<password> so a wordlist, a rule file or a mask can be tested without a hash in the way", "plaintext"),
 		predicateProtoShared(isJohnWrappedRecord, "John-enveloped digest", hashid.TierSignature,
 			"a record whose leading $name$ envelope names a supported hash or format",
 			8, "John writes the format name into the record where hashcat writes the payload bare, so these records arrive from John users with the algorithm already stated",

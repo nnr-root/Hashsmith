@@ -14,6 +14,9 @@ import (
 )
 
 func verifyChap(targetHash, candidate string) (bool, error) {
+	if rewritten, ok := johnChapRecord(targetHash); ok {
+		targetHash = rewritten
+	}
 	f := strings.Split(targetHash, ":")
 	if len(f) != 3 || len(f[0]) != 32 {
 		return false, errors.New("invalid iSCSI CHAP hash (need md5:challenge:id)")

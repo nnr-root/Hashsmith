@@ -26,6 +26,14 @@ import (
 )
 
 func verifyMongoDB(targetHash, candidate string) (bool, error) {
+	// MONGODB-CR, the credential MongoDB used before SCRAM: one MD5 over the
+	// username, a fixed separator and the password.
+	if user, digest, ok := johnMongoDBLegacy(targetHash); ok {
+		return strings.EqualFold(md5Hex([]byte(user+":mongo:"+candidate)), digest), nil
+	}
+	if rewritten, ok := johnMongoDBSCRAM(targetHash); ok {
+		targetHash = rewritten
+	}
 	if !strings.HasPrefix(targetHash, "$mongodb-scram$") {
 		return false, errors.New("invalid MongoDB hash (missing $mongodb-scram$ prefix)")
 	}
