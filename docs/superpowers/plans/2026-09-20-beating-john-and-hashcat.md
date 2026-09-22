@@ -2197,16 +2197,49 @@ padding onwards. Its constants are the fractional part of pi, computed rather
 than copied: the first eight words are a published value (they are Blowfish's
 too), which checks the other 128.
 
+### The last stretch, and what a search is for
+
+Past 490 the loop was: sweep, then implement what the sweep explains. Two
+sweeps did most of it. One tried iterated digest constructions — five hashes,
+five orderings of password and salt, up to eleven hundred rounds — against
+every unrecognised record, and returned exactly two hits, both readings rather
+than algorithms: FormSpring writes `<digest>$<salt>` where hashcat writes
+`<digest>:<salt>`, and dynamic_1013's records carry their inner digest
+precomputed in the salt field, so what the record implies is `md5($p.$s)`
+rather than the `md5($p.PMD5(username))` John prints. That is the third
+printed expression corrected in the table with its reason attached.
+
+Accepting the dollar spelling needed one condition that is easy to miss and
+the reason to write a test: **if both halves are hex it is not a salted
+digest**, it is two fields of some other format. A first, looser rule proved
+that by claiming a Kerberos AS-REP and a routing capture and failing on both.
+
+Formats settled by the same read-hypothesise-test loop: Tezos fundraiser
+wallets (whose twist is that the password goes into the SALT, after the
+literal "mnemonic" and the email — the plain BIP-39 reading produces a
+valid-looking wallet that is not this one), BlackBerry ES10 (a hundred rounds
+of SHA-512 in which the salt is touched once and never again), and MDC-2, the
+hash you build out of a block cipher when you have no hash, verified against
+OpenSSL's published pangram digests.
+
+**And several searches returned nothing, which is the other half of the
+method.** `$hsrp$`, `$vtp$`, `$sxc$`, `$lp$`, `$lpcli$`, WoWSRP, GELI,
+OpenBSD softraid, STRIP, BKS and Palshop were each put through a bounded space
+of the obvious constructions and none reproduced its vector. Every one of
+those is recorded where its reader would have gone. A search says nothing
+about the space outside the one searched, and claiming a record you cannot
+answer for is worse than leaving it alone.
+
 ### Where it stands
 
-Of 605 records: **493 crack**, 93 are not detected, 19 are detected and fail,
+Of 605 records: **499 crack**, 87 are not detected, 19 are detected and fail,
 none are refused. That is up from 217 when the John ratchet was built.
 
 What is left is a long tail of container formats with no implementation — PGP
-disk, GELI, OpenBSD softraid, GNOME keyring, KDE wallet, Dashlane, tezos,
-Nokia SL3 — plus three hashes this tool still lacks (tiger, panama, MDC-2,
-has-160) and a handful of records deliberately declined with the evidence
-written down: `$sxc$`, `$hsrp$`, `$vtp$`, `$lp$`, `$lpcli$`, bcrypt's `$2x$`,
-`$gost-cp$`, and John's bare `user:hash` mscash2 line.
+disk, GELI, OpenBSD softraid, GNOME keyring, KDE wallet, Dashlane, SAP's PSE,
+Nokia SL3 — plus two hashes this tool still lacks (tiger and panama, whose
+sixteen dynamic expressions each are the last nineteen of John's 446 that do
+not parse), and the records deliberately declined with the evidence written
+down.
 
 Still true after every change: no entry has ever reported a WRONG password.
