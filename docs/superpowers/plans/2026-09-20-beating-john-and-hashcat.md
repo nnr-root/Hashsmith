@@ -2018,3 +2018,136 @@ carry a genuinely different field layout rather than a differently spelled
 envelope. None of it is cryptography; all of it is reading records.
 
 Still true after every change: no entry has ever reported a WRONG password.
+
+## From 227 to 436: the residue, worked through
+
+That last paragraph called the remaining work "per-format parser work" and
+listed the formats. It was right about the character of it and wrong about
+the size: the single largest item was not a format at all.
+
+### The lever: John's dynamic engine is one format, not 163
+
+163 of the 335 unrecognised records — nearly half — were `$dynamic_<n>$`.
+That looks like 163 formats and is one. John does not write a verifier per
+scheme; it writes an evaluator and a table of expressions, and a record names
+its expression by number. `$dynamic_9$<digest>$113-` is `md5($s.md5($p))`
+over the salt `113-`.
+
+So the work was an evaluator. The table is transcribed from
+`john --list=subformats` so it stays checkable against John line by line;
+255 of John's 446 expressions are built from hashes this tool has. The
+language is small and completely specified by what the table contains:
+concatenation, calls whose suffix picks hex or raw bytes or base64, four
+variables, literals, and a few reshaping calls (`utf16`, `uc`, `lc`, the
+pads).
+
+**Two of John's own printed expressions are wrong**, and both are corrected in
+the table with the reason attached. `dynamic_1588` leaves out that ColdFusion
+upper-cases its inner digest. `dynamic_1590` describes an AS/400 salt as plain
+text when the record stores it already upper-cased, blank-padded and in
+UTF-16BE. Both were settled against John's own test vectors — the transcription
+is faithful to what John computes, not to what it prints.
+
+Records are read as John writes them: a hex-encoded salt, the `$$U` and `$$2`
+markers — looked for **twice**, because a hex-encoded salt encodes the markers
+along with it, as PostgreSQL's `dynamic_1015` does — a login before the record,
+a digest stored truncated or zero-padded, and LinkedIn's SHA-1 with its first
+five hex digits zeroed.
+
+Of the 136 records claimed, every one cracks with the password John ships and
+none with any other. The rest are declined at detection rather than claimed and
+failed: an expression naming tiger, panama, haval or skein, or a digest not in
+the encoding the expression produces (Cisco's PIX and ASA records are
+`dynamic_19` and `dynamic_20` but store PIX base64).
+
+The useful half of that work is not the ratchet number. `@dynamic=<expr>@<digest>`
+is John's spelling for an expression given on the spot, and it costs a switch
+statement once the engine exists — so a scheme this tool has never heard of can
+be cracked by writing down what it computes, salt and all, with no code at all.
+
+### Search as a way of reading records
+
+With the engine in place, a mechanical question became worth asking: how many
+of the still-unrecognised records are one of those expressions wearing an
+envelope? Trying every field of every record as the digest, the salt or the
+username against all 255 evaluable expressions takes nine seconds and answers
+it without a guess. Fifteen were. Seven got a format of their own — John names
+`dynamic_12` "IPB" and `dynamic_4` "OSC" itself — including four
+routing-protocol formats whose salt is not a salt but a captured packet.
+
+The same technique settled the keyed-MAC routing formats, where the question
+was which MAC rather than which expression: `net-ah` is HMAC-MD5 truncated to
+twelve bytes, `rsvp` is the MAC whole, and `ospf` is RFC 5709 — the one part
+not visible in the packet being Apad, the 0x878FE1F3 filler written into the
+authentication field before the MAC is taken.
+
+**And it recorded two failures, which is the point of using it.** `$hsrp$` and
+`$vtp$` went through the same search — every hash of the packet and the key in
+either order, the key NUL-padded and repeated to nine lengths, HMAC under each,
+the key written over the packet at every two-byte offset — and came out
+unexplained. `$sxc$` lines up with `$odf$` field for field and still does not
+verify under eighteen variations. A search says nothing about the space outside
+the one searched, so all three are left alone with the evidence written where
+the reader would have gone. Claiming a record and failing on it is worse than
+not claiming it.
+
+### The defect the ratchet was really for
+
+Six records failed for one reason: the password is empty. Chasing that found
+two defects, the second worse than the first.
+
+The dictionary reader trimmed every line and skipped the ones that came out
+empty. That cost `" secret"` and `"secret "` — a list containing them was being
+asked about a word it does not hold, and a recovered password was printed
+trimmed, which would send an operator off with the wrong answer. And it cost
+the empty password, which is an account with no password at all: the weakest
+finding an audit can make and the one it most wants reported.
+
+Removing the trim was not enough. Found-ness was carried by the password being
+non-empty — `result.password != ""` — so Hashsmith verified the empty password,
+stopped the run on it, and then reported "Not found". The one password it could
+never name, however it was reached. `crackedResult` now says whether it found
+something, separately from what it found, and the counter follows the same rule
+as the reader because the count is what `--skip` and `--limit` slice.
+
+Nothing needs trimming: bufio's line scanner already drops the newline and any
+carriage return before it.
+
+### The rest, briefly
+
+**The captured-credential family.** Six formats share one line — user, an empty
+field, a domain, three fields carrying the exchange — and two were implemented.
+`netlm`, `nethalflm`, `netlmv2` and `mschapv2` are the rest; MS-CHAPv2's
+challenge is derived rather than given, after which it is the NTLMv1 computation
+exactly. Telling them apart is now done by shape rather than by assumption: a
+16-byte response with an 8-byte trailer is LMv2, not v2 with a suspiciously
+short blob. Where the shape leaves a real ambiguity both readings are offered in
+order. One fix fell out of the same reading — NTLMv2's identity may be stated as
+separate user and domain fields or as one `DOMAIN\user`, and only the first was
+read.
+
+**Container records, all five of the refused ones.** None needed new
+cryptography; each needed its record read as written. `$7z$`'s type field is a
+codec discriminator and was being read as a padding length — this tool's own
+extractor writes the padding count there, so the misreading held until a record
+disagreed. `$luks$` is the partition header verbatim, hex, with every field the
+other spellings name at a fixed offset inside it. KeePass writes the size of a
+KDB1 header where a cipher id belongs.
+
+**Four formats John reads that this did not**: `azuread` (the password never
+reaches PBKDF2 — the NTLM hash does, so anyone holding the on-premises hash can
+check a candidate against the cloud record), `known-hosts` (the secret is a
+hostname, so cracking one turns an anonymised file back into a list of
+machines), `zipmonster`, and John's `dummy`. Plus macOS's two pre-PBKDF2 hashes,
+which are offered rather than asserted because their length is the whole
+signature and forty-eight hex characters is also a Tiger-192 digest.
+
+### Where it stands
+
+Of 605 records: **436 crack**, 144 are not detected, 24 are detected and fail,
+none are refused. Nothing in the not-detected column is a spelling any more —
+what is left is formats with no implementation (password managers, PGP disk,
+PuTTY and PST keys, Kerberos's older exchanges) and a dozen hashes this tool
+does not have (tiger, panama, haval, skein, snefru, has-160, MDC-2).
+
+Still true after every change: no entry has ever reported a WRONG password.
