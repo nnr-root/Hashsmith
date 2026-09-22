@@ -150,7 +150,7 @@ multibit $multibit$	CRACKED
 mysqlna $mysqlna$	CRACKED
 mysql-sha1	CRACKED
 mysql	CRACKED
-net-ah $net-ah$	NOT-DETECTED
+net-ah $net-ah$	CRACKED
 nethalflm	CRACKED
 nethalflm $nethalflm$	CRACKED
 netlm	CRACKED
@@ -187,7 +187,7 @@ oracle11	CRACKED
 Oracle12C $oracle12c$	CRACKED
 osc $osc$	CRACKED
 osc $dynamic_4$	CRACKED
-ospf $ospf$	NOT-DETECTED
+ospf $ospf$	CRACKED
 Padlock $padlock$	NOT-DETECTED
 Palshop $palshop$	NOT-DETECTED
 Palshop	NOT-DETECTED
@@ -226,7 +226,7 @@ PuTTY $putty$	NOT-DETECTED
 pwsafe $pwsafe$	CRACKED
 qnx	CRACKED
 RACF $racf$	CRACKED
-RACF-KDFAES $racf$	CRACKED
+RACF-KDFAES $racf$	TIMEOUT
 radius $radius$	NOT-DETECTED
 RAdmin $radmin2$	CRACKED
 RAKP $rakp$	NOT-DETECTED
@@ -263,7 +263,7 @@ ripemd-128	NOT-FOUND
 ripemd-128 $ripemd$	CRACKED
 ripemd-160	CRACKED
 ripemd-160 $ripemd$	CRACKED
-rsvp $rsvp$	NOT-DETECTED
+rsvp $rsvp$	CRACKED
 Siemens-S7 $siemens-s7$	NOT-DETECTED
 Salted-SHA1	CRACKED
 SSHA512	CRACKED

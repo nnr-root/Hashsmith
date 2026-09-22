@@ -2,6 +2,8 @@ package main
 
 import (
 	"crypto/hmac"
+	"crypto/md5"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
@@ -219,5 +221,68 @@ func TestKnownHostsCandidateIsAHostname(t *testing.T) {
 		if bad, _ := verifyKnownHosts(record, other); bad {
 			t.Errorf("%q: accepted the wrong host", other)
 		}
+	}
+}
+
+// TestRoutingAuthentication covers the keyed-MAC members of the routing
+// family against John's own captures.
+func TestRoutingAuthentication(t *testing.T) {
+	for _, tc := range []struct{ typ, format string }{
+		{"net-ah", "net-ah $net-ah$"},
+		{"rsvp", "rsvp $rsvp$"},
+		{"ospf", "ospf $ospf$"},
+	} {
+		record, pass := johnVector(t, tc.format)
+		if types := detectHashTypes(record); !containsString(types, tc.typ) {
+			t.Errorf("%s: detectHashTypes did not offer %s: %v", tc.format, tc.typ, types)
+		}
+		if ok, err := verifyCandidate(pass, record, tc.typ, "", "prefix"); err != nil || !ok {
+			t.Errorf("%s: rejected the right key: ok=%v err=%v", tc.format, ok, err)
+		}
+		if bad, _ := verifyCandidate("x"+pass, record, tc.typ, "", "prefix"); bad {
+			t.Errorf("%s: accepted a wrong key", tc.format)
+		}
+	}
+}
+
+// TestOSPFApad pins RFC 5709's filler, which is the one thing about OSPF's
+// cryptographic authentication that cannot be guessed from the packet: the
+// authentication field is set to 0x878FE1F3 repeated before the MAC is taken,
+// and a MAC over the packet alone does not match.
+func TestOSPFApad(t *testing.T) {
+	if got := hex.EncodeToString(ospfApad(20)); got != "878fe1f3878fe1f3878fe1f3878fe1f3878fe1f3" {
+		t.Errorf("Apad = %s", got)
+	}
+	record, pass := johnVector(t, "ospf $ospf$")
+	_, packet, digest, err := routingRecord(record, "$ospf$")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac := hmac.New(sha1.New, []byte(pass))
+	mac.Write(packet)
+	if hmac.Equal(mac.Sum(nil), digest) {
+		t.Error("the MAC over the packet alone matched, so Apad is not part of this record after all")
+	}
+}
+
+// TestAHIsTruncated pins that an AH record carries ninety-six bits of a MAC
+// rather than a whole one, and that the check compares exactly what is there.
+func TestAHIsTruncated(t *testing.T) {
+	record, pass := johnVector(t, "net-ah $net-ah$")
+	_, packet, digest, err := routingRecord(record, "$net-ah$")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(digest) != 12 {
+		t.Fatalf("AH digest is %d bytes, want 12", len(digest))
+	}
+	mac := hmac.New(md5.New, []byte(pass))
+	mac.Write(packet)
+	full := mac.Sum(nil)
+	if !hmac.Equal(full[:12], digest) {
+		t.Error("the first twelve bytes of the MAC are not what the record holds")
+	}
+	if hmac.Equal(full, digest) {
+		t.Error("the record holds a whole MAC, so the truncation is not real")
 	}
 }
