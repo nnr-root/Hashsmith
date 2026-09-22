@@ -11,14 +11,41 @@ import (
 // bcryptSpeedupFloor is a ratchet, not a target. Raise it as the core improves;
 // never lower it to make a change pass.
 //
-// It is a RATIO against x/crypto/bcrypt measured in this same process, not an
-// absolute c/s figure. An absolute floor would encode one machine's clock speed
-// and flake on every other runner; the ratio is the quantity the work is
-// actually about and is stable across hardware.
+// It is a RATIO against x/crypto/bcrypt measured in this same process rather
+// than an absolute c/s figure, because an absolute floor would encode one
+// machine's clock speed. What stood here additionally claimed the ratio "is
+// stable across hardware", and that is the part a week of red CI disproved.
 //
-// Set from the measurement in docs/superpowers/notes/2026-09-06-bcrypt-lane-tuning.md
-// with a 15% margin below the observed value to absorb runner variance.
-const bcryptSpeedupFloor = 1.92 * 0.85 // measured 1.92x speedup at Lanes=4, see docs/superpowers/notes/2026-09-06-bcrypt-lane-tuning.md
+// Two QUIET arm64 machines disagree by a third. The tuning machine, an Apple
+// M2, reads 1.92x. GitHub's hosted arm64 runner read 1.39x, 1.39x, 1.40x and
+// 1.40x across four consecutive nightly runs, with its reference side varying
+// by 0.03% between them — a machine so consistent that the contention guard
+// below has nothing to object to. Same architecture, same test, same code:
+//
+//	                x/crypto      lane/candidate   ratio
+//	Apple M2        3.259 ms      1.527 ms         1.92x
+//	GitHub arm64    1.774 ms      1.270 ms         1.40x
+//
+// The reference side is 1.84x faster on the runner while the lane side is only
+// 1.20x faster, which is what a microarchitectural difference looks like:
+// interleaving four Blowfish states pays off in proportion to the out-of-order
+// window and the cache behind it, and those are not the same machine to
+// machine. The ratio is portable in FORM and not in VALUE.
+//
+// So this floor is the slowest measurement any machine has produced, less the
+// project's usual 15% margin — a guard that the core is still meaningfully
+// ahead of the reference anywhere it runs. The ratchet the tuning work
+// actually set is bcryptCalibratedFloor, asserted on the lane calibrated for
+// it. Neither number may be lowered to make a change pass; both may be raised
+// when a slower machine is measured and found to beat them.
+const bcryptSpeedupFloor = 1.39 * 0.85 // slowest measured: GitHub's hosted arm64 runner
+
+// bcryptCalibratedFloor is the ratchet from
+// docs/superpowers/notes/2026-09-06-bcrypt-lane-tuning.md — 1.92x at Lanes=4,
+// with the same 15% margin — and is what the dedicated CI job asserts, since
+// that lane runs on one known architecture with nothing else on the machine.
+// A regression the portable floor would let through is caught there.
+const bcryptCalibratedFloor = 1.92 * 0.85
 
 // refQuietBaselineNs is the best-of-5 wall-clock cost of a single
 // x/crypto/bcrypt.CompareHashAndPassword at cost 5 on this project's tuning
@@ -181,6 +208,15 @@ func TestSpeedupOverXCrypto(t *testing.T) {
 		skipf("timing test; run without -short")
 	}
 
+	// The portable floor holds on every machine measured; the calibrated one
+	// is the ratchet the tuning work set, and is asserted only on the lane
+	// that is quiet, single-architecture and required to produce a
+	// measurement — see the two constants for why they differ.
+	floor, floorName := bcryptSpeedupFloor, "portable floor, see bcryptSpeedupFloor"
+	if required {
+		floor, floorName = bcryptCalibratedFloor, "calibrated floor, asserted because "+ratchetRequiredEnv+"=1"
+	}
+
 	crypt, err := bcrypt.GenerateFromPassword([]byte("ratchet"), 5)
 	if err != nil {
 		t.Fatal(err)
@@ -240,7 +276,7 @@ func TestSpeedupOverXCrypto(t *testing.T) {
 			worstSpread, obviousContentionSpread, quietSpreadCeiling, laneNs, refNs)
 	}
 
-	if got < bcryptSpeedupFloor || worstSpread > quietSpreadCeiling {
+	if got < floor || worstSpread > quietSpreadCeiling {
 		got2, spread2, lane2, ref2 := measure(9)
 		bestLane2, _ := minMax(lane2)
 		bestRef2, _ := minMax(ref2)
@@ -275,7 +311,7 @@ func TestSpeedupOverXCrypto(t *testing.T) {
 			float64(bestRef)/1e6, refQuietBaselineNs/1e6)
 	}
 
-	if got < bcryptSpeedupFloor {
-		t.Errorf("speedup %.2fx is below the %.2fx floor", got, bcryptSpeedupFloor)
+	if got < floor {
+		t.Errorf("speedup %.2fx is below the %.2fx floor (%s)", got, floor, floorName)
 	}
 }
