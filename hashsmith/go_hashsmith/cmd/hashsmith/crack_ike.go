@@ -21,6 +21,9 @@ import (
 )
 
 func verifyIKE(targetHash, candidate string) (bool, error) {
+	if rewritten, ok := johnIKERecord(targetHash); ok {
+		targetHash = rewritten
+	}
 	f := strings.Split(targetHash, ":")
 	if len(f) != 9 {
 		return false, errors.New("invalid IKE-PSK hash (need 9 colon-separated fields)")

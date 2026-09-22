@@ -2522,6 +2522,16 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyPHPS(targetHash, candidate)
 	case "dynamic":
 		return verifyJohnDynamic(targetHash, candidate)
+	case "azuread":
+		return verifyAzureAD(targetHash, candidate)
+	case "known-hosts":
+		return verifyKnownHosts(targetHash, candidate)
+	case "zipmonster":
+		return verifyZipMonster(targetHash, candidate)
+	case "dummy":
+		return verifyDummy(targetHash, candidate)
+	case "p5k2":
+		return verifyP5K2(targetHash, candidate)
 	case "xsha":
 		return verifyXSHA(targetHash, candidate)
 	case "xsha512":

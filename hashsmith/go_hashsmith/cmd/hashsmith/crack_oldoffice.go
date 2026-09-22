@@ -15,6 +15,12 @@ import (
 //	$oldoffice$0/1*salt*encryptedVerifier*encryptedMD5
 //	$oldoffice$3/4*salt*encryptedVerifier*encryptedSHA1[*secondBlock]
 func verifyOldOffice(targetHash, candidate, expectedFamily string) (bool, error) {
+	// John writes the record on a line of its own fields: a username before
+	// it, and after it the five-byte RC4 key that opens the document outright.
+	// Neither belongs to the record.
+	if rewritten, ok := johnOldOfficeRecord(targetHash); ok {
+		targetHash = rewritten
+	}
 	targetHash, collider, err := splitColliderAnswer(targetHash)
 	if err != nil {
 		return false, err

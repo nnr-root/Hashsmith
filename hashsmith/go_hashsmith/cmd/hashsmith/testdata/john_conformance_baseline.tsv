@@ -33,7 +33,7 @@ as400-ssha1 $as400ssha1$	CRACKED
 as400-ssha1 $dynamic_1590$	CRACKED
 asa-md5 $dynamic_20$	NOT-DETECTED
 AxCrypt $axcrypt$	CRACKED
-AzureAD	NOT-DETECTED
+AzureAD	CRACKED
 BestCrypt $bestcrypt$	NOT-DETECTED
 bfegg	NOT-DETECTED
 Bitcoin $bitcoin$	CRACKED
@@ -97,7 +97,7 @@ HAVAL-256-3 $haval$	NOT-DETECTED
 hdaa $response$	NOT-DETECTED
 hMailServer	CRACKED
 hsrp $hsrp$	NOT-DETECTED
-IKE $ike$	NOT-DETECTED
+IKE $ike$	CRACKED
 ipb2 $ipb2$	CRACKED
 itunes-backup $itunes_backup$	CRACKED
 iwork $iwork$	CRACKED
@@ -105,7 +105,7 @@ KeePass $keepass$	CRACKED
 keychain $keychain$	CRACKED
 keyring $keyring$	NOT-DETECTED
 keystore $keystore$	NOT-DETECTED
-known_hosts $known_hosts$	NOT-DETECTED
+known_hosts $known_hosts$	CRACKED
 krb4 $af$	NOT-DETECTED
 krb5 $krb5$	NOT-DETECTED
 krb5asrep	NOT-DETECTED
@@ -179,7 +179,7 @@ ODF $odf$	CRACKED
 ODF $sxc$	NOT-DETECTED
 Office $office$	CRACKED
 oldoffice $oldoffice$	CRACKED
-oldoffice	NOT-DETECTED
+oldoffice	CRACKED
 OpenBSD-SoftRAID $openbsd-softraid$	NOT-DETECTED
 openssl-enc $openssl$	NOT-DETECTED
 oracle	CRACKED
@@ -197,7 +197,7 @@ PBKDF2-HMAC-MD4 $pbkdf2-hmac-md4$	CRACKED
 PBKDF2-HMAC-MD5 $pbkdf2-hmac-md5$	CRACKED
 PBKDF2-HMAC-SHA1 $pbkdf2-hmac-sha1$	CRACKED
 PBKDF2-HMAC-SHA1	CRACKED
-PBKDF2-HMAC-SHA1 $p5k2$	NOT-DETECTED
+PBKDF2-HMAC-SHA1 $p5k2$	CRACKED
 PBKDF2-HMAC-SHA256 $pbkdf2-sha256$	CRACKED
 PBKDF2-HMAC-SHA256 $8$	CRACKED
 PBKDF2-HMAC-SHA512 $pbkdf2-hmac-sha512$	CRACKED
@@ -326,7 +326,7 @@ xsha	CRACKED
 xsha512	CRACKED
 xsha512 $lion$	CRACKED
 ZIP $zip2$	CRACKED
-ZipMonster $zipmonster$	NOT-DETECTED
+ZipMonster $zipmonster$	CRACKED
 ZipMonster	NOT-FOUND
 plaintext $0$	CRACKED
 has-160	NOT-FOUND
@@ -340,12 +340,12 @@ HMAC-SHA512	CRACKED
 sha1crypt-opencl $sha1$	CRACKED
 KeePass-opencl $keepass$	CRACKED
 oldoffice-opencl $oldoffice$	CRACKED
-oldoffice-opencl	NOT-DETECTED
+oldoffice-opencl	CRACKED
 PBKDF2-HMAC-MD4-opencl $pbkdf2-hmac-md4$	CRACKED
 PBKDF2-HMAC-MD5-opencl $pbkdf2-hmac-md5$	CRACKED
 PBKDF2-HMAC-SHA1-opencl $pbkdf2-hmac-sha1$	CRACKED
 PBKDF2-HMAC-SHA1-opencl	CRACKED
-PBKDF2-HMAC-SHA1-opencl $p5k2$	NOT-DETECTED
+PBKDF2-HMAC-SHA1-opencl $p5k2$	CRACKED
 rar-opencl $rar3$	CRACKED
 RAR5-opencl $rar5$	CRACKED
 TrueCrypt-opencl	CRACKED
@@ -603,5 +603,5 @@ dynamic_2009 $dynamic_2009$	CRACKED
 dynamic_2010 $dynamic_2010$	CRACKED
 dynamic_2011 $dynamic_2011$	CRACKED
 dynamic_2014 $dynamic_2014$	CRACKED
-dummy $dummy$	NOT-DETECTED
+dummy $dummy$	CRACKED
 crypt	CRACKED

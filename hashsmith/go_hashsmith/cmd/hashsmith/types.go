@@ -275,6 +275,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 		}},
 		{"KDF / memory-hard / frameworks / CMS", [][2]string{
 			{"argon2", "Argon2id"},
+			{"p5k2", "Passlib $p5k2$ PBKDF2-HMAC-SHA1 (hex rounds, URL-safe base64)"},
 			{"scrypt", "scrypt (native scrypt$ or Hashcat SCRYPT: record)"},
 			{"django", "Django PBKDF2, scrypt, Argon2, bcrypt-SHA256, MD5/SHA1"},
 			{"shiro1-sha512", "Apache Shiro 1 iterated salted SHA-512 (Hashcat 12150)"},
@@ -320,6 +321,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"mediawiki", "MediaWiki ($B$)"},
 			{"vbulletin", "vBulletin (md5:salt)"},
 			{"redmine", "Redmine (sha1:salt)"},
+			{"azuread", "Azure AD Connect synchronised credential (PBKDF2-SHA256 over the NTLM hash)"},
 			{"xsha", "macOS 10.4-10.6 salted SHA-1, Hashcat 122 / John xsha"},
 			{"xsha512", "macOS 10.7 salted SHA-512, Hashcat 1722 / John xsha512"},
 			{"cisco8", "Cisco-IOS type 8 ($8$, PBKDF2-SHA256)"},
@@ -483,6 +485,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"nethalflm", "NetHalfLM: the first half of a captured LM response (John nethalflm)"},
 			{"netlmv2", "NetLMv2 captured LMv2 response (John netlmv2)"},
 			{"mschapv2", "MS-CHAPv2 (PPTP, PEAP-MSCHAPv2), Hashcat 5500's sibling"},
+			{"known-hosts", "OpenSSH hashed known_hosts entry (the candidate is a hostname)"},
 			{"ike", "IKE aggressive-mode PSK (MD5 / SHA-1)"},
 			{"net-md5", "RIPv2 / OSPF MD5 routing authentication, John $netmd5$"},
 			{"net-sha1", "OSPF SHA-1 routing authentication (RFC 5709), John $netsha1$"},
@@ -499,6 +502,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"teamspeak3", "TeamSpeak 3 channel hash, Hashcat 28300"},
 		}},
 		{"Encrypted containers (extract with the matching *2smith command)", [][2]string{
+			{"zipmonster", "ZipMonster: MD5 over its own upper-case hex, 50,000 times"},
 			{"zipcrypto", "Traditional PKWARE ZipCrypto"},
 			{"winzip", "WinZip AES from zip2john ($zip2$…, any key size, authentication-code checked), Hashcat 13600"},
 			{"zipaes128", "WinZip AES-128"},
@@ -577,6 +581,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 			{"as400-des", "AS/400 (IBM i) DES, EBCDIC profile name under an EBCDIC password key, Hashcat 8501"},
 			{"juniper-ive", "Juniper IVE, md5crypt wrapped in a fixed-key AES-128-CBC blob, Hashcat 501"},
 			{"pkzip-masterkey", "PKZIP/ZipCrypto 96-bit master key state, Hashcat 20500 (a bare 24-hex record, so -t is required)"},
+			{"dummy", "John's dummy format: the password in hex, for exercising a run end to end"},
 			{"plaintext", "The target IS the password, Hashcat 99999 — for exercising a wordlist or ruleset"},
 		}},
 	}

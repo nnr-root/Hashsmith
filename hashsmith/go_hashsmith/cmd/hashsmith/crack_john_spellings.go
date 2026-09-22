@@ -10,10 +10,15 @@ package main
 // and two ways of writing it down.
 
 import (
+	"crypto/hmac"
+	"crypto/sha1"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"strconv"
 	"strings"
+
+	"golang.org/x/crypto/pbkdf2"
 )
 
 // johnSeededChecksum reads John's "$crc32$<initial>.<checksum>" — and the
@@ -174,4 +179,109 @@ func johnMongoDBLegacy(target string) (user, digest string, ok bool) {
 		return "", "", false
 	}
 	return f[1], f[2], true
+}
+
+// johnIKERecord reads John's "$ike$*<type>*<nine fields>" as the nine
+// colon-separated fields hashcat writes for the same aggressive-mode exchange.
+// The leading type field says MD5 or SHA-1, which the length of HASH_R already
+// says, so it is read for validity and then not needed.
+func johnIKERecord(target string) (string, bool) {
+	const prefix = "$ike$*"
+	t := strings.TrimSpace(target)
+	if !strings.HasPrefix(t, prefix) {
+		return "", false
+	}
+	f := strings.Split(t[len(prefix):], "*")
+	if len(f) != 10 {
+		return "", false
+	}
+	if f[0] != "0" && f[0] != "1" {
+		return "", false
+	}
+	for _, x := range f[1:] {
+		if x == "" || !isHex(x) {
+			return "", false
+		}
+	}
+	return strings.Join(f[1:], ":"), true
+}
+
+// John's $sxc$ records are NOT read here, and the reason is worth recording.
+//
+// The record lines up with $odf$ field for field, differing only in carrying
+// two lengths where hashcat carries one, so rewriting one as the other looks
+// like the whole job. It is not: rewritten that way the record does not
+// verify, and a bounded sweep of the obvious variations — the checksum over
+// 756, 760 or all of the decrypted bytes; Blowfish in 64-bit or 8-bit CFB;
+// the PBKDF2 password as SHA-1, SHA-256 or the password itself; key lengths
+// of 16, 20 and 32 — found no combination that reproduces John's own test
+// vector. Something else differs, and sweeping cannot find a construction
+// outside the space swept. Claiming the record and failing on it would be
+// worse than leaving it alone, so it is left alone.
+
+// johnOldOfficeRecord takes the Office record out of the line John writes it
+// on, which carries the username before it — usually empty, leaving a bare
+// leading colon.
+//
+// What follows the record is left where it is. John writes the five-byte RC4
+// key there when it has one, and that field is not noise: it is the same
+// "collider answer" hashcat's modes 9720 and 9820 carry, which the verifier
+// checks the recovered password against. Cutting the line at the first colon
+// would throw it away, and a record whose answer is never checked is one that
+// will happily report a wrong password.
+func johnOldOfficeRecord(target string) (string, bool) {
+	const marker = "$oldoffice$"
+	t := strings.TrimSpace(target)
+	start := strings.Index(t, marker)
+	if start <= 0 || t[start-1] != ':' {
+		return "", false
+	}
+	rest := t[start:]
+	if strings.Count(rest, "*") < 3 {
+		return "", false
+	}
+	return rest, true
+}
+
+// johnP5K2Record reads "$p5k2$<rounds>$<salt>$<digest>", Passlib's spelling of
+// PBKDF2-HMAC-SHA1. Two things in it are not what they look like: the round
+// count is hex, not decimal, and the base64 is the URL-safe alphabet rather
+// than the adapted one Passlib's other formats use.
+func johnP5K2Record(target string) (rounds int, salt, digest []byte, ok bool) {
+	const prefix = "$p5k2$"
+	t := strings.TrimSpace(target)
+	if !strings.HasPrefix(t, prefix) {
+		return 0, nil, nil, false
+	}
+	f := strings.Split(t[len(prefix):], "$")
+	if len(f) != 3 {
+		return 0, nil, nil, false
+	}
+	n, err := strconv.ParseInt(f[0], 16, 64)
+	if err != nil || n < 1 || n > maxKDFIterations {
+		return 0, nil, nil, false
+	}
+	decode := func(s string) ([]byte, bool) {
+		b, err := base64.StdEncoding.DecodeString(
+			strings.NewReplacer("-", "+", "_", "/").Replace(s))
+		return b, err == nil && len(b) > 0
+	}
+	salt, ok = decode(f[1])
+	if !ok {
+		return 0, nil, nil, false
+	}
+	digest, ok = decode(f[2])
+	if !ok {
+		return 0, nil, nil, false
+	}
+	return int(n), salt, digest, true
+}
+
+// verifyP5K2 checks that record.
+func verifyP5K2(target, candidate string) (bool, error) {
+	rounds, salt, digest, ok := johnP5K2Record(target)
+	if !ok {
+		return false, errors.New("invalid $p5k2$ PBKDF2-HMAC-SHA1 record")
+	}
+	return hmac.Equal(pbkdf2.Key([]byte(candidate), salt, rounds, len(digest), sha1.New), digest), nil
 }

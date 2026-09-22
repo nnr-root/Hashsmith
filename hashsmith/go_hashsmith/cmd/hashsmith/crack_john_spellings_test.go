@@ -1,6 +1,14 @@
 package main
 
-import "testing"
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"strings"
+	"testing"
+
+	"golang.org/x/crypto/pbkdf2"
+)
 
 // TestJohnSpellings runs John's spelling of each record through the verifier
 // Hashsmith already had, and then the spelling Hashsmith writes through the
@@ -147,5 +155,69 @@ func TestCisco4Envelope(t *testing.T) {
 	}
 	if bad, _ := verifyCandidate(pass+"x", record, "cisco4", "", "prefix"); bad {
 		t.Error("accepted a wrong password")
+	}
+}
+
+// TestSmallJohnFormats covers four formats John reads that Hashsmith did not,
+// each against John's own vector.
+func TestSmallJohnFormats(t *testing.T) {
+	for _, tc := range []struct{ typ, format string }{
+		{"azuread", "AzureAD"},
+		{"known-hosts", "known_hosts $known_hosts$"},
+		{"zipmonster", "ZipMonster $zipmonster$"},
+		{"dummy", "dummy $dummy$"},
+		{"p5k2", "PBKDF2-HMAC-SHA1 $p5k2$"},
+		{"ike", "IKE $ike$"},
+		{"office-old", "oldoffice"},
+	} {
+		record, pass := johnVector(t, tc.format)
+		if types := detectHashTypes(record); !containsString(types, tc.typ) {
+			t.Errorf("%s: detectHashTypes did not offer %s: %v", tc.format, tc.typ, types)
+		}
+		if ok, err := verifyCandidate(pass, record, tc.typ, "", "prefix"); err != nil || !ok {
+			t.Errorf("%s: rejected the right password: ok=%v err=%v", tc.format, ok, err)
+		}
+		if bad, _ := verifyCandidate("x"+pass, record, tc.typ, "", "prefix"); bad {
+			t.Errorf("%s: accepted a wrong password", tc.format)
+		}
+	}
+}
+
+// TestAzureADDerivation states what an Azure AD record actually protects. The
+// password never reaches PBKDF2: the NTLM hash does, written as upper-case hex
+// in UTF-16LE. Anyone holding the on-premises hash can check a candidate
+// against the cloud record without knowing the password, which is worth
+// pinning so the reading is not "simplified" into hashing the password.
+func TestAzureADDerivation(t *testing.T) {
+	record, pass := johnVector(t, "AzureAD")
+	salt, rounds, digest, err := azureADFields(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rounds != 100 {
+		t.Errorf("read %d rounds, want 100", rounds)
+	}
+	key := utf16le(strings.ToUpper(hex.EncodeToString(ntHash(pass))))
+	if got := pbkdf2.Key(key, salt, rounds, len(digest), sha256.New); !hmac.Equal(got, digest) {
+		t.Error("the stated derivation does not reproduce the record")
+	}
+	// Hashing the password itself must NOT reproduce it.
+	if got := pbkdf2.Key([]byte(pass), salt, rounds, len(digest), sha256.New); hmac.Equal(got, digest) {
+		t.Error("the record is a PBKDF2 over the password after all")
+	}
+}
+
+// TestKnownHostsCandidateIsAHostname pins what a known_hosts entry answers
+// for. The secret is a hostname or address, not a password, so the wordlist
+// that cracks one is a list of machines.
+func TestKnownHostsCandidateIsAHostname(t *testing.T) {
+	record, host := johnVector(t, "known_hosts $known_hosts$")
+	if ok, err := verifyKnownHosts(record, host); err != nil || !ok {
+		t.Fatalf("rejected the right host: ok=%v err=%v", ok, err)
+	}
+	for _, other := range []string{"213.100.98.218", "213.100.98.21", "example.com", ""} {
+		if bad, _ := verifyKnownHosts(record, other); bad {
+			t.Errorf("%q: accepted the wrong host", other)
+		}
 	}
 }
