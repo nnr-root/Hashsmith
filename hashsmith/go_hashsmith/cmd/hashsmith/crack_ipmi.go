@@ -15,6 +15,9 @@ import (
 )
 
 func verifyIPMI(targetHash, candidate string) (bool, error) {
+	if rewritten, ok := johnRAKPRecord(targetHash); ok {
+		targetHash = rewritten
+	}
 	f := strings.SplitN(targetHash, ":", 2)
 	if len(f) != 2 || len(f[1]) != 40 {
 		return false, errors.New("invalid IPMI hash (need salt:hmac-sha1)")

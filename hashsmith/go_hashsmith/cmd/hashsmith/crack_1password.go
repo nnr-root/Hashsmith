@@ -22,6 +22,9 @@ import (
 )
 
 func verify1Password(targetHash, candidate string) (bool, error) {
+	if rewritten, ok := johnAgileKeychainRecord(targetHash); ok {
+		targetHash = rewritten
+	}
 	f := strings.Split(targetHash, ":")
 	if len(f) != 3 {
 		return false, errors.New("invalid 1Password hash (need iter:salt:data)")

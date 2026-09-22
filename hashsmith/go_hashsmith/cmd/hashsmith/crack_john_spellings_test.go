@@ -358,3 +358,102 @@ func TestMSKrb5Spelling(t *testing.T) {
 		}
 	}
 }
+
+// TestVaultAndKeystoreRecords covers the three password stores whose John
+// records this reads.
+func TestVaultAndKeystoreRecords(t *testing.T) {
+	for _, tc := range []struct{ typ, format string }{
+		{"jks-keystore", "keystore $keystore$"},
+		{"1password", "agilekeychain $agilekeychain$"},
+		{"1password-cloud", "cloudkeychain $cloudkeychain$"},
+	} {
+		record, pass := johnVector(t, tc.format)
+		if types := detectHashTypes(record); !containsString(types, tc.typ) {
+			t.Errorf("%s: detectHashTypes did not offer %s: %v", tc.format, tc.typ, types)
+		}
+		if ok, err := verifyCandidate(pass, record, tc.typ, "", "prefix"); err != nil || !ok {
+			t.Errorf("%s: rejected the right password: ok=%v err=%v", tc.format, ok, err)
+		}
+		if bad, _ := verifyCandidate("x"+pass, record, tc.typ, "", "prefix"); bad {
+			t.Errorf("%s: accepted a wrong password", tc.format)
+		}
+	}
+}
+
+// TestKeystoreIsTheStoresOwnDigest pins what a keystore record checks. The
+// digest closes the file and covers the password, the constant and every byte
+// before it — so a change anywhere in the store must break it, which is also
+// what makes the check as cheap as one SHA-1.
+func TestKeystoreIsTheStoresOwnDigest(t *testing.T) {
+	record, pass := johnVector(t, "keystore $keystore$")
+	store, digest, err := keystoreFields(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := sha1.New()
+	h.Write(utf16be(pass))
+	h.Write([]byte("Mighty Aphrodite"))
+	h.Write(store)
+	if !hmac.Equal(h.Sum(nil), digest) {
+		t.Fatal("the stated construction does not reproduce the digest")
+	}
+	// Without the constant it does not match, so the constant is load-bearing
+	// rather than decoration.
+	h2 := sha1.New()
+	h2.Write(utf16be(pass))
+	h2.Write(store)
+	if hmac.Equal(h2.Sum(nil), digest) {
+		t.Error("the digest does not include Sun's constant after all")
+	}
+	// A single changed byte anywhere in the store breaks it.
+	tampered := append([]byte(nil), store...)
+	tampered[len(tampered)/2] ^= 1
+	h3 := sha1.New()
+	h3.Write(utf16be(pass))
+	h3.Write([]byte("Mighty Aphrodite"))
+	h3.Write(tampered)
+	if hmac.Equal(h3.Sum(nil), digest) {
+		t.Error("the digest does not cover the store")
+	}
+}
+
+// TestRAKPAndPMKIDSpellings covers two captures John writes with different
+// punctuation from hashcat: the IPMI RAKP exchange and a WPA PMKID.
+func TestRAKPAndPMKIDSpellings(t *testing.T) {
+	record, pass := johnVector(t, "RAKP $rakp$")
+	if types := detectHashTypes(record); !containsString(types, "ipmi") {
+		t.Errorf("detectHashTypes did not offer ipmi: %v", types)
+	}
+	if ok, err := verifyCandidate(pass, record, "ipmi", "", "prefix"); err != nil || !ok {
+		t.Errorf("RAKP: rejected the right password: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyCandidate("x"+pass, record, "ipmi", "", "prefix"); bad {
+		t.Error("RAKP: accepted a wrong password")
+	}
+
+	// The PMKID record is cracked two ways, and both readings are offered
+	// because the record cannot say which secret the operator holds.
+	pmkid, passphrase := johnVector(t, "wpapsk")
+	types := detectHashTypes(pmkid)
+	for _, want := range []string{"wpa", "wpa-pmk"} {
+		if !containsString(types, want) {
+			t.Errorf("detectHashTypes did not offer %s: %v", want, types)
+		}
+	}
+	if ok, err := verifyCandidate(passphrase, pmkid, "wpa", "", "prefix"); err != nil || !ok {
+		t.Errorf("PMKID: rejected the right passphrase: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyCandidate(passphrase+"x", pmkid, "wpa", "", "prefix"); bad {
+		t.Error("PMKID: accepted a wrong passphrase")
+	}
+	// And the same record answers for a PMK given directly, which is the
+	// second reading the prototype offers.
+	pmkRecord, pmk := johnVector(t, "wpapsk-pmk")
+	if ok, err := verifyCandidate(pmk, pmkRecord, "wpa-pmk", "", "prefix"); err != nil || !ok {
+		t.Errorf("PMK: rejected the right PMK: ok=%v err=%v", ok, err)
+	}
+	// A line with colons is hashcat's own spelling and must not be rewritten.
+	if _, ok := johnWPAPMKIDRecord("2582a8281bf9d4308d6f5731d0e61c61:4604ba734d4e:89acf0e761f4:ed487162465a774bfba60eb603a39f3a"); ok {
+		t.Error("claimed hashcat's colon-separated record as John's")
+	}
+}

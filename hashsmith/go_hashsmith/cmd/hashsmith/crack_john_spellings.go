@@ -285,3 +285,98 @@ func verifyP5K2(target, candidate string) (bool, error) {
 	}
 	return hmac.Equal(pbkdf2.Key([]byte(candidate), salt, rounds, len(digest), sha1.New), digest), nil
 }
+
+// johnAgileKeychainRecord reads John's 1Password Agile Keychain record as the
+// "<iterations>:<salt>:<data>" hashcat writes.
+//
+// The keychain holds two encrypted keys, and John writes both — the same
+// password opens each, so the check uses the first and the second is
+// redundant rather than additional evidence.
+func johnAgileKeychainRecord(target string) (string, bool) {
+	const prefix = "$agilekeychain$"
+	t := strings.TrimSpace(target)
+	if !strings.HasPrefix(t, prefix) {
+		return "", false
+	}
+	f := strings.Split(t[len(prefix):], "*")
+	// <count>*<iterations>*<salt length>*<salt>*<data length>*<data>, then the
+	// same five fields again for each further key.
+	if len(f) < 6 {
+		return "", false
+	}
+	if _, err := strconv.Atoi(f[0]); err != nil {
+		return "", false
+	}
+	if _, err := strconv.Atoi(f[1]); err != nil {
+		return "", false
+	}
+	if !isHex(f[3]) || !isHex(f[5]) || f[3] == "" || f[5] == "" {
+		return "", false
+	}
+	return f[1] + ":" + f[3] + ":" + f[5], true
+}
+
+// johnCloudKeychainRecord reads John's 1Password Cloud Keychain record as
+// hashcat's "<hmac>:<salt>:<iterations>:<data>".
+//
+// John states every length beside its field, which is what makes the record
+// long: salt, then the iteration count, then an IV and a ciphertext neither
+// tool needs, then the MAC and the bytes it covers. Only those last two and
+// the salt and count decide anything.
+func johnCloudKeychainRecord(target string) (string, bool) {
+	const prefix = "$cloudkeychain$"
+	t := strings.TrimSpace(target)
+	if !strings.HasPrefix(t, prefix) {
+		return "", false
+	}
+	f := strings.Split(t[len(prefix):], "$")
+	if len(f) != 14 {
+		return "", false
+	}
+	salt, iterations, mac, data := f[1], f[2], f[11], f[13]
+	if _, err := strconv.Atoi(iterations); err != nil {
+		return "", false
+	}
+	if len(mac) != 64 || !isHex(mac) || !isHex(salt) || !isHex(data) || data == "" {
+		return "", false
+	}
+	return mac + ":" + salt + ":" + iterations + ":" + data, true
+}
+
+// johnRAKPRecord reads John's "$rakp$<session blob>$<digest>" as the
+// "<blob>:<digest>" hashcat writes for the same IPMI 2.0 RAKP exchange.
+func johnRAKPRecord(target string) (string, bool) {
+	const prefix = "$rakp$"
+	t := strings.TrimSpace(target)
+	if !strings.HasPrefix(t, prefix) {
+		return "", false
+	}
+	f := strings.Split(t[len(prefix):], "$")
+	if len(f) != 2 || !isHex(f[0]) || len(f[0]) < 32 || len(f[1]) != 40 || !isHex(f[1]) {
+		return "", false
+	}
+	return f[0] + ":" + f[1], true
+}
+
+// johnWPAPMKIDRecord reads John's PMKID capture, which states the same four
+// fields hashcat does and joins them with stars instead of colons.
+func johnWPAPMKIDRecord(target string) (string, bool) {
+	t := strings.TrimSpace(target)
+	if strings.Contains(t, ":") || !strings.Contains(t, "*") {
+		return "", false
+	}
+	f := strings.Split(t, "*")
+	if len(f) != 4 {
+		return "", false
+	}
+	// PMKID, access point, station, and the network name as hex.
+	if len(f[0]) != 32 || len(f[1]) != 12 || len(f[2]) != 12 || f[3] == "" || len(f[3])%2 != 0 {
+		return "", false
+	}
+	for _, x := range f {
+		if !isHex(x) {
+			return "", false
+		}
+	}
+	return strings.Join(f, ":"), true
+}

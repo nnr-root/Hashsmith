@@ -17,6 +17,10 @@ import (
 )
 
 func verifyWPAPMKID(target, candidate string, candidateIsPMK bool) (bool, error) {
+	// John joins the same four fields with stars.
+	if rewritten, ok := johnWPAPMKIDRecord(target); ok {
+		target = rewritten
+	}
 	// Hashcat 22001 accepts the modern WPA*01/WPA*02 representation and uses a
 	// raw 32-byte PMK as its candidate. Reuse the complete WPA verifier for both
 	// PMKID and EAPOL records rather than limiting this type to legacy PMKID text.
@@ -33,6 +37,13 @@ func verifyWPAPMKID(target, candidate string, candidateIsPMK bool) (bool, error)
 	}
 
 	fields := strings.Split(target, ":")
+	// A PMKID record states the network name so that a passphrase can be
+	// turned into a PMK. Given the PMK itself the name is redundant, so a
+	// four-field record answers for a PMK candidate as readily as a
+	// three-field one — the same capture, attacked with a different secret.
+	if candidateIsPMK && len(fields) == 4 {
+		fields = fields[:3]
+	}
 	wantFields := 4
 	if candidateIsPMK {
 		wantFields = 3

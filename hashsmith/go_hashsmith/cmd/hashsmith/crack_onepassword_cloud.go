@@ -32,6 +32,9 @@ type onePasswordCloudRecord struct {
 }
 
 func parseOnePasswordCloud(target string) (*onePasswordCloudRecord, error) {
+	if rewritten, ok := johnCloudKeychainRecord(target); ok {
+		target = rewritten
+	}
 	p := strings.Split(strings.TrimSpace(target), ":")
 	if len(p) != 4 {
 		return nil, errors.New("1Password cloud keychain record must be <hmac>:<salt>:<iterations>:<data>")

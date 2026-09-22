@@ -29,8 +29,15 @@ func walletsPrototypes() []hashid.Prototype {
 		// is TierStructural rather than TierSignature: reporting the
 		// isLegacyPMKID path as an unrivalled "certain" match would overstate
 		// its evidence.
+		// Two types, because a captured PMKID or handshake supports two
+		// attacks and the record cannot say which the operator is running:
+		// the passphrase, or the 32-byte PMK it derives to. hashcat splits
+		// these into modes 22000 and 22001 for the same reason. The PMK
+		// reading is second because a passphrase is what is usually held, and
+		// it rejects anything that is not 64 hex characters at once, so
+		// offering it costs almost nothing.
 		{
-			Types: []string{"wpa"}, Display: "WPA/WPA2 PMKID and EAPOL (hc22000)",
+			Types: []string{"wpa", "wpa-pmk"}, Display: "WPA/WPA2 PMKID and EAPOL (hc22000)",
 			Tier: hashid.TierStructural, Exclusive: true,
 			Match: func(in hashid.Input) (hashid.Evidence, bool) {
 				if strings.HasPrefix(in.Normalized, "WPA*01*") || strings.HasPrefix(in.Normalized, "WPA*02*") || isLegacyPMKID(in.Normalized) {

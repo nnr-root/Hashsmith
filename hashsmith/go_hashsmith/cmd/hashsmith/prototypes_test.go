@@ -151,7 +151,9 @@ func TestTableCoverageBatchD(t *testing.T) {
 
 func TestTableCoverageBatchE(t *testing.T) {
 	runTableCoverage(t, []tableCoverageCase{
-		{"wpa", `WPA*01*5ce7ebe97a1bbfeb2822ae627b726d5b*27462da350ac*accd10fb464e*686173686361742d6573736964***`, []string{"wpa"}},
+		// A capture is attacked either with a passphrase or with the PMK, so both
+		// readings are offered.
+		{"wpa,wpa-pmk", `WPA*01*5ce7ebe97a1bbfeb2822ae627b726d5b*27462da350ac*accd10fb464e*686173686361742d6573736964***`, []string{"wpa", "wpa-pmk"}},
 		// detectWPAPMKIDRecord sits between the wpa branch and $ethereum$ in
 		// the legacy cascade (original lines 1473-1475) but has no entry in
 		// the golden-inputs convenience file, which otherwise lists exactly

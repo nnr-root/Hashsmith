@@ -43,11 +43,14 @@ func TestWPAVectors(t *testing.T) {
 		t.Error("EAPOL should not verify with the wrong passphrase")
 	}
 
-	// Detection routes both to the wpa cracker.
+	// Detection routes all three to the wpa cracker, and offers the PMK
+	// reading after it: the same capture is attacked either with the
+	// passphrase or with the 32-byte PMK it derives to, and the record cannot
+	// say which the operator holds.
 	for _, line := range []string{pmkidLine, eapolLine, legacy} {
 		got := detectHashTypes(line)
-		if len(got) != 1 || got[0] != "wpa" {
-			t.Errorf("detectHashTypes(%.20s…) = %v, want [wpa]", line, got)
+		if len(got) != 2 || got[0] != "wpa" || got[1] != "wpa-pmk" {
+			t.Errorf("detectHashTypes(%.20s…) = %v, want [wpa wpa-pmk]", line, got)
 		}
 	}
 }

@@ -20,7 +20,7 @@ AFS $k4$	NOT-DETECTED
 tripcode	NOT-FOUND
 AndroidBackup $ab$	CRACKED
 adxcrypt $adxcrypt$	NOT-DETECTED
-agilekeychain $agilekeychain$	NOT-DETECTED
+agilekeychain $agilekeychain$	CRACKED
 aix-ssha1	CRACKED
 aix-ssha256	CRACKED
 aix-ssha512	CRACKED
@@ -47,7 +47,7 @@ WoWSRP $wowsrp$	NOT-DETECTED
 Blockchain $blockchain$	CRACKED
 chap $chap$	CRACKED
 Clipperz $clipperz$	NOT-DETECTED
-cloudkeychain $cloudkeychain$	NOT-DETECTED
+cloudkeychain $cloudkeychain$	CRACKED
 dynamic=md5($p)	CRACKED
 cq $cq$	NOT-DETECTED
 CRC32 $crc32$	CRACKED
@@ -104,7 +104,7 @@ iwork $iwork$	CRACKED
 KeePass $keepass$	CRACKED
 keychain $keychain$	CRACKED
 keyring $keyring$	NOT-DETECTED
-keystore $keystore$	NOT-DETECTED
+keystore $keystore$	CRACKED
 known_hosts $known_hosts$	CRACKED
 krb4 $af$	NOT-DETECTED
 krb5 $krb5$	NOT-DETECTED
@@ -229,7 +229,7 @@ RACF $racf$	CRACKED
 RACF-KDFAES $racf$	TIMEOUT
 radius $radius$	NOT-DETECTED
 RAdmin $radmin2$	CRACKED
-RAKP $rakp$	NOT-DETECTED
+RAKP $rakp$	CRACKED
 rar $rar3$	CRACKED
 RAR5 $rar5$	CRACKED
 Raw-SHA512	CRACKED
@@ -320,7 +320,7 @@ whirlpool1 $whirlpool$	NOT-FOUND
 wpapsk $wpapsk$	NOT-DETECTED
 wpapsk	CRACKED
 wpapsk-pmk $wpapsk$	NOT-DETECTED
-wpapsk-pmk	NOT-FOUND
+wpapsk-pmk	CRACKED
 xmpp-scram $xmpp-scram$	CRACKED
 xsha	CRACKED
 xsha512	CRACKED
@@ -351,7 +351,7 @@ RAR5-opencl $rar5$	CRACKED
 TrueCrypt-opencl	CRACKED
 lotus5-opencl	NOT-FOUND
 AndroidBackup-opencl $ab$	CRACKED
-agilekeychain-opencl $agilekeychain$	NOT-DETECTED
+agilekeychain-opencl $agilekeychain$	CRACKED
 ansible-opencl $ansible$	CRACKED
 axcrypt-opencl $axcrypt$	CRACKED
 axcrypt2-opencl $axcrypt$	CRACKED
@@ -361,7 +361,7 @@ bcrypt-opencl $2b$	CRACKED
 BitLocker-opencl $bitlocker$	CRACKED
 bitwarden-opencl $bitwarden$	CRACKED
 blockchain-opencl $blockchain$	CRACKED
-cloudkeychain-opencl $cloudkeychain$	NOT-DETECTED
+cloudkeychain-opencl $cloudkeychain$	CRACKED
 md5crypt-opencl $1$	CRACKED
 md5crypt-opencl $apr1$	CRACKED
 sha256crypt-opencl $5$	CRACKED
@@ -382,7 +382,7 @@ gpg-opencl $gpg$	CRACKED
 iwork-opencl $iwork$	CRACKED
 keychain-opencl $keychain$	CRACKED
 keyring-opencl $keyring$	NOT-DETECTED
-keystore-opencl $keystore$	NOT-DETECTED
+keystore-opencl $keystore$	CRACKED
 krb5pa-md5-opencl $krb5pa$	CRACKED
 krb5pa-md5-opencl $mskrb5$	CRACKED
 krb5pa-sha1-opencl $krb5pa$	CRACKED
@@ -418,7 +418,7 @@ pgpwde-opencl $pgpwde$	NOT-DETECTED
 PHPass-opencl $p$	CRACKED
 PHPass-opencl $h$	CRACKED
 pwsafe-opencl $pwsafe$	CRACKED
-RAKP-opencl $rakp$	NOT-DETECTED
+RAKP-opencl $rakp$	CRACKED
 raw-MD4-opencl	CRACKED
 raw-MD4-opencl $md4$	CRACKED
 raw-MD5-opencl	CRACKED
@@ -447,7 +447,7 @@ vmx-opencl $vmx$	CRACKED
 wpapsk-opencl $wpapsk$	NOT-DETECTED
 wpapsk-opencl	CRACKED
 wpapsk-pmk-opencl $wpapsk$	NOT-DETECTED
-wpapsk-pmk-opencl	NOT-FOUND
+wpapsk-pmk-opencl	CRACKED
 XSHA512-free-opencl	CRACKED
 XSHA512-free-opencl $lion$	CRACKED
 XSHA512-opencl	CRACKED
