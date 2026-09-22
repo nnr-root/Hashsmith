@@ -95,13 +95,48 @@ func hashCompatSaltedDigest(text, algorithm, salt string) (string, error) {
 func compatSaltedTargetParts(target, salt string) (digest, effSalt string, ok bool) {
 	digest, effSalt = target, salt
 	if effSalt == "" {
-		i := strings.LastIndexByte(target, ':')
-		if i < 1 || i == len(target)-1 {
+		d, sv, split := compatSaltSeparator(target)
+		if !split {
 			return "", "", false
 		}
-		digest, effSalt = target[:i], target[i+1:]
+		digest, effSalt = d, sv
 	}
 	return strings.TrimPrefix(digest, "$BLAKE2$"), effSalt, true
+}
+
+// compatSaltSeparator splits "<digest><separator><salt>".
+//
+// The separator is normally a colon, and the LAST one, because a salt may
+// contain colons and a digest may not. John writes some of the same records
+// with a dollar instead — FormSpring's sha256($s.$p) arrives as
+// "<64 hex>$RA" — so that spelling is accepted too, under conditions narrow
+// enough that nothing else can fall into it: no colon anywhere, exactly one
+// dollar, not in first position, and hex before it. A crypt-style record
+// fails the last two, since its dollar leads and there are more of them.
+func compatSaltSeparator(target string) (digest, salt string, ok bool) {
+	if i := strings.LastIndexByte(target, ':'); i >= 1 && i < len(target)-1 {
+		return target[:i], target[i+1:], true
+	}
+	if strings.IndexByte(target, ':') >= 0 {
+		return "", "", false
+	}
+	i := strings.IndexByte(target, '$')
+	if i < 1 || i != strings.LastIndexByte(target, '$') || i == len(target)-1 {
+		return "", "", false
+	}
+	if !isHex(target[:i]) {
+		return "", "", false
+	}
+	// Both halves being hex means this is more likely a two-field record of
+	// some other format than a digest and a salt — Kerberos writes a checksum
+	// and an encrypted blob exactly that way, and the routing captures write
+	// a packet and a MAC. A salt that is itself long and hex is refused for
+	// that reason; a short one, or one that is not hex at all, is not
+	// mistakable for a second field.
+	if salt := target[i+1:]; len(salt) >= 16 && isHex(salt) {
+		return "", "", false
+	}
+	return target[:i], target[i+1:], true
 }
 
 // verifyCompatSaltedDigest accepts the hash:salt input syntax used by Hashcat
@@ -116,13 +151,13 @@ func verifyCompatSaltedDigest(candidate, target, algorithm, salt string) (bool, 
 }
 
 func compatSaltedHashParts(target string) (digest, salt string, ok bool) {
-	i := strings.LastIndexByte(target, ':')
-	if i < 1 || i == len(target)-1 || !isHex(target[:i]) {
+	d, sv, split := compatSaltSeparator(target)
+	if !split || !isHex(d) {
 		return "", "", false
 	}
-	switch len(target[:i]) {
+	switch len(d) {
 	case 32, 40, 56, 64, 96, 128:
-		return target[:i], target[i+1:], true
+		return d, sv, true
 	default:
 		return "", "", false
 	}

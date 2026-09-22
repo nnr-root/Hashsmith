@@ -841,3 +841,45 @@ func TestBlackberryES10(t *testing.T) {
 		t.Error("re-salting each round also matches, so the rounds are not over the digest alone")
 	}
 }
+
+// TestSaltSeparatedByDollar covers John's other spelling of a salted digest:
+// a dollar where hashcat writes a colon. The reading is deliberately narrow,
+// and the cases it must NOT take are the point of the test — anything with a
+// colon still splits on the colon, and a crypt-style record is not a salted
+// digest at all.
+func TestSaltSeparatedByDollar(t *testing.T) {
+	record, pass := johnVector(t, "FormSpring")
+	if types := detectHashTypes(record); !containsString(types, "sha256-salt-pass") {
+		t.Errorf("detectHashTypes did not offer sha256-salt-pass: %v", types)
+	}
+	if ok, err := verifyCandidate(pass, record, "sha256-salt-pass", "", "prefix"); err != nil || !ok {
+		t.Errorf("rejected the right password: ok=%v err=%v", ok, err)
+	}
+	if bad, _ := verifyCandidate(pass+"x", record, "sha256-salt-pass", "", "prefix"); bad {
+		t.Error("accepted a wrong password")
+	}
+
+	for _, tc := range []struct {
+		name, target, digest, salt string
+		ok                         bool
+	}{
+		{"a dollar with hex before it", "aabbccdd$pepper", "aabbccdd", "pepper", true},
+		{"a colon wins over a dollar", "aabbccdd$x:salt", "aabbccdd$x", "salt", true},
+		{"a leading dollar is not a separator", "$1$abc$digest", "", "", false},
+		{"two dollars are a record, not a split", "aabb$cc$dd", "", "", false},
+		{"nothing after the dollar", "aabbccdd$", "", "", false},
+		{"nothing before it", "$salt", "", "", false},
+		{"not hex before it", "notahash$salt", "", "", false},
+		// Both halves hex is another format's two fields, not a salted
+		// digest: Kerberos and the routing captures are both written that
+		// way, and both were claimed by an earlier, looser rule.
+		{"a long hex right-hand side", "63b386c8c75ecd10f9df354f42427fbf$bb46b57e89d878455743d1e4c2cd871b", "", "", false},
+		{"a short hex salt is still a salt", "aabbccdd$deadbeef", "aabbccdd", "deadbeef", true},
+	} {
+		d, s, ok := compatSaltSeparator(tc.target)
+		if ok != tc.ok || (ok && (d != tc.digest || s != tc.salt)) {
+			t.Errorf("%s: compatSaltSeparator(%q) = (%q, %q, %v), want (%q, %q, %v)",
+				tc.name, tc.target, d, s, ok, tc.digest, tc.salt, tc.ok)
+		}
+	}
+}

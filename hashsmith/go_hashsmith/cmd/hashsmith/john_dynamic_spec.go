@@ -413,11 +413,15 @@ var johnDynamicSpecs = map[int]string{
 	1010: `md5($p null_padded_to_len_100)`, // RAdmin v2.x MD5
 	1011: `md5($p.md5($s))`,                // webEdition CMS
 	1012: `md5($p.md5($s))`,                // webEdition CMS
-	1013: `md5($p.PMD5(username))`,         // webEdition CMS
-	1014: `md5($p.$s)`,                     // long salt
-	1015: `md5(md5($p.$u).$s)`,             // PostgreSQL 'pass the hash'
-	1016: `md5($p.$s)`,                     // long salt
-	1017: `md5($s.$p)`,                     // long salt
+	// John prints dynamic_1013 as md5($p.PMD5(username)), but its records do
+	// not carry a username: the salt field already holds that inner digest,
+	// precomputed. What the record implies is therefore md5($p.$s), which is
+	// what the vector confirms.
+	1013: `md5($p.$s)`,         // webEdition CMS
+	1014: `md5($p.$s)`,         // long salt
+	1015: `md5(md5($p.$u).$s)`, // PostgreSQL 'pass the hash'
+	1016: `md5($p.$s)`,         // long salt
+	1017: `md5($s.$p)`,         // long salt
 	1018: `md5(sha1(sha1($p)))`,
 	1019: `md5(sha1(sha1(md5($p))))`,
 	1020: `md5(sha1(md5($p)))`,
