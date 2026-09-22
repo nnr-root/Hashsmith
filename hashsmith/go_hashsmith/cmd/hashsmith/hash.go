@@ -117,6 +117,8 @@ func hashText(text string, algorithm string, salt string, saltMode string) (stri
 		return hex.EncodeToString(h.Sum(nil)), nil
 	case "md2":
 		return md2Hex([]byte(text)), nil
+	case "mdc2":
+		return mdc2Hex([]byte(text)), nil
 	case "sha0":
 		return sha0Hex([]byte(text)), nil
 	case "sha1":

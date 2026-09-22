@@ -42,6 +42,7 @@ var johnWrappers = []struct {
 	{"$sha512$", []string{"sha512"}},
 	{"$md4$", []string{"md4"}},
 	{"$md2$", []string{"md2"}},
+	{"$mdc2$", []string{"mdc2"}},
 	{"$gost$", []string{"gost"}},
 	{"$keccak256$", []string{"keccak256"}},
 	{"$keccak$", []string{"keccak512"}},

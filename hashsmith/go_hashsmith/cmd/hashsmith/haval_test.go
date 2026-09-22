@@ -93,3 +93,33 @@ func itoa(n int) string {
 	}
 	return string(b)
 }
+
+// TestMDC2AgainstPublishedVectors checks MDC-2 against the two pangram
+// digests OpenSSL publishes, which differ in a single letter — the case a
+// chaining construction has to get right.
+func TestMDC2AgainstPublishedVectors(t *testing.T) {
+	for _, tc := range []struct{ msg, want string }{
+		{"The quick brown fox jumps over the lazy dog", "000ed54e093d61679aefbeae05bfe33a"},
+		{"The quick brown fox jumps over the lazy cog", "775f59f8e51aec29c57ac6ab850d58e8"},
+		{"", "52525252525252522525252525252525"},
+	} {
+		if got := mdc2Hex([]byte(tc.msg)); !strings.EqualFold(got, tc.want) {
+			t.Errorf("mdc2(%q) = %s, want %s", tc.msg, got, tc.want)
+		}
+	}
+	// The two chains must not be the same hash twice: if the halves stopped
+	// crossing over, both would start from their own constant and the two
+	// eight-byte halves of the result would be independent. A one-bit change
+	// has to move both.
+	a := mdc2Sum([]byte("a message that is longer than one block"))
+	b := mdc2Sum([]byte("a message that is longer than one blocL"))
+	same := 0
+	for i := range a {
+		if a[i] == b[i] {
+			same++
+		}
+	}
+	if same > 4 {
+		t.Errorf("a one-character change left %d of 16 digest bytes unchanged", same)
+	}
+}

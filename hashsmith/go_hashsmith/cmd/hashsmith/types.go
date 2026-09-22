@@ -18,6 +18,7 @@ func hashTypeCatalogueSeed() []typeGroup {
 	return []typeGroup{
 		{"Raw digests", [][2]string{
 			{"md2", "MD2"},
+			{"mdc2", "MDC-2 (ISO/IEC 10118-2 over DES)"},
 			{"md4", "MD4"},
 			{"md5", "MD5"},
 			{"sha0", "SHA-0"},

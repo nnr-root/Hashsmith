@@ -125,7 +125,7 @@ lotus85	NOT-DETECTED
 LUKS $luks$	CRACKED
 MD2 $md2$	CRACKED
 MD2	CRACKED
-mdc2 $mdc2$	NOT-DETECTED
+mdc2 $mdc2$	CRACKED
 mdc2	NOT-FOUND
 MediaWiki $b$	CRACKED
 MediaWiki $dynamic_9$	CRACKED

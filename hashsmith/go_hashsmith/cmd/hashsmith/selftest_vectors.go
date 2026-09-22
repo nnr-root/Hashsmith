@@ -220,6 +220,7 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		// The published "abc" values below were each confirmed against Hashsmith's
 		// own independently-written implementation before being pinned here.
 		{"md2", "abc", "", "da853b0d3f88d99b30283a69e6ded6bb", srcPublished},
+		{"mdc2", "The quick brown fox jumps over the lazy dog", "", "000ed54e093d61679aefbeae05bfe33a", srcPublished},
 		{"md4", "abc", "", "a448017aaf21d8525fc10ae87aa6729d", srcPublished},
 		{"sha0", "abc", "", "0164b8a914cd2a5e74c4f7ff082c4d97f1edf880", srcPublished},
 		{"whirlpool", "abc", "", "4e2448a4c6f486bb16b6562c73b4020bf3043e3a731bce721ae1b303d97e6d4c7181eebdb6c57e277d0e34957114cbd6c797fc9d95d8b582d225292076d4eef5", srcPublished},
