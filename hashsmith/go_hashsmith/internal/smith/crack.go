@@ -1163,7 +1163,19 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 	runCtx := context.Background()
 	var sess *sessionState
 	var resumeFrom int64
-	if cc != nil && cc.sessName != "" && (m == "brute" || m == "mask" || m == "markov" || m == "hybrid" || m == "combinator" || m == "prince") {
+	if cc != nil && cc.sessName != "" && !sessionCheckpointModes[m] {
+		// Say so. A run asked to be resumable and silently given no
+		// checkpoint is the worst outcome available here: the operator finds
+		// out at the moment they try to resume, which is after an interrupt,
+		// which is exactly when the work is already lost. The multi-hash path
+		// has always said this; the single-target path did not.
+		clrYellow.Fprintf(os.Stderr,
+			"--session is not checkpointed for -M %s; running without a checkpoint. "+
+				"A checkpoint is a position in the candidate stream, and a wordlist has no "+
+				"stable one — an edited or reordered list would resume at a different word. "+
+				"Use --skip/--limit to split a dictionary run instead.\n", m)
+	}
+	if cc != nil && cc.sessName != "" && sessionCheckpointModes[m] {
 		var cancel context.CancelFunc
 		runCtx, cancel = context.WithCancel(context.Background())
 		sigCh := make(chan os.Signal, 1)
@@ -1967,6 +1979,14 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 	// scalar verify path unchanged.
 	newHasher, laned := newLaneHasher(typ, targetHash, salt, saltMode)
 
+	// vectorized: whether this target can go through a multi-candidate vector
+	// core (md5/md4/ntlm and the salted digests that have one). Eligibility is
+	// resolved once here; each worker builds its OWN dictVectorLanes below,
+	// since it carries a transposedBatch of reusable scratch. A target that
+	// takes the bcrypt lanes never takes these — bcrypt has no vector core —
+	// so the two are exclusive by construction rather than by a check.
+	vectorized := !laned && newDictVectorLanes(typ, targetHash, salt, saltMode) != nil
+
 	// workers
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
@@ -1985,6 +2005,19 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 			var lh *bcryptlane.Hasher
 			if laned {
 				lh = newHasher()
+			}
+
+			// dvl is this worker's own vector hasher, for the same reason lh
+			// is its own: it holds a transposedBatch of scratch and is not
+			// safe to share. best is the earliest hit seen but not yet
+			// reported — the vector core tests a whole group at once, so a
+			// hit is known at group granularity rather than per candidate,
+			// and "earliest" is resolved by seq before anything is reported.
+			var dvl *dictVectorLanes
+			best := dictWord{seq: -1}
+			seq := 0
+			if vectorized {
+				dvl = newDictVectorLanes(typ, targetHash, salt, saltMode)
 			}
 
 			type cand struct{ pw, ruleLabel string }
@@ -2032,7 +2065,94 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 				return found
 			}
 
+			// reportBest hands the earliest pending hit to the result
+			// channel and stops the run, exactly as the scalar path does on
+			// its first match.
+			reportBest := func() bool {
+				if best.seq < 0 {
+					return false
+				}
+				select {
+				case resultCh <- crackedResult{password: best.word, ruleLabel: best.ruleLabel, found: true}:
+				default:
+				}
+				cancel()
+				return true
+			}
+
+			// flushVec empties every pending length bucket. Like the bcrypt
+			// flush above it MUST run after every batch, before every
+			// innerCtx.Done() return and after the channel closes: a word
+			// still sitting in a bucket has not been hashed, and dropping it
+			// would report a crackable password as not found.
+			flushVec := func() bool {
+				if dvl == nil {
+					return false
+				}
+				localAttempts += int64(dvl.flushAll(&best))
+				if localAttempts >= 1024 {
+					atomic.AddInt64(atomicAttempts, localAttempts)
+					localAttempts = 0
+				}
+				return reportBest()
+			}
+
+			// flushAny routes to whichever multi-candidate path this worker
+			// is on, so the loop below has one call site per exit rather than
+			// a condition at each.
+			flushAny := func() bool {
+				if dvl != nil {
+					return flushVec()
+				}
+				return flush()
+			}
+
 			tryCandidate := func(pw, ruleLabel string) bool {
+				if dvl != nil {
+					if !dvl.accepts(pw) {
+						// Too long for one block under this salt. The scalar
+						// verifier takes it, which is where every dict
+						// candidate went before this path existed.
+						localAttempts++
+						if localAttempts >= 1024 {
+							atomic.AddInt64(atomicAttempts, localAttempts)
+							localAttempts = 0
+						}
+						if verify(pw) {
+							// Keep the earliest, the same rule the group
+							// flushes use. best cannot currently be set here
+							// — a group that matches reports and ends the
+							// worker before control returns — but making the
+							// rule unconditional means a future change to
+							// that flow cannot silently start reporting a
+							// later password than the one the wordlist put
+							// first.
+							if best.seq < 0 || seq < best.seq {
+								best = dictWord{word: pw, ruleLabel: ruleLabel, seq: seq}
+							}
+							seq++
+							return reportBest()
+						}
+						seq++
+						return false
+					}
+					localAttempts += int64(dvl.add(pw, ruleLabel, seq, &best))
+					seq++
+					if localAttempts >= 1024 {
+						atomic.AddInt64(atomicAttempts, localAttempts)
+						localAttempts = 0
+					}
+					if best.seq >= 0 {
+						// A group flushed inside add() matched. Other buckets
+						// may still hold an EARLIER candidate, so empty them
+						// before reporting: otherwise which password a run
+						// reports would depend on how the lengths happened to
+						// interleave.
+						localAttempts += int64(dvl.flushAll(&best))
+						return reportBest()
+					}
+					return false
+				}
 				if lh == nil {
 					localAttempts++
 					if localAttempts >= 1024 {
@@ -2058,7 +2178,7 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 			for {
 				select {
 				case <-innerCtx.Done():
-					flush()
+					flushAny()
 					return
 				case words, ok := <-batchCh:
 					if !ok {
@@ -2075,13 +2195,13 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 						// buf persisting differently) silently removing the
 						// only flush that still mattered. Do NOT delete this
 						// on the evidence of a green test suite.
-						flush()
+						flushAny()
 						return
 					}
 					for _, word := range words {
 						select {
 						case <-innerCtx.Done():
-							flush()
+							flushAny()
 							return
 						default:
 						}
@@ -2094,7 +2214,7 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 							for _, mw := range rules.expand(word) {
 								select {
 								case <-innerCtx.Done():
-									flush()
+									flushAny()
 									return
 								default:
 								}
@@ -2119,7 +2239,7 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 					// one flush that still mattered — do NOT "simplify" by
 					// deleting one of these two just because the tests stay
 					// green.
-					if flush() {
+					if flushAny() {
 						return
 					}
 				}

@@ -563,12 +563,20 @@ func batchSaltGroups(batch []*batchTarget) []string {
 	return out
 }
 
-// batchSessionModes are the modes --session checkpoints, for one target or a
-// whole dump. Identical to doCrack's list on purpose: a session's meaning is a
-// property of the candidate STREAM (a global keyspace index), not of how many
-// targets are being compared against it, so the two must never disagree about
-// which modes are resumable.
-var batchSessionModes = map[string]bool{
+// sessionCheckpointModes are the modes --session checkpoints, for one target
+// or a whole dump. A session's meaning is a property of the candidate STREAM —
+// a global keyspace index — and not of how many targets are being compared
+// against it, so one target and a dump must never disagree about which modes
+// are resumable.
+//
+// They used to be written twice: this map, and an inline || chain in doCrack.
+// The comment here already said they "must never disagree", which is an
+// instruction a reader can follow and a compiler cannot. They had not drifted
+// on WHICH modes qualify, but they had drifted on what happens to a mode that
+// does not: the dump path said so, and doCrack's chain had no else at all, so
+// `-M dict --session foo` ran to completion, wrote no checkpoint and said
+// nothing. One map now answers for both.
+var sessionCheckpointModes = map[string]bool{
 	"brute": true, "mask": true, "markov": true,
 	"hybrid": true, "combinator": true, "prince": true,
 }
@@ -613,7 +621,7 @@ func batchSession(ctx *context.Context, targets []string, typeOrder, runSalts []
 		return nil, 0, nil
 	}
 	m := strings.ToLower(mode)
-	if !batchSessionModes[m] {
+	if !sessionCheckpointModes[m] {
 		clrYellow.Fprintf(os.Stderr,
 			"--session is not checkpointed for -M %s in multi-hash mode; running without a checkpoint\n", m)
 		return nil, 0, nil
