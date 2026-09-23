@@ -3040,11 +3040,38 @@ the vector would have shown it.
 
 ### Where the remainder is
 
-Extractors: 48 → 69. Container sniffers: 18 → 28. Of John's 118 converters, 55
+### Containers with no header
+
+The PGP trio — self-decrypting archive, virtual disk, whole-disk encryption —
+share a property that shapes all three extractors: none has a file header
+saying what it is. Each keeps its structure somewhere inside a file whose
+beginning belongs to something else: an executable stub, a partition table, a
+raw disk image. All three are found by SCANNING for a structure that validates,
+and at one candidate position per byte over a megabyte a one-field test finds
+false structures constantly — so each checks several fields at once before
+believing it has found anything.
+
+The virtual disk is the awkward one: its MAIN header carries the salt and the
+cipher, and the iteration count and check bytes are in a USER record it points
+at, which can be near the end of the file. Neither half is a record on its own.
+
+PGP WDE's iteration field is a LOGARITHM, which reads as the opposite of what
+it is. A record carrying 17 looks like a format with almost no work factor and
+is doing 131,072 rounds.
+
+LibreOffice shares StarOffice's manifest walk, now factored out. The two
+families differ in namespace — openoffice.org's and OASIS's — so attributes are
+matched on local name alone. Two documents are refused rather than guessed at:
+one naming SHA-1 for its checksum and SHA-256 for its start key (the start key
+is what the checksum covers, so a disagreeing pair describes a derivation
+nothing implements), and ODF 1.2's whole-package form, which has no per-part
+checksum at all.
+
+Extractors: 48 → 73. Container sniffers: 18 → 29. Of John's 118 converters, 51
 still have no counterpart — down from 76. The remainder is now dominated by
-network captures (pcap, wpapcap, radius), PGP containers (pgpdisk, pgpsda,
-pgpwde), Apple and office documents (iwork, libreoffice, lion, mac, strip) and
-a long tail of single-product wallets.
+network captures (pcap, wpapcap, radius, hccap), Windows and enterprise
+credential stores (DPAPImk, racf, sap, pse, ps_token, sspr), Apple documents
+(iwork, lion, mac, strip) and a long tail of single-product wallets.
 
 ---
 

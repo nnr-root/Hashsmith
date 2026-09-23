@@ -574,54 +574,11 @@ func extractStarOfficeRecords(path string) ([]string, error) {
 	}
 	defer mf.Close()
 
-	// The manifest's encryption data is nested inside the file-entry for
-	// content.xml, so the decoder walks tokens rather than unmarshalling a
-	// struct: it has to know WHICH entry it is inside when it meets the
-	// checksum.
-	var checksum, iv, salt, iterations string
-	dec := xml.NewDecoder(mf)
-	inTarget := false
-	for {
-		tok, err := dec.Token()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, errors.New("META-INF/manifest.xml is not well-formed XML")
-		}
-		start, ok := tok.(xml.StartElement)
-		if !ok {
-			if end, ok := tok.(xml.EndElement); ok && end.Name.Local == "file-entry" {
-				inTarget = false
-			}
-			continue
-		}
-		attr := func(name string) string {
-			for _, a := range start.Attr {
-				if a.Name.Local == name {
-					return a.Value
-				}
-			}
-			return ""
-		}
-		switch start.Name.Local {
-		case "file-entry":
-			inTarget = attr("full-path") == "content.xml"
-		case "encryption-data":
-			if inTarget {
-				checksum = attr("checksum")
-			}
-		case "algorithm":
-			if inTarget {
-				iv = attr("initialisation-vector")
-			}
-		case "key-derivation":
-			if inTarget {
-				salt = attr("salt")
-				iterations = attr("iteration-count")
-			}
-		}
+	entry, err := readODFManifest(mf)
+	if err != nil {
+		return nil, err
 	}
+	checksum, iv, salt, iterations := entry.checksum, entry.iv, entry.salt, entry.iterations
 	if checksum == "" || iv == "" || salt == "" || iterations == "" {
 		return nil, errors.New("this document is not encrypted: its manifest carries no checksum, IV and salt for content.xml")
 	}

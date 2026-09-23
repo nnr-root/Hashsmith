@@ -421,3 +421,17 @@ func sniffCCache(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
 	}
 	return hashid.Evidence(fmt.Sprintf("krb5 credential cache tag 0x05, version %d", head[1])), hashid.Certain, true
 }
+
+// sniffPGPDisk matches a PGP Virtual Disk's MAIN header. The header is not at
+// offset zero — a .pgd begins with whatever the container put there — so this
+// searches the head, and it requires both halves of the eight-byte tag rather
+// than just "PGPd", which appears in PGP software for other reasons.
+func sniffPGPDisk(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	for i := 0; i+8 <= len(head); i++ {
+		if string(head[i:i+4]) == "PGPd" && string(head[i+4:i+8]) == "MAIN" {
+			return hashid.Evidence(fmt.Sprintf(
+				"PGP Virtual Disk header \"PGPd\"\"MAIN\" at offset %d", i)), hashid.Certain, true
+		}
+	}
+	return "", 0, false
+}
