@@ -722,3 +722,85 @@ func (r *leReader) uint32() (uint32, error) {
 	}
 	return binary.LittleEndian.Uint32(b), nil
 }
+
+// ── openssl enc ───────────────────────────────────────────────────────────────
+
+func runExtractOpenSSLEnc(args []string) error {
+	return runFileRecordExtractor("openssl2smith", args, extractOpenSSLEncRecords)
+}
+
+// opensslEncCombinations are the cipher and digest pairs `openssl enc` offers
+// by default, most likely first. MD5 leads because it was OpenSSL's default
+// digest through 1.0.x and most files in the wild predate the change; SHA-256
+// took over in 1.1.0.
+var opensslEncCombinations = []struct{ cipher, digest int }{
+	{0, 0}, // AES-256, MD5
+	{0, 2}, // AES-256, SHA-256
+	{1, 0}, // AES-128, MD5
+	{1, 2}, // AES-128, SHA-256
+	{0, 1}, // AES-256, SHA-1
+	{1, 1}, // AES-128, SHA-1
+}
+
+// extractOpenSSLEncRecords converts a file written by `openssl enc`.
+//
+// Such a file records NOTHING about how it was made. There is an eight-byte
+// magic, an eight-byte salt, and ciphertext — no cipher name, no digest name,
+// no iteration count, no authentication tag. John's converter resolves this by
+// making the user pass -c and -m and guess; get either wrong and the record
+// cannot crack, with no way to tell that from a bad wordlist.
+//
+// This emits one record per combination instead. Six of them cover both AES
+// key sizes and all three digests, only one can ever answer, and the run tries
+// them in order of how common they are. The cost is six cheap candidates per
+// password rather than one; the alternative is asking the user a question the
+// file cannot answer.
+func extractOpenSSLEncRecords(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if strings.Contains(string(data), "PRIVATE KEY-----") {
+		return nil, errors.New("this is a private key, not a file from `openssl enc`; use ssh2smith")
+	}
+	const magic = "Salted__"
+	if !strings.HasPrefix(string(data), magic) {
+		// `openssl enc -a` writes base64, possibly wrapped.
+		clean := strings.Map(func(r rune) rune {
+			if r == '\n' || r == '\r' {
+				return -1
+			}
+			return r
+		}, string(data))
+		decoded, derr := base64.StdEncoding.DecodeString(clean)
+		if derr != nil || !strings.HasPrefix(string(decoded), magic) {
+			return nil, errors.New("this file has no \"Salted__\" header, so it was not written by `openssl enc` with a password")
+		}
+		data = decoded
+	}
+	if len(data) < 32 {
+		return nil, errors.New("this file is too short to hold a salt and a block")
+	}
+	salt := hex.EncodeToString(data[8:16])
+	body := data[16:]
+
+	var tail string
+	if len(body) <= 16 {
+		// One block: its IV is the derived one, which the record says by
+		// setting the inlined flag.
+		tail = fmt.Sprintf("%s$1$0", hex.EncodeToString(data[len(data)-16:]))
+	} else {
+		head := body
+		if len(head) > 256 {
+			head = head[:256]
+		}
+		tail = fmt.Sprintf("%s$0$%d$%s$0",
+			hex.EncodeToString(data[len(data)-32:]), len(head), hex.EncodeToString(head))
+	}
+
+	records := make([]string, 0, len(opensslEncCombinations))
+	for _, c := range opensslEncCombinations {
+		records = append(records, fmt.Sprintf("$openssl$%d$%d$8$%s$%s", c.cipher, c.digest, salt, tail))
+	}
+	return records, nil
+}

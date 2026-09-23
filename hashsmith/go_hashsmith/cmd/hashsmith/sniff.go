@@ -390,3 +390,34 @@ func sniffFileZillaServer(head []byte) (hashid.Evidence, hashid.Confidence, bool
 	}
 	return "XML with a <FileZillaServer> root element", hashid.Likely, true
 }
+
+// sniffOpenSSLEnc matches the eight-byte header `openssl enc` writes in front
+// of a salt. It is the whole of the format's self-description: nothing after
+// it says which cipher or digest made the file.
+func sniffOpenSSLEnc(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if !bytes.HasPrefix(head, []byte("Salted__")) || len(head) < 32 {
+		return "", 0, false
+	}
+	return "magic \"Salted__\" followed by an eight-byte salt", hashid.Certain, true
+}
+
+// sniffKirbi matches KRB-CRED's application tag. 0x76 is [APPLICATION 22]
+// constructed, which is what mimikatz writes at the head of every .kirbi.
+func sniffKirbi(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if len(head) < 4 || head[0] != 0x76 {
+		return "", 0, false
+	}
+	if _, err := derAt(head, 2); err != nil {
+		return "", 0, false
+	}
+	return "DER [APPLICATION 22] KRB-CRED with a ticket list", hashid.Certain, true
+}
+
+// sniffCCache matches the krb5 credential cache's two-byte tag: 0x05 then a
+// version between 1 and 4.
+func sniffCCache(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if len(head) < 2 || head[0] != 0x05 || head[1] < 1 || head[1] > 4 {
+		return "", 0, false
+	}
+	return hashid.Evidence(fmt.Sprintf("krb5 credential cache tag 0x05, version %d", head[1])), hashid.Certain, true
+}

@@ -2,7 +2,31 @@ package main
 
 // Files written by `openssl enc`.
 //
-//	$openssl$<key length>$<digest>$<salt length>$<salt>$<sample>$<last>$<hint>
+//	$openssl$<cipher>$<digest>$<salt length>$<salt>$<last chunks>$1$<hint>
+//	$openssl$<cipher>$<digest>$<salt length>$<salt>$<last chunks>$0$<n>$<head>$<hint>
+//
+// The first field is a CIPHER INDEX, not a key length, and it counts DOWN:
+// 0 is AES-256 and 1 is AES-128. That is John's numbering and there is no
+// third value — openssl2john's default run writes 0, so a record straight out
+// of that converter is an AES-256 one. Reading the field as a key length gets
+// the two ciphers exactly backwards on a record that names either.
+//
+// The field after the sample says whether the file was INLINED: whether it is
+// short enough that its only ciphertext block is the last one. That changes
+// what the sample means and how it is decrypted:
+//
+//	1  the sample is sixteen bytes, the file's one and only block, and the
+//	   IV is the one the password derived
+//	0  the sample is thirty-two bytes — the block BEFORE the last one
+//	   followed by the last one — and CBC makes the first of those the IV
+//	   for the second, so the derived IV is not used here at all
+//
+// A reader that decrypts the whole sample under the derived IV gets the final
+// block right by accident (CBC recovers from a wrong IV after one block) and
+// the block before it as noise, which then fails any test applied to the
+// plaintext as a whole. That is the failure with no symptom: the padding
+// checks out, so the record looks readable, and the right password is
+// rejected.
 //
 // `openssl enc` derives the key and IV from the password and an eight-byte
 // salt with EVP_BytesToKey — one pass of a digest by default, no iteration
@@ -62,6 +86,13 @@ type opensslEnc struct {
 	keyLen  int
 	salt    []byte
 	sample  []byte
+	// inlined says the sample is the file's only block. When it is false
+	// the sample carries the preceding block in front of the last one.
+	inlined bool
+	// head is up to 256 bytes from the START of the ciphertext, which some
+	// records carry and which is worth far more than the tail: decrypted,
+	// it is real plaintext rather than plaintext plus padding.
+	head []byte
 }
 
 func parseOpenSSLEnc(target string) (*opensslEnc, error) {
@@ -75,14 +106,13 @@ func parseOpenSSLEnc(target string) (*opensslEnc, error) {
 	}
 	r := &opensslEnc{}
 	switch f[0] {
+	case "0":
+		r.keyLen = 32 // AES-256
 	case "1":
-		r.keyLen = 16
-	case "2":
-		r.keyLen = 24
-	case "3":
-		r.keyLen = 32
+		r.keyLen = 16 // AES-128
 	default:
-		return nil, errors.New("unsupported openssl enc key size " + f[0])
+		return nil, errors.New("unsupported openssl enc cipher " + f[0] +
+			" (0 is AES-256 and 1 is AES-128; there is no third)")
 	}
 	switch f[1] {
 	case "0":
@@ -104,6 +134,28 @@ func parseOpenSSLEnc(target string) (*opensslEnc, error) {
 	if r.sample, err = hex.DecodeString(f[4]); err != nil ||
 		len(r.sample) == 0 || len(r.sample)%aes.BlockSize != 0 {
 		return nil, errors.New("invalid openssl enc sample")
+	}
+
+	// A record with no inlined flag is read as inlined, which is what a
+	// sixteen-byte sample can only be.
+	r.inlined = len(f) < 6 || f[5] != "0"
+	if r.inlined {
+		if len(r.sample) != aes.BlockSize {
+			return nil, errors.New("an inlined openssl enc sample is one sixteen-byte block")
+		}
+	} else {
+		if len(r.sample) < 2*aes.BlockSize {
+			return nil, errors.New("a non-inlined openssl enc sample carries the block before the last one as well")
+		}
+		// The last two blocks are the ones that matter; older writers
+		// put exactly two here and nothing depends on more.
+		r.sample = r.sample[len(r.sample)-2*aes.BlockSize:]
+		if len(f) >= 9 {
+			head, err := hex.DecodeString(f[8])
+			if err == nil && len(head) >= aes.BlockSize && len(head)%aes.BlockSize == 0 {
+				r.head = head
+			}
+		}
 	}
 	return r, nil
 }
@@ -132,8 +184,17 @@ func verifyOpenSSLEnc(target, candidate string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	plain := make([]byte, len(r.sample))
-	cipher.NewCBCDecrypter(block, iv).CryptBlocks(plain, r.sample)
+
+	// Decrypt the FINAL block only, under whichever IV chains into it: the
+	// derived one for a one-block file, the preceding ciphertext block
+	// otherwise.
+	last := r.sample
+	chain := iv
+	if !r.inlined {
+		chain, last = r.sample[:aes.BlockSize], r.sample[aes.BlockSize:]
+	}
+	plain := make([]byte, aes.BlockSize)
+	cipher.NewCBCDecrypter(block, chain).CryptBlocks(plain, last)
 
 	n := int(plain[len(plain)-1])
 	if n < 1 || n > aes.BlockSize || n > len(plain) {
@@ -146,7 +207,21 @@ func verifyOpenSSLEnc(target, candidate string) (bool, error) {
 	}
 	// Padding alone is one chance in 256. See the note at the top of this
 	// file for why that is not enough on its own.
-	return printableForOpenSSL(plain[:len(plain)-n]), nil
+	if !printableForOpenSSL(plain[:len(plain)-n]) {
+		return false, nil
+	}
+
+	// When the record carries the head of the file, decrypt that too. It is
+	// plaintext with no padding in it, so many more bytes have to come out
+	// printable, and the one-in-256 padding coincidence stops mattering.
+	if len(r.head) > 0 {
+		headPlain := make([]byte, len(r.head))
+		cipher.NewCBCDecrypter(block, iv).CryptBlocks(headPlain, r.head)
+		if !printableForOpenSSL(headPlain) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func isOpenSSLEnc(target string) bool {

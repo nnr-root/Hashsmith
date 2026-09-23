@@ -3010,11 +3010,41 @@ dynamic_24 is sha1($p.$s), so the four bytes that follow the SHA-1 in the blob
 are the salt and the password goes first. Reversing that gives a record that
 extracts cleanly and never cracks — the failure mode with no symptom.
 
-Extractors: 48 → 65. Container sniffers: 18 → 25. Of John's 118 converters, 59
-still have no counterpart — down from 76, and the list is now dominated by
-network captures (pcap, wpapcap, radius), Kerberos artifacts (ccache, kirbi,
-krb, kdcdump) and Windows credential stores (DPAPImk, mcafee_epo's siblings),
-which is a better-shaped remainder than it was.
+### Two defects the extractor work surfaced
+
+Writing an extractor means reading the format the way a producer writes it,
+which is a different exercise from reading it the way a record spells it — and
+it caught two real defects in `openssl enc`, neither of which the conformance
+ratchet could see.
+
+The first field of an `$openssl$` record is a CIPHER INDEX and it counts down:
+0 is AES-256, 1 is AES-128. It was being read as a key length, so a record
+naming AES-256 was refused outright — and openssl2john's DEFAULT run writes
+exactly that, which means records straight out of John's own converter were the
+ones this could not read.
+
+The field after the sample says whether the file was INLINED: whether its only
+ciphertext block is the last one. When it is not, the sample carries the block
+BEFORE the last one in front of it, and CBC makes that block the IV for the
+final one. Decrypting the whole sample under the derived IV gets the final
+block right by accident — CBC recovers from a wrong IV after one block — and
+noise for the block in front. The padding check then passed and the
+printability check failed, so a correct password was rejected with no
+indication why.
+
+The single self-test vector was AES-128 AND inlined, which is the one
+combination both defects leave alone. This is the argument for testing against
+files a real producer wrote rather than against a record someone transcribed:
+the vector was correct and the reader was wrong, and no amount of re-reading
+the vector would have shown it.
+
+### Where the remainder is
+
+Extractors: 48 → 69. Container sniffers: 18 → 28. Of John's 118 converters, 55
+still have no counterpart — down from 76. The remainder is now dominated by
+network captures (pcap, wpapcap, radius), PGP containers (pgpdisk, pgpsda,
+pgpwde), Apple and office documents (iwork, libreoffice, lion, mac, strip) and
+a long tail of single-product wallets.
 
 ---
 
