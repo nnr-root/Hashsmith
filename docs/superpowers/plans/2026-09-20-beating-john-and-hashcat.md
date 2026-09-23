@@ -112,6 +112,91 @@ Not found
 
 Each was reproduced directly against the built binary.
 
+### 2.0 The feasibility guard measured a cold machine and believed it
+
+Found 2026-09-23, while investigating what had been filed as a flaky test. It
+was not a flaky test.
+
+Three consecutive `crack -M brute -n 6 -x 6` runs of a keyspace that finishes
+in about six seconds, on an idle 8-core M2, printed:
+
+```
+Keyspace 308,915,776 at ~1.95 MH/s  -> ETA ~3 minutes     (actual 5.15s)
+Keyspace 308,915,776 at ~55.71 MH/s -> ETA ~6 seconds     (actual 6.17s)
+Keyspace 308,915,776 at ~1.13 MH/s  -> ETA ~5 minutes     (actual 7.99s)
+```
+
+Two users in three were told a five-second job would take five minutes. The
+measured rate for identical work spanned a factor of fifty. This is worse than
+a cosmetic ETA: the same number decides whether `checkFeasibility` REFUSES to
+start a run, so a reading like these can decline a job that would have finished
+while the refusal was being read.
+
+**One cause, appearing at three levels.** Every "repeat the work until the
+elapsed time is long enough to trust" loop in this codebase exits on its first
+iteration when that iteration is slow — and a cold first iteration is slow for
+reasons that have nothing to do with the work. So each loop terminated earliest
+in exactly the case where its answer was worst:
+
+1. `benchVerifyPath` doubles its repetition count until a round exceeds 100µs.
+   One cold md5 verify exceeds 100µs by itself, so it returned after a SINGLE
+   repetition, reporting the cold call as the per-operation cost: 25.9µs,
+   42.8µs, 52.4µs, 49.6µs, 62.3µs on successive fresh processes against a true
+   1.1µs.
+2. `feasibilityRate` borrows the single verify `doCrack` has already paid for,
+   and trusted it whenever it was LONGER than that same 100µs bar. The bar was
+   meant to reject a reading too brief for the clock to resolve; it also
+   accepts every cold reading, because being cold is what makes a reading long.
+3. An inflated per-op cost then fails `feasibilityProbeChunkFits`, which does
+   not merely degrade the estimate — it disqualifies the real-dispatch probe
+   outright and drops the run onto `benchTarget`'s scalar loop, which for any
+   type with a batch fast path is roughly thirty-five times pessimistic. A
+   cliff on one side of the gate and a slope on the other.
+
+**The fix, in three parts, each measured rather than reasoned about:**
+
+- `benchVerifyPath` will not accept a timing averaged over fewer than sixteen
+  repetitions unless the single call is genuinely slow (≥10ms), which leaves
+  the expensive case it exists for — one VeraCrypt RIPEMD-160 verify is ~2.6
+  seconds — measured in exactly one call as before.
+- A borrowed single-call timing is trusted only at 100x the warm-up bar, where
+  cold overhead is under 1%; below that it is re-measured.
+- The per-op cost is taken as the MINIMUM of three readings, because its two
+  uses fail asymmetrically: too small only shortens the probe's first call,
+  which the doubling loop corrects, while too large trips the gate above.
+- The probe itself now keeps the FASTEST of three samples inside its unchanged
+  150ms budget. Every error here is one-directional — cold caches, cold branch
+  predictors, unfaulted pages, and a scheduler that has not yet promoted the
+  process off the efficiency cores all make a sample look slower than steady
+  state, and nothing makes one look faster — so the maximum is the estimator,
+  not the mean.
+
+Measured after, on a machine at load average 18 (busier than the one that
+produced the original failures): 12 of 12 consecutive fresh runs reported 47-80
+MH/s and an ETA of 4-7 seconds against an actual ~6 seconds. With the probe
+sampling alone reverted, an 820 kH/s outlier reappears within ten runs, which
+is how each part was kept or dropped.
+
+**Why it was filed as flakiness.** The test that covers this retried three
+times and passed on the best attempt, so a cold first attempt was absorbed and
+the bug stayed invisible from inside the suite; it surfaced only as occasional
+failures when a loaded machine spoiled the later attempts too.
+
+The first attempt at a fix was to treat that as contention and skip the test
+when the machine was too busy to measure. Building the instrument to decide
+when to skip is what disproved the premise: a 38x ratio appeared at a CPU share
+of 0.90, and three fresh processes gave first-attempt ratios of 29x, 24x and
+26x at shares of 0.97, 0.90 and 0.79. Contention does not explain that; a cold
+process does.
+
+So the share is measured and REPORTED on every attempt and in every failure —
+a reader needs to know whether to believe a failed timing — but it is never
+allowed to skip. A skip on low share would have turned the very failure that
+found this defect into a silent pass, and would do it again if the defect
+returned. Verified with the fix in place and no share gating at all: the timing
+tests pass repeatedly on a machine held at load average 20 by twelve synthetic
+spinners.
+
 ### 2.1 The CLI input pipeline silently rewrites the user's input
 
 This single subsystem causes failures across `encode`, `decode`, `hash`, `crack`
@@ -352,7 +437,7 @@ paths of the §1 harness produce byte-identical results; `crack ... | head` work
 
 **Acceptance:** `make conformance` prints the §1 table; CI fails if CRACKED drops.
 
-### Phase 2 — Burn down the Hashcat record gap `[L]` — **IN PROGRESS**
+### Phase 2 — Burn down the Hashcat record gap `[L]` — **DONE** (529/538)
 
 With Phase 1 as the scoreboard, in strict value order:
 
@@ -361,13 +446,19 @@ With Phase 1 as the scoreboard, in strict value order:
 - [x] Every rejection closed: Episerver, MongoDB SCRAM, Oracle 11g, Juniper,
       AxCrypt 1, Werkzeug, PostgreSQL, Skip32, NetNTLMv2-NT, SNMPv3, Ansible,
       Bitwarden, Blockchain, NSEC3, RAR5, iTunes
-- [ ] The 83 unimplemented modes, prioritised by engagement frequency. The
-      largest coherent families are PKZIP/SecureZIP (10), Lotus Domino (3),
-      DPAPI masterkey (4), MS Office <= 2003 (4), Electrum (2), AxCrypt 2 (2),
-      Telegram (2), Mozilla key3/key4 (2), DiskCryptor (3), ENCsecurity (4)
-- [ ] Raise the pinned baseline with each landing, never to silence a failure
+- [x] The 83 unimplemented modes, prioritised by engagement frequency. Every
+      family named here when this was written — PKZIP/SecureZIP, Lotus Domino,
+      DPAPI masterkey, MS Office <= 2003, Electrum, AxCrypt 2, Telegram,
+      Mozilla key3/key4, DiskCryptor, ENCsecurity — is implemented and
+      cracking. See "Final: 529 of 538" below for the nine that are not, none
+      of which is an unimplemented format: four recover a key from ciphertext
+      structure with no password to check, three run a user-supplied function
+      as the hash, one is hashcat's STDOUT pseudo-mode, and one is the
+      conformance harness timing out on a mode that passes when run alone.
+- [x] Raise the pinned baseline with each landing, never to silence a failure
 
 **Acceptance:** CRACKED >= 500/538 (93%). State the residue and why.
+**Met:** 529/538 (98.3%), residue stated above and in full below.
 
 ### Phase 3 — Ship something a stranger can install `[M]` — **DONE** (fa731b4, 0a3f730)
 

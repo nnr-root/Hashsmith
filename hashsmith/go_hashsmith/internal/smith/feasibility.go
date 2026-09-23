@@ -79,6 +79,14 @@ const (
 	// — i.e. runs of a minute or more, for which 150 ms is under 0.25%.
 	feasibilityProbeDuration = 150 * time.Millisecond
 
+	// feasibilityProbeSamples is how many times the calibration probe measures
+	// the dispatch inside that budget, keeping the fastest. Three is the
+	// smallest number that lets a cold first sample be outvoted while leaving
+	// each sample a 50ms window — long enough that the doubling loop rarely
+	// has to run, and long enough to span several scheduling quanta. The total
+	// cost is unchanged: one budget, split.
+	feasibilityProbeSamples = 3
+
 	// feasibilityWarmup is the time budget for the cheap first-tier estimate.
 	// A single cold call to a raw digest is dominated by cache misses and
 	// branch mispredicts, not by the hash, and reads hundreds of times slower
@@ -87,6 +95,55 @@ const (
 	// state for a fast digest while still being far too short to notice, and a
 	// KDF whose single call already exceeds it pays exactly one call.
 	feasibilityWarmup = 100 * time.Microsecond
+
+	// feasibilitySingleCallFloor is how large a BORROWED single-call timing
+	// must be before feasibilityRate trusts it without re-measuring.
+	//
+	// feasibilityWarmup just above records why a single cold call cannot be
+	// trusted: it is dominated by cache misses and branch mispredicts rather
+	// than by the hash, and reads hundreds of times slower than steady state.
+	// The rule that used to guard this rejected a reading SHORTER than that
+	// bar — which catches a reading too brief for the clock to resolve, and
+	// accepts every cold one, because being cold is precisely what makes a
+	// reading long.
+	//
+	// Measured on an idle 8-core M2, one cold md5 verify read 116.75µs,
+	// 27.33µs and 20.83µs on successive fresh processes, against a true cost
+	// under 2µs. At 116.75µs the value fails feasibilityProbeChunkFits, which
+	// disqualifies the real-dispatch probe entirely and drops the run onto
+	// benchTarget's scalar loop: "Keyspace 308,915,776 at ~2.17 MH/s -> ETA
+	// ~2 minutes" for a job that finished in 6 seconds, against the 61 MH/s
+	// the same binary measured on a run where the gate happened to pass.
+	//
+	// So a borrowed reading is trusted only where cold-start overhead cannot
+	// matter to it. Cold overhead is itself on the order of feasibilityWarmup,
+	// so 100x that bar holds it under 1%. Anything below is re-measured by
+	// benchVerifyPath, which amortises over doubling repetitions. The
+	// expensive case the borrowing exists for is untouched: one VeraCrypt
+	// RIPEMD-160 verify is about 2.6 seconds, 260x this floor.
+	feasibilitySingleCallFloor = 100 * feasibilityWarmup
+
+	// feasibilityPerOpSamples is how many times a cheap per-op cost is
+	// measured before the smallest reading is taken.
+	//
+	// The minimum is the right statistic here, and not because noise is
+	// symmetric — it is not. perOp's only job is to size the probe's first
+	// candidate limit and to answer feasibilityProbeChunkFits, and those two
+	// uses fail in wildly different ways. Too SMALL only shortens the first
+	// probe call, which the doubling loop immediately corrects. Too LARGE
+	// trips the chunk-fits gate, which does not shorten anything: it
+	// disqualifies the real-dispatch probe outright and drops the run onto
+	// benchTarget's scalar loop, an estimate some thirty-five times
+	// pessimistic for any type with a batch fast path. A cliff on one side
+	// and a slope on the other means the reading should lean down.
+	//
+	// Measured on a loaded 8-core M2 (load average 26), single readings of
+	// md5's per-op cost ranged from 1.56µs to 12.39µs against a true ~2µs,
+	// and the two readings above 11.9µs were exactly the two runs out of
+	// sixteen that fell off the cliff. Three samples cost at most three times
+	// feasibilityWarmup — under a millisecond — and are paid only by runs the
+	// cheap estimate has already put above a minute.
+	feasibilityPerOpSamples = 3
 )
 
 // feasibilityRefusal is the error a refused run returns. It is a distinct type
@@ -238,8 +295,13 @@ func feasibilityRate(work int64, typ, target, salt, saltMode string, workers int
 	// bar benchVerifyPath sets for its own single-call sample; a sub-microsecond
 	// reading from a fast hash is no more usable from here than from there.
 	perOp := measuredPerOp
-	if perOp < feasibilityWarmup {
-		_, _, perOp = benchVerifyPath(typ, target, salt, saltMode, feasibilityWarmup)
+	if perOp < feasibilitySingleCallFloor {
+		// Re-measure rather than trust one call. Keeping the borrowed value
+		// when nothing better can be resolved means this can only ever
+		// improve on the previous behaviour, never fall back further.
+		if measured := feasibilityFastestPerOp(typ, target, salt, saltMode); measured > 0 {
+			perOp = measured
+		}
 	}
 	if perOp > 0 {
 		optimistic := float64(workers) / perOp.Seconds()
@@ -255,6 +317,21 @@ func feasibilityRate(work int64, typ, target, salt, saltMode string, workers int
 		return 0, false
 	}
 	return rate, true
+}
+
+// feasibilityFastestPerOp returns the smallest per-operation cost seen across
+// feasibilityPerOpSamples measurements, or zero if none resolved. See that
+// constant for why the smallest reading is the one to keep.
+func feasibilityFastestPerOp(typ, target, salt, saltMode string) time.Duration {
+	var best time.Duration
+	for i := 0; i < feasibilityPerOpSamples; i++ {
+		if _, _, p := benchVerifyPath(typ, target, salt, saltMode, feasibilityWarmup); p > 0 {
+			if best == 0 || p < best {
+				best = p
+			}
+		}
+	}
+	return best
 }
 
 // feasibilityProbeRate measures this run's real throughput via probe — the
@@ -310,7 +387,40 @@ func feasibilityProbeRate(probe feasibilityProbe, perOp, budget time.Duration, w
 	if workers < 1 {
 		workers = 1
 	}
-	limit := int64(workers) * int64(budget.Seconds()/perOp.Seconds())
+	// Sample the dispatch several times inside the budget and keep the BEST
+	// rate, rather than returning the first sample that is long enough to
+	// trust.
+	//
+	// This is not noise-averaging; it is a correction for a bias that only
+	// runs one way. Every mechanism that can make a sample wrong here makes
+	// it look SLOWER than the rate the real run will settle at: a process
+	// that has just started has cold caches and cold branch predictors, its
+	// pages are not yet faulted in, and on a big.LITTLE machine (every Apple
+	// silicon Mac, and most recent laptops) the scheduler has not yet
+	// promoted it off the efficiency cores. Nothing makes a sample look
+	// faster than steady state. So the maximum of several samples is the best
+	// estimator of steady state, and the mean is simply the steady-state rate
+	// dragged down by however much warm-up happened to land in the window.
+	//
+	// Measured before this existed, on an idle 8-core M2: three consecutive
+	// `crack -M brute -n 6 -x 6` runs of a keyspace that finishes in ~5s
+	// printed "ETA ~3 minutes", "ETA ~6 seconds" and "ETA ~5 minutes" — the
+	// probe measuring 1.95 MH/s, 55.71 MH/s and 1.13 MH/s for identical work,
+	// a 50x spread, with the cold reading winning two runs out of three. Two
+	// users in three were told a five-second job would take five minutes.
+	//
+	// It matters more than an ugly ETA line, because this rate also decides
+	// whether checkFeasibility REFUSES the run: a 35x-pessimistic reading can
+	// turn a job that would finish while you read the message into one the
+	// tool declines to start. The guard's own asymmetry rule points the same
+	// way — erring optimistic costs an honest ETA line, erring pessimistic
+	// costs the user the run — so taking the maximum is the safe direction as
+	// well as the accurate one.
+	sampleBudget := budget / feasibilityProbeSamples
+	if sampleBudget <= 0 {
+		sampleBudget = budget
+	}
+	limit := int64(workers) * int64(sampleBudget.Seconds()/perOp.Seconds())
 	if limit < int64(workers) {
 		limit = int64(workers)
 	}
@@ -318,10 +428,15 @@ func feasibilityProbeRate(probe feasibilityProbe, perOp, budget time.Duration, w
 	// unusual platform) from sizing an unbounded limit; never reached by any
 	// real algorithm.
 	const maxLimit = int64(1) << 40
-	minElapsed := budget / 8
+	minElapsed := sampleBudget / 8
 
+	// One ctx across every sample, so the whole calibration still costs at
+	// most `budget` — splitting it into samples must not make it slower.
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
+
+	best := 0.0
+	taken := 0
 
 	for {
 		start := time.Now()
@@ -331,9 +446,21 @@ func feasibilityProbeRate(probe feasibilityProbe, perOp, budget time.Duration, w
 			return 0, false
 		}
 		if attempts > 0 && elapsed > 0 && (elapsed >= minElapsed || ctx.Err() != nil) {
-			return float64(attempts) / elapsed.Seconds(), true
+			if rate := float64(attempts) / elapsed.Seconds(); rate > best {
+				best = rate
+			}
+			taken++
+			if taken >= feasibilityProbeSamples || ctx.Err() != nil {
+				return best, true
+			}
+			continue
 		}
 		if ctx.Err() != nil || limit >= maxLimit {
+			// A sample already taken is worth more than falling back, even
+			// if the budget ran out before the rest could be collected.
+			if best > 0 {
+				return best, true
+			}
 			return 0, false
 		}
 		limit *= 2

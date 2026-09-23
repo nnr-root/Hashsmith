@@ -120,6 +120,46 @@ const benchProbeCandidate = "benchprobe"
 //
 // perOp is 0 only when even 8192 calls did not resolve on the clock, which
 // callers must treat as "unknown", never as "instant".
+// benchTrustedSingleCall is how long ONE call must take before a timing
+// averaged over a single repetition is believed.
+//
+// benchVerifyPath doubles its repetition count until the round is long enough
+// to time, which quietly assumes that a round long enough to time is a round
+// worth trusting. For a slow KDF that holds: one VeraCrypt RIPEMD-160 verify
+// is about 2.6 seconds and measuring it once is measuring it correctly. For a
+// raw digest it is exactly backwards. The first call to a cold md5 path is
+// dominated by cache misses and branch mispredicts and runs a hundred times
+// slower than steady state, so it clears minElapsed on its own, at reps=1 —
+// and the loop exits at precisely the moment its answer is worst, reporting
+// the cold call as the per-operation cost.
+//
+// Measured on an idle 8-core M2, that produced per-op readings of 25.9µs,
+// 42.8µs, 52.4µs, 49.6µs and 62.3µs on successive fresh processes against a
+// true cost of 1.1µs. Downstream, the feasibility guard turned those into
+// "ETA ~4 minutes", "~9 minutes" and "~10 minutes" for a job that finished in
+// six seconds, and it is the same number that decides whether the guard
+// REFUSES a run outright.
+//
+// So a one-repetition timing is believed only when the call is genuinely slow
+// enough that cold-start overhead — itself on the order of a hundred
+// microseconds — cannot matter to it. Below that, the timing must average
+// over benchMinReps repetitions, by which point the earlier doubling rounds
+// have warmed everything up.
+const benchTrustedSingleCall = 10 * time.Millisecond
+
+// benchMinReps is how many repetitions a timing must average over when the
+// per-call cost is too small for one call to be trusted. Sixteen means the
+// accepted round is preceded by fifteen calls over the same code and data,
+// which is ample to fault in the pages and train the branch predictors; a
+// fast digest reaches it in microseconds.
+const benchMinReps = 16
+
+// benchTimingIsTrustworthy reports whether a round of `reps` repetitions
+// taking `el` is a sound basis for a per-operation cost.
+func benchTimingIsTrustworthy(reps int, el time.Duration) bool {
+	return reps >= benchMinReps || el >= benchTrustedSingleCall
+}
+
 func benchVerifyPath(typ, target, salt, saltMode string, minElapsed time.Duration) (fv *fastVerifier, fast bool, perOp time.Duration) {
 	// Only an unsalted target can take the fast verifier — the same condition
 	// doCrack applies before swapping its verifyFn.
@@ -136,7 +176,7 @@ func benchVerifyPath(typ, target, salt, saltMode string, minElapsed time.Duratio
 				verifyCandidate(benchProbeCandidate, target, typ, salt, saltMode)
 			}
 		}
-		if el := time.Since(start); el > 0 && el >= minElapsed {
+		if el := time.Since(start); el > 0 && el >= minElapsed && benchTimingIsTrustworthy(reps, el) {
 			return fv, fast, el / time.Duration(reps)
 		}
 	}

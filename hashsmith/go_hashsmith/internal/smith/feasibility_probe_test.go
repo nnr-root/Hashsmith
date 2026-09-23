@@ -87,6 +87,94 @@ func feasibilityScalarOnlyProbe(layout *keyspaceLayout, workers int, verifyFn fu
 	}
 }
 
+// ── Measuring the measurement ─────────────────────────────────────────────────
+//
+// Everything below compares a PREDICTION, made from a short probe, against the
+// ACTUAL wall clock of a long sweep, and every attempt also reports what
+// fraction of the CPU it received while it ran.
+//
+// That share is REPORTED, never acted on. The distinction matters. These
+// timings were intermittently failing, and the obvious reading was contention:
+// a probe lasting milliseconds runs inside one scheduling quantum at full
+// speed while a sweep lasting seconds is descheduled, so on a busy machine the
+// ratio should inflate for reasons unrelated to the code. Measuring it said
+// otherwise — a 38x ratio turned up at a CPU share of 0.90, on a machine idle
+// enough to time — and following that led to a real defect in the guard
+// itself, not in the test: see feasibility.go's feasibilitySingleCallFloor and
+// benchmark.go's benchTimingIsTrustworthy. Three fresh processes produced
+// first-attempt ratios of 29x, 24x and 26x at CPU shares of 0.97, 0.90 and
+// 0.79, which is not a pattern contention explains.
+//
+// So the share is printed on every attempt and in every failure, because a
+// reader looking at a failed timing needs to know whether to believe it — and
+// it is not allowed to skip the test. A guard that skipped on a low share
+// would have turned exactly the failure that found this bug into a silent
+// pass, and would do it again if the bug came back.
+
+// measuredCPUShare returns the fraction of `workers` cores the process
+// actually received while fn ran, and fn's wall-clock duration. A share of 1.0
+// means every worker had a core to itself throughout. Platforms that cannot
+// report process CPU time report 1.0, which is simply "no information".
+func measuredCPUShare(workers int, fn func()) (share, wallSeconds float64) {
+	cpu0, ok := processCPUSeconds()
+	start := time.Now()
+	fn()
+	wallSeconds = time.Since(start).Seconds()
+	cpu1, ok2 := processCPUSeconds()
+	if !ok || !ok2 || wallSeconds <= 0 || workers <= 0 {
+		return 1.0, wallSeconds
+	}
+	return (cpu1 - cpu0) / (wallSeconds * float64(workers)), wallSeconds
+}
+
+// feasibilityAttempt is one timing attempt: what the guard predicted, what the
+// run actually took, and how much of the CPU that run received.
+type feasibilityAttempt struct {
+	predicted float64
+	actual    float64
+	share     float64
+}
+
+// assertFeasibilityRatio holds the best of a few timing attempts to
+// feasibilityETATolerance.
+//
+// Retrying past noise does not weaken what the test proves. A genuine
+// regression — probing the scalar path again, a pessimistic constant factor,
+// tier two skipped, or the cold-measurement defect above returning — makes
+// EVERY attempt pessimistic by roughly the same systematic factor, so it still
+// fails all of them, not most. Mutation testing during this task confirmed
+// that on each of those.
+func assertFeasibilityRatio(t *testing.T, label string, measure func() feasibilityAttempt) {
+	t.Helper()
+	const attempts = 3
+	best := math.Inf(1)
+	var bestPredicted, bestActual, bestShare float64
+
+	for i := 0; i < attempts; i++ {
+		a := measure()
+		if a.actual <= 0 {
+			t.Fatalf("%s: run reported non-positive elapsed time %v — cannot compute a ratio", label, a.actual)
+		}
+		ratio := a.predicted / a.actual
+		t.Logf("%s: attempt %d/%d predicted ETA %.4gs, actual %.4gs, ratio %.2fx, cpu share %.2f",
+			label, i+1, attempts, a.predicted, a.actual, ratio, a.share)
+		if ratio < best {
+			best, bestPredicted, bestActual, bestShare = ratio, a.predicted, a.actual, a.share
+		}
+		if ratio <= feasibilityETATolerance {
+			return
+		}
+	}
+
+	t.Errorf("%s: best of %d attempts still predicted an ETA (%.4gs) %.1fx the real elapsed "+
+		"time (%.4gs), exceeding the %.0fx tolerance — the guard is timing the wrong path "+
+		"again. That attempt held %.0f%% of the CPU it asked for; well under 100%% means the "+
+		"machine was contended and the number is worth re-checking on an idle one, but it is "+
+		"NOT on its own an explanation — the defect this test was written against produced "+
+		"ratios above 20x at shares over 0.90.",
+		label, attempts, bestPredicted, best, bestActual, feasibilityETATolerance, bestShare*100)
+}
+
 // feasibilityETATolerance bounds how far a fast-path prediction may sit above
 // the ACTUAL measured wall clock for the same real dispatch. 4x is chosen
 // from two clusters actually observed developing this suite on shared,
@@ -113,7 +201,7 @@ const feasibilityETATolerance = 4.0
 // going through feasibilityRate's tier-one gate) so the test exercises tier
 // two — the mechanism that changed — regardless of whether tier one's own
 // noisy cheap estimate happens to resolve early on a given run.
-func measureDispatchETA(t *testing.T, typ, salt, saltMode string, length, workers int) (predictedETASec, actualElapsedSec float64) {
+func measureDispatchETA(t *testing.T, typ, salt, saltMode string, length, workers int) (predictedETASec, actualElapsedSec, cpuShare float64) {
 	t.Helper()
 	target := feasibilityBenchTarget(t, typ, salt, saltMode)
 	layout := bruteLayout(feasibilityTestCharset, length, length)
@@ -127,10 +215,11 @@ func measureDispatchETA(t *testing.T, typ, salt, saltMode string, length, worker
 	predictedETASec = float64(layout.total) / rate
 
 	var realAttempts int64
-	start := time.Now()
-	_, _, err := runBruteOrMaskLayout(context.Background(), layout, nil, 0, 0, workers,
-		&realAttempts, typ, salt, saltMode, target, verifyFn)
-	actualElapsedSec = time.Since(start).Seconds()
+	var err error
+	cpuShare, actualElapsedSec = measuredCPUShare(workers, func() {
+		_, _, err = runBruteOrMaskLayout(context.Background(), layout, nil, 0, 0, workers,
+			&realAttempts, typ, salt, saltMode, target, verifyFn)
+	})
 	if err != nil {
 		t.Fatalf("real dispatch run: %v", err)
 	}
@@ -139,7 +228,7 @@ func measureDispatchETA(t *testing.T, typ, salt, saltMode string, length, worker
 			"(the target is built to be unreachable, so a short count means something else stopped it)",
 			realAttempts, layout.total)
 	}
-	return predictedETASec, actualElapsedSec
+	return predictedETASec, actualElapsedSec, cpuShare
 }
 
 // TestFeasibilityETAMatchesRealDispatch is properties 1 and 2 from the task:
@@ -180,30 +269,10 @@ func TestFeasibilityETAMatchesRealDispatch(t *testing.T) {
 			// skipped) makes EVERY attempt pessimistic by roughly the same
 			// systematic factor — see the mutation testing performed for this
 			// task — so it still fails all 3, not just most.
-			const attempts = 3
-			var best float64 = math.Inf(1)
-			var lastPredicted, lastActual float64
-			for i := 0; i < attempts; i++ {
-				predicted, actual := measureDispatchETA(t, c.typ, c.salt, c.saltMode, c.length, workers)
-				if actual <= 0 {
-					t.Fatalf("real sweep reported non-positive elapsed time %v — cannot compute a ratio", actual)
-				}
-				ratio := predicted / actual
-				t.Logf("%s: attempt %d/%d predicted ETA %.4gs, actual %.4gs, ratio %.2fx",
-					c.name, i+1, attempts, predicted, actual, ratio)
-				lastPredicted, lastActual = predicted, actual
-				if ratio < best {
-					best = ratio
-				}
-				if ratio <= feasibilityETATolerance {
-					break
-				}
-			}
-			if best > feasibilityETATolerance {
-				t.Errorf("%s: best of %d attempts still predicted an ETA (%.4gs) %.1fx the real "+
-					"dispatch's actual time (%.4gs), exceeding the %.0fx tolerance — the guard is "+
-					"timing the wrong path again", c.name, attempts, lastPredicted, best, lastActual, feasibilityETATolerance)
-			}
+			assertFeasibilityRatio(t, c.name, func() feasibilityAttempt {
+				predicted, actual, share := measureDispatchETA(t, c.typ, c.salt, c.saltMode, c.length, workers)
+				return feasibilityAttempt{predicted: predicted, actual: actual, share: share}
+			})
 		})
 	}
 }
@@ -569,34 +638,25 @@ func TestFeasibilityETAThroughRunCrack(t *testing.T) {
 	// see its comment for why up to 3 attempts, passing on the best, does
 	// not weaken what a systematic regression (this mutation included) would
 	// still reliably fail.
-	const attemptsN = 3
-	best := math.Inf(1)
-	var lastPredicted, lastActual float64
-	for i := 0; i < attemptsN; i++ {
-		start := time.Now()
-		out, err := captureStderrResult(t, func() error {
-			return runCrack([]string{"-t", "md5", "-s", "deadbeef", "-S", "prefix",
-				"-M", "brute", "-C", feasibilityTestCharset, "-n", "6", "-x", "6",
-				"-p", "4", "--no-pot", target})
+	assertFeasibilityRatio(t, "through runCrack", func() feasibilityAttempt {
+		var out string
+		var err error
+		// -p 4 is the worker count the command is given, so it is the
+		// denominator the share is measured against.
+		share, elapsed := measuredCPUShare(4, func() {
+			out, err = captureStderrResult(t, func() error {
+				return runCrack([]string{"-t", "md5", "-s", "deadbeef", "-S", "prefix",
+					"-M", "brute", "-C", feasibilityTestCharset, "-n", "6", "-x", "6",
+					"-p", "4", "--no-pot", target})
+			})
 		})
-		elapsed := time.Since(start).Seconds()
 		if err != nil {
-			t.Fatalf("attempt %d/%d: runCrack: %v\n%s", i+1, attemptsN, err, out)
+			t.Fatalf("runCrack: %v\n%s", err, out)
 		}
-		predicted := feasibilityPredictedETAFromOutput(t, out)
-		ratio := predicted / elapsed
-		t.Logf("attempt %d/%d: predicted ETA %.4gs, actual %.4gs, ratio %.2fx", i+1, attemptsN, predicted, elapsed, ratio)
-		lastPredicted, lastActual = predicted, elapsed
-		if ratio < best {
-			best = ratio
+		return feasibilityAttempt{
+			predicted: feasibilityPredictedETAFromOutput(t, out),
+			actual:    elapsed,
+			share:     share,
 		}
-		if ratio <= feasibilityETATolerance {
-			break
-		}
-	}
-	if best > feasibilityETATolerance {
-		t.Errorf("best of %d attempts through runCrack still predicted an ETA (%.4gs) %.1fx the "+
-			"real elapsed time (%.4gs), exceeding the %.0fx tolerance — the guard is timing the "+
-			"wrong path again", attemptsN, lastPredicted, best, lastActual, feasibilityETATolerance)
-	}
+	})
 }

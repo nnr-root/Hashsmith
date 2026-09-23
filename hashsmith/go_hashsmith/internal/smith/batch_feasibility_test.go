@@ -12,7 +12,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -161,7 +160,7 @@ func batchFeasibilityScalarOnlyProbe(layout *keyspaceLayout, workers int, verify
 // unbounded sweep — so "predicted" and "actual" are the same code path this
 // task changed. Mirrors feasibility_probe_test.go's measureDispatchETA for
 // the single-target path.
-func measureBatchDispatchETA(t *testing.T, typ, salt, saltMode string, length, workers, numTargets int) (predictedETASec, actualElapsedSec float64) {
+func measureBatchDispatchETA(t *testing.T, typ, salt, saltMode string, length, workers, numTargets int) (predictedETASec, actualElapsedSec, cpuShare float64) {
 	t.Helper()
 	batch, active := buildUnreachableBatch(t, typ, salt, saltMode, numTargets)
 	layout := bruteLayout(feasibilityTestCharset, length, length)
@@ -177,25 +176,27 @@ func measureBatchDispatchETA(t *testing.T, typ, salt, saltMode string, length, w
 	predictedETASec = float64(layout.total) / rate
 
 	var realAttempts int64
-	start := time.Now()
-	ranFast := batchFastLayout(context.Background(), typ, salt, saltMode, layout, active, batch,
-		0, 0, workers, &realAttempts, nil, record)
-	if !ranFast {
-		ranFast = batchStdLayout(context.Background(), typ, layout, active, batch, salt, saltMode,
+	var layoutErr error
+	cpuShare, actualElapsedSec = measuredCPUShare(workers, func() {
+		ranFast := batchFastLayout(context.Background(), typ, salt, saltMode, layout, active, batch,
 			0, 0, workers, &realAttempts, nil, record)
-	}
-	if !ranFast {
-		if _, err := runLayout(context.Background(), layout, 0, 0, workers, &realAttempts, nil, verify); err != nil {
-			t.Fatalf("real dispatch run: %v", err)
+		if !ranFast {
+			ranFast = batchStdLayout(context.Background(), typ, layout, active, batch, salt, saltMode,
+				0, 0, workers, &realAttempts, nil, record)
 		}
+		if !ranFast {
+			_, layoutErr = runLayout(context.Background(), layout, 0, 0, workers, &realAttempts, nil, verify)
+		}
+	})
+	if layoutErr != nil {
+		t.Fatalf("real dispatch run: %v", layoutErr)
 	}
-	actualElapsedSec = time.Since(start).Seconds()
 	if realAttempts != layout.total {
 		t.Fatalf("real run attempted %d candidates, want the full %d-candidate sweep "+
 			"(targets are unreachable, so a short count means something else stopped it)",
 			realAttempts, layout.total)
 	}
-	return predictedETASec, actualElapsedSec
+	return predictedETASec, actualElapsedSec, cpuShare
 }
 
 // TestBatchFeasibilityETAMatchesRealDispatch is the dump-path headline: the
@@ -232,30 +233,10 @@ func TestBatchFeasibilityETAMatchesRealDispatch(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			const attempts = 3
-			var best float64 = math.Inf(1)
-			var lastPredicted, lastActual float64
-			for i := 0; i < attempts; i++ {
-				predicted, actual := measureBatchDispatchETA(t, c.typ, c.salt, c.saltMode, length, workers, numTargets)
-				if actual <= 0 {
-					t.Fatalf("real sweep reported non-positive elapsed time %v", actual)
-				}
-				ratio := predicted / actual
-				t.Logf("%s: attempt %d/%d predicted ETA %.4gs, actual %.4gs, ratio %.2fx",
-					c.name, i+1, attempts, predicted, actual, ratio)
-				lastPredicted, lastActual = predicted, actual
-				if ratio < best {
-					best = ratio
-				}
-				if ratio <= feasibilityETATolerance {
-					break
-				}
-			}
-			if best > feasibilityETATolerance {
-				t.Errorf("%s: best of %d attempts still predicted a dump ETA (%.4gs) %.1fx the real "+
-					"batch dispatch's actual time (%.4gs), exceeding the %.0fx tolerance — the dump "+
-					"guard is timing the wrong path", c.name, attempts, lastPredicted, best, lastActual, feasibilityETATolerance)
-			}
+			assertFeasibilityRatio(t, c.name, func() feasibilityAttempt {
+				predicted, actual, share := measureBatchDispatchETA(t, c.typ, c.salt, c.saltMode, length, workers, numTargets)
+				return feasibilityAttempt{predicted: predicted, actual: actual, share: share}
+			})
 		})
 	}
 }
@@ -388,39 +369,30 @@ func TestBatchFeasibilityETAThroughRunCrack(t *testing.T) {
 	// this as feasible on its own (see feasibility_probe_test.go's identical
 	// reasoning for the single-target CLI test) — this test has to reach
 	// tier two, the mechanism batch.go's probe wiring changed.
-	const attemptsN = 3
-	best := math.Inf(1)
-	var lastPredicted, lastActual float64
-	for i := 0; i < attemptsN; i++ {
-		start := time.Now()
-		out, err := captureStderrResult(t, func() error {
-			return runCrack([]string{"-t", "md5", "-s", "deadbeef", "-S", "prefix",
-				"-M", "brute", "-C", feasibilityTestCharset, "-n", "6", "-x", "6",
-				"-p", "4", "--no-pot", targetsFile})
+	assertFeasibilityRatio(t, "dump through runCrack", func() feasibilityAttempt {
+		var out string
+		var err error
+		// -p 4 is the worker count the command is given, so it is the
+		// denominator the share is measured against.
+		share, elapsed := measuredCPUShare(4, func() {
+			out, err = captureStderrResult(t, func() error {
+				return runCrack([]string{"-t", "md5", "-s", "deadbeef", "-S", "prefix",
+					"-M", "brute", "-C", feasibilityTestCharset, "-n", "6", "-x", "6",
+					"-p", "4", "--no-pot", targetsFile})
+			})
 		})
-		elapsed := time.Since(start).Seconds()
 		if err != nil {
-			t.Fatalf("attempt %d/%d: runCrack: %v\n%s", i+1, attemptsN, err, out)
+			t.Fatalf("runCrack: %v\n%s", err, out)
 		}
 		if !strings.Contains(out, batchBannerPrefix) {
-			t.Fatalf("attempt %d/%d: multi-hash mode did not run:\n%s", i+1, attemptsN, out)
+			t.Fatalf("multi-hash mode did not run:\n%s", out)
 		}
-		predicted := feasibilityPredictedETAFromOutput(t, out)
-		ratio := predicted / elapsed
-		t.Logf("attempt %d/%d: predicted ETA %.4gs, actual %.4gs, ratio %.2fx", i+1, attemptsN, predicted, elapsed, ratio)
-		lastPredicted, lastActual = predicted, elapsed
-		if ratio < best {
-			best = ratio
+		return feasibilityAttempt{
+			predicted: feasibilityPredictedETAFromOutput(t, out),
+			actual:    elapsed,
+			share:     share,
 		}
-		if ratio <= feasibilityETATolerance {
-			break
-		}
-	}
-	if best > feasibilityETATolerance {
-		t.Errorf("best of %d attempts through runCrack still predicted a dump ETA (%.4gs) %.1fx the "+
-			"real elapsed time (%.4gs), exceeding the %.0fx tolerance — the dump guard is timing the "+
-			"wrong path again", attemptsN, lastPredicted, best, lastActual, feasibilityETATolerance)
-	}
+	})
 }
 
 // TestBatchFeasibilityMultiSaltDumpPassesMeasuredIndependently is the
@@ -462,30 +434,10 @@ func TestBatchFeasibilityMultiSaltDumpPassesMeasuredIndependently(t *testing.T) 
 	salts := []string{"deadbeef", "cafebabe"}
 	for _, salt := range salts {
 		t.Run("salt="+salt, func(t *testing.T) {
-			const attempts = 3
-			var best float64 = math.Inf(1)
-			var lastPredicted, lastActual float64
-			for i := 0; i < attempts; i++ {
-				predicted, actual := measureBatchDispatchETA(t, "md5", salt, "prefix", length, workers, numTargets)
-				if actual <= 0 {
-					t.Fatalf("real sweep reported non-positive elapsed time %v", actual)
-				}
-				ratio := predicted / actual
-				t.Logf("salt=%s: attempt %d/%d predicted ETA %.4gs, actual %.4gs, ratio %.2fx",
-					salt, i+1, attempts, predicted, actual, ratio)
-				lastPredicted, lastActual = predicted, actual
-				if ratio < best {
-					best = ratio
-				}
-				if ratio <= feasibilityETATolerance {
-					break
-				}
-			}
-			if best > feasibilityETATolerance {
-				t.Errorf("salt=%s: best of %d attempts still predicted an ETA (%.4gs) %.1fx this "+
-					"group's real dispatch time (%.4gs), exceeding the %.0fx tolerance", salt, attempts,
-					lastPredicted, best, lastActual, feasibilityETATolerance)
-			}
+			assertFeasibilityRatio(t, "salt="+salt, func() feasibilityAttempt {
+				predicted, actual, share := measureBatchDispatchETA(t, "md5", salt, "prefix", length, workers, numTargets)
+				return feasibilityAttempt{predicted: predicted, actual: actual, share: share}
+			})
 		})
 	}
 }
