@@ -222,3 +222,42 @@ func BenchmarkBatchDictVector(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkDictByType measures the dictionary engine per hash type, with and
+// without the batched cores, so the vector path (md5/md4/ntlm) and the
+// contiguous path (sha1/sha256) are each measured against their own scalar
+// baseline rather than against each other.
+func BenchmarkDictByType(b *testing.B) {
+	const n = 200000
+	path := benchWordlist(b, n, []int{4, 5, 6, 7, 8})
+	for _, typ := range []string{"md5", "ntlm", "sha1", "sha256", "sha512"} {
+		target, err := hashText("nomatchhere", typ, "", "")
+		if err != nil {
+			b.Fatal(err)
+		}
+		verify := func(pw string) bool {
+			ok, _ := verifyCandidate(pw, target, typ, "", "")
+			return ok
+		}
+		for _, fast := range []bool{true, false} {
+			label := typ + "/batched"
+			if !fast {
+				label = typ + "/scalar"
+			}
+			b.Run(label, func(b *testing.B) {
+				if !fast {
+					b.Setenv("HASHSMITH_NO_FASTPATH", "1")
+				}
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					var attempts int64
+					if _, err := dictAttack(context.Background(), path, 0, 0, 4,
+						&attempts, nil, verify, target, typ, "", ""); err != nil {
+						b.Fatal(err)
+					}
+				}
+				b.ReportMetric(float64(n)*float64(b.N)/b.Elapsed().Seconds()/1e6, "MH/s")
+			})
+		}
+	}
+}

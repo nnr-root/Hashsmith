@@ -511,12 +511,48 @@ Paired: **25.66 MH/s against 1.707 MH/s, about 15x.** That ratio is against a
 generic `hashText` verifier, so it overstates the gain against the CLI's own
 optimised scalar path, exactly as the single-target figure does.
 
-Scope, stated because it is narrower than "dictionary runs are vectorised"
-would imply: the vector cores cover **md5, md4, ntlm and salted md5**. sha1,
-sha256 and sha512 have no vector plan — they use the separate contiguous-batch
-path in stdfast.go, which is not wired to either dictionary engine. Writing
-the non-vacuity guard into the differential test is what surfaced that: the
-sha1 subtest had been comparing the scalar path against itself and passing.
+**Then sha1 and sha256, through the other core.** The vector cores cover only
+md5, md4, ntlm and salted md5. sha1 and sha256 have no vector plan at all —
+they use the contiguous-batch path in stdfast.go, which was wired to the mask
+runners and not to either dictionary engine.
+
+Writing a non-vacuity guard into the differential test is what surfaced that:
+the sha1 subtest had been comparing the scalar path against ITSELF and
+passing, because with no plan for sha1 both halves of a vector-versus-scalar
+comparison are the same code.
+
+Since both batch layouts are fixed-length for the life of a fill, the
+bucketing above them is identical, so it was factored out: `dictLaneCore` is
+the interface, `dictVectorCore` and `dictStdCore` implement it, and the
+length bucketing is written once. Measured per type on the same wordlist,
+batched against its own scalar baseline:
+
+| type | batched | scalar | ratio |
+|---|---|---|---|
+| md5 | 23.16 MH/s | 1.35 MH/s | 17.2x |
+| ntlm | 17.15 MH/s | 1.26 MH/s | 13.7x |
+| sha1 | 16.84 MH/s | 1.67 MH/s | 10.1x |
+| sha256 | 13.79 MH/s | 1.62 MH/s | 8.5x |
+| sha512 | 1.17 MH/s | 1.32 MH/s | unchanged |
+
+sha512 is the control: it has no batched core of either kind, and its two
+numbers are the same within noise, which is what says the harness is measuring
+the cores rather than the environment. All of these are against the generic
+`verifyCandidate`, so they overstate the gain against the CLI's own optimised
+scalar path.
+
+One more defect, again caught by the differential test rather than by reading:
+sha1 missed the EMPTY password. `contigBatch.fillFromWords` guards its length
+with `L < 1`, matching fillFromSegment, because a mask segment always has at
+least one position — but a wordlist's empty line is an ordinary entry kept
+verbatim, and the empty string is a password real dumps contain. Those words
+went into a bucket that could never be written and were dropped: never hashed,
+never handed to the scalar verifier. The core refuses them now, which routes
+them to the scalar path like anything else it cannot take.
+
+Coverage is now pinned by a test rather than by a sentence, because this is
+exactly the kind of claim that drifts silently: a type can stop resolving a
+plan and every differential test for it keeps passing.
 
 **descrypt.** The lead said "not bitsliced", and it is not — but that was not
 the first problem. The implementation was textbook bit-at-a-time DES: every

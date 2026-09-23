@@ -853,3 +853,46 @@ func batchStdLayout(ctx context.Context, typ string, layout *keyspaceLayout,
 	}
 	return true
 }
+
+// fillFromWords writes up to group() candidates taken from words — a LIST
+// rather than a mixed-radix segment — and returns how many it wrote.
+//
+// It is fillFromSegment's twin for a wordlist, and shares its every rule: the
+// message is pre || candidate || suf, the stride is that whole length, and
+// nothing is written past the group.
+//
+// Every word must already be exactly len(words[0]) bytes, and that length must
+// be the one the caller is about to hash under. The contiguous layout is
+// fixed-length for the whole life of a fill — one stride for every slot — so a
+// wordlist cannot be poured in in file order and has to be bucketed by length
+// first, exactly as the transposed batch requires. A word of the wrong length
+// would be hashed at the wrong stride, silently, so it stops instead.
+func (cb *contigBatch) fillFromWords(words []string) int {
+	if len(words) == 0 {
+		return 0
+	}
+	L := len(words[0])
+	if L < 1 || L > stdMaxCandidateLen {
+		return 0
+	}
+	want := len(words)
+	if want > cb.group {
+		want = cb.group
+	}
+	pre := len(cb.pre)
+	stride := pre + L + len(cb.suf)
+	cb.length = L
+	cb.stride = stride
+
+	n := 0
+	for ; n < want; n++ {
+		if len(words[n]) != L {
+			break
+		}
+		at := n * stride
+		copy(cb.msgs[at:at+pre], cb.pre)
+		copy(cb.msgs[at+pre:at+pre+L], words[n])
+		copy(cb.msgs[at+pre+L:at+stride], cb.suf)
+	}
+	return n
+}

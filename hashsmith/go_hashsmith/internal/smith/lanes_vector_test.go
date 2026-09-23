@@ -114,8 +114,9 @@ func TestDictVectorRefusesNonASCIIUnderUTF16(t *testing.T) {
 	if d == nil {
 		t.Skip("no ntlm vector plan on this backend")
 	}
-	if d.algo.enc != encUTF16LE {
-		t.Fatalf("ntlm plan is not UTF-16LE; this test guards the wrong thing")
+	vc, ok := d.core.(*dictVectorCore)
+	if !ok || vc.algo.enc != encUTF16LE {
+		t.Fatalf("ntlm did not resolve to a UTF-16LE vector core; this test guards the wrong thing")
 	}
 	for _, w := range []string{"café", "naïve", "日本", "\x80", "a\xffb"} {
 		if d.accepts(w) {
@@ -437,5 +438,86 @@ func TestBatchDictVectorHandlesDuplicateDigests(t *testing.T) {
 	got := runBatchDict(t, path, "md5", "", "", plains, 4)
 	if !got["alpha"] || !got["bravo"] {
 		t.Fatalf("a dump with a repeated digest did not resolve both entries: %v", got)
+	}
+}
+
+// TestDictLaneCoverage pins which types a dictionary run actually accelerates,
+// and by which core. Coverage claims drift silently — a type can stop
+// resolving a plan and every differential test for it keeps passing, because
+// scalar-versus-scalar always agrees. This asserts the mapping directly.
+func TestDictLaneCoverage(t *testing.T) {
+	const (
+		vector     = "vector"
+		contiguous = "contiguous"
+		scalar     = "scalar"
+	)
+	for _, tc := range []struct{ typ, salt, mode, want string }{
+		{"md5", "", "", vector},
+		{"md4", "", "", vector},
+		{"ntlm", "", "", vector},
+		{"md5", "deadbeef", "prefix", vector},
+		{"md5", "deadbeef", "suffix", vector},
+		{"sha1", "", "", contiguous},
+		{"sha256", "", "", contiguous},
+		{"sha1", "deadbeef", "prefix", contiguous},
+		{"sha256", "deadbeef", "suffix", contiguous},
+		// No batched core: a 64-byte digest does not fit the contiguous
+		// path's layout, and there is no SHA-512 vector core.
+		{"sha512", "", "", scalar},
+	} {
+		tc := tc
+		t.Run(tc.typ+"/"+tc.salt+"/"+tc.mode, func(t *testing.T) {
+			h, err := hashText("probe", tc.typ, tc.salt, tc.mode)
+			if err != nil {
+				t.Fatalf("hashText: %v", err)
+			}
+			d := newDictVectorLanesMulti(tc.typ, []string{h}, []int{0}, tc.salt, tc.mode)
+			got := scalar
+			if d != nil {
+				switch d.core.(type) {
+				case *dictVectorCore:
+					got = vector
+				case *dictStdCore:
+					got = contiguous
+				default:
+					t.Fatalf("unknown core type %T", d.core)
+				}
+			}
+			if got != tc.want {
+				t.Errorf("%s (salt %q, %s) resolves to the %s path, want %s",
+					tc.typ, tc.salt, tc.mode, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDictStdCoreRefusesTheEmptyCandidate pins a defect the contiguous core
+// shipped with for one test run.
+//
+// contigBatch.fillFromWords guards its length with `L < 1`, matching
+// fillFromSegment, because a mask segment always has at least one position. A
+// wordlist does not: an empty line is an ordinary entry, kept verbatim, and
+// the empty string is a real password real dumps contain. With the core
+// accepting it, those words went into a bucket that could never be written and
+// were dropped — never hashed, never handed to the scalar verifier. sha1 found
+// the empty password on the scalar path and missed it on this one.
+func TestDictStdCoreRefusesTheEmptyCandidate(t *testing.T) {
+	h, err := hashText("", "sha1", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := newDictVectorLanesMulti("sha1", []string{h}, []int{0}, "", "")
+	if d == nil {
+		t.Skip("no contiguous plan for sha1 here")
+	}
+	if _, ok := d.core.(*dictStdCore); !ok {
+		t.Fatalf("sha1 did not resolve to the contiguous core; this test guards the wrong thing")
+	}
+	if d.accepts("") {
+		t.Error("the contiguous core accepted the empty candidate, which its fill cannot write — " +
+			"it must be refused so the scalar verifier takes it")
+	}
+	if !d.accepts("a") {
+		t.Error("the contiguous core refused a one-character candidate, which it can write")
 	}
 }
