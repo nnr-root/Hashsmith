@@ -68,7 +68,7 @@ func bsdiCryptRaw(candidate, target string) (string, error) {
 
 	pw := []byte(candidate)
 	key := bsdiKeyFromBlock(pw, 0)
-	ks := desSubkeys(key)
+	ks := desSubkeysFast(key)
 
 	// Every block after the first is folded in by encrypting the KEY UNDER
 	// ITSELF and XORing the next eight characters into the result.
@@ -82,7 +82,7 @@ func bsdiCryptRaw(candidate, target string) (string, error) {
 	for off := 8; off < len(pw); off += 8 {
 		key = desEncryptBlockFast(key, &ks, 0)
 		key ^= bsdiKeyFromBlock(pw, off)
-		ks = desSubkeys(key)
+		ks = desSubkeysFast(key)
 	}
 
 	// The iteration count is the whole point of this scheme — a record can ask

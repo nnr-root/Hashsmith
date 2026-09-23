@@ -207,7 +207,7 @@ func descryptRaw(password, salt string) (string, error) {
 		key = (key << 8) | uint64(b)
 	}
 
-	ks := desSubkeys(key)
+	ks := desSubkeysFast(key)
 
 	// Encrypt the all-zero block 25 times, through the SP-box round function.
 	// The salt mask is derived once here rather than per round: it depends

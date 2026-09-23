@@ -74,6 +74,29 @@ const (
 	// (and the test suite) free of any measurable startup cost.
 	feasibilityRoughCeiling = 60.0
 
+	// feasibilityBatchedRoughCeiling replaces the above when a BATCHED core
+	// will run the candidates — the vector cores, or the contiguous batch.
+	//
+	// Tier one models workers/perOp from a scalar verify. That is the right
+	// model for a type the run will actually verify one candidate at a time,
+	// and it is wrong by the core's whole speedup for a type it will not:
+	// measured today, 4.5x for the UTF-16 constructions up to 22x for a
+	// generated keyspace. The error is one-directional — tier one can only
+	// ever be PESSIMISTIC here — so it never causes a false refusal, which is
+	// why it went unnoticed. What it causes is a wrong ETA: a job that
+	// finishes in 2.5 seconds printing "ETA ~53 seconds".
+	//
+	// The fix is not to make the cheap estimate accurate, which would mean
+	// measuring the core, which is the probe. It is to trust the cheap
+	// estimate only while its known error cannot matter. At two seconds, even
+	// a 25x overestimate describes a run of eighty milliseconds: over before
+	// the line is read. Above it, the 150ms probe is paid and the ETA is
+	// measured rather than modelled.
+	//
+	// Still six orders of magnitude below feasibilityLimitSeconds, so the
+	// refusal argument the 60s ceiling rests on is untouched.
+	feasibilityBatchedRoughCeiling = 2.0
+
 	// feasibilityProbeDuration is the calibration probe's time budget, paid
 	// only by runs the cheap estimate already put above feasibilityRoughCeiling
 	// — i.e. runs of a minute or more, for which 150 ms is under 0.25%.
@@ -305,7 +328,11 @@ func feasibilityRate(work int64, typ, target, salt, saltMode string, workers int
 	}
 	if perOp > 0 {
 		optimistic := float64(workers) / perOp.Seconds()
-		if optimistic > 0 && float64(work)/optimistic < feasibilityRoughCeiling {
+		ceiling := feasibilityRoughCeiling
+		if feasibilityBatchedCoreApplies(typ, salt, saltMode) {
+			ceiling = feasibilityBatchedRoughCeiling
+		}
+		if optimistic > 0 && float64(work)/optimistic < ceiling {
 			return optimistic, true
 		}
 	}
@@ -332,6 +359,32 @@ func feasibilityFastestPerOp(typ, target, salt, saltMode string) time.Duration {
 		}
 	}
 	return best
+}
+
+// feasibilityBatchedCoreApplies reports whether this (type, salt, salt mode)
+// resolves to any batched core, and so whether tier one's scalar model is
+// about to be wrong by that core's speedup.
+//
+// It asks the PLAN resolvers rather than the eligibility gates, because those
+// need a keyspaceLayout and tier one runs before one is chosen. A resolved
+// plan is the necessary condition: no plan means no core, whatever the layout
+// turns out to be. A plan that exists but whose layout is later refused costs
+// only an unnecessary probe, which is the safe direction.
+//
+// HASHSMITH_NO_FASTPATH is honoured so a forced-scalar comparison measures the
+// same tiers it would otherwise, rather than silently changing which ceiling
+// applies.
+func feasibilityBatchedCoreApplies(typ, salt, saltMode string) bool {
+	if os.Getenv("HASHSMITH_NO_FASTPATH") != "" {
+		return false
+	}
+	if vectorBackendName() != "" {
+		if algo, ok := fastAlgoPlanFor(typ, salt, saltMode); ok && algo.shape.group() > 0 {
+			return true
+		}
+	}
+	_, _, _, ok := stdSaltedPlanForEnc(typ, salt, saltMode)
+	return ok
 }
 
 // feasibilityProbeRate measures this run's real throughput via probe — the

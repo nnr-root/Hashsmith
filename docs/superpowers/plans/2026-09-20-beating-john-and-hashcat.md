@@ -609,6 +609,38 @@ bit-at-a-time original — which stays in the tree as the authority. The salt
 mask shifted the wrong way in its first draft and those tests caught it on
 salt bit 0 alone.
 
+**The key schedule, afterwards.** Profiling what remained put PC1 and PC2 at
+583ns of descryptRaw's 4839ns — an eighth of it, because PC1 walks 64 bit
+positions and PC2 walks 56 of them sixteen times over, 960 loop iterations to
+produce one key's subkeys. Byte-driven tables, the same identity and the same
+generation as desETab: **578ns to 54.2ns**, about 10.7x, and 10% off the whole
+operation. BSDi extended crypt shares the schedule and takes it too.
+
+**And bitslicing, which should NOT be done — measured, not assumed.** The
+question kept returning, so it is now answered in the tree
+(descrypt_bitslice_test.go) rather than re-derived each time.
+
+Bitslicing computes N passwords at once, one per bit of a machine word, with
+S-boxes as boolean gate networks and permutations reduced to free wire
+selection. Its entire economy rests on those networks being small: the
+published ones run about 45-60 gates per box and are the product of dedicated
+search. They cannot be derived cheaply, and reproducing one from memory is
+exactly the sort of plausible-looking wrong code that is worst here.
+
+What CAN be derived mechanically from the table is a multiplexer tree. That is
+written, and all 64 inputs of all 8 S-boxes are checked against desSBox — it
+is correct. It is also about ten times larger than a hand-optimised network,
+and per S-box per 64 candidates it measures **366ns against the SP table's
+35ns: 10.4x SLOWER** than the scalar path already in use.
+
+So a mechanically-derived bitslice is not an optimisation. A hand-optimised
+one, in pure Go over uint64, would be worth roughly the ratio between 500
+gates and 50 — a small multiple rather than an order of magnitude, because the
+scalar table lookup is already close to load-bound. John's remaining advantage
+is not the gate networks alone but the 128-bit SIMD on top of them; matching
+it means hand-written NEON and AVX2 for the full bitsliced round. The project
+has precedent for that in md4/md5, and it is a project rather than a change.
+
 **What this reorders.** The `l.gen != nil` condition is the highest-value
 finding, because dictionary attacks are the mode real engagements actually
 run, and because it is one condition rather than a diffuse problem. Note that

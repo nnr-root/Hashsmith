@@ -97,3 +97,25 @@ func BenchmarkDescryptFeistel(b *testing.B) {
 		}
 	})
 }
+
+// TestDesSubkeysFastMatchesReference holds the byte-driven key schedule to the
+// bit-at-a-time one, which stays in the tree as the authority. A wrong subkey
+// fails identically to a wrong password: no signal, just nothing found.
+func TestDesSubkeysFastMatchesReference(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	for i := 0; i < 5000; i++ {
+		key := rng.Uint64()
+		want := desSubkeys(key)
+		got := desSubkeysFast(key)
+		if got != want {
+			t.Fatalf("key=%016x: fast schedule differs from the reference\n got  %v\n want %v",
+				key, got, want)
+		}
+	}
+	// And the edges, which a random sample will not reach.
+	for _, key := range []uint64{0, ^uint64(0), 1, 1 << 63, 0x0101010101010101} {
+		if got, want := desSubkeysFast(key), desSubkeys(key); got != want {
+			t.Fatalf("key=%016x: fast schedule differs from the reference", key)
+		}
+	}
+}

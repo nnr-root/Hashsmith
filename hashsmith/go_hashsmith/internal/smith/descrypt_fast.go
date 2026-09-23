@@ -39,6 +39,20 @@ package smith
 // encode a different permutation than the reference does.
 var desETab [4][256]uint64
 
+// desPC1Tab and desPC2Tab are the key schedule's two permutations, driven by
+// byte rather than by bit for the same reason desETab is: a permutation is
+// linear over bit positions, so the image of a word is the OR of the images of
+// its bytes.
+//
+// The schedule is not the hot loop — it runs once per password against 400
+// Feistel calls — but it was still an eighth of descryptRaw's time (583ns of
+// 4839ns), because PC1 walks 64 positions and PC2 walks 56 of them sixteen
+// times over: 960 bit-loop iterations to produce one key's subkeys.
+var (
+	desPC1Tab [8][256]uint64
+	desPC2Tab [7][256]uint64
+)
+
 // desSP[i][v] is S-box i applied to the 6-bit value v, placed in that box's
 // nibble of the 32-bit word, and then run through the P permutation. Composing
 // the two means the round function never touches P at all.
@@ -51,6 +65,19 @@ func init() {
 		for v := 0; v < 256; v++ {
 			word := uint64(v) << uint(8*(3-b))
 			desETab[b][v] = permute(word, desE[:], 32)
+		}
+	}
+	for b := 0; b < 8; b++ {
+		for v := 0; v < 256; v++ {
+			// Byte b of a 64-bit value, in the MSB-first numbering permute
+			// uses: byte 0 holds bit positions 1..8.
+			desPC1Tab[b][v] = permute(uint64(v)<<uint(56-8*b), desPC1[:], 64)
+		}
+	}
+	for b := 0; b < 7; b++ {
+		for v := 0; v < 256; v++ {
+			// Byte b of a 56-bit value.
+			desPC2Tab[b][v] = permute(uint64(v)<<uint(48-8*b), desPC2[:], 56)
 		}
 	}
 	for box := 0; box < 8; box++ {
@@ -171,4 +198,36 @@ func desIterateZeroBlock(ks *[16]uint64, saltMask uint64, rounds int) uint64 {
 		state = (r << 32) | l
 	}
 	return permute(state, desFP[:], 64)
+}
+
+// desSubkeysFast is desSubkeys over the byte-driven permutations. It must
+// produce the identical schedule — TestDesSubkeysFastMatchesReference asserts
+// that over random keys, against the bit-at-a-time original which stays as
+// the authority.
+func desSubkeysFast(key uint64) [16]uint64 {
+	permuted := desPC1Tab[0][(key>>56)&0xff] |
+		desPC1Tab[1][(key>>48)&0xff] |
+		desPC1Tab[2][(key>>40)&0xff] |
+		desPC1Tab[3][(key>>32)&0xff] |
+		desPC1Tab[4][(key>>24)&0xff] |
+		desPC1Tab[5][(key>>16)&0xff] |
+		desPC1Tab[6][(key>>8)&0xff] |
+		desPC1Tab[7][key&0xff] // 56 bits
+	c := (permuted >> 28) & 0x0fffffff
+	d := permuted & 0x0fffffff
+	var ks [16]uint64
+	for i := 0; i < 16; i++ {
+		s := uint(desShifts[i])
+		c = ((c << s) | (c >> (28 - s))) & 0x0fffffff
+		d = ((d << s) | (d >> (28 - s))) & 0x0fffffff
+		cd := (c << 28) | d
+		ks[i] = desPC2Tab[0][(cd>>48)&0xff] |
+			desPC2Tab[1][(cd>>40)&0xff] |
+			desPC2Tab[2][(cd>>32)&0xff] |
+			desPC2Tab[3][(cd>>24)&0xff] |
+			desPC2Tab[4][(cd>>16)&0xff] |
+			desPC2Tab[5][(cd>>8)&0xff] |
+			desPC2Tab[6][cd&0xff] // 48 bits
+	}
+	return ks
 }
