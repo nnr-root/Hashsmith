@@ -383,3 +383,77 @@ func (tb *transposedBatch) candidateAt(i int) []byte {
 	}
 	return out
 }
+
+// fillFromWords writes up to group() candidates into the transposed lanes,
+// taken from words rather than enumerated from a mask, and returns how many it
+// wrote.
+//
+// It is fillFromSegment's twin for a source that is a LIST — a wordlist — and
+// obeys every rule that one does: the message is salt.pre || enc(candidate) ||
+// salt.suf, word 14 carries the bit length of the whole message rather than of
+// the candidate, and any lane past the last real candidate is rewritten as the
+// empty block so it cannot still hold bytes from a previous, longer fill.
+//
+// Every word must already be exactly tb.length bytes. That is not a
+// convenience: the transposed layout is fixed-length for the whole life of a
+// batch between resets, which is precisely why a wordlist cannot be poured
+// into it in file order and has to be bucketed by length first. Callers that
+// get this wrong would hash a message of the wrong length, so it is checked.
+func (tb *transposedBatch) fillFromWords(words []string) int {
+	group := tb.shape.group()
+	n := 0
+	var msg [transposedMaxLen]byte
+
+	pre := len(tb.salt.pre)
+	L := tb.length
+	encLen := L
+	if tb.enc == encUTF16LE {
+		encLen = L * 2
+	}
+	msgLen := pre + encLen + len(tb.salt.suf)
+	bitLen := uint32(msgLen) * 8
+	copy(msg[:pre], tb.salt.pre)
+	copy(msg[pre+encLen:msgLen], tb.salt.suf)
+
+	lanes := tb.shape.lanes
+	full := msgLen / 4
+	rem := msgLen % 4
+
+	for _, w := range words {
+		if n >= group {
+			break
+		}
+		if len(w) != L {
+			// A caller that mixes lengths would otherwise hash a message
+			// whose declared bit length does not match its bytes, and get a
+			// wrong digest with no signal. Stop rather than guess.
+			break
+		}
+		if tb.enc == encUTF16LE {
+			for b := 0; b < L; b++ {
+				msg[pre+b*2] = w[b]
+				msg[pre+b*2+1] = 0
+			}
+		} else {
+			copy(msg[pre:pre+L], w)
+		}
+		base := tb.wordBase(n)
+		for k := 0; k < full; k++ {
+			tb.words[base+k*lanes] = binary.LittleEndian.Uint32(msg[k*4:])
+		}
+		var tail uint32
+		for b := 0; b < rem; b++ {
+			tail |= uint32(msg[full*4+b]) << (8 * b)
+		}
+		tail |= 0x80 << (8 * rem)
+		tb.words[base+full*lanes] = tail
+		tb.words[base+14*lanes] = bitLen
+		n++
+	}
+
+	for i := n; i < group; i++ {
+		tb.writeEmptyLane(i)
+	}
+	tb.n = n
+	return n
+}
