@@ -113,6 +113,9 @@ var universalExtractorRegistry = []extractorDefinition{
 	{name: "apex2smith", input: "Oracle APEX credential export", formats: "APEX md5($p.$s), as a dynamic expression", run: runExtractAPEX},
 	{name: "aem2smith", input: "Adobe AEM password lines", formats: "SSPR iterated SHA-256 and SHA-512", run: runExtractAEM},
 	{name: "gitea2smith", input: "Gitea user table dump", formats: "Gitea PBKDF2-HMAC-SHA256", run: runExtractGitea},
+	{name: "ibmiscanner2smith", aliases: []string{"as400scanner2smith"}, input: "IBM i scanner output", formats: "AS/400 username-salted SHA-1", run: runExtractIBMiScanner},
+	{name: "mosquitto2smith", input: "Mosquitto password file", formats: "MQTT broker salted SHA-512 and PBKDF2-HMAC-SHA512", run: runExtractMosquitto},
+	{name: "pem2smith", input: "encrypted PKCS#8 PEM key", formats: "$PEM$ (John and hashcat's spelling of what ssh2smith writes as $pkcs8$)", run: runExtractPEM},
 	{name: "vmx2smith", aliases: []string{"vmwarevmx2smith"}, input: "VMware .vmx", formats: "VMware encryption.keySafe", run: runExtractVMX},
 	{name: "zip2smith", aliases: []string{"extract-hash", "zip2hash"}, input: ".zip", formats: "ZipCrypto/WinZip AES", run: runExtractHash},
 }

@@ -3140,7 +3140,29 @@ are hex in the database and base64 in the record, and both spellings are ASCII,
 so the wrong one looks perfectly well-formed. Each failure produces a record
 that parses and never cracks.
 
-Extractors: 48 → 82. Container sniffers: 18 → 30. Of John's 118 converters, 40
+### A record narrower than the file it describes
+
+`pem2smith` writes the `$PEM$` spelling of a key `ssh2smith` already reads as
+`$pkcs8$`, so a key extracted here can be handed to John or hashcat. What made
+it worth writing is what it CANNOT do.
+
+The `$PEM$` record carries no PRF field — `$PEM$1` *means* PBKDF2-HMAC-SHA1 —
+and its salt is fixed at eight bytes. That is not a property of PBKDF2, which
+allows any length; it is a property of the record, and of the fixed-size
+buffers John (`SALTLEN 8` in `pem_common.h`) and hashcat's kernels read it into.
+OpenSSL 3 writes a sixteen-byte salt by default.
+
+**So a key from a current OpenSSL cannot be expressed as `$PEM$` at all, by
+either tool.** Hashsmith's own `$pkcs8$` record names the PRF and carries a salt
+of any length, and reads those keys — checked here against keys OpenSSL 3.6
+actually wrote, at both PRFs and both salt lengths. Both narrowings are refused
+by name, pointing at `ssh2smith`, and the test proves the redirection is real by
+reading the same key the other way and cracking it.
+
+This is the first place the project has a capability John does not, rather than
+a gap it was closing.
+
+Extractors: 48 → 85. Container sniffers: 18 → 30. Of John's 118 converters, 37
 still have no counterpart — down from 76. The remainder is now dominated by the
 rest of the capture family (pcap, radius, hccap), Windows and enterprise
 credential stores (DPAPImk, racf, sap, pse, ps_token, sspr), Apple documents
