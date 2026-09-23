@@ -274,3 +274,48 @@ func BenchmarkDictByType(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkGeneratedKeyspace measures a generator-backed layout — the shape
+// hybrid, combinator, markov and prince all produce — through the batched
+// runner and through the scalar one. Those modes had no batched core at all
+// until runLayoutBatched, so this is the number that says whether drawing
+// candidates positionally and bucketing them by length was worth it.
+func BenchmarkGeneratedKeyspace(b *testing.B) {
+	const n = 200000
+	words := make([]string, n)
+	for i := range words {
+		words[i] = strings.Repeat(string(rune('a'+i%26)), 4+i%5) + fmt.Sprint(i%1000)
+	}
+	target, err := hashText("absent-from-this-keyspace", "md5", "", "")
+	if err != nil {
+		b.Fatal(err)
+	}
+	verify := func(pw string) bool {
+		ok, _ := verifyCandidate(pw, target, "md5", "", "")
+		return ok
+	}
+	lay := func() *keyspaceLayout {
+		return &keyspaceLayout{total: int64(n), gen: func(i int64) string { return words[i] }}
+	}
+	b.Run("batched", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			var attempts int64
+			if _, err := runLayoutBatched(context.Background(), lay(), 0, 0, 4, &attempts, nil,
+				func() *dictVectorLanes {
+					return newDictVectorLanesMulti("md5", []string{target}, []int{0}, "", "")
+				}, verify); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.ReportMetric(float64(n)*float64(b.N)/b.Elapsed().Seconds()/1e6, "MH/s")
+	})
+	b.Run("scalar", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			var attempts int64
+			if _, err := runLayout(context.Background(), lay(), 0, 0, 4, &attempts, nil, verify); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.ReportMetric(float64(n)*float64(b.N)/b.Elapsed().Seconds()/1e6, "MH/s")
+	})
+}

@@ -147,6 +147,22 @@ func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *ses
 			return runLayoutLanes(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark, newHasher)
 		})
 	}
+	// Anything the two odometer paths refused can still reach a batched core
+	// by drawing candidates positionally and bucketing them by length — which
+	// is what the dictionary engine does, and what lets hybrid, combinator,
+	// markov and prince (all generator-backed, all refused above by
+	// `l.gen != nil`) use a core for the first time. See lanes_layout.go.
+	//
+	// It is offered LAST so nothing diverts a run that already had a better
+	// path: the vector and contiguous runners decode the odometer directly and
+	// never pay for a generated string at all.
+	if newDictVectorLanes(typ, effHash, effSalt, saltMode) != nil {
+		return runSessionRunner(ctx, layout, sess, resumeFrom, func(watermark *int64) (string, error) {
+			return runLayoutBatched(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark,
+				func() *dictVectorLanes { return newDictVectorLanes(typ, effHash, effSalt, saltMode) },
+				verify)
+		})
+	}
 	return runSessionLayout(ctx, layout, sess, resumeFrom, limit, workers, atomicAttempts, verify)
 }
 
