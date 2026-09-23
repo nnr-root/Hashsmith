@@ -3182,7 +3182,35 @@ compressed, so the salt has to be decompressed out before the record can exist.
 And a token whose MAC is the SHA-1 of its own data is signed with an EMPTY key:
 that node has no password, which is reported rather than turned into a record.
 
-Extractors: 48 → 88. Container sniffers: 18 → 30. Of John's 118 converters, 34
+### pcap2john, and a scan that misses
+
+`pcap2john` handles twenty-one protocols in one script. `pcap2smith` covers the
+two with the widest reach — HTTP Digest and SNMPv3 — and names the rest as
+absent rather than claiming coverage it does not have.
+
+SNMPv3 is where reading the format properly beats what John does. Its converter
+finds the fields by scanning for their tag and length bytes — `\x04\x0b` for the
+engine id — which works for an eleven-byte engine id and silently misses every
+other length. **Engine ids are commonly thirteen bytes, and John's own test
+vector for the format has one**, so John's own converter could not have produced
+its own vector. Parsing the message handles any length. That needed offsets in
+the DER walker built for the Kerberos converters, because the authentication
+parameters must be zeroed *where they sit* — that is the state the sender
+computed the MAC over.
+
+Two things in the record are not what they look like. The second field is not a
+privacy protocol: John's format calls it "packet number, for debugging" and
+discards it. And pcap2john appends the privacy parameters as a sixth field
+whenever a message carried any — which this refused outright, so every authPriv
+record John's own converter writes was unreadable here. Now accepted and
+dropped.
+
+HTTP Digest's trap is in a different packet from the credentials: the digest
+covers the request METHOD, which is on the request line, not in the
+Authorization header. A record built from the header alone is well-formed and
+wrong.
+
+Extractors: 48 → 89. Container sniffers: 18 → 30. Of John's 118 converters, 33
 still have no counterpart — down from 76. The remainder is now dominated by the
 rest of the capture family (pcap, radius, hccap), Windows and enterprise
 credential stores (DPAPImk, racf, sap, pse, ps_token, sspr), Apple documents

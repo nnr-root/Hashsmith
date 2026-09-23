@@ -25,7 +25,7 @@ func extractorFixture(t *testing.T, name string, data []byte) string {
 // smaller catalogue. Raise it when adding one; never lower it to make a change
 // pass.
 func TestExtractorRegistryIsUniqueAndRoutable(t *testing.T) {
-	const wantExtractors = 88 // 85 + Money, BitShares and PS_TOKEN
+	const wantExtractors = 89 // 88 + pcap2smith
 	if got := len(universalExtractorRegistry); got != wantExtractors {
 		t.Fatalf("extractor registry has %d entries, want %d", got, wantExtractors)
 	}

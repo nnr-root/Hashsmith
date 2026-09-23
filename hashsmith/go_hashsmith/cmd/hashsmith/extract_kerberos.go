@@ -25,15 +25,24 @@ import (
 // ── A DER walker ──────────────────────────────────────────────────────────────
 
 // derValue is one tag-length-value triple.
+//
+// off is where the value's BODY begins, counted from the start of the document
+// the value was parsed out of. A reader that only needs the bytes can ignore
+// it; a reader that has to modify the document in place — SNMPv3 zeroes its
+// own authentication parameters before hashing — cannot work without it.
 type derValue struct {
 	class       byte // 0 universal, 1 application, 2 context, 3 private
 	constructed bool
 	tag         int
 	body        []byte
+	off         int
 }
 
-// derParse reads one value and returns it with whatever follows.
-func derParse(b []byte) (derValue, []byte, error) {
+// derParse reads one value and returns it with whatever follows. base is where
+// b begins inside the document, so that off is absolute.
+func derParse(b []byte) (derValue, []byte, error) { return derParseAt(b, 0) }
+
+func derParseAt(b []byte, base int) (derValue, []byte, error) {
 	var v derValue
 	if len(b) < 2 {
 		return v, nil, io.ErrUnexpectedEOF
@@ -80,6 +89,7 @@ func derParse(b []byte) (derValue, []byte, error) {
 		return v, nil, io.ErrUnexpectedEOF
 	}
 	v.body = b[i : i+length]
+	v.off = base + i
 	return v, b[i+length:], nil
 }
 
@@ -90,12 +100,14 @@ func derChildren(v derValue) ([]derValue, error) {
 	}
 	var out []derValue
 	rest := v.body
+	at := v.off
 	for len(rest) > 0 {
-		child, remaining, err := derParse(rest)
+		child, remaining, err := derParseAt(rest, at)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, child)
+		at += len(rest) - len(remaining)
 		rest = remaining
 	}
 	return out, nil

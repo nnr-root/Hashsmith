@@ -108,8 +108,17 @@ func snmpV3AuthDigest(candidate string, engineID, packet []byte, newHash func() 
 
 func verifySNMPv3(target, candidate string) (bool, error) {
 	parts := strings.Split(target, "$")
+	// John's own reader takes five fields after the tag and stops. Its
+	// pcap2john writes a SIXTH — the privacy parameters — whenever the
+	// message carried any, and John simply ignores it. Nothing is lost by
+	// doing the same: the privacy parameters are already inside the
+	// message field, which is what the MAC covers. Requiring exactly seven
+	// meant refusing every authPriv record John's own converter writes.
+	if len(parts) == 8 && parts[0] == "" && parts[1] == "SNMPv3" {
+		parts = parts[:7]
+	}
 	if len(parts) != 7 || parts[0] != "" || parts[1] != "SNMPv3" {
-		return false, errors.New("invalid SNMPv3 record (need $SNMPv3$ with 7 fields)")
+		return false, errors.New("invalid SNMPv3 record (need $SNMPv3$ with five fields after the tag)")
 	}
 	// A candidate that cannot possibly be the answer is a NEGATIVE, not an
 	// error. Returning an error here aborts the whole run on the first

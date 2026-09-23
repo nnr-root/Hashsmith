@@ -169,3 +169,28 @@ func TestExtractHCCAPRefusesAPartialFile(t *testing.T) {
 		t.Fatalf("a partial hccap should be refused by name, got %v", err)
 	}
 }
+
+// tcpFrame wraps a payload in TCP, IPv4 and Ethernet, for the capture
+// extractors that read a stream rather than a datagram.
+func tcpFrame(src, dst [4]byte, sport, dport uint16, payload []byte) string {
+	tcp := make([]byte, 20+len(payload))
+	binary.BigEndian.PutUint16(tcp[0:], sport)
+	binary.BigEndian.PutUint16(tcp[2:], dport)
+	tcp[12] = 5 << 4 // data offset: five 32-bit words, no options
+	tcp[13] = 0x18   // PSH|ACK
+	copy(tcp[20:], payload)
+
+	ip := make([]byte, 20+len(tcp))
+	ip[0] = 0x45
+	binary.BigEndian.PutUint16(ip[2:], uint16(len(ip)))
+	ip[8] = 64
+	ip[9] = 6 // TCP
+	copy(ip[12:16], src[:])
+	copy(ip[16:20], dst[:])
+	copy(ip[20:], tcp)
+
+	eth := make([]byte, 14+len(ip))
+	binary.BigEndian.PutUint16(eth[12:], 0x0800)
+	copy(eth[14:], ip)
+	return hex.EncodeToString(eth)
+}
