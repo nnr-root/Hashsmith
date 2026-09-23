@@ -60,6 +60,8 @@ func johnLabelSeed() map[string]string {
 		"lastpass-lp": "lp", "lastpass-cli": "lpcli",
 		"wowsrp": "WoWSRP", "bfegg": "bfegg", "openbsd-softraid": "OpenBSD-SoftRAID",
 		"andotp": "andOTP", "clipperz": "Clipperz",
+		"dashlane": "dashlane", "padlock": "Padlock", "bcrypt-2x": "bcrypt",
+		"pgpsda": "pgpsda", "pgpdisk": "pgpdisk", "pgpwde": "pgpwde", "sappse": "sappse", "skey": "skey", "bks": "BKS", "geli": "geli", "krb4": "krb4", "afs": "AFS", "sunmd5": "SunMD5", "krb5-des": "krb5-3",
 		"whirlpool": "whirlpool", "sm3": "sm3",
 
 		// Windows

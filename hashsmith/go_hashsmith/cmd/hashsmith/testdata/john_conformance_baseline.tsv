@@ -9,14 +9,14 @@ md5crypt-long $1$	CRACKED
 md5crypt-long $apr1$	CRACKED
 md5crypt-long	CRACKED
 bcrypt $2a$	CRACKED
-bcrypt $2x$	NOT-DETECTED
+bcrypt $2x$	CRACKED
 bcrypt $2b$	CRACKED
 scrypt $7$	CRACKED
 scrypt $9$	CRACKED
 scrypt $scryptkdf.pm$	CRACKED
 LM $lm$	CRACKED
 LM	CRACKED
-AFS $k4$	NOT-DETECTED
+AFS $k4$	CRACKED
 tripcode	CRACKED
 AndroidBackup $ab$	CRACKED
 adxcrypt $adxcrypt$	CRACKED
@@ -40,7 +40,7 @@ Bitcoin $bitcoin$	CRACKED
 BitLocker $bitlocker$	CRACKED
 bitshares $bitshares$	CRACKED
 Bitwarden $bitwarden$	CRACKED
-BKS $bks$	NOT-DETECTED
+BKS $bks$	CRACKED
 Blackberry-ES10 $bbes10$	CRACKED
 WoWSRP	CRACKED
 WoWSRP $wowsrp$	CRACKED
@@ -57,7 +57,7 @@ sha256crypt $5$	CRACKED
 sha512crypt $6$	CRACKED
 Citrix_NS10	CRACKED
 dahua $dahua$	CRACKED
-dashlane $dashlane$	NOT-DETECTED
+dashlane $dashlane$	CRACKED
 diskcryptor $diskcryptor$	CRACKED
 Django $django$	CRACKED
 django-scrypt	CRACKED
@@ -85,7 +85,7 @@ Fortigate	CRACKED
 FormSpring	CRACKED
 FormSpring $dynamic_61$	CRACKED
 FVDE $fvde$	CRACKED
-geli $geli$	NOT-DETECTED
+geli $geli$	CRACKED
 gost	CRACKED
 gost $gost$	CRACKED
 gost $gost-cp$	CRACKED
@@ -106,7 +106,7 @@ keychain $keychain$	CRACKED
 keyring $keyring$	CRACKED
 keystore $keystore$	CRACKED
 known_hosts $known_hosts$	CRACKED
-krb4 $af$	NOT-DETECTED
+krb4 $af$	CRACKED
 krb5 $krb5$	NOT-DETECTED
 krb5asrep	CRACKED
 krb5asrep $krb5asrep$	CRACKED
@@ -115,7 +115,7 @@ krb5tgs $krb5tgs$	CRACKED
 krb5-17 $krb17$	CRACKED
 krb5-18	CRACKED
 krb5-18 $krb18$	CRACKED
-krb5-3 $krb3$	NOT-DETECTED
+krb5-3 $krb3$	CRACKED
 kwallet $kwallet$	NOT-DETECTED
 lp $lp$	CRACKED
 lpcli $lpcli$	CRACKED
@@ -188,7 +188,7 @@ Oracle12C $oracle12c$	CRACKED
 osc $osc$	CRACKED
 osc $dynamic_4$	CRACKED
 ospf $ospf$	CRACKED
-Padlock $padlock$	NOT-DETECTED
+Padlock $padlock$	CRACKED
 Palshop $palshop$	CRACKED
 Palshop	CRACKED
 Panama	CRACKED
@@ -206,9 +206,9 @@ PBKDF2-HMAC-SHA512 $ml$	CRACKED
 PDF $pdf$	CRACKED
 PEM $pem$	CRACKED
 pfx $pfxng$	CRACKED
-pgpdisk $pgpdisk$	NOT-DETECTED
-pgpsda $pgpsda$	NOT-DETECTED
-pgpwde $pgpwde$	NOT-DETECTED
+pgpdisk $pgpdisk$	CRACKED
+pgpsda $pgpsda$	CRACKED
+pgpwde $pgpwde$	CRACKED
 phpass $p$	CRACKED
 phpass $h$	CRACKED
 PHPS $phps$	CRACKED
@@ -270,7 +270,7 @@ SSHA512	CRACKED
 sapb	CRACKED
 sapg	CRACKED
 saph	CRACKED
-sappse $pse$	NOT-DETECTED
+sappse $pse$	CRACKED
 securezip $zip3$	CRACKED
 7z $7z$	CRACKED
 Signal $signal$	CRACKED
@@ -278,7 +278,7 @@ SIP $sip$	CRACKED
 skein-256	CRACKED
 skein-256 $skein$	CRACKED
 skein-512 $skein$	CRACKED
-skey	NOT-DETECTED
+skey	CRACKED
 SL3 $sl3$	CRACKED
 SL3	CRACKED
 Snefru-128	CRACKED
@@ -291,7 +291,7 @@ solarwinds $solarwinds$	CRACKED
 SSH $sshng$	CRACKED
 sspr $sspr$	CRACKED
 STRIP $strip$	CRACKED
-SunMD5 $md5$	NOT-DETECTED
+SunMD5 $md5$	CRACKED
 SybaseASE	CRACKED
 Sybase-PROP	NOT-DETECTED
 tacacs-plus $tacacs-plus$	CRACKED
@@ -356,7 +356,7 @@ ansible-opencl $ansible$	CRACKED
 axcrypt-opencl $axcrypt$	CRACKED
 axcrypt2-opencl $axcrypt$	CRACKED
 bcrypt-opencl $2a$	CRACKED
-bcrypt-opencl $2x$	NOT-DETECTED
+bcrypt-opencl $2x$	CRACKED
 bcrypt-opencl $2b$	CRACKED
 BitLocker-opencl $bitlocker$	CRACKED
 bitwarden-opencl $bitwarden$	CRACKED
@@ -366,7 +366,7 @@ md5crypt-opencl $1$	CRACKED
 md5crypt-opencl $apr1$	CRACKED
 sha256crypt-opencl $5$	CRACKED
 sha512crypt-opencl $6$	CRACKED
-dashlane-opencl $dashlane$	NOT-DETECTED
+dashlane-opencl $dashlane$	CRACKED
 descrypt-opencl	CRACKED
 diskcryptor-opencl $diskcryptor$	CRACKED
 diskcryptor-aes-opencl $diskcryptor$	CRACKED
@@ -377,7 +377,7 @@ enpass-opencl $enpass$	CRACKED
 ethereum-opencl $ethereum$	CRACKED
 ethereum-presale-opencl $ethereum$	CRACKED
 FVDE-opencl $fvde$	CRACKED
-geli-opencl $geli$	NOT-DETECTED
+geli-opencl $geli$	CRACKED
 gpg-opencl $gpg$	CRACKED
 iwork-opencl $iwork$	CRACKED
 keychain-opencl $keychain$	CRACKED
@@ -412,9 +412,9 @@ PBKDF2-HMAC-SHA512-opencl	CRACKED
 PBKDF2-HMAC-SHA512-opencl $ml$	CRACKED
 pem-opencl $pem$	CRACKED
 pfx-opencl $pfxng$	CRACKED
-pgpdisk-opencl $pgpdisk$	NOT-DETECTED
-pgpsda-opencl $pgpsda$	NOT-DETECTED
-pgpwde-opencl $pgpwde$	NOT-DETECTED
+pgpdisk-opencl $pgpdisk$	CRACKED
+pgpsda-opencl $pgpsda$	CRACKED
+pgpwde-opencl $pgpwde$	CRACKED
 PHPass-opencl $p$	CRACKED
 PHPass-opencl $h$	CRACKED
 pwsafe-opencl $pwsafe$	CRACKED
@@ -433,7 +433,7 @@ raw-SHA512-free-opencl $sha512$	CRACKED
 raw-SHA512-opencl	CRACKED
 raw-SHA512-opencl $sha512$	CRACKED
 salted-SHA1-opencl	CRACKED
-sappse-opencl $pse$	NOT-DETECTED
+sappse-opencl $pse$	CRACKED
 7z-opencl $7z$	CRACKED
 SL3-opencl $sl3$	CRACKED
 SL3-opencl	CRACKED

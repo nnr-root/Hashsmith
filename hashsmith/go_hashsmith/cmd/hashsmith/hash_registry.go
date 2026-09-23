@@ -293,6 +293,7 @@ func spellingHashAliasSeed() map[string]string {
 		"whirlpool-0": "whirlpool0", "whirlpool-t": "whirlpool1", "whirlpoolt": "whirlpool1",
 		"po": "postoffice", "post.office": "postoffice", "post-office": "postoffice",
 		"lp": "lastpass-lp", "lpcli": "lastpass-cli", "lastpass-lpcli": "lastpass-cli",
+		"2x": "bcrypt-2x", "bcrypt2x": "bcrypt-2x", "bcrypt-signext": "bcrypt-2x",
 		"siphash-2-4": "siphash", "siphash24": "siphash", "sm-3": "sm3",
 		"lmhash": "lm", "lanman": "lm",
 		"crc-32": "crc32", "crc32-ieee": "crc32", "crc-32c": "crc32c", "castagnoli": "crc32c",

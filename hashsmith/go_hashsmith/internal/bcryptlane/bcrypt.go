@@ -206,3 +206,29 @@ func (h *Hasher) one(pw []byte) bool {
 	}
 	return h.finish(c)
 }
+
+// MatchesRawKey answers the target with a key buffer given exactly as it is
+// to be used — no trailing NUL appended, no cycling assumed beyond what the
+// schedule does on its own.
+//
+// Every other entry point here takes a password and builds the key from it,
+// because that is what bcrypt does. This one exists for $2x$, crypt_blowfish's
+// bug-compatibility variant, whose key schedule packs bytes into words with
+// sign extension. That packing cannot be expressed as a password, but it CAN
+// be expressed as a key: the caller precomputes the seventy-two bytes the
+// buggy reader would have produced and hands them over. See
+// crack_bcrypt_signext.go for the derivation.
+func (h *Hasher) MatchesRawKey(key []byte) bool {
+	if len(key) == 0 {
+		return false
+	}
+	c := newSaltedState(key, h.csalt[:])
+	if c == nil {
+		return false
+	}
+	for i, rounds := uint64(0), uint64(1)<<uint(h.cost); i < rounds; i++ {
+		expandKey(key, c)
+		expandKey(h.csalt[:], c)
+	}
+	return h.finish(c)
+}

@@ -2601,3 +2601,183 @@ say yes or no exactly, and the work factor is the only thing between them.
 Of 605 records: **571 crack**, 33 are not detected, 1 is detected and
 deliberately not guessed. That is up from 523 two entries ago and 217 when the
 ratchet was built.
+
+## Six more, and a bug kept on purpose
+
+**Dashlane** is PBKDF2-HMAC-SHA1 at 10,204 iterations — not 10,000, not
+10,240; a number with no round shape to it, which is what a typed constant
+looks like. What identifies a correct password is that the plaintext inflates:
+the vault is DEFLATE-compressed XML, and arbitrary bytes essentially never
+form a valid DEFLATE stream, let alone one spelling an XML declaration. Two
+details of the container are not deducible from the record — the IV comes out
+of OpenSSL's `EVP_BytesToKey` over the PBKDF2 output (whose key half is then
+discarded, because the AES key is the PBKDF2 output itself), and the
+compressed stream starts six bytes into the plaintext.
+
+**Padlock** is PBKDF2-HMAC-SHA256 inside AES-CCM, and its tag cannot be
+checked at all: Padlock hands its additional authenticated data to SJCL still
+base64-encoded, so the tag is computed over the wrong bytes and no independent
+implementation reproduces it. John says so in its own source and checks the
+plaintext instead. That leaves CCM's confidentiality half, which is plain
+counter mode — no CBC-MAC needed to read the plaintext out.
+
+### `$2x$`: the variant that exists to reproduce a bug
+
+In 2011 a sign-extension mistake was found in crypt_blowfish. Packing the
+password's bytes into 32-bit words, it read each byte as a SIGNED char: a byte
+below 0x80 is unaffected, one at or above it arrives negative, and OR-ing that
+into the accumulator sets every bit above the byte too. ASCII passwords hash
+identically either way — which is why the bug survived fourteen years — and
+anything with a byte above the ASCII range hashes to something much weaker.
+The fix introduced `$2y$` for the corrected schedule and `$2x$` for the old
+one, so existing records could be marked rather than silently reinterpreted.
+
+A `$2x$` record therefore does not mean "an old hash". It means "a hash
+deliberately kept buggy", and the password behind one is by construction
+likelier than average to be non-ASCII — which is the only reason the
+distinction was worth keeping at all.
+
+It needed no second bcrypt. The bug is in how bytes become words and nothing
+else, and the schedule reads eighteen words of four bytes with the key cycled:
+seventy-two byte positions. Work out what the buggy reader would have produced
+at those seventy-two positions, write it down as a seventy-two-byte key, and
+an **ordinary** bcrypt over that key produces the `$2x$` digest exactly. Per
+group, a byte at or above 0x80 fills every EARLIER byte of its own four with
+0xFF and touches nothing after it — a rule the tests pin directly, alongside
+the property that an ASCII password produces no filled byte at all.
+
+### The three PGP formats
+
+`$pgpsda$`, `$pgpdisk$` and `$pgpwde$` share a designer and not much else.
+
+The SDA and Disk derivations are OpenPGP's iterated-and-salted S2K written the
+wrong way round: instead of hashing a stream of salt-then-password to a byte
+count, they hash the salt once and then the password followed by a counter
+byte, once per iteration — and the counter is eight bits, so it wraps every
+256 rounds and contributes nothing after the first pass. Both verify by having
+the derived key encrypt its own first block: CAST5 for the SDA, and for Disk
+whichever cipher the algorithm number names — 3 is CAST5, 4 Twofish, 5 through
+7 AES-256. A volume reporting 3 was made by a PGP old enough that the disk it
+protects is probably older still.
+
+WDE stores no verifier at all. It stores the encrypted session key, and a
+password is right when what comes out is correctly OAEP-padded — a stronger
+check than any verifier, since the padding carries a twenty-byte hash of the
+empty label that a wrong password would have to reproduce by accident. Its
+S2K is the properly-written one, and its IV is not stored either: sixteen zero
+bytes with the first set to 8, a constant PGP's own source calls
+`kPGPdiskUserWithSymType`.
+
+### Two where the verifier is not a hash of anything
+
+**SAP's PSE** stores the PIN protecting an SAP system's private keys
+**encrypted under a key derived from that same PIN**. So a candidate is checked
+by deriving the key, encrypting the candidate with it, and asking whether that
+is what the file holds — which makes the verifier exactly as long as the
+password, and means an eight-character password and a nine-character one
+cannot collide because the stored lengths differ.
+
+**S/Key** stores the last one-time password the server accepted. The scheme
+walks a hash chain backwards: the client hands over the value one step before
+the stored one and the server hashes it once. Cracking it means walking the
+chain forwards from a candidate passphrase, sequence-number times — so a LOW
+sequence number is cheaper to attack than a high one, and the more an account
+has been used, the faster its passphrase falls. That inverts the usual
+relationship between a record's age and its cost.
+
+S/Key's four hashes all fold their digest to sixty-four bits, and SHA-1's fold
+is specified in words rather than bytes. The two surviving words are written
+big-endian — the digest's own order — and a little-endian reading of the same
+words produces a plausible-looking answer that never matches. The other three
+vectors passed while that one did not, which is exactly the shape of a
+byte-order mistake and is why it was worth having four.
+
+### Two keystores, and a fold with nothing in it
+
+**Bouncy Castle's keystore** has a flaw worth stating because it changes what
+a hit means. The MAC key's length is in the record, and Bouncy Castle wrote it
+in BITS — so a keystore saying 20 has a TWO-BYTE MAC key. Sixteen bits of key
+over a twenty-byte HMAC means many passwords produce the right MAC, and John
+marks such a record inexact for exactly that reason. A match on a BKS store
+with a short MAC key says the candidate is one of a large family the keystore
+would accept; a match on the UBER variant, where the check is a full SHA-1 of
+the decrypted store, says it is the password.
+
+**GELI** does not encrypt the disk under the passphrase. It encrypts a master
+key, and stores up to two independently wrapped copies so a volume can have
+two passphrases — so a hit says which slot it opened as well as that it opened
+one. Between the PBKDF2 and the key there are two steps, each of which turns a
+correct password into what looks exactly like a wrong one. The PBKDF2 output
+is folded through HMAC-SHA512 **under an empty key**, because a passphrase and
+a key file are combined by HMAC in the general case and a volume with no key
+file still goes through the fold with nothing in it. Only then do the
+encryption and authentication keys come out, by HMAC of a single byte — 0x01
+and 0x00 — under the folded result. Skipping the empty fold cost an hour and
+produced digests that were wrong in the way a wrong password is wrong.
+
+### AFS, and a seam between two implementations
+
+AFS's string-to-key is two functions with a length test between them, and the
+test is on the PASSWORD: eight characters or fewer take one path, nine or more
+the other. That is not a tuning choice. It is the seam between CMU's original,
+which ran the password through crypt(3) and therefore could never use more
+than eight characters of it, and Transarc's replacement, which fixed that by
+hashing the whole thing with DES in CBC. Both are still live, because a cell
+full of short passwords is still using the first.
+
+The CMU path repays a second look. It XORs the password with the cell name,
+replaces any resulting NUL with 'X', hands eight bytes to crypt(3) under the
+fixed salt "p1", takes eight characters out and shifts each left one bit to
+make room for DES's parity. A password longer than eight characters loses
+everything past the eighth; a cell name longer than the password contributes
+its own bytes to the key.
+
+Kerberos 4's record has no digest in it at all. It is a captured ticket, and a
+password is right when the decrypted ticket spells "krbtgt" where the ticket
+format says it should — decrypted in propagating CBC, where each block's
+feedback is the XOR of the plaintext and ciphertext before it rather than the
+ciphertext alone. One corrupted block ruins everything after it, which is the
+property Kerberos wanted and the reason that trailing word is worth checking.
+
+### SunMD5, and a hash whose cost depends on the password
+
+SunMD5 is MD5 iterated at least 4,096 times, and what is interesting is not
+the count but what gets hashed. On each round a coin is flipped from the bits
+of the current digest, and when it comes up heads the round hashes a kilobyte
+and a half of Hamlet as well. Half the rounds are cheap and half are
+expensive, and WHICH is decided by the digest — so the cost of checking a
+password depends on the password and cannot be scheduled in advance.
+
+That was deliberate. A fast MD5 gets its speed from fixed buffer sizes and
+unrolled loops, and a hash whose block count depends on data it has not
+computed yet defeats both. Twenty years on it is also why SunMD5 resists SIMD
+batching: the lanes fall out of step on the first coin flip.
+
+The constant phrase is 1,517 bytes and the text is 1,516. The implementation
+hashes the C string constant's trailing NUL along with the words, and leaving
+it out produces a digest that is wrong in exactly the way a wrong password is
+wrong — three vectors failing identically, with nothing to say which of a
+dozen details was at fault. It was the last byte.
+
+### What a 56-bit key looks like from the inside
+
+Kerberos 5's DES database keys (etypes 2 and 3) use the string-to-key it
+inherited from Kerberos 4, and it is the clearest illustration here of what
+"56-bit key" means in practice. Password and salt are folded to fifty-six bits
+by XOR-ing eight-byte blocks together, with every other block reversed — bit
+by bit as well as byte by byte, so the fold does not simply cancel repeated
+input — and the result is used as a DES key to CBC-MAC that same input. The
+MAC is the key.
+
+Everything after the fold is defence against DES's own quirks. Parity bits are
+inserted, carrying no information because DES ignores them. And if the result
+lands on one of the sixteen weak or semi-weak keys — the ones whose encryption
+is its own inverse, or nearly — the last byte is flipped. Hitting one by
+accident is about a one in 2^52 event; the check exists because "about never"
+is not "never".
+
+### Where it stands
+
+Of 605 records: **592 crack**, 12 are not detected, 1 is detected and
+deliberately not guessed. Eleven distinct formats remain, plus one expression
+whose constant lives in John's configuration file.

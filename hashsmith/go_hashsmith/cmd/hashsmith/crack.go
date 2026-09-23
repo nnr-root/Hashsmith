@@ -2652,6 +2652,34 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyAndOTP(targetHash, candidate)
 	case "clipperz":
 		return verifyClipperz(targetHash, candidate)
+	case "dashlane":
+		return verifyDashlane(targetHash, candidate)
+	case "padlock":
+		return verifyPadlock(targetHash, candidate)
+	case "bcrypt-2x":
+		return verifyBcryptSignExt(targetHash, candidate)
+	case "pgpsda":
+		return verifyPGPSDA(targetHash, candidate)
+	case "pgpdisk":
+		return verifyPGPDisk(targetHash, candidate)
+	case "pgpwde":
+		return verifyPGPWDE(targetHash, candidate)
+	case "sappse":
+		return verifySAPPSE(targetHash, candidate)
+	case "skey":
+		return verifySKey(targetHash, candidate)
+	case "bks":
+		return verifyBKS(targetHash, candidate)
+	case "geli":
+		return verifyGELI(targetHash, candidate)
+	case "krb4":
+		return verifyKRB4(targetHash, candidate)
+	case "afs":
+		return verifyAFS(targetHash, candidate)
+	case "sunmd5":
+		return verifySunMD5(targetHash, candidate)
+	case "krb5-des":
+		return verifyKrb5DES(targetHash, candidate)
 	case "dummy":
 		return verifyDummy(targetHash, candidate)
 	case "p5k2":

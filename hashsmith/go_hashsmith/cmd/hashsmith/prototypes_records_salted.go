@@ -272,6 +272,45 @@ func saltedPrototypes() []hashid.Prototype {
 			Prevalence: 3,
 			Rationale:  "Eggdrop's userfile; the leading plus is its own marker for an encrypted password, which nothing else in this table uses",
 		},
+		{
+			Types: []string{"skey"}, Display: "S/Key one-time password",
+			Tier: hashid.TierStructural, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "a sequence number, a seed and a 64-bit response", isSKey(in.Raw)
+			},
+			Prevalence: 3,
+			Rationale:  "S/Key predates every modern second factor and survives on old Unix hosts; the stored value is the last one-time password used, not a password hash",
+		},
+		{
+			Types: []string{"sunmd5"}, Display: "SunMD5", Tier: hashid.TierSignature, Exclusive: true,
+			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				return "record prefix $md5$ or $md5, with a 22-character digest", isSunMD5(in.Normalized)
+			},
+			Prevalence: 8,
+			Rationale:  "Solaris 9 and 10 shipped this as the alternative to descrypt, so it appears wherever a Solaris shadow file does",
+		},
+		hasPrefixProto("$krb3$", "Kerberos 5 DES database key", 4,
+			"etype 2 or 3 from a KDC dump; a 56-bit DES key, which finding in a modern KDC says something about the KDC", "krb5-des"),
+		hasPrefixProto("$af$", "Kerberos 4 ticket", 3,
+			"a captured Kerberos 4 TGT; there is no digest in the record, so a password is right when the decrypted ticket spells \"krbtgt\" where it should", "krb4"),
+		hasPrefixProto("$K4$", "AFS KeyFile", 3,
+			"an AFS cell's DES key; the derivation takes one path for passwords of eight bytes or fewer and another for longer ones, which is the seam between two implementations", "afs"),
+		hasPrefixProto("$geli$", "FreeBSD GELI volume", 5,
+			"full-disk encryption on FreeBSD; the passphrase unwraps a master key rather than encrypting the disk, and a volume can hold two independently wrapped copies", "geli"),
+		hasPrefixProto("$bks$", "Bouncy Castle keystore", 5,
+			"a Java keystore in Bouncy Castle's own format; the BKS variant writes its MAC key length in bits, so a keystore saying 20 has a two-byte key and many passwords produce the right MAC", "bks"),
+		hasPrefixProto("$pse$", "SAP Personal Security Environment", 5,
+			"an SAP system's private keys; the PIN protecting them is stored encrypted under a key derived from the PIN, so the verifier is the password itself", "sappse"),
+		hasPrefixProto("$pgpsda$", "PGP Self-Decrypting Archive", 4,
+			"an archive that carries its own decryptor, so it travels by email and survives in inboxes", "pgpsda"),
+		hasPrefixProto("$pgpdisk$", "PGP Disk volume", 6,
+			"Symantec Encryption Desktop's volume format; the algorithm number in the record dates it, since 3 means CAST5", "pgpdisk"),
+		hasPrefixProto("$pgpwde$", "PGP Whole Disk Encryption", 6,
+			"full-disk encryption whose record stores no verifier at all — a password is right when the session key it decrypts is correctly OAEP-padded", "pgpwde"),
+		hasPrefixProto("$dashlane$", "Dashlane local vault", 5,
+			"a password manager's offline vault; a correct key inflates to XML, which arbitrary bytes essentially never do", "dashlane"),
+		hasPrefixProto("$padlock$", "Padlock password manager", 3,
+			"a browser vault built on SJCL, whose CCM tag is computed over the wrong bytes and so cannot be checked; the plaintext is checked instead", "padlock"),
 		hasPrefixProto("$andotp$", "andOTP encrypted backup", 5,
 			"an Android authenticator's backup file, encrypted under one unsalted SHA-256 of the password and holding every TOTP secret its owner has", "andotp"),
 		hasPrefixProto("$clipperz$", "Clipperz SRP-6a verifier", 3,
@@ -430,6 +469,13 @@ func saltedPrototypes() []hashid.Prototype {
 		//
 		// reBcrypt (`^\$2[aby]\$\d{2}\$`) anchors on a literal $2a$/$2b$/$2y$
 		// scheme tag, so TierSignature.
+		// $2x$ is bcrypt too, and is deliberately NOT in reBcrypt: the
+		// schedule behind it differs, so a $2x$ record answered by the
+		// ordinary bcrypt verifier would simply never match. It gets its own
+		// entry and its own type.
+		predicateProto(isBcryptSignExt, "bcrypt, sign-extension variant", hashid.TierSignature,
+			`record prefix $2x$ followed by a 2-digit cost`,
+			6, "$2x$ marks a record deliberately kept on crypt_blowfish's buggy schedule rather than migrated to $2y$, so it is rare and the password behind one is likelier than average to be non-ASCII", "bcrypt-2x"),
 		predicateProto(reBcrypt.MatchString, "bcrypt", hashid.TierSignature,
 			`record prefix $2a$, $2b$ or $2y$ followed by a 2-digit cost`,
 			40, "bcrypt is a widely adopted password-storage default across modern web frameworks (Rails, Laravel, Django's bcrypt backend), giving it broad real-world exposure", "bcrypt"),
