@@ -442,7 +442,20 @@ six of this area's blockers for free; the rest is additive.
       back has a real ambiguity — `xxd` does not delimit its printable column
       and that column may be indistinguishable from more hex — resolved by the
       column SPACING rather than by guessing at the text.
-- [ ] brotli/zstd/xz/bzip2, the missing classical ciphers
+- [x] Ten more classical ciphers: affine, Beaufort, autokey, Gronsfeld,
+      Playfair, Bifid, Nihilist, columnar transposition, scytale and ADFGVX.
+      Every one carries its published vector — Wikipedia's or Practical
+      Cryptography's, never this code's own output — and the two transposition
+      ciphers are property-tested across every incomplete rectangle from 1 to
+      40 characters, which is the case that breaks naive implementations.
+- [x] brotli, zstd, xz, LZMA, bzip2 and raw DEFLATE, routed through one pair of
+      constructors so the Base64 transport and the expansion ceiling are shared.
+      The decode fixtures came from `brotli(1)`, `zstd(1)`, `xz(1)`, `lzma(1)`,
+      `bzip2(1)` and `gzip(1)` on this machine, so they prove the decoders agree
+      with the world rather than with their own encoders. Brotli, LZMA and raw
+      DEFLATE are deliberately held OUT of `magic`: they carry no signature, so
+      their decoders accept arbitrary bytes, and magic would report the noise as
+      a finding. 62 codecs to 80.
 - [ ] An importable Go library API, so Hashsmith is embeddable rather than CLI-only
 
 **Acceptance:** codec vectors reach parity with hash vectors; magic decode

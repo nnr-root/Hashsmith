@@ -2,8 +2,6 @@ package main
 
 import (
 	"bytes"
-	"compress/gzip"
-	"compress/zlib"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -176,15 +174,9 @@ func isCrockfordCandidate(text string) bool {
 
 func encodeCompressed(data []byte, typ string) (string, error) {
 	var buf bytes.Buffer
-	var w io.WriteCloser
-	var err error
-	switch typ {
-	case "gzip":
-		w = gzip.NewWriter(&buf)
-	case "zlib":
-		w = zlib.NewWriter(&buf)
-	default:
-		return "", errors.New("unsupported compression type")
+	w, err := compressWriter(typ, &buf)
+	if err != nil {
+		return "", err
 	}
 	if _, err = w.Write(data); err == nil {
 		err = w.Close()
@@ -213,15 +205,7 @@ func decodeCompressed(text, typ string, limit int) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s Base64 transport", typ)
 	}
-	var r io.ReadCloser
-	switch typ {
-	case "gzip":
-		r, err = gzip.NewReader(bytes.NewReader(compressed))
-	case "zlib":
-		r, err = zlib.NewReader(bytes.NewReader(compressed))
-	default:
-		return nil, errors.New("unsupported compression type")
-	}
+	r, err := decompressReader(typ, bytes.NewReader(compressed))
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s stream", typ)
 	}
