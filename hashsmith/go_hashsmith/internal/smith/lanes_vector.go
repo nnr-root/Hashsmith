@@ -80,10 +80,11 @@ func (c *dictVectorCore) match(i int) ([]int, bool) { return c.ft.lookup(&c.out[
 // forms, which have no vector core but do have a hardware-accelerated stdlib
 // implementation. It is pure Go and runs identically on every architecture.
 type dictStdCore struct {
-	algo *stdAlgo
-	st   *stdTargets
-	cb   *contigBatch
-	grp  int
+	algo  *stdAlgo
+	st    *stdTargets
+	cb    *contigBatch
+	grp   int
+	utf16 bool
 }
 
 func (c *dictStdCore) group() int { return c.grp }
@@ -99,10 +100,25 @@ func (c *dictStdCore) group() int { return c.grp }
 // scalar verifier, which is the same thing that happens to any other word this
 // core cannot take.
 //
-// There is no encoding restriction otherwise: the candidate's bytes are
-// copied verbatim into the message, so unlike the UTF-16LE vector core this
-// one is byte-transparent.
-func (c *dictStdCore) accepts(word string) bool { return len(word) >= 1 }
+// In UTF-16LE mode it also refuses non-ASCII, for the same reason the vector
+// core does: the fill expands byte b to the pair (b, 0x00), which equals
+// utf16le(s) only while s is ASCII. utf16le itself encodes runes and emits
+// surrogate pairs, so anything above 0x7f hashes a different message. A
+// byte-transparent construction has no such restriction.
+func (c *dictStdCore) accepts(word string) bool {
+	if len(word) < 1 {
+		return false
+	}
+	if !c.utf16 {
+		return true
+	}
+	for i := 0; i < len(word); i++ {
+		if word[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
 
 func (c *dictStdCore) fill(words []string) int { return c.cb.fillFromWords(words) }
 
@@ -166,8 +182,15 @@ func newDictVectorLanesMulti(typ string, hexes []string, idxs []int, salt, saltM
 		}
 	}
 
-	// No vector core: try the contiguous batch, which covers sha1 and sha256.
-	algo, sp, ok := stdSaltedPlanFor(typ, salt, saltMode)
+	// No vector core: try the contiguous batch, which covers the SHA-2 family
+	// and the salted md5 forms.
+	//
+	// stdSaltedPlanForEnc rather than stdSaltedPlanFor: the latter is the mask
+	// runners' gate and refuses the UTF-16LE constructions because
+	// fillFromSegment cannot encode them. A dictionary fills from a LIST, not
+	// an odometer, so fillFromWords can and does — see that comment for the
+	// boundary.
+	algo, sp, utf16, ok := stdSaltedPlanForEnc(typ, salt, saltMode)
 	if !ok {
 		return nil
 	}
@@ -182,10 +205,11 @@ func newDictVectorLanesMulti(typ string, hexes []string, idxs []int, salt, saltM
 		return nil
 	}
 	return newDictLanes(&dictStdCore{
-		algo: algo,
-		st:   st,
-		cb:   newContigBatch(dictStdGroup, algo.digLen, sp),
-		grp:  dictStdGroup,
+		algo:  algo,
+		st:    st,
+		cb:    newContigBatchEnc(dictStdGroup, algo.digLen, sp, utf16),
+		grp:   dictStdGroup,
+		utf16: utf16,
 	}, stdMaxCandidateLen)
 }
 

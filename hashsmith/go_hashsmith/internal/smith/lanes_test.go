@@ -65,7 +65,7 @@ func TestDictAttackLanesFindsAtEveryPosition(t *testing.T) {
 // EVERY word must be attempted exactly once — attempts must equal wordcount
 // exactly. Any single missed flush point leaves a short count, which a >=
 // bound (as used above) would not catch but == does. n sweeps lengths that
-// straddle both the lane width (bcryptlane.Lanes=4) and dictBatchSize (512).
+// straddle both the lane width (bcryptlane.Lanes=4) and a batch boundary.
 //
 // What this test does and does not prove: it catches the loss of ALL
 // flushing — deleting both flush points at once leaves attempts short for
@@ -117,21 +117,30 @@ func TestDictAttackLanesExhaustiveAttemptCount(t *testing.T) {
 }
 
 // TestDictAttackLanesMultiBatchConcurrent closes review finding I-2: every
-// test above uses n <= 17 against dictBatchSize=512, so the reader emits
+// test above uses n <= 17, far below dictBatchSize, so the reader emits
 // exactly one batch and only one of the two workers ever receives words —
 // lh.Run is never actually exercised concurrently by more than one goroutine,
 // so a green -race run on those tests is not evidence that per-worker lane
 // hashers are safe under real concurrency. This test forces multiple batches
-// (n=1600 spans four: 512, 512, 512, 64) and four workers so more than one
-// worker's lh.Run genuinely runs at once, with the needle planted at the
-// first word, at two batch boundaries, and at the last word.
+// and four workers so more than one worker's lh.Run genuinely runs at once,
+// with the needle planted at the first word, at two batch boundaries, and at
+// the last word.
+//
+// The size is DERIVED from dictBatchSize rather than written out. It used to
+// be "n=1600 spans four: 512, 512, 512, 64", with the boundaries spelled as
+// 512 and 1024 — correct until dictBatchSize was raised to 4096, at which
+// point 1600 words are a single batch and this test silently stops testing
+// concurrency at all while still passing. Deriving it means the test follows
+// the constant instead of quietly falling behind it.
 func TestDictAttackLanesMultiBatchConcurrent(t *testing.T) {
 	crypt, err := bcrypt.GenerateFromPassword([]byte("needle"), 4)
 	if err != nil {
 		t.Fatal(err)
 	}
-	const n = 1600
-	for _, pos := range []int{0, 512, 1024, n - 1} {
+	// Three full batches and a short fourth, so the final partial-batch flush
+	// is exercised too.
+	n := dictBatchSize*3 + 64
+	for _, pos := range []int{0, dictBatchSize, dictBatchSize * 2, n - 1} {
 		words := make([]string, n)
 		for i := range words {
 			words[i] = "chaff"

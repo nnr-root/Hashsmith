@@ -43,7 +43,27 @@ import (
 )
 
 const (
-	dictBatchSize = 512  // words per batch sent over channel
+	// dictBatchSize is how many words the reader hands a worker at a time.
+	//
+	// It was 512, and raising it is worth 8% of dictionary throughput. The
+	// reason is visible in a CPU profile: with the vector and contiguous
+	// cores doing the hashing, a worker drains a batch in microseconds and
+	// parks, so runtime.usleep, pthread_cond_signal and pthread_cond_wait
+	// together accounted for about 70% of the run. Fewer, larger handoffs
+	// spend less of the run in the scheduler.
+	//
+	// 4096 is measured, not guessed, and the measurement had to wait for an
+	// idle machine — four earlier sweeps on a contended one produced
+	// overlapping ranges at every size and no signal at all. Interleaved
+	// 512/4096/512/4096 at 8 workers, ten samples each: 512 spans
+	// 41.1-43.3 MH/s and 4096 spans 44.9-46.6, which do not overlap. 1024
+	// lands between them and 16384 is worse than 4096, so this is a peak
+	// rather than a ceiling.
+	//
+	// Anything that depends on this value should DERIVE from it —
+	// TestDictAttackLanesMultiBatchConcurrent used to write 512 out by hand
+	// and would have silently stopped spanning multiple batches here.
+	dictBatchSize = 4096
 	ctxCheckEvery = 1024 // brute-force iterations between context polls
 )
 

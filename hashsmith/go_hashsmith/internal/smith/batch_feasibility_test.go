@@ -365,20 +365,24 @@ func TestBatchFeasibilityETAThroughRunCrack(t *testing.T) {
 	targetsFile := filepath.Join(dir, "dump.txt")
 	mustWrite(t, targetsFile, strings.Join(lines, "\n")+"\n")
 
-	// Large enough that tier one's cheap single-call estimate cannot resolve
-	// this as feasible on its own (see feasibility_probe_test.go's identical
-	// reasoning for the single-target CLI test) — this test has to reach
-	// tier two, the mechanism batch.go's probe wiring changed.
+	// This test has to reach tier two, the mechanism batch.go's probe wiring
+	// changed. Two workers rather than four keeps the cheap estimate above
+	// the ceiling, and requireTierTwo asserts it instead of trusting a
+	// comment — see that function for what happened when the premise was only
+	// written down.
+	requireTierTwo(t, bruteLayout(feasibilityTestCharset, 6, 6).total, 2,
+		"md5", lines[0], "deadbeef", "prefix")
+
 	assertFeasibilityRatio(t, "dump through runCrack", func() feasibilityAttempt {
 		var out string
 		var err error
-		// -p 4 is the worker count the command is given, so it is the
+		// -p 2 is the worker count the command is given, so it is the
 		// denominator the share is measured against.
-		share, elapsed := measuredCPUShare(4, func() {
+		share, elapsed := measuredCPUShare(2, func() {
 			out, err = captureStderrResult(t, func() error {
 				return runCrack([]string{"-t", "md5", "-s", "deadbeef", "-S", "prefix",
 					"-M", "brute", "-C", feasibilityTestCharset, "-n", "6", "-x", "6",
-					"-p", "4", "--no-pot", targetsFile})
+					"-p", "2", "--no-pot", targetsFile})
 			})
 		})
 		if err != nil {

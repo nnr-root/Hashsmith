@@ -281,27 +281,51 @@ func stdSaltedBaseFor(name string) (*stdAlgo, bool) {
 // core owns unsalted MD5/MD4/NTLM and is several times faster, so routing them
 // here would be a silent regression, not an acceleration.
 func stdSaltedPlanFor(typ, salt, saltMode string) (*stdAlgo, stdSalt, bool) {
+	algo, sp, utf16, ok := stdSaltedPlanForEnc(typ, salt, saltMode)
+	if !ok || utf16 {
+		// The UTF-16LE constructions are refused HERE and nowhere deeper,
+		// because this is the resolver the MASK and BRUTE runners use and
+		// contigBatch.fillFromSegment does not implement the encoding: its
+		// odometer writes one byte per character position and incrementally
+		// updates in place, so a two-byte character would need that loop
+		// rewritten. The dictionary engines have no such constraint — they
+		// fill from a list, not an odometer — so they call
+		// stdSaltedPlanForEnc directly and do support it.
+		//
+		// This is a scope boundary, not a correctness one. Widening it means
+		// teaching fillFromSegment the encoding and keeping
+		// TestContigFillMatchesMaskIdxToStr green, not relaxing anything here.
+		return nil, stdSalt{}, false
+	}
+	return algo, sp, true
+}
+
+// stdSaltedPlanForEnc is stdSaltedPlanFor's core, additionally reporting
+// whether the CANDIDATE must be UTF-16LE encoded in the message. The salt is
+// never encoded: hashCompatSaltedDigest writes the salt's own bytes and
+// encodes only the password, and this mirrors that exactly.
+func stdSaltedPlanForEnc(typ, salt, saltMode string) (*stdAlgo, stdSalt, bool, bool) {
 	canon := canonicalHashType(typ)
 	if spec, ok := compatSaltedDigests[canon]; ok {
-		if spec.passwordUTF16 || salt == "" {
-			return nil, stdSalt{}, false
+		if salt == "" {
+			return nil, stdSalt{}, false, false
 		}
 		base, _, _ := strings.Cut(canon, "-")
 		algo, ok := stdSaltedBaseFor(base)
 		if !ok {
-			return nil, stdSalt{}, false
+			return nil, stdSalt{}, false, false
 		}
 		if spec.saltFirst {
-			return algo, stdSalt{pre: []byte(salt)}, true
+			return algo, stdSalt{pre: []byte(salt)}, spec.passwordUTF16, true
 		}
-		return algo, stdSalt{suf: []byte(salt)}, true
+		return algo, stdSalt{suf: []byte(salt)}, spec.passwordUTF16, true
 	}
 	if salt == "" {
 		algo, ok := stdAlgoFor(canon)
 		if !ok {
-			return nil, stdSalt{}, false
+			return nil, stdSalt{}, false, false
 		}
-		return algo, stdSalt{}, true
+		return algo, stdSalt{}, false, true
 	}
 	// A raw digest carrying -s. hashText only applies the generic
 	// concatenation to types that do not consume the salt themselves, so this
@@ -309,12 +333,12 @@ func stdSaltedPlanFor(typ, salt, saltMode string) (*stdAlgo, stdSalt, bool) {
 	// sha1 and sha256 is in it, and stdSaltedBaseFor admits nothing else.
 	algo, ok := stdSaltedBaseFor(canon)
 	if !ok {
-		return nil, stdSalt{}, false
+		return nil, stdSalt{}, false, false
 	}
 	if saltMode == "suffix" {
-		return algo, stdSalt{suf: []byte(salt)}, true
+		return algo, stdSalt{suf: []byte(salt)}, false, true
 	}
-	return algo, stdSalt{pre: []byte(salt)}, true
+	return algo, stdSalt{pre: []byte(salt)}, false, true
 }
 
 // stdPathEligible reports whether l can be enumerated by runLayoutStd, and if
@@ -393,12 +417,35 @@ type contigBatch struct {
 	pre    []byte // salt bytes before the candidate ("" for an unsalted run)
 	suf    []byte // salt bytes after it
 	length int    // candidate length of the current fill (0 before the first)
-	stride int    // len(pre) + length + len(suf); the message length hashBatch is passed
+	stride int    // len(pre) + enc(length) + len(suf); the message length hashBatch is passed
+	// utf16 makes the CANDIDATE — and only the candidate — UTF-16LE encoded
+	// in the message, which is what the *-utf16le-* constructions hash. The
+	// salt stays raw on both sides of it, because hashCompatSaltedDigest
+	// writes the salt's own bytes and encodes only the password.
+	//
+	// The expansion here is byte b to the pair (b, 0x00), which equals
+	// utf16le(s) only while s is ASCII. Callers must have established that:
+	// stdPathEligible refuses a mask charset holding any byte >= 0x80, and
+	// the dictionary core refuses such a word so it falls to the scalar
+	// verifier. The transposed batch carries the identical rule for NTLM.
+	utf16 bool
 }
 
 func newContigBatch(group, digLen int, salt stdSalt) *contigBatch {
+	return newContigBatchEnc(group, digLen, salt, false)
+}
+
+// newContigBatchEnc is newContigBatch with the candidate encoding chosen. A
+// UTF-16LE candidate occupies two bytes per character, so the slab is sized
+// for the worst case.
+func newContigBatchEnc(group, digLen int, salt stdSalt, utf16 bool) *contigBatch {
+	width := stdMaxCandidateLen
+	if utf16 {
+		width *= 2
+	}
 	return &contigBatch{
-		msgs:   make([]byte, group*(stdMaxCandidateLen+salt.width())),
+		utf16:  utf16,
+		msgs:   make([]byte, group*(width+salt.width())),
 		out:    make([]byte, group*stdMaxDigestLen),
 		group:  group,
 		digLen: digLen,
@@ -496,7 +543,19 @@ func (cb *contigBatch) fillFromSegment(sets [][]byte, from, total int64, want in
 // part of the recovered plaintext.
 func (cb *contigBatch) candidate(i int) []byte {
 	off := i*cb.stride + len(cb.pre)
-	return cb.msgs[off : off+cb.length]
+	if !cb.utf16 {
+		return cb.msgs[off : off+cb.length]
+	}
+	// In UTF-16LE mode each candidate byte occupies every other message byte,
+	// so the interleaved zeros are stripped back out. This allocates, unlike
+	// the raw case — it runs once per reported hit, not on the hot path, and
+	// returning the message's own bytes would file the 0x00s as part of the
+	// recovered plaintext.
+	out := make([]byte, cb.length)
+	for b := 0; b < cb.length; b++ {
+		out[b] = cb.msgs[off+b*2]
+	}
+	return out
 }
 
 // messages returns the first n messages, packed contiguously at cb.stride —
@@ -927,7 +986,11 @@ func (cb *contigBatch) fillFromWords(words []string) int {
 		want = cb.group
 	}
 	pre := len(cb.pre)
-	stride := pre + L + len(cb.suf)
+	encLen := L
+	if cb.utf16 {
+		encLen = L * 2
+	}
+	stride := pre + encLen + len(cb.suf)
 	cb.length = L
 	cb.stride = stride
 
@@ -938,8 +1001,18 @@ func (cb *contigBatch) fillFromWords(words []string) int {
 		}
 		at := n * stride
 		copy(cb.msgs[at:at+pre], cb.pre)
-		copy(cb.msgs[at+pre:at+pre+L], words[n])
-		copy(cb.msgs[at+pre+L:at+stride], cb.suf)
+		if cb.utf16 {
+			// Each candidate byte b becomes (b, 0x00) — byte-identical to
+			// utf16le(s) for ASCII input, which the caller has guaranteed.
+			w := words[n]
+			for b := 0; b < L; b++ {
+				cb.msgs[at+pre+b*2] = w[b]
+				cb.msgs[at+pre+b*2+1] = 0
+			}
+		} else {
+			copy(cb.msgs[at+pre:at+pre+L], words[n])
+		}
+		copy(cb.msgs[at+pre+encLen:at+stride], cb.suf)
 	}
 	return n
 }

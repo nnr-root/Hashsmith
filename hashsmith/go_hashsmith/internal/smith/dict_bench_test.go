@@ -230,13 +230,26 @@ func BenchmarkBatchDictVector(b *testing.B) {
 func BenchmarkDictByType(b *testing.B) {
 	const n = 200000
 	path := benchWordlist(b, n, []int{4, 5, 6, 7, 8})
-	for _, typ := range []string{"md5", "ntlm", "sha1", "sha256", "sha512"} {
-		target, err := hashText("nomatchhere", typ, "", "")
+	for _, tc := range []struct{ typ, salt string }{
+		{"md5", ""}, {"ntlm", ""}, {"sha1", ""}, {"sha256", ""}, {"sha512", ""},
+		// The UTF-16LE salted constructions, which the dictionary engine
+		// reaches and the mask runners deliberately do not.
+		{"sha1-utf16le-pass-salt", "s4lt"},
+		{"sha256-utf16le-pass-salt", "s4lt"},
+	} {
+		typ, salt := tc.typ, tc.salt
+		var target string
+		var err error
+		if salt == "" {
+			target, err = hashText("nomatchhere", typ, "", "")
+		} else {
+			target, err = hashCompatSaltedDigest("nomatchhere", typ, salt)
+		}
 		if err != nil {
 			b.Fatal(err)
 		}
 		verify := func(pw string) bool {
-			ok, _ := verifyCandidate(pw, target, typ, "", "")
+			ok, _ := verifyCandidate(pw, target, typ, salt, "prefix")
 			return ok
 		}
 		for _, fast := range []bool{true, false} {
@@ -252,7 +265,7 @@ func BenchmarkDictByType(b *testing.B) {
 				for i := 0; i < b.N; i++ {
 					var attempts int64
 					if _, err := dictAttack(context.Background(), path, 0, 0, 4,
-						&attempts, nil, verify, target, typ, "", ""); err != nil {
+						&attempts, nil, verify, target, typ, salt, "prefix"); err != nil {
 						b.Fatal(err)
 					}
 				}

@@ -135,6 +135,41 @@ type feasibilityAttempt struct {
 	share     float64
 }
 
+// requireTierTwo fails unless tier ONE's cheap estimate for this run exceeds
+// feasibilityRoughCeiling — that is, unless the run genuinely reaches the
+// tier-two probe these tests are about.
+//
+// It exists because that premise silently stopped holding. The tests that
+// depend on it size their keyspace so tier one cannot resolve it, and say so
+// in a comment; one of them records that a mutation slipped through at 26^5
+// for exactly this reason. But the boundary is not a constant — it is
+// work / (workers / perOp) against a 60-second ceiling, and perOp is
+// MEASURED. When feasibilityFastestPerOp improved md5's reading from about
+// 2µs to about 650ns, the estimate for 26^6 at four workers fell from ~154s
+// to ~53s, crossed under the ceiling, and tier one began answering. The tests
+// then compared a cheap scalar estimate against a vector-cored run and saw
+// the ~20x that gap is worth, with nothing saying why.
+//
+// A comment cannot hold an invariant that depends on a measurement. This can.
+func requireTierTwo(t *testing.T, work int64, workers int, typ, target, salt, saltMode string) {
+	t.Helper()
+	_, _, perOp := benchVerifyPath(typ, target, salt, saltMode, feasibilityWarmup)
+	if perOp <= 0 {
+		return // tier one cannot resolve without a perOp either
+	}
+	optimistic := float64(workers) / perOp.Seconds()
+	est := float64(work) / optimistic
+	if est < feasibilityRoughCeiling {
+		t.Fatalf("this test needs tier TWO, but tier one resolves the run by itself: "+
+			"work=%d workers=%d perOp=%v gives an estimate of %.1fs, under the %.0fs ceiling. "+
+			"Tier one models workers/scalarPerOp and cannot see a batched core, so it is "+
+			"systematically pessimistic for these types and comparing against it measures "+
+			"that gap rather than the probe. Enlarge the keyspace or lower the worker count "+
+			"until the estimate clears the ceiling.",
+			work, workers, perOp, est, feasibilityRoughCeiling)
+	}
+}
+
 // assertFeasibilityRatio holds the best of a few timing attempts to
 // feasibilityETATolerance.
 //
@@ -634,6 +669,13 @@ func TestFeasibilityETAThroughRunCrack(t *testing.T) {
 	// exactly the gap that let the "probe the scalar path again" mutation
 	// slip through this test once during development, at 26^5.
 
+	// Two workers, not four. Tier one's estimate is work/(workers/perOp), so
+	// halving the workers doubles it — which is what keeps 26^6 above the
+	// ceiling now that perOp is measured more accurately than it used to be.
+	// requireTierTwo asserts that rather than trusting it.
+	requireTierTwo(t, bruteLayout(feasibilityTestCharset, 6, 6).total, 2,
+		"md5", target, "deadbeef", "prefix")
+
 	// Same noise-tolerant retry as TestFeasibilityETAMatchesRealDispatch —
 	// see its comment for why up to 3 attempts, passing on the best, does
 	// not weaken what a systematic regression (this mutation included) would
@@ -641,13 +683,13 @@ func TestFeasibilityETAThroughRunCrack(t *testing.T) {
 	assertFeasibilityRatio(t, "through runCrack", func() feasibilityAttempt {
 		var out string
 		var err error
-		// -p 4 is the worker count the command is given, so it is the
+		// -p 2 is the worker count the command is given, so it is the
 		// denominator the share is measured against.
-		share, elapsed := measuredCPUShare(4, func() {
+		share, elapsed := measuredCPUShare(2, func() {
 			out, err = captureStderrResult(t, func() error {
 				return runCrack([]string{"-t", "md5", "-s", "deadbeef", "-S", "prefix",
 					"-M", "brute", "-C", feasibilityTestCharset, "-n", "6", "-x", "6",
-					"-p", "4", "--no-pot", target})
+					"-p", "2", "--no-pot", target})
 			})
 		})
 		if err != nil {
