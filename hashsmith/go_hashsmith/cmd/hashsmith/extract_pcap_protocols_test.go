@@ -383,3 +383,149 @@ func TestExtractPCAPRSVP(t *testing.T) {
 	}
 	mustCrack(t, "rsvp", got[0], password)
 }
+
+// ── Kerberos TGS-REP ─────────────────────────────────────────────────────────
+
+// tgsRepMessage builds a TGS-REP carrying one ticket, to RFC 4120's
+// definition. The reply's OWN encrypted part is filled with junk on purpose:
+// it is encrypted under the requesting user's key, which the attacker already
+// has, and taking it instead of the ticket's would give a record that cracks
+// with a password nobody wanted.
+func tgsRepMessage(t *testing.T, ticketCipher []byte) []byte {
+	t.Helper()
+	sname := der(0xa2, der(0x30,
+		der(0xa0, derInteger(2)),
+		der(0xa1, der(0x30,
+			der(0x1b, []byte("HTTP")),
+			der(0x1b, []byte("web.example.com")))),
+	))
+	ticket := der(0x61, der(0x30,
+		der(0xa0, derInteger(5)),
+		der(0xa1, der(0x1b, []byte("EXAMPLE.COM"))),
+		sname,
+		der(0xa3, der(0x30,
+			der(0xa0, derInteger(23)),
+			der(0xa2, derOctets(ticketCipher)))),
+	))
+	return der(0x6d, der(0x30,
+		der(0xa0, derInteger(5)),  // pvno
+		der(0xa1, derInteger(13)), // msg-type: TGS-REP
+		der(0xa3, der(0x1b, []byte("EXAMPLE.COM"))),
+		der(0xa4, der(0x30, der(0xa0, derInteger(1)),
+			der(0xa1, der(0x30, der(0x1b, []byte("alice")))))),
+		der(0xa5, ticket),
+		// The reply's own enc-part, under the USER's key.
+		der(0xa6, der(0x30,
+			der(0xa0, derInteger(23)),
+			der(0xa2, derOctets(bytes.Repeat([]byte{0xee}, 64))))),
+	))
+}
+
+func TestExtractPCAPTGSRep(t *testing.T) {
+	record, password := johnVector(t, "krb5tgs $krb5tgs$")
+	f := strings.Split(strings.TrimPrefix(record, "$krb5tgs$"), "$")
+	cipher := append(mustHex(t, f[1]), mustHex(t, f[2])...)
+	message := tgsRepMessage(t, cipher)
+
+	for _, tc := range []struct {
+		name  string
+		frame string
+	}{
+		{"over UDP", udpFrame([4]byte{10, 0, 0, 1}, [4]byte{10, 0, 0, 2},
+			kerberosPort, 40000, message)},
+		// TCP prefixes the reply with a four-byte length.
+		{"over TCP", tcpFrame([4]byte{10, 0, 0, 1}, [4]byte{10, 0, 0, 2},
+			kerberosPort, 40000, append([]byte{
+				byte(len(message) >> 24), byte(len(message) >> 16),
+				byte(len(message) >> 8), byte(len(message)),
+			}, message...))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := pcapOf(t, linkTypeEthernet, false, tc.frame)
+			got, err := extractPCAPRecords(writeFixture(t, "krb.pcap", file))
+			if err != nil {
+				t.Fatalf("extractPCAPRecords: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("got %d records, want 1: %v", len(got), got)
+			}
+			// The record names the service, which is what tells a user
+			// which account a ticket belongs to.
+			want := "$krb5tgs$23$*HTTP/web.example.com@EXAMPLE.COM*$" + f[1] + "$" + f[2]
+			if got[0] != want {
+				t.Fatalf("\n got: %.70s...\nwant: %.70s...", got[0], want)
+			}
+			mustCrack(t, "krb5tgs", got[0], password)
+		})
+	}
+}
+
+// A reply split across TCP segments is left alone: half a reply is not a
+// record, and emitting one would be emitting something that cannot parse.
+func TestExtractPCAPTGSRepIgnoresATruncatedReply(t *testing.T) {
+	message := tgsRepMessage(t, bytes.Repeat([]byte{0x11}, 64))
+	// Claim a length larger than what the segment carries.
+	prefixed := append([]byte{0, 0, 0xff, 0xff}, message...)
+	file := pcapOf(t, linkTypeEthernet, false,
+		tcpFrame([4]byte{10, 0, 0, 1}, [4]byte{10, 0, 0, 2}, kerberosPort, 40000, prefixed))
+
+	if _, err := extractPCAPRecords(writeFixture(t, "part.pcap", file)); err == nil {
+		t.Error("a truncated reply should not become a record")
+	}
+}
+
+// KDC-REP's padata field is OPTIONAL, so the ticket is the sixth element of a
+// reply that carries it and the fifth of one that does not. Both shapes must
+// give the same record — a reader that counts elements gets the reply's own
+// encrypted part for one of them, which cracks with the password of the
+// account that ASKED for the ticket rather than the one that owns it.
+func TestExtractPCAPTGSRepBothPadataShapes(t *testing.T) {
+	record, password := johnVector(t, "krb5tgs $krb5tgs$")
+	f := strings.Split(strings.TrimPrefix(record, "$krb5tgs$"), "$")
+	cipher := append(mustHex(t, f[1]), mustHex(t, f[2])...)
+
+	without := tgsRepMessage(t, cipher)
+	// Splice a padata element in as field [2], where a KDC that sends one
+	// puts it.
+	padata := der(0xa2, der(0x30, der(0x30,
+		der(0xa1, derInteger(19)),
+		der(0xa2, derOctets([]byte("padata"))))))
+	inner, _, err := derParse(without)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := inner.body // the SEQUENCE, as encoded
+	seq, _, err := derParse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	children, err := derChildren(seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rebuilt []byte
+	for i, c := range children {
+		rebuilt = append(rebuilt, reencode(c)...)
+		if i == 1 { // after msg-type, where padata belongs
+			rebuilt = append(rebuilt, padata...)
+		}
+	}
+	with := der(0x6d, der(0x30, rebuilt))
+
+	for name, message := range map[string][]byte{"without padata": without, "with padata": with} {
+		t.Run(name, func(t *testing.T) {
+			file := pcapOf(t, linkTypeEthernet, false,
+				udpFrame([4]byte{10, 0, 0, 1}, [4]byte{10, 0, 0, 2},
+					kerberosPort, 40000, message))
+			got, err := extractPCAPRecords(writeFixture(t, "krb.pcap", file))
+			if err != nil {
+				t.Fatalf("extractPCAPRecords: %v", err)
+			}
+			want := "$krb5tgs$23$*HTTP/web.example.com@EXAMPLE.COM*$" + f[1] + "$" + f[2]
+			if len(got) != 1 || got[0] != want {
+				t.Fatalf("\n got: %.70s...\nwant: %.70s...", got[0], want)
+			}
+			mustCrack(t, "krb5tgs", got[0], password)
+		})
+	}
+}

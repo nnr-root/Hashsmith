@@ -71,13 +71,18 @@ func extractPCAPRecords(path string) ([]string, error) {
 		if r, ok := rsvpRecord(f.data, f.linkType); ok {
 			add(r)
 		}
+		for _, payload := range kerberosPayloads(f.data, f.linkType) {
+			if r, ok := tgsRepRecord(payload); ok {
+				add(r)
+			}
+		}
 	}
 
 	if len(records) == 0 {
 		if basicAuth > 0 {
 			return nil, fmt.Errorf("this capture holds %d HTTP Basic Authorization header(s) and no crackable record: Basic auth carries the password itself, base64-encoded, so there is nothing to crack — decode the header", basicAuth)
 		}
-		return nil, errors.New("no HTTP Digest, SNMPv3, TACACS+, TCP-MD5, HSRP, IPsec AH or RSVP credentials in this capture (the other protocols pcap2john reads are not covered here)")
+		return nil, errors.New("no HTTP Digest, SNMPv3, TACACS+, TCP-MD5, HSRP, IPsec AH, RSVP or Kerberos TGS-REP credentials in this capture (the other protocols pcap2john reads are not covered here)")
 	}
 	if basicAuth > 0 {
 		fmt.Printf("note: %d HTTP Basic Authorization header(s) are also present; those carry the password itself and need no cracking\n", basicAuth)
@@ -636,4 +641,125 @@ func rsvpRecord(frame []byte, linkType uint32) (string, bool) {
 	}
 	return fmt.Sprintf("$rsvp$%d$%s$%s", algorithm,
 		hex.EncodeToString(message), hex.EncodeToString(digest)), true
+}
+
+// ── Kerberos TGS-REP ──────────────────────────────────────────────────────────
+
+const (
+	kerberosPort = 88
+	// kdcRepTGS is the application tag on a TGS-REP: [APPLICATION 13].
+	kdcRepTGS = 13
+	// kdcRepTicket is the field number of the ticket inside a KDC-REP.
+	kdcRepTicket = 5
+)
+
+// tgsRepRecord turns a TGS-REP into a crackable record.
+//
+// This is the one place here that does MORE than John's converter rather than
+// the same thing. pcap2john dumps the whole reply as $tgsrep$<hex>, which is
+// an intermediate: something else still has to find the ticket inside it and
+// build the record. The reply is DER, and the ticket is field five of it, so
+// the extractor may as well go the rest of the way and emit the record the
+// cracker actually reads.
+//
+// What gets cracked is the TICKET's encrypted part, not the reply's. The reply
+// is encrypted under the requesting user's key — which the attacker already
+// has, since they asked for it — while the ticket is encrypted under the
+// SERVICE ACCOUNT's, which is the thing worth finding. Taking the wrong one
+// produces a record that cracks instantly with a password nobody wanted.
+func tgsRepRecord(payload []byte) (string, bool) {
+	if len(payload) < 2 {
+		return "", false
+	}
+	top, _, err := derParse(payload)
+	if err != nil || top.class != 1 || top.tag != kdcRepTGS {
+		return "", false
+	}
+	// The ticket is found by its CONTEXT TAG, not by counting: KDC-REP's
+	// padata field is OPTIONAL, so the ticket is the sixth element of a
+	// reply that carries padata and the fifth of one that does not. Every
+	// reply from a real KDC omits it, and counting gets the reply's own
+	// encrypted part instead — which cracks with the password of the
+	// account that asked for the ticket, not the one that owns it.
+	fields, err := derChildren(derUnwrap(top))
+	if err != nil {
+		return "", false
+	}
+	var ticket derValue
+	found := false
+	for _, f := range fields {
+		if f.class == 2 && f.tag == kdcRepTicket {
+			ticket, found = derUnwrap(f), true
+			break
+		}
+	}
+	if !found {
+		return "", false
+	}
+	etype, cipher, err := krbTicketEncPart(reencode(ticket))
+	if err != nil {
+		return "", false
+	}
+	return krbTGSRecord(kerberosSPN(ticket), etype, cipher), true
+}
+
+// kerberosSPN reads the service principal out of a ticket, for the label the
+// record carries. It is decoration — the record cracks without it — but a
+// capture with several tickets is unreadable without knowing which service
+// each one is for.
+func kerberosSPN(ticket derValue) string {
+	children, err := derChildren(ticket)
+	if err != nil || len(children) < 3 {
+		return ""
+	}
+	realm := kerberosString(derUnwrap(children[1]))
+	// PrincipalName ::= SEQUENCE { name-type [0], name-string [1] SEQUENCE OF }
+	sname, err := derChildren(derUnwrap(children[2]))
+	if err != nil || len(sname) < 2 {
+		return realm
+	}
+	parts, err := derChildren(derUnwrap(sname[1]))
+	if err != nil {
+		return realm
+	}
+	var names []string
+	for _, p := range parts {
+		if s := kerberosString(p); s != "" {
+			names = append(names, s)
+		}
+	}
+	spn := strings.Join(names, "/")
+	if realm != "" && spn != "" {
+		return spn + "@" + realm
+	}
+	return spn + realm
+}
+
+// kerberosString reads a GeneralString, which is what Kerberos uses for every
+// name in the protocol.
+func kerberosString(v derValue) string {
+	if v.class != 0 || v.tag != 27 || v.constructed {
+		return ""
+	}
+	return string(v.body)
+}
+
+// kerberosPayloads returns the KDC replies in one frame. UDP carries a reply
+// whole; TCP prefixes it with a four-byte length, and a reply too big for one
+// segment is left alone rather than half-read.
+func kerberosPayloads(frame []byte, linkType uint32) [][]byte {
+	if payload, ok := udpPayloadToPort(frame, linkType, kerberosPort); ok {
+		return [][]byte{payload}
+	}
+	payload, fromPort, ok := tcpPayloadFromPort(frame, linkType, kerberosPort)
+	if !ok || !fromPort || len(payload) < 4 {
+		return nil
+	}
+	size := int(payload[0])<<24 | int(payload[1])<<16 | int(payload[2])<<8 | int(payload[3])
+	if size <= 0 || size+4 != len(payload) {
+		// A reply split across segments needs reassembly, which this does
+		// not do; half a reply is not a record.
+		return nil
+	}
+	return [][]byte{payload[4:]}
 }

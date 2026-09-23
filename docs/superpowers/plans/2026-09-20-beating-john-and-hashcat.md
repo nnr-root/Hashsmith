@@ -3234,7 +3234,22 @@ words and is two less than the header's real size. And RSVP's digest length is
 stated nowhere: it runs to the end of the INTEGRITY object, and sixteen bytes
 means MD5 while anything else means SHA-1.
 
-Extractors: 48 → 89, with pcap2smith covering seven protocols. Container
+Kerberos TGS-REP is the one protocol where the extractor does more than John's
+converter rather than the same thing: pcap2john dumps the reply as
+`$tgsrep$<hex>`, an intermediate that something else still has to turn into a
+record. The reply is DER and the ticket is a field of it, so this emits the
+`$krb5tgs$` record directly, service principal included.
+
+It also produced the session's most instructive mistake. The ticket must be
+found by its CONTEXT TAG, not by counting, because KDC-REP's padata field is
+OPTIONAL — the ticket is the sixth element of a reply that carries padata and
+the fifth of one that does not. I wrote the counting version first and it took
+the reply's OWN encrypted part, which is encrypted under the requesting user's
+key: a record that cracks instantly with a password nobody wanted. The kirbi
+converter's comment had already warned about exactly this for EncryptedData's
+optional kvno. Written down once, walked into anyway, two files later.
+
+Extractors: 48 → 89, with pcap2smith covering eight protocols. Container
 sniffers: 18 → 30. Of John's 118 converters, 33 still have no counterpart — down from 76. The remainder is now dominated by the
 rest of the capture family (pcap, radius, hccap), Windows and enterprise
 credential stores (DPAPImk, racf, sap, pse, ps_token, sspr), Apple documents

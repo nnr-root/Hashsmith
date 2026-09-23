@@ -106,7 +106,7 @@ var universalExtractorRegistry = []extractorDefinition{
 	{name: "vncpcap2smith", input: ".pcap/.pcapng capture", formats: "RFB VNC Authentication challenge-response", run: runExtractVNCPCAP},
 	{name: "wpapcap2smith", aliases: []string{"wpa2smith"}, input: ".pcap/.pcapng wireless capture", formats: "WPA/WPA2 PMKID and four-way handshakes, as hashcat 22000 records", run: runExtractWPAPCAP},
 	{name: "radius2smith", input: ".pcap/.pcapng capture with RADIUS", formats: "RADIUS shared secret from a reply and its request, as a dynamic expression", run: runExtractRADIUS},
-	{name: "pcap2smith", input: ".pcap/.pcapng capture", formats: "HTTP Digest, SNMPv3, TACACS+, TCP-MD5, HSRP, IPsec AH and RSVP (the other protocols pcap2john reads are not covered)", run: runExtractPCAP},
+	{name: "pcap2smith", input: ".pcap/.pcapng capture", formats: "HTTP Digest, SNMPv3, TACACS+, TCP-MD5, HSRP, IPsec AH, RSVP and Kerberos TGS-REP (the other protocols pcap2john reads are not covered)", run: runExtractPCAP},
 	{name: "hccap2smith", input: "aircrack-ng .hccap", formats: "legacy 392-byte WPA handshake container", run: runExtractHCCAP},
 	{name: "mac2smith", aliases: []string{"macos2smith", "lion2smith"}, input: "macOS account .plist", formats: "SALTED-SHA512-PBKDF2 (macOS 10.8+)", run: runExtractMacOS, sniff: sniffBinaryPlist},
 	{name: "strip2smith", input: "STRIP password manager database", formats: "STRIP SQLCipher first page", run: runExtractSTRIP},
