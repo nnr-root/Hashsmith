@@ -63,7 +63,7 @@ func TestBatchDictAttackFindsAll(t *testing.T) {
 		return false
 	}
 	var n int64
-	batchDictAttack(context.Background(), wl, 0, 0, verify, 4, nil, &n)
+	batchDictAttack(context.Background(), wl, 0, 0, verify, 4, nil, &n, nil)
 
 	if atomic.LoadInt64(&remaining) != 0 {
 		t.Fatalf("not all found, remaining=%d", remaining)

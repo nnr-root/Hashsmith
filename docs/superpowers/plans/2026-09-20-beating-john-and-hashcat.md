@@ -407,7 +407,15 @@ costs real effort to re-investigate.
 | **Dictionary, hybrid, combinator, markov and prince never reach the SIMD fast path** | **CONFIRMED** | structural, and in one condition: both `fastPathEligible` (keyspace.go:487) and `stdPathEligible` (stdfast.go:296) refuse a layout with `l.gen != nil`, and `gen` is exactly what combinator.go, hybrid.go, markov.go and prince.go set. Measured on the same md5 target with the same worker count and the wordlist fully in page cache: **brute 78.4 MH/s, dict 10.2-10.4 MH/s** across repeated runs. `HASHSMITH_NO_FASTPATH=1` halves brute (16.58 -> 8.11 MH/s on a loaded machine) and leaves dict essentially unchanged (7.62 -> 7.05), which is the direct confirmation that dict was never on it |
 | **descrypt is not bitsliced** | **CONFIRMED** | John, on this machine: 2,945K c/s (`DES 128/128 ASIMD`). Hashsmith, one worker: 10.45 kH/s. Both measured under the same background load, so the absolute numbers are depressed and only the ratio is meaningful — roughly **two orders of magnitude**, which makes the lead's "~400x" the right order rather than an exaggeration |
 
-Not checked: `--gpu` silently ignoring `-s/--salt`, which needs a GPU build.
+**`--gpu` silently ignoring `-s/--salt`** — **stale**, on both halves, checked
+against a Metal build on this machine. A salted target under `--gpu` prints
+"GPU brute does not support a salt yet — using CPU", falls back and cracks it.
+A type with no kernel falls back too. A dispatch error propagates as an error
+rather than becoming "not found", and the trailing-partial-batch trap that
+shape invites is handled — the final flush is there, verified at the
+1,048,576-word batch boundary and either side of it.
+
+That closes §4: **seven of ten leads stale, three real, all three now fixed.**
 
 ### 4.2 What the three confirmations became
 
@@ -483,6 +491,32 @@ by differential testing against the scalar path rather than by inspection:
     "have I reset the batch yet" from `tb.length`, whose zero value is also a
     real bucket length. `runLayoutFast` starts its own `curLen` at -1 for
     exactly this reason and the new code had not copied it.
+
+**Multi-hash dictionary, and the reader shared.** Both dictionary engines had
+the same reader written twice, and only one copy got the arena above. It is
+now one function, `streamWordlistBatches`, and the multi-hash engine's
+allocations fell from **400,807 to 1,588 per operation** with throughput
+7.20 -> 10.29 MH/s in a paired run — the reader alone.
+
+The multi-hash engine then joined the vector cores. The piece that made it
+cheap already existed: `fastTargets`, a bitmap-prefiltered binary search over
+sorted digests, built for `batchFastLayout`'s mask runs. So the lanes were
+generalised from one target to a SET — a single-target run is simply a set of
+one — and hit handling moved behind a sink, because the two callers want
+opposite things from a hit. A single-target run stops. A multi-hash run
+records and keeps going, since another lane in the same group may hold a
+different target's password, and it stops only when every target is found.
+
+Paired: **25.66 MH/s against 1.707 MH/s, about 15x.** That ratio is against a
+generic `hashText` verifier, so it overstates the gain against the CLI's own
+optimised scalar path, exactly as the single-target figure does.
+
+Scope, stated because it is narrower than "dictionary runs are vectorised"
+would imply: the vector cores cover **md5, md4, ntlm and salted md5**. sha1,
+sha256 and sha512 have no vector plan — they use the separate contiguous-batch
+path in stdfast.go, which is not wired to either dictionary engine. Writing
+the non-vacuity guard into the differential test is what surfaced that: the
+sha1 subtest had been comparing the scalar path against itself and passing.
 
 **descrypt.** The lead said "not bitsliced", and it is not — but that was not
 the first problem. The implementation was textbook bit-at-a-time DES: every

@@ -1913,6 +1913,86 @@ func dictWordBounds(skip, limit int64) (lo, upper int64) {
 	return skip, upper
 }
 
+// streamWordlistBatches reads a wordlist and sends it over ch in batches of
+// dictBatchSize words, honouring the [skip, upper) word-index bound, and
+// closes ch when it is done or the context is cancelled.
+//
+// Both dictionary engines use it — the single-target one and the multi-hash
+// one — because they had the same reader written twice and it was worth
+// fixing once.
+//
+// Words are copied into ONE arena per batch and handed out as substrings of a
+// single string, rather than one allocated string per word. scanner.Text()
+// allocates and is called once per word: a heap profile of a dictionary run
+// put it at 70% of every object allocated, and the garbage that produced
+// showed up in the CPU profile as runtime.madvise. A batch of dictBatchSize
+// words now costs two allocations instead of dictBatchSize.
+//
+// scanner.Bytes() is only valid until the next Scan, which is exactly why the
+// bytes are appended into the arena immediately. The arena itself is reused
+// across batches; string(arena) copies, so a batch already sent never aliases
+// bytes the next one will overwrite.
+//
+// The boundary bookkeeping is the part that can go quietly wrong: every word
+// in a batch shares one backing string, so an off-by-one hands a worker a word
+// with a neighbour's characters attached, and it is still a valid string. See
+// TestDictReaderArenaPreservesEveryWord.
+func streamWordlistBatches(ctx context.Context, r io.Reader, skip, upper int64, ch chan<- []string) {
+	defer close(ch)
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 1<<20), 1<<20) // 1 MiB line buffer
+
+	arena := make([]byte, 0, dictBatchSize*16)
+	starts := make([]int, 0, dictBatchSize)
+
+	// flushBatch turns the arena into one string and slices it into the
+	// batch's words. Reports false when the run was cancelled.
+	flushBatch := func() bool {
+		if len(starts) == 0 {
+			return true
+		}
+		joined := string(arena)
+		cur := make([]string, len(starts))
+		for i, from := range starts {
+			to := len(joined)
+			if i+1 < len(starts) {
+				to = starts[i+1]
+			}
+			cur[i] = joined[from:to]
+		}
+		arena = arena[:0]
+		starts = starts[:0]
+		select {
+		case ch <- cur:
+			return true
+		case <-ctx.Done():
+			return false
+		}
+	}
+
+	var idx int64
+	for scanner.Scan() {
+		// Verbatim, empty lines included — see wordlist.go.
+		word := scanner.Bytes()
+		i := idx
+		idx++
+		if i < skip {
+			continue
+		}
+		if upper >= 0 && i >= upper {
+			break
+		}
+		starts = append(starts, len(arena))
+		arena = append(arena, word...)
+		if len(starts) >= dictBatchSize {
+			if !flushBatch() {
+				return
+			}
+		}
+	}
+	flushBatch()
+}
+
 // dictAttack streams a wordlist through `workers` verifiers. skip and limit
 // (0 = unbounded) bound it to word indices [skip, skip+limit) of the whole
 // wordlist — --skip/--limit's dictionary-mode semantics — letting a dict
@@ -1936,76 +2016,7 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 	batchCh := make(chan batch, workers*4)
 	resultCh := make(chan crackedResult, 1)
 
-	// reader
-	//
-	// Words are copied into ONE arena per batch and handed out as substrings
-	// of a single string, rather than one allocated string per word.
-	//
-	// scanner.Text() allocates, and it is called once per word: a heap profile
-	// of a dictionary run put it at 70% of every object allocated, and the
-	// garbage that produced showed up in the CPU profile as runtime.madvise.
-	// A batch of 512 words now costs two allocations — the arena's string and
-	// the slice of substrings — instead of 512.
-	//
-	// scanner.Bytes() is only valid until the next Scan, which is exactly why
-	// the bytes are appended into the arena immediately. The arena itself is
-	// reused across batches; string(arena) copies, so a sent batch never
-	// aliases bytes the next one will overwrite.
-	go func() {
-		defer close(batchCh)
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 1<<20), 1<<20) // 1 MiB line buffer
-
-		arena := make([]byte, 0, dictBatchSize*16)
-		starts := make([]int, 0, dictBatchSize)
-
-		// flushBatch turns the arena into one string and slices it into the
-		// batch's words. Reports false when the run was cancelled.
-		flushBatch := func() bool {
-			if len(starts) == 0 {
-				return true
-			}
-			joined := string(arena)
-			cur := make(batch, len(starts))
-			for i, from := range starts {
-				to := len(joined)
-				if i+1 < len(starts) {
-					to = starts[i+1]
-				}
-				cur[i] = joined[from:to]
-			}
-			arena = arena[:0]
-			starts = starts[:0]
-			select {
-			case batchCh <- cur:
-				return true
-			case <-innerCtx.Done():
-				return false
-			}
-		}
-
-		var idx int64
-		for scanner.Scan() {
-			// Verbatim, empty lines included — see wordlist.go.
-			word := scanner.Bytes()
-			i := idx
-			idx++
-			if i < skip {
-				continue
-			}
-			if upper >= 0 && i >= upper {
-				break
-			}
-			starts = append(starts, len(arena))
-			arena = append(arena, word...)
-			if len(starts) >= dictBatchSize {
-				if !flushBatch() {
-					return
-				}
-			}
-		}
-		flushBatch()
-	}()
+	go streamWordlistBatches(innerCtx, f, skip, upper, batchCh)
 
 	// newHasher/laned: whether typ has an interleaved multi-candidate bcrypt
 	// core for this target (bare bcrypt, single target, no external salt).
@@ -2053,6 +2064,17 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 			seq := 0
 			if vectorized {
 				dvl = newDictVectorLanes(typ, targetHash, salt, saltMode)
+			}
+
+			// keepEarliest is this worker's hit sink. A single-target run
+			// wants the candidate the wordlist put FIRST, so a hit updates
+			// best only when it is earlier and then stops the group — there
+			// is nothing later in the same group worth looking at.
+			keepEarliest := func(dw dictWord, _ []int) bool {
+				if best.seq < 0 || dw.seq < best.seq {
+					best = dw
+				}
+				return true
 			}
 
 			type cand struct{ pw, ruleLabel string }
@@ -2124,7 +2146,7 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 				if dvl == nil {
 					return false
 				}
-				localAttempts += int64(dvl.flushAll(&best))
+				localAttempts += int64(dvl.flushAll(keepEarliest))
 				if localAttempts >= 1024 {
 					atomic.AddInt64(atomicAttempts, localAttempts)
 					localAttempts = 0
@@ -2171,7 +2193,7 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 						seq++
 						return false
 					}
-					localAttempts += int64(dvl.add(pw, ruleLabel, seq, &best))
+					localAttempts += int64(dvl.add(pw, ruleLabel, seq, keepEarliest))
 					seq++
 					if localAttempts >= 1024 {
 						atomic.AddInt64(atomicAttempts, localAttempts)
@@ -2183,7 +2205,7 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 						// before reporting: otherwise which password a run
 						// reports would depend on how the lengths happened to
 						// interleave.
-						localAttempts += int64(dvl.flushAll(&best))
+						localAttempts += int64(dvl.flushAll(keepEarliest))
 						return reportBest()
 					}
 					return false

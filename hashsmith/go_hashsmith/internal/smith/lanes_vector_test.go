@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -44,6 +46,14 @@ func runDict(t *testing.T, path, typ, target, salt, saltMode string, workers int
 // matters: for every word, the vector path and the scalar path must reach the
 // same verdict. They are two implementations of one question, and the only
 // way a faster one is worth having is if it answers identically.
+//
+// Only md5, md4, ntlm and salted md5 actually reach the vector cores — those
+// are the plans fastAlgoPlanFor resolves. sha1 and sha256 are listed anyway
+// and their subtests compare scalar against scalar: that still exercises
+// dictAttack for those types, but it does NOT exercise this path, and saying
+// so is better than leaving a reader to assume coverage that is not there.
+// Their contiguous-batch equivalent (stdfast.go, stdPathEligible) is the
+// obvious next thing to wire up.
 func TestDictVectorMatchesScalarOnEveryWord(t *testing.T) {
 	words := []string{
 		"a", "ab", "abc", "password", "hunter2", "",
@@ -270,5 +280,162 @@ func TestDictReaderArenaRespectsSkipAndLimit(t *testing.T) {
 				t.Fatalf("skip=%d limit=%d: found=%v, want %v", tc.skip, tc.limit, res.found, tc.want)
 			}
 		})
+	}
+}
+
+// ── Multi-hash dictionary on the vector cores ────────────────────────────────
+
+// runBatchDict cracks a dump through the multi-hash dictionary engine and
+// returns which targets were found, keyed by their plaintext.
+func runBatchDict(t *testing.T, wordlistPath string, typ, salt, saltMode string, plains []string, workers int) map[string]bool {
+	t.Helper()
+	batch := make([]*batchTarget, len(plains))
+	active := make([]int, len(plains))
+	hexes := make([]string, len(plains))
+	for i, p := range plains {
+		h, err := hashText(p, typ, salt, saltMode)
+		if err != nil {
+			t.Fatalf("hashText(%q): %v", p, err)
+		}
+		batch[i] = &batchTarget{key: h}
+		active[i] = i
+		hexes[i] = h
+	}
+
+	var mu sync.Mutex
+	found := map[string]bool{}
+	remaining := int64(len(plains))
+	record := func(candidate string, idxs []int) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, idx := range idxs {
+			if atomic.CompareAndSwapInt32(&batch[idx].flag, 0, 1) {
+				found[candidate] = true
+				remaining--
+			}
+		}
+		return remaining <= 0
+	}
+	verify := func(pw string) bool {
+		h, err := hashText(pw, typ, salt, saltMode)
+		if err != nil {
+			return false
+		}
+		var idxs []int
+		for i, hx := range hexes {
+			if hx == h {
+				idxs = append(idxs, i)
+			}
+		}
+		if len(idxs) == 0 {
+			return false
+		}
+		return record(pw, idxs)
+	}
+
+	var vec *batchDictVector
+	if probe := newDictVectorLanesMulti(typ, hexes, active, salt, saltMode); probe != nil {
+		vec = &batchDictVector{
+			newLanes: func() *dictVectorLanes {
+				return newDictVectorLanesMulti(typ, hexes, active, salt, saltMode)
+			},
+			record: record,
+		}
+	}
+	var attempts int64
+	batchDictAttack(context.Background(), wordlistPath, 0, 0, verify, workers, nil, &attempts, vec)
+	return found
+}
+
+// TestBatchDictVectorFindsEveryTarget is the property a multi-hash run turns
+// on and a single-target run does not have: a hit is NOT the end. The vector
+// path tests a whole SIMD group at once, so a group holding two different
+// targets' passwords has to report both, and a bucket still pending when
+// another worker finds something must still be hashed.
+func TestBatchDictVectorFindsEveryTarget(t *testing.T) {
+	plains := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"}
+	// Interleaved with misses, at varying lengths so the words land in
+	// different buckets and flush at different times.
+	words := []string{
+		"zzz", "alpha", "yy", "charlie", "x", "foxtrot", "wwww", "bravo",
+		"delta", "echo", "vvvvv", "golf", "hotel", "uuuuuu",
+	}
+	path := writeWords(t, words)
+
+	for _, workers := range []int{1, 2, 4, 8} {
+		workers := workers
+		t.Run(fmt.Sprint(workers), func(t *testing.T) {
+			got := runBatchDict(t, path, "md5", "", "", plains, workers)
+			for _, p := range plains {
+				if !got[p] {
+					t.Errorf("workers=%d: %q was not found; every target in the dump must be", workers, p)
+				}
+			}
+			if len(got) != len(plains) {
+				t.Errorf("workers=%d: found %d targets, want %d: %v", workers, len(got), len(plains), got)
+			}
+		})
+	}
+}
+
+// TestBatchDictVectorMatchesScalar is the differential check, the same one the
+// single-target path carries: the vector and scalar paths must agree on which
+// targets a dump yields.
+func TestBatchDictVectorMatchesScalar(t *testing.T) {
+	plains := []string{"alpha", "bravo", "charlie", "café", "", "hunter2"}
+	words := append([]string{"miss1", "miss2"}, plains...)
+	words = append(words, "miss3", strings.Repeat("q", 70))
+	path := writeWords(t, words)
+
+	for _, typ := range []string{"md5", "ntlm", "sha1"} {
+		typ := typ
+		t.Run(typ, func(t *testing.T) {
+			// Guard against a vacuous pass. If the "vector" half were also
+			// falling back to the scalar verifier, the two halves would
+			// agree trivially and this test would assert nothing.
+			hexes := make([]string, len(plains))
+			for i, p := range plains {
+				h, err := hashText(p, typ, "", "")
+				if err != nil {
+					t.Fatal(err)
+				}
+				hexes[i] = h
+			}
+			idxs := make([]int, len(plains))
+			for i := range idxs {
+				idxs[i] = i
+			}
+			if newDictVectorLanesMulti(typ, hexes, idxs, "", "") == nil {
+				t.Skipf("no %s vector plan on this backend, so there is nothing to compare", typ)
+			}
+
+			vecFound := runBatchDict(t, path, typ, "", "", plains, 4)
+
+			t.Setenv("HASHSMITH_NO_FASTPATH", "1")
+			scalarFound := runBatchDict(t, path, typ, "", "", plains, 4)
+
+			if len(vecFound) != len(scalarFound) {
+				t.Fatalf("vector found %d targets, scalar found %d\nvector: %v\nscalar: %v",
+					len(vecFound), len(scalarFound), vecFound, scalarFound)
+			}
+			for p := range scalarFound {
+				if !vecFound[p] {
+					t.Errorf("scalar found %q and vector did not", p)
+				}
+			}
+		})
+	}
+}
+
+// TestBatchDictVectorHandlesDuplicateDigests covers the case fastTargets is
+// built to handle and a naive lookup is not: two entries in the dump with the
+// SAME digest. One candidate must satisfy both, or a dump containing the same
+// password twice would report one of them uncracked forever.
+func TestBatchDictVectorHandlesDuplicateDigests(t *testing.T) {
+	plains := []string{"alpha", "alpha", "bravo"}
+	path := writeWords(t, []string{"zzz", "alpha", "bravo", "yyy"})
+	got := runBatchDict(t, path, "md5", "", "", plains, 4)
+	if !got["alpha"] || !got["bravo"] {
+		t.Fatalf("a dump with a repeated digest did not resolve both entries: %v", got)
 	}
 }

@@ -135,3 +135,90 @@ func BenchmarkDictAttack(b *testing.B) {
 	}
 	_ = fmt.Sprint()
 }
+
+// BenchmarkBatchDictAttack is the multi-hash dictionary engine, which shares
+// the reader with the single-target one. It exists so the shared reader's cost
+// is measured on both callers rather than only the one it was tuned against.
+func BenchmarkBatchDictAttack(b *testing.B) {
+	const n = 400000
+	path := benchWordlist(b, n, []int{4, 5, 6, 7, 8, 9, 10})
+	// The verifier is deliberately trivial. This benchmark exists to measure
+	// the READER and the batch pipeline, and a verify that hashes and
+	// hex-encodes would allocate several times per word and bury exactly what
+	// is being measured — the first version of this benchmark did, reporting
+	// four allocations per word that had nothing to do with the reader.
+	verify := func(string) bool { return false }
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var attempts int64
+		batchDictAttack(context.Background(), path, 0, 0, verify, 4, nil, &attempts, nil)
+		if attempts != int64(n) {
+			b.Fatalf("attempts = %d, want %d", attempts, n)
+		}
+	}
+	b.ReportMetric(float64(n)*float64(b.N)/b.Elapsed().Seconds()/1e6, "MH/s")
+}
+
+// BenchmarkBatchDictVector exercises the multi-hash dictionary engine WITH the
+// vector cores wired, against the same engine without them. The plain
+// BenchmarkBatchDictAttack above passes a nil bundle and a trivial verifier,
+// so it measures the reader; this one measures the hashing.
+func BenchmarkBatchDictVector(b *testing.B) {
+	const n = 200000
+	const targets = 50
+	path := benchWordlist(b, n, []int{4, 5, 6, 7, 8})
+
+	hexes := make([]string, targets)
+	idxs := make([]int, targets)
+	for i := range hexes {
+		h, err := hashText(fmt.Sprintf("nomatch-%d", i), "md5", "", "")
+		if err != nil {
+			b.Fatal(err)
+		}
+		hexes[i], idxs[i] = h, i
+	}
+	// None of the wordlist matches, so every run is exhaustive and the
+	// measurement is of throughput rather than of how early it stopped.
+	byHex := make(map[string]bool, targets)
+	for _, h := range hexes {
+		byHex[h] = true
+	}
+	verify := func(pw string) bool {
+		h, err := hashText(pw, "md5", "", "")
+		return err == nil && byHex[h]
+	}
+	record := func(string, []int) bool { return false }
+
+	for _, useVector := range []bool{true, false} {
+		name := "vector"
+		if !useVector {
+			name = "scalar"
+		}
+		b.Run(name, func(b *testing.B) {
+			if !useVector {
+				b.Setenv("HASHSMITH_NO_FASTPATH", "1")
+			}
+			var vec *batchDictVector
+			if probe := newDictVectorLanesMulti("md5", hexes, idxs, "", ""); probe != nil {
+				vec = &batchDictVector{
+					newLanes: func() *dictVectorLanes {
+						return newDictVectorLanesMulti("md5", hexes, idxs, "", "")
+					},
+					record: record,
+				}
+			}
+			if useVector && vec == nil {
+				b.Skip("no md5 vector plan on this backend")
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var attempts int64
+				batchDictAttack(context.Background(), path, 0, 0, verify, 4, nil, &attempts, vec)
+				if attempts != int64(n) {
+					b.Fatalf("attempts = %d, want %d", attempts, n)
+				}
+			}
+			b.ReportMetric(float64(n)*float64(b.N)/b.Elapsed().Seconds()/1e6, "MH/s")
+		})
+	}
+}

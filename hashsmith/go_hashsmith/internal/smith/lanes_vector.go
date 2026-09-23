@@ -30,11 +30,14 @@ import "os"
 // holding reusable scratch, exactly like bcryptlane.Hasher, and is not safe
 // for concurrent use.
 type dictVectorLanes struct {
-	algo   *fastAlgo
-	target [16]byte
-	tb     *transposedBatch
-	out    [][16]byte
-	group  int
+	algo *fastAlgo
+	// ft holds every digest this run is looking for. A single-target run is
+	// simply a set of one, which is what lets the same bucketing serve
+	// `crack` and a multi-hash dump without a second copy of it.
+	ft    *fastTargets
+	tb    *transposedBatch
+	out   [][16]byte
+	group int
 
 	// buckets[n] holds pending words of length n, with the index each was
 	// seen at so a hit can be resolved back to file order. Indexed directly
@@ -76,6 +79,12 @@ type dictWord struct {
 // to check every mask segment's length; a wordlist has no segments, and the
 // per-word length check that replaces it happens in add().
 func newDictVectorLanes(typ, targetHash, salt, saltMode string) *dictVectorLanes {
+	return newDictVectorLanesMulti(typ, []string{targetHash}, []int{0}, salt, saltMode)
+}
+
+// newDictVectorLanesMulti is the multi-target form: every digest in hexes is
+// looked for at once, and a hit reports the caller's own index for it.
+func newDictVectorLanesMulti(typ string, hexes []string, idxs []int, salt, saltMode string) *dictVectorLanes {
 	if vectorBackendName() == "" {
 		return nil
 	}
@@ -88,7 +97,7 @@ func newDictVectorLanes(typ, targetHash, salt, saltMode string) *dictVectorLanes
 	if !ok || algo.shape.group() <= 0 {
 		return nil
 	}
-	target, ok := md5TargetBytes(targetHash)
+	ft, ok := newFastTargets(hexes, idxs)
 	if !ok {
 		return nil
 	}
@@ -106,7 +115,7 @@ func newDictVectorLanes(typ, targetHash, salt, saltMode string) *dictVectorLanes
 	}
 	return &dictVectorLanes{
 		algo:    algo,
-		target:  target,
+		ft:      ft,
 		tb:      newTransposedBatch(algo.shape),
 		out:     make([][16]byte, algo.shape.group()),
 		group:   algo.shape.group(),
@@ -148,25 +157,26 @@ func (d *dictVectorLanes) accepts(word string) bool {
 	return true
 }
 
+// hitSink is told about each candidate whose digest was one of the targets,
+// with the caller's own indices for the targets it matched. Returning true
+// stops the group being scanned any further — which is what a single-target
+// run wants, and what a multi-hash run wants only once every target is found.
+type hitSink func(dw dictWord, idxs []int) bool
+
 // add queues a word. When its bucket reaches a full group the group is hashed
-// immediately; hits are accumulated rather than returned, because a caller
-// testing a whole batch wants the EARLIEST hit in that batch and cannot know
-// it until the batch is done.
-//
-// hits is the running best: the lowest-seq hit seen so far, or seq < 0 for
-// none. Returns the number of candidates actually hashed, for attempt
-// accounting.
-func (d *dictVectorLanes) add(word, ruleLabel string, seq int, best *dictWord) int {
+// immediately, and any hit is handed to sink. Returns the number of candidates
+// actually hashed, for attempt accounting.
+func (d *dictVectorLanes) add(word, ruleLabel string, seq int, sink hitSink) int {
 	n := len(word)
 	d.buckets[n] = append(d.buckets[n], dictWord{word: word, ruleLabel: ruleLabel, seq: seq})
 	if len(d.buckets[n]) < d.group {
 		return 0
 	}
-	return d.flushBucket(n, best)
+	return d.flushBucket(n, sink)
 }
 
 // flushBucket hashes everything pending at length n and clears it.
-func (d *dictVectorLanes) flushBucket(n int, best *dictWord) int {
+func (d *dictVectorLanes) flushBucket(n int, sink hitSink) int {
 	pending := d.buckets[n]
 	if len(pending) == 0 {
 		return 0
@@ -202,10 +212,11 @@ func (d *dictVectorLanes) flushBucket(n int, best *dictWord) int {
 		// Only lanes 0..used-1 hold real candidates; the rest hash the empty
 		// candidate under this salt and must never count as a hit.
 		for i := 0; i < used; i++ {
-			if d.out[i] == d.target {
-				if best.seq < 0 || chunk[i].seq < best.seq {
-					*best = chunk[i]
-				}
+			idxs, ok := d.ft.lookup(&d.out[i])
+			if !ok {
+				continue
+			}
+			if sink(chunk[i], idxs) {
 				break
 			}
 		}
@@ -217,10 +228,10 @@ func (d *dictVectorLanes) flushBucket(n int, best *dictWord) int {
 // flushAll hashes every partial bucket. A batch is not finished until this has
 // run: words still sitting in a bucket have not been tested, and dropping them
 // would report a crackable password as not found.
-func (d *dictVectorLanes) flushAll(best *dictWord) int {
+func (d *dictVectorLanes) flushAll(sink hitSink) int {
 	hashed := 0
 	for n := range d.buckets {
-		hashed += d.flushBucket(n, best)
+		hashed += d.flushBucket(n, sink)
 	}
 	return hashed
 }

@@ -26,7 +26,6 @@ package smith
 // digest is not a concatenation at all.
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -1040,7 +1039,28 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 	case "prince":
 		runPass(princeLay, false)
 	default: // dict
-		batchDictAttack(ctx, wordlist, resumeFrom, limit, verify, workers, rules, &atomicAttempts)
+		// Offer the dictionary run the vector cores, exactly as the mask and
+		// brute paths are offered batchFastLayout. Eligibility is resolved
+		// once here; each worker builds its own lanes, which carry scratch.
+		//
+		// A nil bundle means no vector plan for this type, salt or backend,
+		// and the run stays on the scalar verifier it always used.
+		var vec *batchDictVector
+		if len(active) > 0 {
+			hexes := make([]string, len(active))
+			for i, idx := range active {
+				hexes[i] = batch[idx].key
+			}
+			if probe := newDictVectorLanesMulti(typ, hexes, active, salt, saltMode); probe != nil {
+				vec = &batchDictVector{
+					newLanes: func() *dictVectorLanes {
+						return newDictVectorLanesMulti(typ, hexes, active, salt, saltMode)
+					},
+					record: record,
+				}
+			}
+		}
+		batchDictAttack(ctx, wordlist, resumeFrom, limit, verify, workers, rules, &atomicAttempts, vec)
 		interrupted = ctx.Err() != nil
 	}
 
@@ -1066,8 +1086,22 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 // of the whole wordlist, through the SAME dictWordBounds arithmetic dictAttack
 // and --stdout use — so a dump sliced across machines moves whole words, each
 // carrying its full rule expansion, exactly as a single-target dict slice does.
+// batchDictVector carries what a multi-hash dictionary run needs to reach the
+// vector cores: a factory for per-worker lanes (each owns a transposedBatch of
+// scratch and cannot be shared) and the sink that records a hit.
+//
+// nil means the run stays on the scalar verifier, which is where every
+// multi-hash dictionary candidate went before this existed.
+type batchDictVector struct {
+	newLanes func() *dictVectorLanes
+	// record marks the targets a candidate matched and reports true once
+	// every target in the run has been found — the engine's signal to stop.
+	record func(candidate string, idxs []int) bool
+}
+
 func batchDictAttack(parent context.Context, wordlistPath string, skip, limit int64,
-	verify func(string) bool, workers int, rules *ruleEngine, atomicAttempts *int64) {
+	verify func(string) bool, workers int, rules *ruleEngine, atomicAttempts *int64,
+	vec *batchDictVector) {
 
 	// The source line ("Wordlist: ...") is announced once per run at the CLI
 	// entry point (resolveWordlistForMode), not once per target here.
@@ -1083,40 +1117,10 @@ func batchDictAttack(parent context.Context, wordlistPath string, skip, limit in
 	defer cancel()
 
 	batchCh := make(chan []string, workers*4)
-	go func() {
-		defer close(batchCh)
-		scanner := bufio.NewScanner(f)
-		scanner.Buffer(make([]byte, 1<<20), 1<<20)
-		cur := make([]string, 0, dictBatchSize)
-		var idx int64
-		for scanner.Scan() {
-			// Verbatim, empty lines included — see wordlist.go.
-			word := scanner.Text()
-			i := idx
-			idx++
-			if i < skip {
-				continue
-			}
-			if upper >= 0 && i >= upper {
-				break
-			}
-			cur = append(cur, word)
-			if len(cur) >= dictBatchSize {
-				select {
-				case batchCh <- cur:
-					cur = make([]string, 0, dictBatchSize)
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-		if len(cur) > 0 {
-			select {
-			case batchCh <- cur:
-			case <-ctx.Done():
-			}
-		}
-	}()
+	// The same reader the single-target engine uses — it was written twice,
+	// identically, and the second copy did not get the arena that removed
+	// one allocation per word. See streamWordlistBatches.
+	go streamWordlistBatches(ctx, f, skip, upper, batchCh)
 
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
@@ -1127,7 +1131,48 @@ func batchDictAttack(parent context.Context, wordlistPath string, skip, limit in
 				atomic.AddInt64(atomicAttempts, localAttempts)
 				wg.Done()
 			}()
+			// dvl is this worker's own vector hasher — it holds a
+			// transposedBatch of scratch and is not safe to share. done is
+			// set when the sink reports every target found.
+			var dvl *dictVectorLanes
+			done := false
+			if vec != nil {
+				dvl = vec.newLanes()
+			}
+			sink := func(dw dictWord, idxs []int) bool {
+				if vec.record(dw.word, idxs) {
+					done = true
+					cancel()
+					return true
+				}
+				// More targets are still outstanding, so the rest of this
+				// group is still worth looking at: unlike a single-target
+				// run, a hit here is not the end.
+				return false
+			}
+			// flushVec empties every pending length bucket. It must run
+			// after every batch and before every return, or a word still
+			// sitting in a bucket is never hashed and a crackable target is
+			// reported as not found.
+			flushVec := func() {
+				if dvl == nil {
+					return
+				}
+				localAttempts += int64(dvl.flushAll(sink))
+				if localAttempts >= 1024 {
+					atomic.AddInt64(atomicAttempts, localAttempts)
+					localAttempts = 0
+				}
+			}
 			try := func(pw string) bool {
+				if dvl != nil && dvl.accepts(pw) {
+					localAttempts += int64(dvl.add(pw, "", 0, sink))
+					if localAttempts >= 1024 {
+						atomic.AddInt64(atomicAttempts, localAttempts)
+						localAttempts = 0
+					}
+					return done
+				}
 				localAttempts++
 				if localAttempts >= 1024 {
 					atomic.AddInt64(atomicAttempts, localAttempts)
@@ -1142,27 +1187,38 @@ func batchDictAttack(parent context.Context, wordlistPath string, skip, limit in
 			for {
 				select {
 				case <-ctx.Done():
+					flushVec()
 					return
 				case words, ok := <-batchCh:
 					if !ok {
+						flushVec()
 						return
 					}
 					for _, word := range words {
 						select {
 						case <-ctx.Done():
+							flushVec()
 							return
 						default:
 						}
 						if try(word) {
+							flushVec()
 							return
 						}
 						if rules != nil {
 							for _, mw := range rules.expand(word) {
 								if try(mw.password) {
+									flushVec()
 									return
 								}
 							}
 						}
+					}
+					// End of batch: anything still bucketed has not been
+					// hashed yet.
+					flushVec()
+					if done {
+						return
 					}
 				}
 			}
