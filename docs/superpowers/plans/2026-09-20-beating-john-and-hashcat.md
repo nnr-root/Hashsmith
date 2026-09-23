@@ -3116,7 +3116,21 @@ hccap stores the station's first and the AP's second, the opposite of hccapx.
 Reversed, the record parses, looks right, and never cracks — so the test builds
 one from the real Coherer handshake and requires it to crack.
 
-Extractors: 48 → 76. Container sniffers: 18 → 29. Of John's 118 converters, 48
+macOS came next, and it needed a property-list reader: an account's password
+material is a binary plist stored as a data value inside another binary plist,
+so the scan-for-a-magic-string trick that works elsewhere finds the inner
+plist's header and nothing that says where it ends. Three parts of the binary
+format fail quietly rather than loudly — the trailer is the only fixed landmark
+so a file is read from its last thirty-two bytes first, a collection of more
+than fourteen entries states its length as a separate object, and a UTF-16
+string's length is in CHARACTERS where every other length is in bytes.
+
+The fixtures for it are built by macOS's own `plutil`. A hand-written binary
+plist tests the reader against its author's understanding of the format; a
+plutil-written one tests it against Apple's. That is the same argument as the
+`openssl enc` defects and the Wireshark capture, and it is now the house rule.
+
+Extractors: 48 → 78. Container sniffers: 18 → 30. Of John's 118 converters, 45
 still have no counterpart — down from 76. The remainder is now dominated by the
 rest of the capture family (pcap, radius, hccap), Windows and enterprise
 credential stores (DPAPImk, racf, sap, pse, ps_token, sspr), Apple documents

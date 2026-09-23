@@ -435,3 +435,13 @@ func sniffPGPDisk(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
 	}
 	return "", 0, false
 }
+
+// sniffBinaryPlist matches Apple's binary property-list header. It says the
+// file is a plist and nothing about what is in it, so it is Likely rather than
+// Certain: a macOS account file and a preferences file look identical here.
+func sniffBinaryPlist(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if !bytes.HasPrefix(head, []byte("bplist00")) {
+		return "", 0, false
+	}
+	return "Apple binary property list (\"bplist00\")", hashid.Likely, true
+}
