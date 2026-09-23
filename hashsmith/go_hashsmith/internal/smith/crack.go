@@ -37,8 +37,6 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/crypto/scrypt"
 
-	"hashsmith-go/internal/bcryptlane"
-
 	"hashsmith-go/internal/hashid"
 )
 
@@ -142,9 +140,9 @@ func runBruteOrMaskLayout(ctx context.Context, layout *keyspaceLayout, sess *ses
 	// core: several candidates advance through each Blowfish round together,
 	// which is the only way to make a CPU-bound KDF faster. See
 	// internal/bcryptlane and docs/superpowers/specs/2026-09-06-bcrypt-lanes-design.md.
-	if newHasher, ok := newLaneHasher(typ, effHash, effSalt, saltMode); ok {
+	if newHasher, lanes, ok := newLaneHasher(typ, effHash, effSalt, saltMode); ok {
 		return runSessionRunner(ctx, layout, sess, resumeFrom, func(watermark *int64) (string, error) {
-			return runLayoutLanes(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark, newHasher)
+			return runLayoutLanes(ctx, layout, resumeFrom, limit, workers, atomicAttempts, watermark, newHasher, lanes)
 		})
 	}
 	// Anything the two odometer paths refused can still reach a batched core
@@ -2056,10 +2054,10 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 
 	// newHasher/laned: whether typ has an interleaved multi-candidate bcrypt
 	// core for this target (bare bcrypt, single target, no external salt).
-	// When laned, each worker below hashes candidates bcryptlane.Lanes at a
+	// When laned, each worker below hashes candidates `lanes` at a
 	// time instead of one at a time; everything else falls back to the
 	// scalar verify path unchanged.
-	newHasher, laned := newLaneHasher(typ, targetHash, salt, saltMode)
+	newHasher, laneWidth, laned := newLaneHasher(typ, targetHash, salt, saltMode)
 
 	// vectorized: whether this target can go through a multi-candidate vector
 	// core (md5/md4/ntlm and the salted digests that have one). Eligibility is
@@ -2084,7 +2082,7 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 			// when the factory failed and we fall back to scalar verify).
 			// It is never shared across goroutines: it carries reusable
 			// per-lane scratch and is not safe for concurrent use.
-			var lh *bcryptlane.Hasher
+			var lh laneHasher
 			if laned {
 				lh = newHasher()
 			}
@@ -2114,9 +2112,9 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 			}
 
 			type cand struct{ pw, ruleLabel string }
-			buf := make([]cand, 0, bcryptlane.Lanes)
-			pwBuf := make([][]byte, bcryptlane.Lanes)
-			outBuf := make([]bool, bcryptlane.Lanes)
+			buf := make([]cand, 0, laneWidth)
+			pwBuf := make([][]byte, laneWidth)
+			outBuf := make([]bool, laneWidth)
 
 			// flush tests everything buffered so far and reports the FIRST
 			// hit in buffer order, so a laned run reports the same password
@@ -2263,7 +2261,7 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 					return true
 				}
 				buf = append(buf, cand{pw, ruleLabel})
-				if len(buf) == bcryptlane.Lanes {
+				if len(buf) == laneWidth {
 					return flush()
 				}
 				return false

@@ -10,30 +10,62 @@ import (
 	"hashsmith-go/internal/bcryptlane"
 )
 
-// newLaneHasher reports whether typ has an interleaved multi-candidate core for
-// this target and, if so, returns a factory producing one hasher per worker.
+// laneHasher verifies a batch of candidates against one target, several at a
+// time, by advancing their independent computations together.
 //
-// It returns a FACTORY rather than a shared *Hasher on purpose: the hasher owns
+// Two implement it, for the same reason and by different means. bcrypt's core
+// interleaves the Blowfish rounds of several candidates because a deliberately
+// slow KDF has no other lever. descrypt's interleaves its DES chains because
+// after the table work in descrypt_fast.go the loop is latency-bound on its
+// own dependency chain rather than throughput-bound — round j cannot start
+// addressing a load until round j-1 has resolved.
+type laneHasher interface {
+	// Run verifies len(pw) candidates, writing each verdict to out.
+	Run(pw [][]byte, out []bool)
+}
+
+// newLaneHasher reports whether typ has an interleaved multi-candidate core for
+// this target and, if so, returns a factory producing one hasher per worker
+// and the number of candidates that core advances at a time.
+//
+// It returns a FACTORY rather than a shared hasher on purpose: a hasher owns
 // reusable lane scratch so a batch allocates nothing, which makes it unsafe for
 // concurrent use. One per worker, never one shared.
 //
-// bcrypt only, single target only. Every lane in a batch executes the same
-// iteration count in lockstep, so they must share one cost and one salt - which
-// is true of one target and false of a dump. Dumps keep the scalar path.
-func newLaneHasher(typ, targetHash, salt, saltMode string) (func() *bcryptlane.Hasher, bool) {
-	if canonicalHashType(typ) != "bcrypt" || salt != "" {
-		return nil, false
-	}
-	if _, err := bcryptlane.NewHasher(targetHash); err != nil {
-		return nil, false
-	}
-	return func() *bcryptlane.Hasher {
-		h, err := bcryptlane.NewHasher(targetHash)
-		if err != nil {
-			return nil // caller falls back to the scalar verify
+// Single target only, both types. Every lane in a batch runs in lockstep, so
+// they must share one cost and one salt — true of one target, false of a dump.
+// Dumps keep the scalar path.
+func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, int, bool) {
+	switch canonicalHashType(typ) {
+	case "bcrypt":
+		if salt != "" {
+			return nil, 0, false
 		}
-		return h
-	}, true
+		if _, err := bcryptlane.NewHasher(targetHash); err != nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			h, err := bcryptlane.NewHasher(targetHash)
+			if err != nil {
+				return nil // caller falls back to the scalar verify
+			}
+			return h
+		}, bcryptlane.Lanes, true
+	case "descrypt":
+		if salt != "" {
+			return nil, 0, false
+		}
+		if newDescryptLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newDescryptLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, descryptLanes, true
+	}
+	return nil, 0, false
 }
 
 // runLayoutLanes is runLayout's bcrypt-laned twin: identical bounds
@@ -45,7 +77,7 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() *bcryptlane.H
 // calling a scalar verify closure once per candidate.
 func runLayoutLanes(ctx context.Context, l *keyspaceLayout, resumeFrom, limit int64,
 	workers int, atomicAttempts *int64, watermark *int64,
-	newHasher func() *bcryptlane.Hasher) (string, error) {
+	newHasher func() laneHasher, lanes int) (string, error) {
 
 	if resumeFrom < 0 {
 		resumeFrom = 0
@@ -87,7 +119,7 @@ func runLayoutLanes(ctx context.Context, l *keyspaceLayout, resumeFrom, limit in
 			defer wg.Done()
 			// Each worker owns one Hasher for the life of the run: it carries
 			// reusable lane scratch and must never be shared (see lanes.go).
-			var lh *bcryptlane.Hasher
+			var lh laneHasher
 			for {
 				c := atomic.AddInt64(&nextChunk, 1) - 1
 				start := c * keyspaceChunk
@@ -116,9 +148,9 @@ func runLayoutLanes(ctx context.Context, l *keyspaceLayout, resumeFrom, limit in
 
 				var local int64
 				iter := 0
-				cands := make([]string, 0, bcryptlane.Lanes)
-				pwBuf := make([][]byte, bcryptlane.Lanes)
-				outBuf := make([]bool, bcryptlane.Lanes)
+				cands := make([]string, 0, lanes)
+				pwBuf := make([][]byte, lanes)
+				outBuf := make([]bool, lanes)
 
 				// flush tests everything buffered, reporting the FIRST hit in
 				// buffer order so a laned run reports the same candidate an
@@ -173,14 +205,14 @@ func runLayoutLanes(ctx context.Context, l *keyspaceLayout, resumeFrom, limit in
 						}
 					}
 					cands = append(cands, l.candidate(idx))
-					if len(cands) == bcryptlane.Lanes {
+					if len(cands) == lanes {
 						if flush() {
 							return
 						}
 					}
 				}
 				// End of chunk: keyspaceChunk (4096) is a multiple of
-				// bcryptlane.Lanes (4), so an interior chunk's tail is always
+				// the lane width, so an interior chunk's tail is always
 				// empty and this flush is a no-op there. It is load-bearing for
 				// the run's FINAL chunk (whose end is bound, not lane-aligned)
 				// and for a resume-start chunk whose from is not lane-aligned

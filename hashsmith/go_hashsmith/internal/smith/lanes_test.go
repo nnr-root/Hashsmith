@@ -246,7 +246,7 @@ func TestLanesRespectSessionWatermark(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, ok := newLaneHasher("bcrypt", string(crypt), "", "prefix")
+	h, lanes, ok := newLaneHasher("bcrypt", string(crypt), "", "prefix")
 	if !ok {
 		t.Fatal("newLaneHasher declined a valid bcrypt target")
 	}
@@ -256,7 +256,7 @@ func TestLanesRespectSessionWatermark(t *testing.T) {
 	}
 	var attempts, watermark int64
 	// Start past every candidate except the last few; the answer is index 675.
-	got, err := runLayoutLanes(context.Background(), layout, 670, 0, 2, &attempts, &watermark, h)
+	got, err := runLayoutLanes(context.Background(), layout, 670, 0, 2, &attempts, &watermark, h, lanes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestLanesFlushFinalChunkTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, ok := newLaneHasher("bcrypt", string(crypt), "", "prefix")
+	h, lanes, ok := newLaneHasher("bcrypt", string(crypt), "", "prefix")
 	if !ok {
 		t.Fatal("newLaneHasher declined a valid bcrypt target")
 	}
@@ -304,7 +304,7 @@ func TestLanesFlushFinalChunkTail(t *testing.T) {
 		t.Fatalf("test setup: index 38 is %q, want \"ccc\"", got)
 	}
 	var attempts, watermark int64
-	got, err := runLayoutLanes(context.Background(), layout, 0, 0, 1, &attempts, &watermark, h)
+	got, err := runLayoutLanes(context.Background(), layout, 0, 0, 1, &attempts, &watermark, h, lanes)
 	if err != nil {
 		t.Fatal(err)
 	}
