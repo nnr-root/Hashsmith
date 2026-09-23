@@ -116,6 +116,9 @@ var universalExtractorRegistry = []extractorDefinition{
 	{name: "ibmiscanner2smith", aliases: []string{"as400scanner2smith"}, input: "IBM i scanner output", formats: "AS/400 username-salted SHA-1", run: runExtractIBMiScanner},
 	{name: "mosquitto2smith", input: "Mosquitto password file", formats: "MQTT broker salted SHA-512 and PBKDF2-HMAC-SHA512", run: runExtractMosquitto},
 	{name: "pem2smith", input: "encrypted PKCS#8 PEM key", formats: "$PEM$ (John and hashcat's spelling of what ssh2smith writes as $pkcs8$)", run: runExtractPEM},
+	{name: "money2smith", input: "Microsoft Money 2002-2007 file", formats: "Money MD5 and SHA-1 keyed files", run: runExtractMoney},
+	{name: "bitshares2smith", input: "BitShares wallet (SQLite or LevelDB)", formats: "BitShares type 0 and the LevelDB checksum", run: runExtractBitShares},
+	{name: "ps_token2smith", aliases: []string{"pstoken2smith"}, input: "file of PS_TOKEN cookie values", formats: "PeopleSoft node password, as a dynamic expression", run: runExtractPSToken},
 	{name: "vmx2smith", aliases: []string{"vmwarevmx2smith"}, input: "VMware .vmx", formats: "VMware encryption.keySafe", run: runExtractVMX},
 	{name: "zip2smith", aliases: []string{"extract-hash", "zip2hash"}, input: ".zip", formats: "ZipCrypto/WinZip AES", run: runExtractHash},
 }

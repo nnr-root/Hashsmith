@@ -3162,7 +3162,27 @@ reading the same key the other way and cracking it.
 This is the first place the project has a capability John does not, rather than
 a gap it was closing.
 
-Extractors: 48 → 85. Container sniffers: 18 → 30. Of John's 118 converters, 37
+Money, BitShares and PeopleSoft's PS_TOKEN followed, and two of the three are
+mostly an argument about what NOT to emit.
+
+Money's check value sits at a base offset plus the first byte of its own salt,
+under a fixed 132-byte XOR pad that is the same in every installation. Its test
+builds the fixture backwards from John's record — the record says what the
+unmasked header must contain, the pad says what the file must hold to produce
+it — so a wrong offset shows up at once.
+
+BitShares comes in three shapes and only two are worth a record: the backup
+file's wraps a secp256k1 key, and nothing in it can say whether a password was
+right without elliptic-curve arithmetic. The verifier already declined that
+record; the extractor now declines it at the other end too, so a user learns it
+from the file rather than from a run that finds nothing.
+
+PS_TOKEN's salt is not in the cookie as written — the payload is DEFLATE
+compressed, so the salt has to be decompressed out before the record can exist.
+And a token whose MAC is the SHA-1 of its own data is signed with an EMPTY key:
+that node has no password, which is reported rather than turned into a record.
+
+Extractors: 48 → 88. Container sniffers: 18 → 30. Of John's 118 converters, 34
 still have no counterpart — down from 76. The remainder is now dominated by the
 rest of the capture family (pcap, radius, hccap), Windows and enterprise
 credential stores (DPAPImk, racf, sap, pse, ps_token, sspr), Apple documents
