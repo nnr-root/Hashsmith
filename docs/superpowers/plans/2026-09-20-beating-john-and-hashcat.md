@@ -2982,8 +2982,39 @@ asserting the extractor reproduces that record byte for byte and that it still
 cracks with the password the original file used. A hand-written fixture only
 proves the parser agrees with its author.
 
-Extractors: 48 → 55. Container sniffers: 18 → 23. Sixty-three of John's
-converters still have no counterpart.
+Ten more followed, chosen the same way: Lotus Notes .id, andOTP, Dashlane,
+Padlock, Enpass, FreeBSD GELI, OpenBSD softraid, FileZilla Server, McAfee ePO
+and StarOffice.
+
+Four of those are worth keeping a note on.
+
+**andOTP has no header at all.** The backup file is a 12-byte nonce, the
+ciphertext and a 16-byte GCM tag, so nothing identifies it and any file of
+thirty bytes has the same shape. The extractor cannot refuse a wrong file —
+what saves it is that GCM carries a real authenticator, so a bad extraction
+fails loudly at crack time instead of returning nonsense.
+
+**Enpass's iteration count is not in the file.** Version 6 fixed it at 100,000
+and records nothing, so the count in the record is a constant this tool
+supplies. A database written by a version that chose differently gives a record
+that cannot crack however good the wordlist. That is a property of the format,
+but it has to be stated or it looks like a bug in the cracker.
+
+**GELI's metadata is in the LAST sector**, because GELI encrypts from byte zero
+and keeps the tail for itself. Version 0 has no authentication-algorithm field,
+so every field after it moves by two bytes — which produces a wrong salt rather
+than an error.
+
+**McAfee ePO's seed is stored after the digest and hashed before nothing.**
+dynamic_24 is sha1($p.$s), so the four bytes that follow the SHA-1 in the blob
+are the salt and the password goes first. Reversing that gives a record that
+extracts cleanly and never cracks — the failure mode with no symptom.
+
+Extractors: 48 → 65. Container sniffers: 18 → 25. Of John's 118 converters, 59
+still have no counterpart — down from 76, and the list is now dominated by
+network captures (pcap, wpapcap, radius), Kerberos artifacts (ccache, kirbi,
+krb, kdcdump) and Windows credential stores (DPAPImk, mcafee_epo's siblings),
+which is a better-shaped remainder than it was.
 
 ---
 

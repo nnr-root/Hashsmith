@@ -363,3 +363,30 @@ func sniffKnownHosts(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
 	}
 	return "an OpenSSH hashed known_hosts entry: \"|1|\" then two 28-character base64 fields", hashid.Likely, true
 }
+
+// sniffOpenBSDSoftraid looks for softraid's metadata magic anywhere in the
+// head. It does not sit at offset zero — a real image has a partition table and
+// a boot area in front of it — so this searches rather than compares, and it
+// confirms the RAID type as well, because softraid writes the same magic for
+// plain RAID volumes that have no passphrase at all.
+func sniffOpenBSDSoftraid(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	i := bytes.Index(head, []byte(softraidMagic))
+	if i < 0 || len(head)-i < 81 {
+		return "", 0, false
+	}
+	if !bytes.Equal(head[i+72:i+81], []byte("SR CRYPTO")) {
+		return "", 0, false
+	}
+	return hashid.Evidence(fmt.Sprintf(
+		"softraid magic %q with RAID type \"SR CRYPTO\" at offset %d", softraidMagic, i)), hashid.Certain, true
+}
+
+// sniffFileZillaServer matches the configuration's root element. XML is a
+// shape rather than a signature, so this reports Likely: the element name is
+// FileZilla's, but nothing stops another document from carrying it.
+func sniffFileZillaServer(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if !bytes.Contains(head, []byte("<FileZillaServer")) {
+		return "", 0, false
+	}
+	return "XML with a <FileZillaServer> root element", hashid.Likely, true
+}
