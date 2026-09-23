@@ -2941,6 +2941,52 @@ the other eight: CBC repeats them, XTS zero-fills them. John's source says
 "isn't BestCrypt great?" at that line, which is as close to a specification as
 this part of the format gets.
 
+### Phase 5, started for real
+
+Format parity closed the question the roadmap opened with, and it moved the
+bottleneck. John ships 118 converters; this shipped 48. A format nobody can
+convert into a record is a format nobody cracks, so the long tail here was
+reachable only by someone who already held a record — which is the opposite of
+how an engagement goes.
+
+Seven landed first, chosen because each had a working verifier and no way to
+reach a real file: Java KeyStore, Bouncy Castle BKS and UBER, GNOME Keyring,
+KDE KWallet, OpenSSH known_hosts, Apache htdigest, PuTTY .ppk.
+
+The two Java-shaped stores are the same problem twice. The password is checked
+over EVERY byte of the store body and nothing in the header says where that
+body ends, so finding the offset means walking each entry to its end —
+certificates, chains, timestamps — and throwing all of it away. The walk IS the
+extractor. Two details in that walk would pass a casual read: a version 1
+keystore does not name each certificate's type where version 2 does, so reading
+the name anyway eats the first two bytes of the certificate; and BKS states its
+MAC key size in BYTES at version 1 and in BITS at version 2, for the same
+twenty-byte SHA-1 key.
+
+A salted KWallet keeps its salt in a separate file beside it. An extractor
+reading only the wallet cannot produce a usable record, so the sibling is
+looked for and named when missing.
+
+known_hosts is the one where the thing being cracked is a HOSTNAME, not a
+password, and where unhashed entries must be skipped rather than emitted: they
+are already the answer.
+
+PuTTY version 3 is refused rather than misread. It replaced the unsalted pair
+of SHA-1s with Argon2, so a version 2 record built from a version 3 file would
+be answered WRONGLY, not merely fail. That is the worse outcome and the sniffer
+reports the version digit to prevent it.
+
+The test method matters as much as the extractors. Five of the seven are tested
+by REBUILDING the container from the record John's own format test carries, and
+asserting the extractor reproduces that record byte for byte and that it still
+cracks with the password the original file used. A hand-written fixture only
+proves the parser agrees with its author.
+
+Extractors: 48 → 55. Container sniffers: 18 → 23. Sixty-three of John's
+converters still have no counterpart.
+
+---
+
 Of 605 records: **603 crack**. One is detected and deliberately not guessed
 (ZipMonster, whose 50,000 MD5s per candidate are four orders of magnitude past
 everything of its width). One cannot be answered from the record at all:

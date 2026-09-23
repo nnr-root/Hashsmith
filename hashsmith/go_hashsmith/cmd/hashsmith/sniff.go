@@ -296,3 +296,70 @@ func sniffCoverage() (withSniff, total int) {
 	}
 	return withSniff, total
 }
+
+// ── Key stores, wallets and credential files ─────────────────────────────────
+
+// sniffJavaKeyStore matches Sun's magic number, which is four bytes of
+// deliberate whimsy and belongs to nothing else.
+func sniffJavaKeyStore(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if len(head) < 8 || binary.BigEndian.Uint32(head[0:4]) != jksMagic {
+		return "", 0, false
+	}
+	version := binary.BigEndian.Uint32(head[4:8])
+	if version != 1 && version != 2 {
+		return "", 0, false
+	}
+	return hashid.Evidence(fmt.Sprintf(
+		"signature 0xFEEDFEED, Java KeyStore version %d", version)), hashid.Certain, true
+}
+
+// sniffGnomeKeyring matches the keyring's own name in its first sixteen bytes.
+func sniffGnomeKeyring(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if !bytes.HasPrefix(head, []byte(gnomeKeyringMagic)) {
+		return "", 0, false
+	}
+	return "magic \"GnomeKeyring\\n\\r\\0\\n\"", hashid.Certain, true
+}
+
+// sniffKWallet matches KWallet's magic.
+func sniffKWallet(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if !bytes.HasPrefix(head, []byte(kwalletMagic)) {
+		return "", 0, false
+	}
+	return "magic \"KWALLET\\n\\r\\0\\r\\n\"", hashid.Certain, true
+}
+
+// sniffPutty matches the header line every PPK file opens with. The version
+// digit is reported because only version 2 can be turned into a record here,
+// and a user pointed at a version 3 key should learn that from the sniff
+// rather than from a failure three steps later.
+func sniffPutty(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	const tag = "PuTTY-User-Key-File-"
+	if !bytes.HasPrefix(head, []byte(tag)) || len(head) <= len(tag) {
+		return "", 0, false
+	}
+	version := head[len(tag)]
+	if version < '1' || version > '9' {
+		return "", 0, false
+	}
+	return hashid.Evidence("header \"" + tag + string(version) + "\""), hashid.Certain, true
+}
+
+// sniffKnownHosts matches a hashed known_hosts line. "|1|" opens OpenSSH's
+// hashed host format and the two base64 fields that follow are fixed-width, so
+// this is a strong match on shape — but it is still shape, and a file that
+// merely begins with those characters would match, so it does not claim proof.
+func sniffKnownHosts(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	line := head
+	if i := bytes.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	if !bytes.HasPrefix(line, []byte("|1|")) {
+		return "", 0, false
+	}
+	parts := bytes.SplitN(line, []byte("|"), 5)
+	if len(parts) < 4 || len(parts[2]) != 28 || len(parts[3]) < 28 {
+		return "", 0, false
+	}
+	return "an OpenSSH hashed known_hosts entry: \"|1|\" then two 28-character base64 fields", hashid.Likely, true
+}
