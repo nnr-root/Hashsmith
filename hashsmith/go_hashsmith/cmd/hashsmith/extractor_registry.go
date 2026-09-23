@@ -109,6 +109,10 @@ var universalExtractorRegistry = []extractorDefinition{
 	{name: "hccap2smith", input: "aircrack-ng .hccap", formats: "legacy 392-byte WPA handshake container", run: runExtractHCCAP},
 	{name: "mac2smith", aliases: []string{"macos2smith", "lion2smith"}, input: "macOS account .plist", formats: "SALTED-SHA512-PBKDF2 (macOS 10.8+)", run: runExtractMacOS, sniff: sniffBinaryPlist},
 	{name: "strip2smith", input: "STRIP password manager database", formats: "STRIP SQLCipher first page", run: runExtractSTRIP},
+	{name: "sense2smith", aliases: []string{"pfsense2smith"}, input: "pfSense / OPNsense config.xml", formats: "bcrypt, MD5 and legacy user passwords", run: runExtractPfSense},
+	{name: "apex2smith", input: "Oracle APEX credential export", formats: "APEX md5($p.$s), as a dynamic expression", run: runExtractAPEX},
+	{name: "aem2smith", input: "Adobe AEM password lines", formats: "SSPR iterated SHA-256 and SHA-512", run: runExtractAEM},
+	{name: "gitea2smith", input: "Gitea user table dump", formats: "Gitea PBKDF2-HMAC-SHA256", run: runExtractGitea},
 	{name: "vmx2smith", aliases: []string{"vmwarevmx2smith"}, input: "VMware .vmx", formats: "VMware encryption.keySafe", run: runExtractVMX},
 	{name: "zip2smith", aliases: []string{"extract-hash", "zip2hash"}, input: ".zip", formats: "ZipCrypto/WinZip AES", run: runExtractHash},
 }

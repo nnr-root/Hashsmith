@@ -3130,7 +3130,17 @@ plist tests the reader against its author's understanding of the format; a
 plutil-written one tests it against Apple's. That is the same argument as the
 `openssl enc` defects and the Wireshark capture, and it is now the house rule.
 
-Extractors: 48 → 78. Container sniffers: 18 → 30. Of John's 118 converters, 45
+Four appliance and web-application files followed — pfSense, Oracle APEX,
+Adobe AEM, Gitea — and three of them make the same point in different ways:
+none is an encrypted container, all of them hold hashes that were already
+crackable, and the whole risk is in the reading. APEX's salt is two of the
+file's three columns concatenated in an order the file does not state; AEM's
+record swaps the salt and iteration count relative to the file; Gitea's hashes
+are hex in the database and base64 in the record, and both spellings are ASCII,
+so the wrong one looks perfectly well-formed. Each failure produces a record
+that parses and never cracks.
+
+Extractors: 48 → 82. Container sniffers: 18 → 30. Of John's 118 converters, 40
 still have no counterpart — down from 76. The remainder is now dominated by the
 rest of the capture family (pcap, radius, hccap), Windows and enterprise
 credential stores (DPAPImk, racf, sap, pse, ps_token, sspr), Apple documents
