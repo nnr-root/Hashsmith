@@ -233,6 +233,91 @@ func dedupSorted(in []string) []string {
 //
 // The remaining four lines are not a gap that can close. They expand to
 // 2,030,625 and 857,375,000 rules; john generates its expansions lazily and
+
+// johnConfRuleLines returns the lines of a john.conf that are actually rules:
+// the contents of its [List.Rules:...] sections, minus the file's own
+// structure.
+//
+// John's config format has TWO comment markers, not one. Its doc/CONFIG says
+// so in as many words:
+//
+//	Comment lines start with a hash character ("#") or a semicolon (";")
+//	and are ignored.
+//
+// Only "#" used to be stripped here, so every commented-out rule beginning
+// with ";" was counted as a rule and then failed to compile, for the excellent
+// reason that ";-c T1 Q M T0 Q" is not a rule. That measured a coverage
+// number about the file's comment style rather than about this project.
+//
+// Two things hid it. The CI step meant to run the corpus test named a package
+// containing no tests, so `go test -run` matched nothing and exited 0. And
+// Homebrew's john.conf keeps its ";"-commented rules outside the
+// [List.Rules:...] sections this walks, while Debian's keeps them inside — so
+// the bug was invisible on a Mac and, on Ubuntu, dropped the measured coverage
+// to 90.5% against a 98% floor.
+func johnConfRuleLines(data string) []string {
+	var out []string
+	inRules := false
+	for _, ln := range strings.Split(data, "\n") {
+		trimmed := strings.TrimSpace(ln)
+		if strings.HasPrefix(trimmed, "[") {
+			inRules = strings.HasPrefix(strings.ToLower(trimmed), "[list.rules:")
+			continue
+		}
+		// A blank line, either comment marker, a !! pragma and a .include are
+		// all part of the file's structure rather than rules.
+		if !inRules || trimmed == "" ||
+			strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") ||
+			strings.HasPrefix(trimmed, "!") || strings.HasPrefix(trimmed, ".include") {
+			continue
+		}
+		out = append(out, ln)
+	}
+	return out
+}
+
+// TestJohnConfRuleLinesSkipsBothCommentMarkers pins the classification against
+// a file shaped like Debian's, which is the layout that exposed the bug and
+// the one no Mac has to hand.
+func TestJohnConfRuleLinesSkipsBothCommentMarkers(t *testing.T) {
+	const conf = `
+[Options]
+Wordlist = $JOHN/password.lst
+
+[List.Rules:Wordlist]
+# a hash comment
+: 
+-c l
+;# Toggle case everywhere (up to length 8), assuming that certain case
+;# combinations were already tried.
+;-c T1 Q M T0 Q
+;-c T2 Q M T[z0] T[z1] Q
+!! this is a pragma
+.include <another.conf>
+u
+
+[List.Rules:NT]
+;l Az"[1-90][0-9][0-9]" <+
+c
+`
+	got := johnConfRuleLines(conf)
+	want := []string{":", "-c l", "u", "c"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d rule lines %q, want %d %q", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if strings.TrimSpace(got[i]) != want[i] {
+			t.Errorf("line %d = %q, want %q", i, strings.TrimSpace(got[i]), want[i])
+		}
+	}
+	for _, line := range got {
+		if strings.HasPrefix(strings.TrimSpace(line), ";") {
+			t.Errorf("a semicolon-commented line survived: %q — John's doc/CONFIG "+
+				"names both \"#\" and \";\" as comment markers", line)
+		}
+	}
+}
+
 // never holds them all, while Hashsmith materialises them so a program can be
 // compiled once and reused. Those four are refused with their actual size.
 func TestJohnCorpusCoverageDoesNotRegress(t *testing.T) {
@@ -255,22 +340,9 @@ func TestJohnCorpusCoverageDoesNotRegress(t *testing.T) {
 		t.Skip("john.conf is not installed here, so corpus coverage cannot be measured")
 	}
 
-	inRules := false
 	total, ok := 0, 0
 	var failed []string
-	for _, ln := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(ln)
-		if strings.HasPrefix(trimmed, "[") {
-			inRules = strings.HasPrefix(strings.ToLower(trimmed), "[list.rules:")
-			continue
-		}
-		// A blank line, a comment, a !! pragma and a .include are all part of
-		// the file's structure rather than rules, so counting them as rules
-		// would make coverage a measure of how much of john.conf is rules.
-		if !inRules || trimmed == "" || strings.HasPrefix(trimmed, "#") ||
-			strings.HasPrefix(trimmed, "!") || strings.HasPrefix(trimmed, ".include") {
-			continue
-		}
+	for _, ln := range johnConfRuleLines(string(data)) {
 		total++
 		expanded, err := expandJohnRuleLine(ln)
 		if err != nil {

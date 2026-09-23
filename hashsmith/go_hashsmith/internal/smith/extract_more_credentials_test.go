@@ -121,16 +121,24 @@ func TestExtractPEMRoundTrip(t *testing.T) {
 }
 
 // The $PEM$ record is narrower than the file it describes, and both narrowings
-// are refused by name rather than papered over. A key from a current OpenSSL
-// hits the salt one: the default is sixteen bytes and the record has room for
-// eight, in John and in hashcat alike.
+// are refused by name rather than papered over. The salt is one of them: the
+// record has room for eight bytes, in John and in hashcat alike, and a
+// sixteen-byte salt cannot be written into it.
+//
+// The salt length is asked for explicitly rather than left to OpenSSL's
+// default, which is not a constant. OpenSSL 3.2 raised the PBKDF2 default from
+// eight bytes to sixteen, so this case used to pass on a developer's OpenSSL
+// 3.6 (default 16, refusal produced) and fail on Ubuntu's OpenSSL 3.0
+// (default 8, which the record CAN hold, so nothing was refused and the test
+// read "expected a refusal naming the alternative, got <nil>"). Naming the
+// length the subtest is about makes it the same test everywhere.
 func TestExtractPEMRefusesWhatTheRecordCannotHold(t *testing.T) {
 	for _, tc := range []struct {
 		name, want string
 		args       []string
 	}{
 		{"a sixteen-byte salt", "use ssh2smith",
-			[]string{"-v2", "aes-256-cbc", "-v2prf", "hmacWithSHA1"}},
+			[]string{"-v2", "aes-256-cbc", "-v2prf", "hmacWithSHA1", "-saltlen", "16"}},
 		{"a SHA-256 PRF", "no field for that",
 			[]string{"-v2", "aes-256-cbc", "-v2prf", "hmacWithSHA256", "-saltlen", "8"}},
 	} {
