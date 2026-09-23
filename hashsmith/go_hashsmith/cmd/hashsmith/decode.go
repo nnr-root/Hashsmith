@@ -208,7 +208,7 @@ func decodeTextLimited(text string, typ string, shift int, key string, rails int
 			return "", err
 		}
 		return string(b), nil
-	case "gzip", "zlib":
+	case "gzip", "zlib", "deflate", "brotli", "zstd", "xz", "lzma", "bzip2":
 		b, err := decodeCompressed(text, t, limit)
 		if err != nil {
 			return "", err
@@ -317,6 +317,26 @@ func decodeTextLimited(text string, typ string, shift int, key string, rails int
 		return brainfuckDecode(text)
 	case "railfence":
 		return railFenceDecode(text, rails)
+	case "affine":
+		return decodeAffine(text, key)
+	case "beaufort":
+		return beaufortApply(text, key)
+	case "autokey":
+		return decodeAutokey(text, key)
+	case "gronsfeld":
+		return decodeGronsfeld(text, key)
+	case "playfair":
+		return decodePlayfair(text, key)
+	case "bifid":
+		return decodeBifid(text, key)
+	case "nihilist":
+		return decodeNihilist(text, key)
+	case "columnar":
+		return decodeColumnar(text, key)
+	case "scytale":
+		return decodeScytale(text, rails)
+	case "adfgvx":
+		return decodeADFGVX(text, key)
 	case "polybius":
 		return polybiusDecode(text)
 	case "a1z26":

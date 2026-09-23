@@ -58,9 +58,17 @@ func magicCodecs() []string {
 		"rot5": true, "rot13": true, "rot18": true, "rot47": true,
 		"atbash": true, "leet": true, "reverse": true, "upper": true, "lower": true,
 		"nato": true, "a1z26": true, "baconian": true, "polybius": true,
+		"basen": true, "affine": true, "beaufort": true, "autokey": true,
+		"gronsfeld": true, "playfair": true, "bifid": true, "nihilist": true,
+		"columnar": true, "scytale": true, "adfgvx": true,
 		// Identity-ish and too-permissive alphabets match almost anything and
 		// would flood the beam with noise.
 		"binary": true, "decimal": true, "octal": true,
+		// Raw DEFLATE, LZMA-alone and Brotli carry no magic number, so their
+		// decoders accept arbitrary bytes and emit arbitrary bytes. zstd, xz,
+		// bzip2, gzip and zlib all start with a signature the decoder checks,
+		// which is what makes those safe for a search that tries everything.
+		"deflate": true, "lzma": true, "brotli": true,
 	}
 	var out []string
 	for _, g := range codecCatalogue {

@@ -50,6 +50,21 @@ var codecsWithoutRoundTrip = map[string]string{
 	"atbash":    "letters only",
 	"leet":      "a many-to-one substitution has no inverse",
 	"reverse":   "reverses runes, so it is not byte-preserving",
+
+	// The classical ciphers all reduce their input before transforming it:
+	// letters only, or letters and digits, and most fold case into a square.
+	// Each carries its own published vectors and round trips in
+	// codecs_classical_test.go, where the key and the input suit the cipher.
+	"affine":    "letters only; needs the same -k a,b",
+	"beaufort":  "letters only; needs the same -k key",
+	"autokey":   "letters only; needs the same -k key",
+	"gronsfeld": "letters only; needs the same -k digits",
+	"playfair":  "digraphs only: I/J share a cell, doubles are split and odd lengths padded",
+	"bifid":     "letters only, folded to lower case, and I/J share a cell",
+	"nihilist":  "letters only, folded to lower case, and I/J share a cell",
+	"columnar":  "letters and digits only; needs the same -k key",
+	"scytale":   "needs the same -r rod, which its own test supplies",
+	"adfgvx":    "letters and digits only, folded to lower case",
 }
 
 // roundTripProbes are the payloads every codec is asked to survive. They are
@@ -119,8 +134,22 @@ func TestEveryCodecRoundTrips(t *testing.T) {
 // refuses it. One key does not fit every codec, the same way one input does
 // not — z85 has taken a different input since it was added.
 func codecTestKey(name string) string {
-	if name == "basen" {
+	switch name {
+	case "basen":
 		return base62Alphabet
+	// These four will not accept a plain word: the affine key is two numbers,
+	// Gronsfeld's is digits, and the two fractionating ciphers take a square
+	// and a second key separated by a comma. Each rejects "hashsmith" with a
+	// message naming the shape it wants, which is the behaviour
+	// TestClassicalCipherKeyErrors pins.
+	case "affine":
+		return "5,8"
+	case "gronsfeld":
+		return "31415"
+	case "nihilist":
+		return "zebras,russian"
+	case "adfgvx":
+		return "privacy,german"
 	}
 	return "hashsmith"
 }

@@ -102,8 +102,40 @@ func canonicalCodecType(typ string) string {
 		return "rot18"
 	case "rot-47":
 		return "rot47"
+	case "br":
+		return "brotli"
+	case "zstandard", "zst":
+		return "zstd"
+	case "lzma2", "xz-utils":
+		return "xz"
+	case "lzma1", "alone":
+		return "lzma"
+	case "bz2", "bzip":
+		return "bzip2"
+	case "inflate", "raw-deflate":
+		return "deflate"
 	case "rail-fence":
 		return "railfence"
+	case "affine-cipher":
+		return "affine"
+	case "beaufort-cipher":
+		return "beaufort"
+	case "auto-key", "autokey-vigenere":
+		return "autokey"
+	case "gronsfeld-cipher", "vigenere-numeric":
+		return "gronsfeld"
+	case "playfair-cipher", "wheatstone":
+		return "playfair"
+	case "bifid-cipher", "delastelle":
+		return "bifid"
+	case "nihilist-cipher", "russian-nihilist":
+		return "nihilist"
+	case "columnar-transposition", "columnar-transpose", "column":
+		return "columnar"
+	case "skytale", "scytal":
+		return "scytale"
+	case "adfgx", "adfgvx-cipher":
+		return "adfgvx"
 	case "brainfuck", "bf":
 		return "brainf*ck"
 	case "a1-z26", "a1z-26":
@@ -157,6 +189,12 @@ var codecCatalogue = []typeGroup{
 		{"bech32", "Checksummed Bech32 encoding (HRP from -k)"},
 		{"bech32m", "Bech32m, the revised checksum constant"},
 		{"gzip", "gzip-compressed data with Base64 transport"},
+		{"deflate", "Raw DEFLATE with Base64 transport"},
+		{"brotli", "Brotli-compressed data with Base64 transport"},
+		{"zstd", "Zstandard-compressed data with Base64 transport"},
+		{"xz", "xz-compressed data with Base64 transport"},
+		{"lzma", "LZMA (alone) data with Base64 transport"},
+		{"bzip2", "bzip2-compressed data with Base64 transport"},
 		{"zlib", "zlib-compressed data with Base64 transport"},
 		{"bubblebabble", "Pronounceable Bubble Babble binary encoding"},
 		{"punycode", "RFC 3492 Punycode, the bare encoding without a prefix"},
@@ -197,6 +235,16 @@ var codecCatalogue = []typeGroup{
 		{"baconian", "Bacon's cipher"},
 		{"polybius", "Polybius square"},
 		{"railfence", "Rail fence transposition (use -r)"},
+		{"affine", "Affine cipher, a*x+b over the alphabet (use -k a,b)"},
+		{"beaufort", "Beaufort cipher, its own inverse (use -k)"},
+		{"autokey", "Vigenere autokey, plaintext extends the key (use -k)"},
+		{"gronsfeld", "Gronsfeld, a Vigenere keyed with digits (use -k)"},
+		{"playfair", "Playfair digraph cipher (use -k)"},
+		{"bifid", "Bifid fractionation over a Polybius square (use -k)"},
+		{"nihilist", "Nihilist additive cipher (use -k square,additive)"},
+		{"columnar", "Columnar transposition (use -k)"},
+		{"scytale", "Scytale rod transposition (use -r)"},
+		{"adfgvx", "ADFGVX fractionation and transposition (use -k square,transposition)"},
 		{"leet", "Leet substitutions"},
 		{"reverse", "Unicode-safe reversal"},
 		{"brainf*ck", "Brainfuck source generator/interpreter"},

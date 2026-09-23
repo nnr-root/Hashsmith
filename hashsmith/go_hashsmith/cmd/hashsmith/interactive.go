@@ -21,11 +21,14 @@ var interactiveCodecTypes = []string{
 	"base64", "base64raw", "base64url", "base64url-padded", "base32", "base32-nopad",
 	"base64-mime", "base32hex", "base32crockford", "zbase32", "base36", "base45", "base58",
 	"base58flickr", "base58ripple", "base58check", "base62", "base85", "adobe85", "z85", "base91",
-	"pem", "bech32", "bech32m", "gzip", "zlib", "bubblebabble",
+	"pem", "bech32", "bech32m", "gzip", "zlib", "deflate", "brotli", "zstd",
+	"xz", "lzma", "bzip2", "bubblebabble",
 	"quoted-printable", "html-entities", "json", "uu", "hex", "hex-escape", "binary", "decimal", "octal",
 	"utf16le", "utf16be", "utf32le", "utf32be", "unicode", "url", "url-form",
 	"morse", "nato", "a1z26", "caesar", "rot5", "rot13", "rot18", "rot47", "vigenere", "xor", "atbash",
 	"baconian", "leet", "reverse", "brainf*ck", "railfence", "polybius",
+	"affine", "beaufort", "autokey", "gronsfeld", "playfair", "bifid",
+	"nihilist", "columnar", "scytale", "adfgvx",
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -868,10 +871,22 @@ func askAlgoParams(reader *bufio.Reader, typ string) (shift int, key string, rai
 	switch strings.ToLower(typ) {
 	case "caesar":
 		shift, err = askInt(reader, "Caesar shift", 3)
-	case "vigenere", "xor":
+	case "vigenere", "xor", "beaufort", "autokey", "gronsfeld", "playfair",
+		"bifid", "columnar":
 		key, err = askText(reader, "Key", "")
 		if err == nil && key == "" {
 			err = fmt.Errorf("%s requires a key", typ)
+		}
+	case "affine":
+		key, err = askText(reader, "Key as a,b (a must be coprime with 26)", "5,8")
+	case "nihilist":
+		key, err = askText(reader, "Key as square,additive", "zebras,russian")
+	case "adfgvx":
+		key, err = askText(reader, "Key as square,transposition", "privacy,german")
+	case "scytale":
+		rails, err = askInt(reader, "Letters per turn of the rod", 4)
+		if err == nil && rails < 2 {
+			err = errors.New("a scytale needs a rod of at least two")
 		}
 	case "bech32", "bech32m":
 		key, err = askText(reader, "Human-readable prefix (HRP)", "hs")

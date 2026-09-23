@@ -112,7 +112,7 @@ func encodeText(text string, typ string, shift int, key string, rails int) (stri
 		return encodePEM([]byte(text)), nil
 	case "bech32", "bech32m":
 		return encodeBech32([]byte(text), key, t)
-	case "gzip", "zlib":
+	case "gzip", "zlib", "deflate", "brotli", "zstd", "xz", "lzma", "bzip2":
 		return encodeCompressed([]byte(text), t)
 	case "bubblebabble":
 		return encodeBubbleBabble([]byte(text)), nil
@@ -182,6 +182,26 @@ func encodeText(text string, typ string, shift int, key string, rails int) (stri
 		return brainfuckEncode(text), nil
 	case "railfence":
 		return railFenceEncode(text, rails)
+	case "affine":
+		return encodeAffine(text, key)
+	case "beaufort":
+		return beaufortApply(text, key)
+	case "autokey":
+		return encodeAutokey(text, key)
+	case "gronsfeld":
+		return encodeGronsfeld(text, key)
+	case "playfair":
+		return encodePlayfair(text, key)
+	case "bifid":
+		return encodeBifid(text, key)
+	case "nihilist":
+		return encodeNihilist(text, key)
+	case "columnar":
+		return encodeColumnar(text, key)
+	case "scytale":
+		return encodeScytale(text, rails)
+	case "adfgvx":
+		return encodeADFGVX(text, key)
 	case "polybius":
 		return polybiusEncode(text), nil
 	case "a1z26":
