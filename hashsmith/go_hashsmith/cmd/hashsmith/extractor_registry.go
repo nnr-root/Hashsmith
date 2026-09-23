@@ -105,6 +105,8 @@ var universalExtractorRegistry = []extractorDefinition{
 	{name: "virtualbox2smith", aliases: []string{"vbox2smith"}, input: "VirtualBox .vbox XML", formats: "AES-128/256-XTS keystore", run: runExtractVirtualBox},
 	{name: "vncpcap2smith", input: ".pcap/.pcapng capture", formats: "RFB VNC Authentication challenge-response", run: runExtractVNCPCAP},
 	{name: "wpapcap2smith", aliases: []string{"wpa2smith"}, input: ".pcap/.pcapng wireless capture", formats: "WPA/WPA2 PMKID and four-way handshakes, as hashcat 22000 records", run: runExtractWPAPCAP},
+	{name: "radius2smith", input: ".pcap/.pcapng capture with RADIUS", formats: "RADIUS shared secret from a reply and its request, as a dynamic expression", run: runExtractRADIUS},
+	{name: "hccap2smith", input: "aircrack-ng .hccap", formats: "legacy 392-byte WPA handshake container", run: runExtractHCCAP},
 	{name: "vmx2smith", aliases: []string{"vmwarevmx2smith"}, input: "VMware .vmx", formats: "VMware encryption.keySafe", run: runExtractVMX},
 	{name: "zip2smith", aliases: []string{"extract-hash", "zip2hash"}, input: ".zip", formats: "ZipCrypto/WinZip AES", run: runExtractHash},
 }

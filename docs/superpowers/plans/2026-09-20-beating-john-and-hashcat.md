@@ -3099,7 +3099,20 @@ cracks with "Induction" and its PMKID does not.
 
 ### Where the remainder is
 
-Extractors: 48 → 74. Container sniffers: 18 → 29. Of John's 118 converters, 50
+RADIUS followed, and it is the one extractor here that attacks something other
+than a password: the shared secret between a network access server and the
+RADIUS server. The Response Authenticator in every reply is MD5 over the reply
+with the request's authenticator substituted in, followed by the secret — so a
+reply plus its request is an offline dictionary attack at one MD5 per
+candidate. That is Joshua Hill's 2001 attack, RADIUS still works this way, and
+the secret is usually typed into two devices once and never changed.
+
+hccap came with it. The field that cannot be guessed is which nonce is whose:
+hccap stores the station's first and the AP's second, the opposite of hccapx.
+Reversed, the record parses, looks right, and never cracks — so the test builds
+one from the real Coherer handshake and requires it to crack.
+
+Extractors: 48 → 76. Container sniffers: 18 → 29. Of John's 118 converters, 48
 still have no counterpart — down from 76. The remainder is now dominated by the
 rest of the capture family (pcap, radius, hccap), Windows and enterprise
 credential stores (DPAPImk, racf, sap, pse, ps_token, sspr), Apple documents
