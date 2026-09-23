@@ -20,3 +20,6 @@ graphify-out/
 
 # git worktrees created for isolated task execution
 .claude/worktrees/
+
+# go test -cpuprofile leaves the test binary behind
+hashsmith/go_hashsmith/smith.test

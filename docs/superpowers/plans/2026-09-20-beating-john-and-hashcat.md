@@ -409,6 +409,78 @@ costs real effort to re-investigate.
 
 Not checked: `--gpu` silently ignoring `-s/--salt`, which needs a GPU build.
 
+### 4.2 What the three confirmations became
+
+**`--session` for `-M dict`** now says so, and names `--skip/--limit` as the
+way to split a dictionary run instead. The mode list was written twice — a map
+in batch.go and an inline `||` chain in doCrack — under a comment instructing
+readers to keep them in step, which is an instruction a compiler cannot check.
+They had not drifted on WHICH modes qualify; they had drifted on what happens
+to a mode that does not. One map now answers for both.
+
+**The fast path for dict.** The hypothesis recorded above — that `gen` being
+positional made this mostly a matter of allocation — was WRONG, and worth
+leaving on the record as wrong. The obstacle is that a `transposedBatch` is
+fixed-length between resets: every lane of a SIMD group must hold a candidate
+of the same length, because the padded block carries one bit length for the
+whole group. A mask segment produces same-length candidates by construction; a
+wordlist produces "cat", "password", "hunter2" in a row.
+
+So the words are bucketed by length and each bucket is poured into the batch a
+group at a time. Paired benchmark, same conditions: **~11x on a uniform-length
+list and ~9x on a mixed one** against the generic scalar verifier. End to end
+through the CLI the gain is smaller — about 1.45x on a 12M-word list — because
+the CLI's scalar path was already faster than the generic verifier AND because
+the bottleneck has moved: a profile of the dict pipeline is now 61% scheduler
+(`runtime.usleep`, `pthread_cond_signal`, `cond_wait`), not hashing. Workers
+drain a 512-word batch through the vector core in microseconds and park. The
+reader and the channel handoff are the next thing to fix, and `BenchmarkDictAttack`
+is in the tree to measure it.
+
+Two real defects were introduced writing this and caught before landing, both
+by differential testing against the scalar path rather than by inspection:
+
+  - NTLM with any non-ASCII word was MISSED. The transposed fill expands each
+    candidate byte to (b, 0x00), which is UTF-16LE only for ASCII;
+    `fastPathEligible` protects mask runs by refusing a charset with any byte
+    >= 0x80, but a wordlist is arbitrary UTF-8 nobody chose byte by byte. The
+    check had to move per word. A miss is the worst shape of bug here: "Not
+    found" for a password sitting in the list.
+  - Salted md5 with an EMPTY password was missed, because the code inferred
+    "have I reset the batch yet" from `tb.length`, whose zero value is also a
+    real bucket length. `runLayoutFast` starts its own `curLen` at -1 for
+    exactly this reason and the new code had not copied it.
+
+**descrypt.** The lead said "not bitsliced", and it is not — but that was not
+the first problem. The implementation was textbook bit-at-a-time DES: every
+permutation walked its table one bit per iteration, so a single password cost
+on the order of forty thousand loop iterations. Three ordinary transformations,
+each verified against the bit-at-a-time code rather than against each other:
+
+  - S-box and P composed into eight pre-permuted 64-entry tables (the standard
+    SP-box form), and the E expansion driven by four byte-indexed tables. A
+    permutation is linear over bit positions, so both tables are generated from
+    the very tables the reference walks.
+  - The salt's E-swap as three mask operations instead of a 24-iteration loop
+    with a branch.
+  - IP and FP hoisted out of the iteration loop entirely. They are inverses, so
+    keeping the state in the IP domain means iteration n+1 no longer permutes
+    back what iteration n just permuted: 50 permutations become 2. The same
+    fusion applies to BSDi extended crypt, whose count field routinely asks for
+    tens of thousands of iterations, so it gains far more than descrypt's 25.
+
+Round function: 234ns to 9.5ns in one paired run. End to end, one worker:
+**10.45 kH/s to ~120 kH/s, about 11x.** John on the same machine is still
+ahead — its DES is bitsliced across 128 lanes — but the gap is now roughly
+14x rather than roughly 280x, and bitslicing remains available as a separate
+and much larger project rather than the only thing that could have helped.
+
+Equivalence is asserted exhaustively over all 4096 descrypt salts, over 24-bit
+BSDi salts, and across random keys and blocks, always against the
+bit-at-a-time original — which stays in the tree as the authority. The salt
+mask shifted the wrong way in its first draft and those tests caught it on
+salt bit 0 alone.
+
 **What this reorders.** The `l.gen != nil` condition is the highest-value
 finding, because dictionary attacks are the mode real engagements actually
 run, and because it is one condition rather than a diffuse problem. Note that

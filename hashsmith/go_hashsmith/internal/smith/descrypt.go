@@ -209,11 +209,13 @@ func descryptRaw(password, salt string) (string, error) {
 
 	ks := desSubkeys(key)
 
-	// Encrypt the all-zero block 25 times.
-	var block uint64
-	for i := 0; i < 25; i++ {
-		block = desEncryptBlock(block, ks, saltVal)
-	}
+	// Encrypt the all-zero block 25 times, through the SP-box round function.
+	// The salt mask is derived once here rather than per round: it depends
+	// only on the record. See descrypt_fast.go — and note that the
+	// bit-at-a-time desEncryptBlock above is still the authority this is
+	// tested against, which is why it stays.
+	saltMask := descryptSaltMask(saltVal)
+	block := desIterateZeroBlock(&ks, saltMask, 25)
 
 	return salt[:2] + descryptPack(block), nil
 }

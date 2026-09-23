@@ -80,15 +80,17 @@ func bsdiCryptRaw(candidate, target string) (string, error) {
 	// "abcdefgh" and refused every longer password — the exact signature of a
 	// correct first block and a wrong fold.
 	for off := 8; off < len(pw); off += 8 {
-		key = desEncryptBlock(key, ks, 0)
+		key = desEncryptBlockFast(key, &ks, 0)
 		key ^= bsdiKeyFromBlock(pw, off)
 		ks = desSubkeys(key)
 	}
 
-	var block uint64
-	for i := 0; i < rounds; i++ {
-		block = desEncryptBlock(block, ks, uint32(saltVal))
-	}
+	// The iteration count is the whole point of this scheme — a record can ask
+	// for millions — so this loop is where all of its cost lives. See
+	// desIterateZeroBlock: it is the same loop with the per-iteration IP and
+	// FP removed, which for a count in the tens of thousands is nearly all of
+	// the permutation work.
+	block := desIterateZeroBlock(&ks, descryptSaltMask(uint32(saltVal)), rounds)
 	return bsdiPrefix + target[1:9] + descryptPack(block), nil
 }
 
