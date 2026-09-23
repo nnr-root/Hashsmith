@@ -276,7 +276,8 @@ func TestStdTargetsRejectsWrongWidth(t *testing.T) {
 func TestStdPathEligibility(t *testing.T) {
 	l := bruteLayout("abc", 3, 3)
 
-	for _, typ := range []string{"sha1", "sha256", "SHA256", "100", "1400", "raw-sha1", "raw-sha256"} {
+	for _, typ := range []string{"sha1", "sha256", "SHA256", "100", "1400", "raw-sha1", "raw-sha256",
+		"sha224", "sha384", "sha512"} {
 		if _, _, ok := stdPathEligible(typ, "", "prefix", l); !ok {
 			t.Errorf("%q should be eligible for the stdlib fast path", typ)
 		}
@@ -288,22 +289,41 @@ func TestStdPathEligibility(t *testing.T) {
 			t.Errorf("%q must not take the stdlib path (it has a vector core)", typ)
 		}
 	}
-	// Types whose message is not the raw candidate bytes must be refused
-	// outright rather than hashed as if it were.
-	for _, typ := range []string{"sha1-utf16le", "sha256-utf16le", "sha512", "sha224",
+	// Refused, for two DIFFERENT reasons that this list used to run together.
+	//
+	// sha1-utf16le, sha256-utf16le, md5crypt and bcrypt hash something that
+	// is not the candidate's raw bytes — a re-encoded password, or a
+	// structured record — so laying those bytes out contiguously would digest
+	// the wrong message.
+	//
+	// ripemd160 and whirlpool DO hash the raw bytes; they are refused only
+	// because this registry holds stdlib cores and theirs are not in the
+	// standard library.
+	//
+	// sha224 and sha512 used to be in this list, which is what made the
+	// distinction worth drawing: their message is the raw bytes and their
+	// cores are stdlib, so they were held back purely for want of coverage.
+	// They are eligible above now, with the tests that objection asked for.
+	for _, typ := range []string{"sha1-utf16le", "sha256-utf16le",
 		"md5crypt", "bcrypt", "ripemd160", "whirlpool"} {
 		if _, _, ok := stdPathEligible(typ, "", "prefix", l); ok {
 			t.Errorf("%q must not be eligible in this pass", typ)
 		}
 	}
-	// Salted md5/sha1/sha256 IS eligible now — that is the point of the salted
-	// pass — in both salt modes and in both spellings.
+	// Salted md5/sha1/sha256 IS eligible — that is the point of the salted
+	// pass — in both salt modes and in both spellings, and the rest of the
+	// SHA-2 family joins them.
 	for _, c := range []struct{ typ, salt, saltMode string }{
 		{"md5", "somesalt", "prefix"},
 		{"md5", "somesalt", "suffix"},
 		{"sha1", "somesalt", "prefix"},
 		{"sha256", "somesalt", "prefix"},
 		{"sha256", "somesalt", "suffix"},
+		{"sha224", "somesalt", "prefix"},
+		{"sha384", "somesalt", "suffix"},
+		{"sha512", "somesalt", "prefix"},
+		{"sha512-pass-salt", "somesalt", "prefix"},
+		{"sha224-salt-pass", "somesalt", "prefix"},
 		{"md5-salt-pass", "somesalt", "prefix"},
 		{"md5-pass-salt", "somesalt", "prefix"},
 		{"sha1-salt-pass", "somesalt", "prefix"},
@@ -320,8 +340,6 @@ func TestStdPathEligibility(t *testing.T) {
 	for _, c := range []struct{ typ, salt, saltMode string }{
 		{"md5-utf16le-pass-salt", "somesalt", "prefix"},
 		{"sha1-salt-utf16le-pass", "somesalt", "prefix"},
-		{"sha512", "somesalt", "prefix"},
-		{"sha512-pass-salt", "somesalt", "prefix"},
 		{"blake2b-pass-salt", "somesalt", "prefix"},
 		{"md5-salt-pass", "", "prefix"},
 		{"bcrypt", "somesalt", "prefix"},
@@ -854,7 +872,10 @@ func TestBatchStdLayoutDeclinesSafely(t *testing.T) {
 		batch []*batchTarget
 	}{
 		{"vector-cored type", "md5", mk(md5hex("abc"))},
-		{"unsupported type", "sha512", mk(strings.Repeat("ab", 64))},
+		// ripemd160 hashes the raw candidate bytes but has no stdlib core,
+		// so this path must decline it. sha512 used to stand here and no
+		// longer can: it is supported now.
+		{"unsupported type", "ripemd160", mk(strings.Repeat("ab", 20))},
 		{"wrong-width target", "sha256", mk(md5hex("abc"))},
 		{"one bad target in the set", "sha256", mk(sha256hex("abc"), "zzzz")},
 	}
@@ -902,10 +923,15 @@ func TestRunBruteOrMaskLayoutRoutesSha(t *testing.T) {
 	}
 }
 
-// A construction this path does NOT compute — a salted sha512, whose digest
-// core is not wired up here — must keep today's scalar path exactly: the
-// verify closure decides, not the fast path. This is the assertion that
-// catches a widened eligibility test quietly claiming a format it cannot hash.
+// A construction this path does NOT compute must keep the scalar path exactly:
+// the verify closure decides, not the fast path. This is the assertion that
+// catches a widened eligibility test quietly claiming a format it cannot hash
+// — and it did catch one. It used to carry a salted sha512, which is no longer
+// unsupported; blake2b carries it now, whose digest is the raw concatenated
+// bytes but whose core is not in the standard library, so this registry
+// declines it.
+//
+// Whoever widens eligibility next: change the carrier, do not delete the case.
 func TestRunBruteOrMaskLayoutLeavesUnsupportedSaltedAlone(t *testing.T) {
 	l := bruteLayout("abcdefghijklmnopqrstuvwxyz", 3, 3)
 	// A "target" the fast path could never match; only the closure can.
@@ -914,7 +940,7 @@ func TestRunBruteOrMaskLayoutLeavesUnsupportedSaltedAlone(t *testing.T) {
 	var called atomic.Bool
 	var attempts int64
 	pw, _, err := runBruteOrMaskLayout(context.Background(), l, nil, 0, 0, 2, &attempts,
-		"sha512", "somesalt", "prefix", strings.Repeat("ab", 64), func(c string) bool {
+		"blake2b", "somesalt", "prefix", strings.Repeat("ab", 64), func(c string) bool {
 			called.Store(true)
 			return c == "mnq"
 		})

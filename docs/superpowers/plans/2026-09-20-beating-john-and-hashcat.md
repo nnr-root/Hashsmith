@@ -533,11 +533,36 @@ batched against its own scalar baseline:
 | ntlm | 17.15 MH/s | 1.26 MH/s | 13.7x |
 | sha1 | 16.84 MH/s | 1.67 MH/s | 10.1x |
 | sha256 | 13.79 MH/s | 1.62 MH/s | 8.5x |
-| sha512 | 1.17 MH/s | 1.32 MH/s | unchanged |
+| sha512 | 1.17 MH/s | 1.32 MH/s | unchanged (then) |
 
-sha512 is the control: it has no batched core of either kind, and its two
-numbers are the same within noise, which is what says the harness is measuring
-the cores rather than the environment. All of these are against the generic
+sha512 was the control in that pass: no batched core of either kind, and two
+numbers the same within noise, which is what said the harness was measuring
+the cores rather than the environment.
+
+**Then the rest of the SHA-2 family.** The contiguous registry stopped at
+sha1/sha256, and the source said exactly why: "sha224/384/512 would be a
+one-line addition but would ship untested." That was a deferral for want of
+coverage, not a property of the construction — their message is the raw
+candidate bytes, their cores are in the standard library, and sha512's digest
+is exactly `stdMaxDigestLen`. The coverage that objection was asking for now
+exists, so they are wired up with it: sha224, sha384 and sha512, salted and
+unsalted, each verified against `hashText` through the same test that guards
+sha1 and sha256.
+
+sha512 dictionary runs went from 1.17 MH/s to **10.26 MH/s**, so the control
+had to be replaced — ripemd160 and blake2b take that role now, and for a
+reason worth writing down. The old eligibility test listed sha512 and sha224
+alongside `bcrypt`, `md5crypt` and `sha1-utf16le` under one comment saying
+their message "is not the raw candidate bytes". For bcrypt and the UTF-16
+variants that is true. For sha224 and sha512 it never was, and for ripemd160
+and whirlpool it is not either — those are refused only because their cores
+are not in the standard library. One list, three different reasons. It is
+three lists now.
+
+This pass reaches further than the dictionary engines: `stdPathEligible` also
+gates the mask and brute runners, so sha224/384/512 brute-force and mask runs
+take the contiguous path as well, salted and unsalted. Verified end to end for
+each. All of these are against the generic
 `verifyCandidate`, so they overstate the gain against the CLI's own optimised
 scalar path.
 

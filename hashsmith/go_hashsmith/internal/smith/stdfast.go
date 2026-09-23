@@ -71,6 +71,7 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/binary"
 	"encoding/hex"
 	"math"
@@ -141,6 +142,37 @@ func sha256HashBatch(msgs []byte, msgLen, n int, out []byte) {
 	}
 }
 
+// sha224HashBatch, sha384HashBatch and sha512HashBatch complete the SHA-2
+// family. The comment on stdSaltedBaseFor used to note that these "would be a
+// one-line addition but would ship untested" — which was the right call when
+// there was nothing to test them against. There is now:
+// TestContigFillFromWordsMatchesHashText drives any core here against hashText
+// for both the salted and unsalted forms, and TestStdSaltedPlanMatchesHashText
+// enumerates the plan resolution. They are added WITH that coverage, not
+// instead of it.
+//
+// All three digests fit stdMaxDigestLen, which is 64 — exactly SHA-512's.
+func sha224HashBatch(msgs []byte, msgLen, n int, out []byte) {
+	for i := 0; i < n; i++ {
+		*(*[sha256.Size224]byte)(out[i*sha256.Size224 : i*sha256.Size224+sha256.Size224]) =
+			sha256.Sum224(msgs[i*msgLen : i*msgLen+msgLen])
+	}
+}
+
+func sha384HashBatch(msgs []byte, msgLen, n int, out []byte) {
+	for i := 0; i < n; i++ {
+		*(*[sha512.Size384]byte)(out[i*sha512.Size384 : i*sha512.Size384+sha512.Size384]) =
+			sha512.Sum384(msgs[i*msgLen : i*msgLen+msgLen])
+	}
+}
+
+func sha512HashBatch(msgs []byte, msgLen, n int, out []byte) {
+	for i := 0; i < n; i++ {
+		*(*[sha512.Size]byte)(out[i*sha512.Size : i*sha512.Size+sha512.Size]) =
+			sha512.Sum512(msgs[i*msgLen : i*msgLen+msgLen])
+	}
+}
+
 // md5HashBatch is the same shape for MD5. It exists ONLY for salted runs: an
 // unsalted MD5 keyspace is enumerated by the NEON/AVX2 core through
 // runLayoutFast, which is several times faster than crypto/md5 and must keep
@@ -167,6 +199,12 @@ func stdAlgoFor(typ string) (*stdAlgo, bool) {
 		return &stdAlgo{name: "sha1", digLen: sha1.Size, hashBatch: sha1HashBatch}, true
 	case "sha256":
 		return &stdAlgo{name: "sha256", digLen: sha256.Size, hashBatch: sha256HashBatch}, true
+	case "sha224":
+		return &stdAlgo{name: "sha224", digLen: sha256.Size224, hashBatch: sha224HashBatch}, true
+	case "sha384":
+		return &stdAlgo{name: "sha384", digLen: sha512.Size384, hashBatch: sha384HashBatch}, true
+	case "sha512":
+		return &stdAlgo{name: "sha512", digLen: sha512.Size, hashBatch: sha512HashBatch}, true
 	}
 	return nil, false
 }
@@ -190,16 +228,19 @@ type stdSalt struct {
 func (s stdSalt) width() int { return len(s.pre) + len(s.suf) }
 
 // stdSaltedBaseFor returns the digest core for a simple salt||pass /
-// pass||salt construction. Only md5, sha1 and sha256 are wired up: they are
-// hashcat modes 10/20, 110/120 and 1410/1420, the salted digests real web
-// applications actually store, and each has a stdlib core whose message is the
-// raw concatenated bytes.
+// pass||salt construction. md5, sha1 and sha256 are hashcat modes 10/20,
+// 110/120 and 1410/1420 — the salted digests real web applications actually
+// store — and sha224/384/512 complete the SHA-2 family. Each has a stdlib core
+// whose message is the raw concatenated bytes.
 //
 // Everything else stays on the scalar path on purpose. A UTF-16LE variant
-// (md5-utf16le-pass-salt, …) hashes a re-encoded password, not these bytes;
-// sha224/384/512 would be a one-line addition but would ship untested; and the
-// structured-record formats (bcrypt, sha512crypt, PBKDF2, crack_frameworks.go)
-// are not concatenations at all.
+// (md5-utf16le-pass-salt, …) hashes a re-encoded password, not these bytes,
+// and the structured-record formats (bcrypt, sha512crypt, PBKDF2,
+// crack_frameworks.go) are not concatenations at all.
+//
+// sha224, sha384 and sha512 were held back here for want of coverage rather
+// than for any property of the construction. They are wired up now, with the
+// tests that objection was asking for.
 func stdSaltedBaseFor(name string) (*stdAlgo, bool) {
 	switch name {
 	case "md5":
@@ -208,6 +249,12 @@ func stdSaltedBaseFor(name string) (*stdAlgo, bool) {
 		return &stdAlgo{name: "sha1", digLen: sha1.Size, hashBatch: sha1HashBatch}, true
 	case "sha256":
 		return &stdAlgo{name: "sha256", digLen: sha256.Size, hashBatch: sha256HashBatch}, true
+	case "sha224":
+		return &stdAlgo{name: "sha224", digLen: sha256.Size224, hashBatch: sha224HashBatch}, true
+	case "sha384":
+		return &stdAlgo{name: "sha384", digLen: sha512.Size384, hashBatch: sha384HashBatch}, true
+	case "sha512":
+		return &stdAlgo{name: "sha512", digLen: sha512.Size, hashBatch: sha512HashBatch}, true
 	}
 	return nil, false
 }

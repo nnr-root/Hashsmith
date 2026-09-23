@@ -603,12 +603,18 @@ func TestSaltedBatchTypeIsNarrow(t *testing.T) {
 		{"md5", "s", "suffix", "md5"},
 		{"sha1", "s", "prefix", "sha1"},
 		{"sha256", "s", "prefix", "sha256"},
+		// The rest of the SHA-2 family gained contiguous cores, so the gate
+		// admits them too. They sat in the refused list below until then.
+		{"sha224", "s", "prefix", "sha224"},
+		{"sha384", "s", "suffix", "sha384"},
+		{"sha512", "s", "prefix", "sha512"},
 		{"md5-salt-pass", "", "prefix", "md5-salt-pass"}, // salt comes from hash:salt
 		{"20", "", "prefix", "md5-salt-pass"},            // hashcat mode number
 		{"md5", "", "prefix", ""},                        // unsalted: the raw-digest path owns it
 		{"", "s", "prefix", ""},                          // no -t: auto-detection stays per target
 		{"auto", "s", "prefix", ""},
-		{"sha512", "s", "prefix", ""},                // no batch core
+		{"blake2b", "s", "prefix", ""},               // no batch core
+		{"ripemd160", "s", "prefix", ""},             // no batch core
 		{"md5-utf16le-pass-salt", "s", "prefix", ""}, // different message
 		{"bcrypt", "s", "prefix", ""},
 		{"sha512crypt", "s", "prefix", ""},

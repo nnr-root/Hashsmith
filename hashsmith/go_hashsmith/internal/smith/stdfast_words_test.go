@@ -18,6 +18,16 @@ func TestContigFillFromWordsMatchesHashText(t *testing.T) {
 		{"sha1", "deadbeef", "prefix"},
 		{"sha256", "deadbeef", "suffix"},
 		{"md5", "s4lt", "prefix"},
+		// The rest of the SHA-2 family, held back until there was something
+		// to test them against. sha512's digest is exactly stdMaxDigestLen,
+		// so it is the one that would overflow the slab if that constant
+		// ever shrank.
+		{"sha224", "", ""},
+		{"sha384", "", ""},
+		{"sha512", "", ""},
+		{"sha224", "deadbeef", "prefix"},
+		{"sha384", "deadbeef", "suffix"},
+		{"sha512", "deadbeef", "prefix"},
 	} {
 		tc := tc
 		t.Run(tc.typ+"/"+tc.saltMode, func(t *testing.T) {

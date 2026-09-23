@@ -177,17 +177,28 @@ func TestOutfileDoesNotTruncatePerTargetPath(t *testing.T) {
 	wl := filepath.Join(dir, "wl.txt")
 	mustWrite(t, wl, "password\nadmin\n")
 
-	// sha512-pass-salt is a salted construction the multi-hash batch path
-	// declines — it has no contiguous-batch core (see stdSaltedBaseFor) — so
-	// every target here still takes the per-target path in crackTargets, which
-	// is what this test is about: doCrack's own -o write, once per target, on
-	// the same file. (md5-pass-salt used to serve that purpose; it now batches
-	// by salt group, which is covered separately.)
-	t1, err := hashCompatSaltedDigest("password", "sha512-pass-salt", "saltone")
+	// This test needs a carrier type the multi-hash batch path DECLINES, so
+	// that every target takes the per-target path in crackTargets — which is
+	// what it is about: doCrack's own -o write, once per target, on the same
+	// file.
+	//
+	// The carrier keeps changing, and that is worth recording rather than
+	// quietly editing each time. md5-pass-salt served first, until it started
+	// batching by salt group. sha512-pass-salt served next, until sha512
+	// gained a contiguous-batch core. blake2b-pass-salt serves now: it hashes
+	// the raw concatenated bytes, so hashCompatSaltedDigest produces it, but
+	// its core is not in the standard library, so stdSaltedBaseFor declines it
+	// and saltedBatchType returns "".
+	//
+	// If this test starts failing with the -o file holding "hash:salt:plain"
+	// lines instead of bare plaintexts, that is the symptom: the carrier began
+	// batching and the test is no longer exercising the path it names. Pick
+	// another non-batching salted type rather than relaxing the assertion.
+	t1, err := hashCompatSaltedDigest("password", "blake2b-pass-salt", "saltone")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t2, err := hashCompatSaltedDigest("admin", "sha512-pass-salt", "salttwo")
+	t2, err := hashCompatSaltedDigest("admin", "blake2b-pass-salt", "salttwo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +207,7 @@ func TestOutfileDoesNotTruncatePerTargetPath(t *testing.T) {
 	out := filepath.Join(dir, "out.txt")
 
 	exitCode = 0
-	if err := runCrack([]string{"-t", "sha512-pass-salt", "-M", "dict", "-w", wl, "--no-pot",
+	if err := runCrack([]string{"-t", "blake2b-pass-salt", "-M", "dict", "-w", wl, "--no-pot",
 		"-o", out, targetsFile}); err != nil {
 		t.Fatalf("runCrack: %v", err)
 	}

@@ -461,9 +461,17 @@ func TestDictLaneCoverage(t *testing.T) {
 		{"sha256", "", "", contiguous},
 		{"sha1", "deadbeef", "prefix", contiguous},
 		{"sha256", "deadbeef", "suffix", contiguous},
-		// No batched core: a 64-byte digest does not fit the contiguous
-		// path's layout, and there is no SHA-512 vector core.
-		{"sha512", "", "", scalar},
+		{"sha224", "", "", contiguous},
+		{"sha384", "", "", contiguous},
+		{"sha512", "", "", contiguous},
+		{"sha512", "deadbeef", "prefix", contiguous},
+		// Still scalar, and not by oversight: these have no vector core and
+		// are not in the contiguous path's registry, which takes only
+		// constructions whose message is the raw concatenated bytes of a
+		// stdlib hash. They are the control that keeps this test honest — if
+		// everything resolved to a core, the assertion would be vacuous.
+		{"ripemd160", "", "", scalar},
+		{"blake2b", "", "", scalar},
 	} {
 		tc := tc
 		t.Run(tc.typ+"/"+tc.salt+"/"+tc.mode, func(t *testing.T) {
