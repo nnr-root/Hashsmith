@@ -43,6 +43,12 @@ type dictVectorLanes struct {
 	buckets [][]dictWord
 	// maxLen is the longest candidate this run's salt leaves room for.
 	maxLen int
+	// scratch is the group-sized []string handed to fillFromWords. It is a
+	// field rather than a local because flushBucket runs once per SIMD group
+	// — hundreds of thousands of times over a wordlist — and allocating a
+	// slice each time made this function 28% of the run's total allocated
+	// bytes in a heap profile, second only to the reader itself.
+	scratch []string
 	// curLen is the length the batch is currently reset to, or -1 when it
 	// has never been reset. It cannot be inferred from tb.length: that field
 	// is zero on a fresh batch, and zero is also a REAL bucket length — the
@@ -107,6 +113,7 @@ func newDictVectorLanes(typ, targetHash, salt, saltMode string) *dictVectorLanes
 		buckets: make([][]dictWord, maxLen+1),
 		maxLen:  maxLen,
 		curLen:  -1,
+		scratch: make([]string, 0, algo.shape.group()),
 	}
 }
 
@@ -185,7 +192,7 @@ func (d *dictVectorLanes) flushBucket(n int, best *dictWord) int {
 			}
 			d.curLen = n
 		}
-		words := make([]string, 0, len(chunk))
+		words := d.scratch[:0]
 		for _, c := range chunk {
 			words = append(words, c.word)
 		}

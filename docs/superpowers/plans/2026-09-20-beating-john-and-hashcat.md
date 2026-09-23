@@ -437,6 +437,39 @@ drain a 512-word batch through the vector core in microseconds and park. The
 reader and the channel handoff are the next thing to fix, and `BenchmarkDictAttack`
 is in the tree to measure it.
 
+**The reader, measured next.** The profile above said the pipeline had become
+the ceiling, so it was profiled rather than guessed at. A heap profile put
+`bufio.Scanner.Text()` at 70% of every object allocated — one string per word —
+and `flushBucket`'s per-group `[]string` at 28% of all bytes. Both are gone:
+the group slice is reused, and the reader now copies words into ONE arena per
+batch and hands them out as substrings of a single string, so a 512-word batch
+costs two allocations instead of 512.
+
+Allocations per operation on the benchmark: **421,181 to 1,655**, a factor of
+254. Bytes per operation: 18.15 MB to 10.95 MB. Those numbers are
+deterministic, which is why they are the ones quoted — see below.
+
+The garbage that produced was visible as `runtime.madvise` in the CPU profile,
+and it fell from 9.6% to 2.9%. What did NOT improve is the scheduler overhead,
+which rose as a share precisely because everything else got faster:
+`runtime.usleep` 40%, `pthread_cond_signal` 19%, `pthread_cond_wait` 12% —
+about 70% of the run spent parking and waking goroutines. A single reader
+produces 512-word batches; eight workers drain one through a vector core in
+microseconds and block.
+
+**What could not be measured here, stated as such.** Worker scaling is
+1 -> 13.6 MH/s, 2 -> 25 MH/s, 4 -> 28.6 MH/s (stable across runs), 8 -> 20.7-27
+MH/s (erratic). That looks like oversubscription, but this machine had an
+unrelated process pinned at 99% of a core throughout, so nine goroutines on
+roughly seven available cores is a plausible explanation that has nothing to do
+with the code. A `dictBatchSize` sweep over 512/2048/8192/32768 produced
+overlapping ranges at every size and no resolvable signal across four attempts.
+
+So the constant was left alone. Shipping a tuned value that cannot be defended
+by a measurement would be the same mistake as raising `feasibilityETATolerance`
+to silence a failure. `BenchmarkDictWorkerScaling` and `BenchmarkDictReaderOnly`
+are in the tree so the question can be settled on an idle machine.
+
 Two real defects were introduced writing this and caught before landing, both
 by differential testing against the scalar path rather than by inspection:
 

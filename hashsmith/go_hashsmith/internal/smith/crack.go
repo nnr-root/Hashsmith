@@ -1937,15 +1937,57 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 	resultCh := make(chan crackedResult, 1)
 
 	// reader
+	//
+	// Words are copied into ONE arena per batch and handed out as substrings
+	// of a single string, rather than one allocated string per word.
+	//
+	// scanner.Text() allocates, and it is called once per word: a heap profile
+	// of a dictionary run put it at 70% of every object allocated, and the
+	// garbage that produced showed up in the CPU profile as runtime.madvise.
+	// A batch of 512 words now costs two allocations — the arena's string and
+	// the slice of substrings — instead of 512.
+	//
+	// scanner.Bytes() is only valid until the next Scan, which is exactly why
+	// the bytes are appended into the arena immediately. The arena itself is
+	// reused across batches; string(arena) copies, so a sent batch never
+	// aliases bytes the next one will overwrite.
 	go func() {
 		defer close(batchCh)
 		scanner := bufio.NewScanner(f)
 		scanner.Buffer(make([]byte, 1<<20), 1<<20) // 1 MiB line buffer
-		cur := make(batch, 0, dictBatchSize)
+
+		arena := make([]byte, 0, dictBatchSize*16)
+		starts := make([]int, 0, dictBatchSize)
+
+		// flushBatch turns the arena into one string and slices it into the
+		// batch's words. Reports false when the run was cancelled.
+		flushBatch := func() bool {
+			if len(starts) == 0 {
+				return true
+			}
+			joined := string(arena)
+			cur := make(batch, len(starts))
+			for i, from := range starts {
+				to := len(joined)
+				if i+1 < len(starts) {
+					to = starts[i+1]
+				}
+				cur[i] = joined[from:to]
+			}
+			arena = arena[:0]
+			starts = starts[:0]
+			select {
+			case batchCh <- cur:
+				return true
+			case <-innerCtx.Done():
+				return false
+			}
+		}
+
 		var idx int64
 		for scanner.Scan() {
 			// Verbatim, empty lines included — see wordlist.go.
-			word := scanner.Text()
+			word := scanner.Bytes()
 			i := idx
 			idx++
 			if i < skip {
@@ -1954,22 +1996,15 @@ func dictAttack(ctx context.Context, wordlistPath string, skip, limit int64, wor
 			if upper >= 0 && i >= upper {
 				break
 			}
-			cur = append(cur, word)
-			if len(cur) >= dictBatchSize {
-				select {
-				case batchCh <- cur:
-					cur = make(batch, 0, dictBatchSize)
-				case <-innerCtx.Done():
+			starts = append(starts, len(arena))
+			arena = append(arena, word...)
+			if len(starts) >= dictBatchSize {
+				if !flushBatch() {
 					return
 				}
 			}
 		}
-		if len(cur) > 0 {
-			select {
-			case batchCh <- cur:
-			case <-innerCtx.Done():
-			}
-		}
+		flushBatch()
 	}()
 
 	// newHasher/laned: whether typ has an interleaved multi-candidate bcrypt

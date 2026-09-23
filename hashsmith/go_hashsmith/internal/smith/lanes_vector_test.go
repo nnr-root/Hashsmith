@@ -174,3 +174,101 @@ func TestDictVectorFindsAtEveryPosition(t *testing.T) {
 		})
 	}
 }
+
+// TestDictReaderArenaPreservesEveryWord guards the reader's arena: words are
+// no longer individually allocated strings but substrings of one per-batch
+// string, so an off-by-one in the offset bookkeeping would hand a worker a
+// word with a neighbour's characters attached — and it would do it silently,
+// since every such word is still a valid string.
+//
+// The list is built so that a boundary error cannot hide: lengths vary, empty
+// lines appear (they are kept verbatim), and the words straddle the batch
+// boundary at dictBatchSize.
+func TestDictReaderArenaPreservesEveryWord(t *testing.T) {
+	var words []string
+	for i := 0; i < dictBatchSize*2+7; i++ {
+		switch i % 5 {
+		case 0:
+			words = append(words, "")
+		case 1:
+			words = append(words, "w"+fmt.Sprint(i))
+		default:
+			words = append(words, strings.Repeat(string(rune('a'+i%26)), 1+i%12)+fmt.Sprint(i))
+		}
+	}
+	path := writeWords(t, words)
+
+	// Every distinct word must be findable, and nothing else must be. A
+	// straddled boundary shows up as a word that cannot be found (its bytes
+	// were split) or as a neighbour that can (its bytes were joined).
+	for _, at := range []int{0, 1, 4, dictBatchSize - 1, dictBatchSize, dictBatchSize + 1, len(words) - 1} {
+		want := words[at]
+		target, err := hashText(want, "md5", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, found, _ := runDict(t, path, "md5", target, "", "", 4)
+		if !found {
+			t.Fatalf("index %d: %q was not found; the arena split or joined it", at, want)
+		}
+		if got != want {
+			t.Fatalf("index %d: found %q, want %q", at, got, want)
+		}
+	}
+
+	// And a word that is a CONCATENATION of two adjacent entries must NOT be
+	// found, which is what an arena with lost boundaries would produce.
+	glued := words[1] + words[2]
+	target, err := hashText(glued, "md5", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, _ := runDict(t, path, "md5", target, "", "", 4); found {
+		t.Fatalf("found %q, which is two adjacent words run together — the arena lost a boundary", glued)
+	}
+}
+
+// TestDictReaderArenaRespectsSkipAndLimit keeps the word-index bookkeeping
+// honest across the rewrite: --skip/--limit count words of the whole file, and
+// the arena changed how words are collected but must not change which ones.
+func TestDictReaderArenaRespectsSkipAndLimit(t *testing.T) {
+	var words []string
+	for i := 0; i < 500; i++ {
+		words = append(words, "word"+fmt.Sprint(i))
+	}
+	path := writeWords(t, words)
+
+	target, err := hashText("word250", "md5", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	verify := func(pw string) bool {
+		ok, _ := verifyCandidate(pw, target, "md5", "", "")
+		return ok
+	}
+
+	for _, tc := range []struct {
+		name        string
+		skip, limit int64
+		want        bool
+	}{
+		{"whole file", 0, 0, true},
+		{"slice containing it", 200, 100, true},
+		{"slice ending before it", 0, 250, false},
+		{"slice starting after it", 251, 0, false},
+		{"exactly it", 250, 1, true},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			var attempts int64
+			res, err := dictAttack(context.Background(), path, tc.skip, tc.limit, 4,
+				&attempts, nil, verify, target, "md5", "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.found != tc.want {
+				t.Fatalf("skip=%d limit=%d: found=%v, want %v", tc.skip, tc.limit, res.found, tc.want)
+			}
+		})
+	}
+}

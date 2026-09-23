@@ -29,6 +29,61 @@ func benchWordlist(tb testing.TB, n int, widths []int) string {
 	return path
 }
 
+// BenchmarkDictWorkerScaling answers a question the end-to-end number cannot:
+// is the reader or the hashing the ceiling? If throughput barely moves from
+// one worker to eight, the single reader goroutine is saturated and no amount
+// of making the workers faster will show up.
+func BenchmarkDictWorkerScaling(b *testing.B) {
+	const n = 400000
+	target, err := hashText("nomatchhere", "md5", "", "")
+	if err != nil {
+		b.Fatal(err)
+	}
+	path := benchWordlist(b, n, []int{6})
+	verify := func(pw string) bool {
+		ok, _ := verifyCandidate(pw, target, "md5", "", "")
+		return ok
+	}
+	for _, workers := range []int{1, 2, 4, 8} {
+		b.Run(fmt.Sprint(workers), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var attempts int64
+				if _, err := dictAttack(context.Background(), path, 0, 0, workers,
+					&attempts, nil, verify, target, "md5", "", ""); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ReportMetric(float64(n)*float64(b.N)/b.Elapsed().Seconds()/1e6, "MH/s")
+		})
+	}
+}
+
+// BenchmarkDictReaderOnly is the reader's own ceiling: the same scan-and-batch
+// loop with no hashing at all, so the number it reports is the most a
+// dictionary run could ever reach with this pipeline shape.
+func BenchmarkDictReaderOnly(b *testing.B) {
+	const n = 400000
+	path := benchWordlist(b, n, []int{6})
+	target, err := hashText("nomatchhere", "md5", "", "")
+	if err != nil {
+		b.Fatal(err)
+	}
+	neverMatches := func(string) bool { return false }
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var attempts int64
+		// "nosuchtype" has no vector plan and no fast verifier, but the
+		// closure above short-circuits, so this times the pipeline rather
+		// than any digest.
+		if _, err := dictAttack(context.Background(), path, 0, 0, 8,
+			&attempts, nil, neverMatches, target, "nosuchtype", "", ""); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportMetric(float64(n)*float64(b.N)/b.Elapsed().Seconds()/1e6, "MH/s")
+}
+
 // BenchmarkDictAttack measures the dictionary pipeline end to end, which is
 // the number that matters: a faster core is worth nothing if the reader is
 // the ceiling. Run the uniform and mixed cases together — bucketing by length
