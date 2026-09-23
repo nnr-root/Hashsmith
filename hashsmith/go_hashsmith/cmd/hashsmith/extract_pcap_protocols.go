@@ -60,13 +60,24 @@ func extractPCAPRecords(path string) ([]string, error) {
 		if r, ok := tcpMD5Record(f.data, f.linkType); ok {
 			add(r)
 		}
+		if payload, ok := udpPayloadToPort(f.data, f.linkType, hsrpPort); ok {
+			if r, ok := hsrpRecord(payload); ok {
+				add(r)
+			}
+		}
+		if r, ok := netAHRecord(f.data, f.linkType); ok {
+			add(r)
+		}
+		if r, ok := rsvpRecord(f.data, f.linkType); ok {
+			add(r)
+		}
 	}
 
 	if len(records) == 0 {
 		if basicAuth > 0 {
 			return nil, fmt.Errorf("this capture holds %d HTTP Basic Authorization header(s) and no crackable record: Basic auth carries the password itself, base64-encoded, so there is nothing to crack — decode the header", basicAuth)
 		}
-		return nil, errors.New("no HTTP Digest, SNMPv3, TACACS+ or TCP-MD5 credentials in this capture (the other protocols pcap2john reads are not covered here)")
+		return nil, errors.New("no HTTP Digest, SNMPv3, TACACS+, TCP-MD5, HSRP, IPsec AH or RSVP credentials in this capture (the other protocols pcap2john reads are not covered here)")
 	}
 	if basicAuth > 0 {
 		fmt.Printf("note: %d HTTP Basic Authorization header(s) are also present; those carry the password itself and need no cracking\n", basicAuth)
@@ -482,4 +493,147 @@ func tcpPayloadFromPort(frame []byte, linkType uint32, port uint16) (payload []b
 		return nil, false, false
 	}
 	return body, sport == port, true
+}
+
+// ── HSRP version 1 ────────────────────────────────────────────────────────────
+
+const (
+	hsrpPort = 1985
+	// hsrpAuthTLV is the MD5 authentication TLV's type byte, and
+	// hsrpSaltBytes is how much of the packet the digest covers before the
+	// digest field itself.
+	hsrpAuthTLV    = 4
+	hsrpHeaderLen  = 20
+	hsrpSaltBytes  = 34
+	hsrpDigestLen  = 16
+	hsrpRecordSalt = hsrpSaltBytes + hsrpDigestLen
+)
+
+// hsrpRecord builds a record from an HSRP version 1 hello.
+//
+// The digest covers the first thirty-four bytes of the packet — the twenty
+// byte header and the fourteen that open the authentication TLV — followed by
+// SIXTEEN ZEROS where the digest itself will go. So the salt is longer than
+// the part of the packet that is real, and a reader that stopped at
+// thirty-four bytes would produce a salt the router never hashed.
+func hsrpRecord(payload []byte) (string, bool) {
+	if len(payload) < hsrpRecordSalt {
+		return "", false
+	}
+	// The authentication TLV follows the fixed header; without it there is
+	// no digest and nothing to crack.
+	if payload[hsrpHeaderLen] != hsrpAuthTLV {
+		return "", false
+	}
+	tlvLen := int(payload[hsrpHeaderLen+1])
+	if hsrpHeaderLen+2+tlvLen > len(payload) || tlvLen < hsrpDigestLen+12 {
+		return "", false
+	}
+	salt := make([]byte, hsrpRecordSalt)
+	copy(salt, payload[:hsrpSaltBytes])
+	digest := payload[hsrpSaltBytes : hsrpSaltBytes+hsrpDigestLen]
+
+	return fmt.Sprintf("$hsrp$%s$%s",
+		hex.EncodeToString(salt), hex.EncodeToString(digest)), true
+}
+
+// ── IPsec Authentication Header ───────────────────────────────────────────────
+
+const (
+	ipProtoAH   = 51
+	ipProtoRSVP = 46
+	ahFixedLen  = 12 // next header, payload length, reserved, SPI, sequence
+)
+
+// netAHRecord builds a record from a packet carrying an Authentication Header.
+//
+// The digest covers the WHOLE IP PACKET, which means the fields a router is
+// allowed to change in flight have to be put back to what the sender hashed:
+// the type-of-service byte, the three flag bits, and the header checksum are
+// all zeroed. Leave any of them as captured and the record is the packet as it
+// ARRIVED rather than as it was signed, which is a record that cannot crack
+// on a path with more than one hop.
+func netAHRecord(frame []byte, linkType uint32) (string, bool) {
+	ipAt, ok := ipv4Offset(frame, linkType)
+	if !ok || len(frame) < ipAt+20 || frame[ipAt]>>4 != 4 || frame[ipAt+9] != ipProtoAH {
+		return "", false
+	}
+	ipLen := int(frame[ipAt]&0x0f) * 4
+	total := int(bigEndianUint16(frame[ipAt+2:]))
+	if ipLen < 20 || total < ipLen+ahFixedLen || ipAt+total > len(frame) {
+		return "", false
+	}
+	packet := append([]byte(nil), frame[ipAt:ipAt+total]...)
+
+	// The AH's own length field counts 32-bit words and is two less than
+	// the header's real size, which is the one place this format's
+	// arithmetic is not what it looks like.
+	payloadLen := int(packet[ipLen+1])
+	ahLen := (payloadLen + 2) * 4
+	icvLen := ahLen - ahFixedLen
+	if icvLen <= 0 || ipLen+ahLen > len(packet) {
+		return "", false
+	}
+	icvAt := ipLen + ahFixedLen
+	icv := append([]byte(nil), packet[icvAt:icvAt+icvLen]...)
+
+	packet[1] = 0                 // type of service
+	packet[6] &^= 0xe0            // the three flag bits, keeping the fragment offset
+	packet[10], packet[11] = 0, 0 // header checksum
+	for i := 0; i < icvLen; i++ {
+		packet[icvAt+i] = 0
+	}
+	return fmt.Sprintf("$net-ah$0$%s$%s",
+		hex.EncodeToString(packet), hex.EncodeToString(icv)), true
+}
+
+// ── RSVP ──────────────────────────────────────────────────────────────────────
+
+const rsvpIntegrityClass = 4
+
+// rsvpRecord builds a record from an RSVP message carrying an INTEGRITY
+// object.
+//
+// The digest sits twenty bytes into that object and runs to its end, so its
+// LENGTH is not stated anywhere — it is whatever is left. Sixteen bytes means
+// MD5 and anything else means SHA-1, which is how the record's first field is
+// decided: the message does not name the algorithm either.
+func rsvpRecord(frame []byte, linkType uint32) (string, bool) {
+	ipAt, ok := ipv4Offset(frame, linkType)
+	if !ok || len(frame) < ipAt+20 || frame[ipAt]>>4 != 4 || frame[ipAt+9] != ipProtoRSVP {
+		return "", false
+	}
+	ipLen := int(frame[ipAt]&0x0f) * 4
+	total := int(bigEndianUint16(frame[ipAt+2:]))
+	if ipLen < 20 || total <= ipLen || ipAt+total > len(frame) {
+		return "", false
+	}
+	message := append([]byte(nil), frame[ipAt+ipLen:ipAt+total]...)
+
+	// The RSVP header is eight bytes and the INTEGRITY object, when there
+	// is one, follows it directly.
+	const headerLen, digestAt = 8, 20
+	if len(message) < headerLen+digestAt {
+		return "", false
+	}
+	objectLen := int(bigEndianUint16(message[headerLen:]))
+	if message[headerLen+2] != rsvpIntegrityClass {
+		return "", false
+	}
+	if objectLen <= digestAt || headerLen+objectLen > len(message) {
+		return "", false
+	}
+	digestLen := objectLen - digestAt
+	at := headerLen + digestAt
+	digest := append([]byte(nil), message[at:at+digestLen]...)
+	for i := 0; i < digestLen; i++ {
+		message[at+i] = 0
+	}
+
+	algorithm := 2 // SHA-1
+	if digestLen == 16 {
+		algorithm = 1 // MD5
+	}
+	return fmt.Sprintf("$rsvp$%d$%s$%s", algorithm,
+		hex.EncodeToString(message), hex.EncodeToString(digest)), true
 }

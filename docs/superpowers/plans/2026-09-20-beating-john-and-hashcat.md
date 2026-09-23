@@ -3223,7 +3223,18 @@ addresses coming from the IP header and everything else from the TCP one. Its
 test rebuilds the segment from John's salt, which is the strongest available
 check that the layers go together in the right order.
 
-Extractors: 48 → 89, with pcap2smith covering four protocols. Container
+HSRP, IPsec AH and RSVP followed, and each hides a version of the same trap.
+HSRP's salt is LONGER than the real part of the packet: the digest covers
+thirty-four bytes and then sixteen zeros standing in for the digest that has
+not been computed yet. AH signs the whole IP packet, so the fields a router may
+change in flight — type of service, the three flag bits, the header checksum —
+must be put back to what the sender hashed, or the record describes the packet
+as it arrived rather than as it was signed. AH's own length field counts 32-bit
+words and is two less than the header's real size. And RSVP's digest length is
+stated nowhere: it runs to the end of the INTEGRITY object, and sixteen bytes
+means MD5 while anything else means SHA-1.
+
+Extractors: 48 → 89, with pcap2smith covering seven protocols. Container
 sniffers: 18 → 30. Of John's 118 converters, 33 still have no counterpart — down from 76. The remainder is now dominated by the
 rest of the capture family (pcap, radius, hccap), Windows and enterprise
 credential stores (DPAPImk, racf, sap, pse, ps_token, sspr), Apple documents

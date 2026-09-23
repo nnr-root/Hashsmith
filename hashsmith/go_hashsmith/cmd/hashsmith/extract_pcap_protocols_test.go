@@ -281,3 +281,105 @@ func TestTCPOptionWalk(t *testing.T) {
 		t.Error("an option longer than the list should be refused")
 	}
 }
+
+// ipv4Frame wraps a payload in IPv4 and Ethernet for a given protocol number.
+func ipv4Frame(t *testing.T, proto byte, src, dst [4]byte, payload []byte) string {
+	t.Helper()
+	ip := make([]byte, 20+len(payload))
+	ip[0] = 0x45
+	ip[1] = 0x10 // a non-zero type of service, which the AH record must clear
+	ip[2], ip[3] = byte(len(ip)>>8), byte(len(ip))
+	ip[4], ip[5] = 0x00, 0x15
+	ip[6] = 0x40 // the "don't fragment" flag, which the AH record must clear
+	ip[8], ip[9] = 0xff, proto
+	ip[10], ip[11] = 0xbe, 0xef // a real checksum, which the AH record must clear
+	copy(ip[12:16], src[:])
+	copy(ip[16:20], dst[:])
+	copy(ip[20:], payload)
+
+	eth := make([]byte, 14+len(ip))
+	eth[12], eth[13] = 0x08, 0x00
+	copy(eth[14:], ip)
+	return hex.EncodeToString(eth)
+}
+
+func TestExtractPCAPHSRP(t *testing.T) {
+	record, password := johnVector(t, "hsrp $hsrp$")
+	f := strings.Split(strings.TrimPrefix(record, "$hsrp$"), "$")
+	salt := mustHex(t, f[0])
+	digest := mustHex(t, f[1])
+
+	// The packet is the real part of the salt with the digest put back
+	// where the router wrote it.
+	payload := append(append([]byte(nil), salt[:hsrpSaltBytes]...), digest...)
+
+	file := pcapOf(t, linkTypeEthernet, false,
+		udpFrame([4]byte{10, 0, 0, 1}, [4]byte{224, 0, 0, 2}, hsrpPort, hsrpPort, payload))
+
+	got, err := extractPCAPRecords(writeFixture(t, "hsrp.pcap", file))
+	if err != nil {
+		t.Fatalf("extractPCAPRecords: %v", err)
+	}
+	if len(got) != 1 || got[0] != record {
+		t.Fatalf("\n got: %v\nwant: %s", got, record)
+	}
+	mustCrack(t, "hsrp", got[0], password)
+}
+
+// TestExtractPCAPNetAH rebuilds the packet from the record, putting back the
+// three fields the record zeroes and the ICV, and requires the extractor to
+// zero them again. The fixture sets all three to non-zero values, so a reader
+// that copied the packet across unchanged fails here.
+func TestExtractPCAPNetAH(t *testing.T) {
+	record, password := johnVector(t, "net-ah $net-ah$")
+	f := strings.Split(strings.TrimPrefix(record, "$net-ah$"), "$")
+	packet := append([]byte(nil), mustHex(t, f[1])...)
+	icv := mustHex(t, f[2])
+
+	ipLen := int(packet[0]&0x0f) * 4
+	icvAt := ipLen + ahFixedLen
+	copy(packet[icvAt:], icv)
+	// Put back what a router would have changed on the way.
+	packet[1] = 0x10
+	packet[6] |= 0x40
+	packet[10], packet[11] = 0xbe, 0xef
+
+	eth := make([]byte, 14+len(packet))
+	eth[12], eth[13] = 0x08, 0x00
+	copy(eth[14:], packet)
+
+	file := pcapOf(t, linkTypeEthernet, false, hex.EncodeToString(eth))
+	got, err := extractPCAPRecords(writeFixture(t, "ah.pcap", file))
+	if err != nil {
+		t.Fatalf("extractPCAPRecords: %v", err)
+	}
+	if len(got) != 1 || got[0] != record {
+		t.Fatalf("\n got: %.70s...\nwant: %.70s...", got[0], record)
+	}
+	mustCrack(t, "net-ah", got[0], password)
+}
+
+func TestExtractPCAPRSVP(t *testing.T) {
+	record, password := johnVector(t, "rsvp $rsvp$")
+	f := strings.Split(strings.TrimPrefix(record, "$rsvp$"), "$")
+	message := append([]byte(nil), mustHex(t, f[1])...)
+	digest := mustHex(t, f[2])
+	if f[0] != "1" || len(digest) != 16 {
+		t.Fatalf("this vector is no longer the MD5 shape (%s, %d)", f[0], len(digest))
+	}
+	// The digest sits twenty bytes into the INTEGRITY object, which follows
+	// the eight-byte RSVP header.
+	copy(message[8+20:], digest)
+
+	file := pcapOf(t, linkTypeEthernet, false,
+		ipv4Frame(t, ipProtoRSVP, [4]byte{192, 168, 1, 20}, [4]byte{192, 168, 1, 10}, message))
+
+	got, err := extractPCAPRecords(writeFixture(t, "rsvp.pcap", file))
+	if err != nil {
+		t.Fatalf("extractPCAPRecords: %v", err)
+	}
+	if len(got) != 1 || got[0] != record {
+		t.Fatalf("\n got: %.70s...\nwant: %.70s...", got[0], record)
+	}
+	mustCrack(t, "rsvp", got[0], password)
+}
