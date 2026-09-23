@@ -62,8 +62,8 @@ func johnLabelSeed() map[string]string {
 		"andotp": "andOTP", "clipperz": "Clipperz",
 		"dashlane": "dashlane", "padlock": "Padlock", "bcrypt-2x": "bcrypt",
 		"pgpsda": "pgpsda", "pgpdisk": "pgpdisk", "pgpwde": "pgpwde", "sappse": "sappse", "skey": "skey", "bks": "BKS", "geli": "geli", "krb4": "krb4", "afs": "AFS", "sunmd5": "SunMD5", "krb5-des": "krb5-3", "openvms": "OpenVMS", "kwallet": "kwallet", "krb5-tgt": "krb5", "o3logon": "o3logon", "o10glogon": "o10glogon",
-		"sybase-prop": "Sybase-PROP",
-		"whirlpool":   "whirlpool", "sm3": "sm3",
+		"sybase-prop": "Sybase-PROP", "lotus85": "lotus85", "bestcrypt": "BestCrypt",
+		"whirlpool": "whirlpool", "sm3": "sm3",
 
 		// Windows
 		"ntlm": "NT", "lm": "LM",

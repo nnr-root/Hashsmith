@@ -2892,7 +2892,58 @@ affect byte zero of the key.
 What gets encrypted is a fixed sentence. Literally a joke, about a fly, and it
 is the plaintext behind every Sybase PROP hash in the world.
 
-Of 605 records: **601 crack**, 3 are not detected, 1 is detected and
-deliberately not guessed. Two distinct formats remain — BestCrypt and Lotus
-Notes 8.5 — plus one expression whose constant lives in John's configuration
-file.
+### The last two
+
+**Lotus Notes 8.5** is the user.id file rather than the directory entry, and it
+is the other half of a format already half-implemented: Domino 5, 6 and 8 are
+what the SERVER stores, and this is what the CLIENT carries. It reuses IBM's
+substitution table — already in the tree for Domino 5 — in a different
+arrangement, then encrypts a blob with RC2, which Go ships nowhere, so RC2 had
+to be written out.
+
+RC2 is worth the detour. Rivest designed it in 1987, kept it a trade secret,
+watched it get reverse-engineered onto sci.crypt in 1996, and published it as
+RFC 2268 in 1998. The design carries its era in a way no modern cipher does: it
+separates the KEY LENGTH from the EFFECTIVE key length, and the key schedule
+deliberately destroys entropy to hit the effective number — one byte is masked
+down and the whole schedule re-derived backwards from it. That existed so a
+product could ship a long key and export a short one. Lotus asks for 64
+effective bits from an eight-byte key, so nothing is discarded, and the real
+strength is the password's.
+
+Three things in the derivation look like mistakes. One is: the code computes
+SHA-1 of a fixed string plus the password, stores it, and then reads only the
+sixteen bytes BEFORE it, so the SHA-1 never reaches the key. One is not: a
+`memset` with its value and length arguments transposed writes the right byte
+anyway, because both are 16. And the last is the format's real problem — there
+is no iteration count anywhere. A candidate costs one proprietary hash and one
+RC2 decryption of under a hundred bytes.
+
+**BestCrypt** — the container, not the volume; `$bcve$3$` was already read and
+is a different product — derives its key with PKCS#12's function from RFC 7292,
+the one designed for .pfx files in 1996 and still alive because certificate
+tooling never replaced it. Jetico did not take it unmodified, and both changes
+are invisible from the interface:
+
+The block width v is 64 for every hash, including SHA-512, whose block is
+actually 128. A conforming PKCS#12 implementation and BestCrypt therefore
+disagree on SHA-512 containers, and neither can read the other's files.
+
+Because v is 64 and the password buffer is filled to v rather than to a whole
+number of the password's own lengths, a password longer than 31 characters is
+TRUNCATED under SHA-512 and Whirlpool: the buffer holds 64 bytes of UTF-16,
+which is 32 characters. The SHA-256 path does grow its buffer. So the same
+passphrase is stronger in a SHA-256 container than in a Whirlpool one, and
+nothing tells the user which they chose.
+
+The IV is eight bytes where AES wants sixteen, and the two modes disagree about
+the other eight: CBC repeats them, XTS zero-fills them. John's source says
+"isn't BestCrypt great?" at that line, which is as close to a specification as
+this part of the format gets.
+
+Of 605 records: **603 crack**. One is detected and deliberately not guessed
+(ZipMonster, whose 50,000 MD5s per candidate are four orders of magnitude past
+everything of its width). One cannot be answered from the record at all:
+`dynamic_1507` names a constant that lives in John's configuration file, so the
+expression alone does not determine a digest. Every other format John reads,
+Hashsmith reads.

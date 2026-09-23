@@ -83,6 +83,8 @@ func archivePrototypes() []hashid.Prototype {
 			"BestCrypt v4 is Jetico's current volume format, so it is the one a present-day container will carry", "bestcrypt-v4"),
 		hasPrefixProto("$bcve$3$", "BestCrypt v3 encrypted volume", 5,
 			"Jetico BestCrypt has a small but persistent installed base, mostly in European enterprise deployments", "bestcrypt-v3"),
+		hasPrefixProto("$BestCrypt$", "BestCrypt container file", 5,
+			"the .jbc container rather than a whole volume, which is the form most BestCrypt users actually hold", "bestcrypt"),
 		hasPrefixProto("$kgb$", "Kremlin Encrypt 3.0 archive", 3,
 			"Kremlin Encrypt was a 1990s Windows file-encryption product with no current user base; its records appear mainly in old evidence images", "kremlin"),
 		// Listed before $racf$ so the longer prefix wins; the two formats share

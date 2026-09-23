@@ -2917,6 +2917,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyDomino6(targetHash, candidate)
 	case "domino8":
 		return verifyDomino8(targetHash, candidate)
+	case "lotus85":
+		return verifyLotus85(targetHash, candidate)
 	case "stuffit5":
 		return verifyStuffit5(targetHash, candidate)
 	case "sqlcipher":
@@ -2931,6 +2933,8 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifyBestCryptV4(targetHash, candidate)
 	case "bestcrypt-v3":
 		return verifyBestCryptV3(targetHash, candidate)
+	case "bestcrypt":
+		return verifyBestCryptContainer(targetHash, candidate)
 	case "kremlin":
 		return verifyKremlin(targetHash, candidate)
 	case "racf-kdfaes":

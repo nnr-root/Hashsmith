@@ -230,6 +230,15 @@ func shapePrototypes() []hashid.Prototype {
 			"anything hashed before the 2003 revision was hashed with one of these two, and nothing in a bare digest says which", nil,
 			"whirlpool0", "whirlpool1"),
 		hexShapeProto(128, "Cisco ISE", 10, "single-product format", nil, "cisco-ise"),
+
+		// A Notes user.id blob is a ciphertext, not a digest, so its length is
+		// whatever the file held — John accepts anything from 40 to 100 bytes.
+		// It is offered by shape only at the width every blob seen so far has,
+		// because the wider rule would add it to every SHA-512 and Whirlpool
+		// digest in the world for no gain. The reader accepts the full range
+		// when the type is named with -t.
+		hexShapeProto(112, "Lotus Notes 8.5 user.id blob", 3,
+			"not a digest at all but an RC2 ciphertext, recognised only by its width; nothing else of this length is in common use", nil, "lotus85"),
 	}
 }
 
