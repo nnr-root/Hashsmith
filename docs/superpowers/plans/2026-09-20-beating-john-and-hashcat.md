@@ -3067,9 +3067,41 @@ is what the checksum covers, so a disagreeing pair describes a derivation
 nothing implements), and ODF 1.2's whole-package form, which has no per-part
 checksum at all.
 
-Extractors: 48 → 73. Container sniffers: 18 → 29. Of John's 118 converters, 51
-still have no counterpart — down from 76. The remainder is now dominated by
-network captures (pcap, wpapcap, radius, hccap), Windows and enterprise
+### WPA, and three silent failures
+
+The WPA capture extractor is the one an engagement reaches for most, and most
+of the work in it is refusing to emit records that cannot crack. Three details
+fail silently and each was worth finding:
+
+**The AP and the client are told apart by direction, and the two cases are
+mirror images.** A frame going TO the distribution system carries the BSSID in
+address 1; one coming FROM it carries the BSSID in address 2. Backwards, every
+record names the client as the access point, the ESSID lookup misses, and a
+capture with a beacon looks like one without — which is exactly what the first
+run against a real capture reported.
+
+**Message 4 is allowed to carry a zeroed nonce, and almost every client does.**
+The client's nonce is read back out of the frame the MIC covers, so a
+message-4 record gives the wrong pairwise key and can never crack. Before that
+was fixed the extractor produced five records for the sample capture, three of
+which were unanswerable.
+
+**Four radio headers exist and a capture uses whichever the driver felt like.**
+A wrong header length does not error — it reads an 802.11 header out of the
+middle of the radio header, which parses into plausible nonsense.
+
+One caveat is documented rather than worked around. An AP offers a PMKID over
+whatever PMK it holds, so one that cached a key or ran 802.1X offers a PMKID
+over a different key: that record will not crack even though the handshake from
+the same capture will. Nothing in the frame says which case it is. The
+Wireshark sample capture turns out to be exactly that case — its handshake
+cracks with "Induction" and its PMKID does not.
+
+### Where the remainder is
+
+Extractors: 48 → 74. Container sniffers: 18 → 29. Of John's 118 converters, 50
+still have no counterpart — down from 76. The remainder is now dominated by the
+rest of the capture family (pcap, radius, hccap), Windows and enterprise
 credential stores (DPAPImk, racf, sap, pse, ps_token, sspr), Apple documents
 (iwork, lion, mac, strip) and a long tail of single-product wallets.
 

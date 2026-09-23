@@ -25,7 +25,7 @@ func extractorFixture(t *testing.T, name string, data []byte) string {
 // smaller catalogue. Raise it when adding one; never lower it to make a change
 // pass.
 func TestExtractorRegistryIsUniqueAndRoutable(t *testing.T) {
-	const wantExtractors = 73 // 72 + libreoffice2smith
+	const wantExtractors = 74 // 73 + wpapcap2smith
 	if got := len(universalExtractorRegistry); got != wantExtractors {
 		t.Fatalf("extractor registry has %d entries, want %d", got, wantExtractors)
 	}
