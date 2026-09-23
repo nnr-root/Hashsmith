@@ -88,14 +88,14 @@ func TestEveryCodecRoundTrips(t *testing.T) {
 				}
 			}
 			for _, probe := range probes {
-				enc, err := encodeText(probe.in, name, 3, "hashsmith", 2)
+				enc, err := encodeText(probe.in, name, 3, codecTestKey(name), 2)
 				if err != nil {
 					// A codec that cannot represent a payload must SAY so.
 					// Silently producing something that will not decode is
 					// the failure this test exists to catch.
 					continue
 				}
-				dec, err := decodeText(enc, name, 3, "hashsmith", 2)
+				dec, err := decodeText(enc, name, 3, codecTestKey(name), 2)
 				if err != nil {
 					t.Errorf("%s: encoded %q to %.60q, which will not decode: %v",
 						probe.name, probe.in, enc, err)
@@ -112,13 +112,26 @@ func TestEveryCodecRoundTrips(t *testing.T) {
 
 // Every catalogue entry must actually be usable: listing a name that encode
 // rejects makes `hashsmith encodings` a list of promises rather than a menu.
+// codecTestKey is the -k value to use for a codec in the sweeps below.
+//
+// "hashsmith" is a fine key for vigenere and xor, and is not a valid base-N
+// ALPHABET: it repeats h and s, so a digit would have two meanings and basen
+// refuses it. One key does not fit every codec, the same way one input does
+// not — z85 has taken a different input since it was added.
+func codecTestKey(name string) string {
+	if name == "basen" {
+		return base62Alphabet
+	}
+	return "hashsmith"
+}
+
 func TestEveryListedCodecEncodes(t *testing.T) {
 	for _, name := range codecCatalogueNames() {
 		in := "Hashsmith"
 		if name == "z85" {
 			in = "abcd" // Z85 is defined only for multiples of four bytes
 		}
-		if _, err := encodeText(in, name, 3, "hashsmith", 2); err != nil {
+		if _, err := encodeText(in, name, 3, codecTestKey(name), 2); err != nil {
 			t.Errorf("catalogue lists %q but encode rejects it: %v", name, err)
 		}
 	}

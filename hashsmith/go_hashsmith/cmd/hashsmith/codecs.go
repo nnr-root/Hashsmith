@@ -112,6 +112,10 @@ func canonicalCodecType(typ string) string {
 		return "bubblebabble"
 	case "puny", "punycode", "rfc3492":
 		return "punycode"
+	case "base-n", "basen", "baseN", "custom-base":
+		return "basen"
+	case "hex-dump", "hexdump", "hd", "canonical-hex":
+		return "hexdump"
 	case "idn", "idna", "idna2003":
 		return "idna"
 	default:
@@ -157,6 +161,8 @@ var codecCatalogue = []typeGroup{
 		{"bubblebabble", "Pronounceable Bubble Babble binary encoding"},
 		{"punycode", "RFC 3492 Punycode, the bare encoding without a prefix"},
 		{"idna", "Domain names to and from their xn-- ASCII form"},
+		{"basen", "Base-N over an alphabet you supply with -k"},
+		{"hexdump", "Canonical hex dump, the form `hexdump -C` writes"},
 	}},
 	{"Escaping and character encodings", [][2]string{
 		{"url", "RFC 3986 percent encoding"},
@@ -610,4 +616,60 @@ func decodeBase32Flexible(text string, hexAlphabet bool) ([]byte, error) {
 		return enc.DecodeString(s)
 	}
 	return enc.WithPadding(base32.NoPadding).DecodeString(s)
+}
+
+// encodeBigRadixRunes and decodeBigRadixRunes are encodeBigRadix and
+// decodeBigRadix over an alphabet that may hold characters outside ASCII,
+// which a supplied one may. The byte-indexed pair above stays as it is: every
+// standardised alphabet is ASCII and indexing bytes is cheaper.
+func encodeBigRadixRunes(data []byte, alphabet []rune) string {
+	num := new(big.Int).SetBytes(data)
+	base := big.NewInt(int64(len(alphabet)))
+	zero := new(big.Int)
+	rem := new(big.Int)
+	out := make([]rune, 0, len(data)*2)
+	for num.Cmp(zero) > 0 {
+		num.DivMod(num, base, rem)
+		out = append(out, alphabet[rem.Int64()])
+	}
+	for _, b := range data {
+		if b != 0 {
+			break
+		}
+		out = append(out, alphabet[0])
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return string(out)
+}
+
+func decodeBigRadixRunes(text string, alphabet []rune) ([]byte, error) {
+	if text == "" {
+		return []byte{}, nil
+	}
+	index := make(map[rune]int64, len(alphabet))
+	for i, r := range alphabet {
+		index[r] = int64(i)
+	}
+	num := new(big.Int)
+	base := big.NewInt(int64(len(alphabet)))
+	input := []rune(text)
+	for _, ch := range input {
+		d, ok := index[ch]
+		if !ok {
+			return nil, fmt.Errorf("%q is not a digit of this alphabet", string(ch))
+		}
+		num.Mul(num, base)
+		num.Add(num, big.NewInt(d))
+	}
+	out := num.Bytes()
+	leading := 0
+	for leading < len(input) && input[leading] == alphabet[0] {
+		leading++
+	}
+	if leading > 0 {
+		out = append(make([]byte, leading), out...)
+	}
+	return out, nil
 }

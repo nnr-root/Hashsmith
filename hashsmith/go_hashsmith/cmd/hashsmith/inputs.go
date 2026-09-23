@@ -57,6 +57,13 @@ type inputOpts struct {
 	// noFile disables treating an existing path as a file of inputs. Used by
 	// callers whose argument is definitionally literal text.
 	noFile bool
+	// whole makes a file ONE input rather than one per line.
+	//
+	// The line-per-input default is right for a list of hashes and wrong for
+	// anything whose representation spans lines: a PEM block, a hex dump, a
+	// wrapped MIME body. Those decode to nothing useful line by line, because
+	// each line is a fragment of one value rather than a value.
+	whole bool
 }
 
 // targetInputOpts is the profile for hash targets (crack, identify, auto):
@@ -114,6 +121,14 @@ func collectInputsOpts(arg string, opts inputOpts) ([]string, error) {
 	// a secret deserves to know their argument became a file.
 	if !opts.noFile {
 		if info, err := os.Stat(arg); err == nil && !info.IsDir() {
+			if opts.whole {
+				body, rerr := os.ReadFile(arg)
+				if rerr != nil {
+					return nil, rerr
+				}
+				noteFileSubstitution(arg, info.Size(), 1)
+				return []string{string(body)}, nil
+			}
 			lines, rerr := readInputLines(arg)
 			if rerr == nil {
 				noteFileSubstitution(arg, info.Size(), len(lines))
@@ -199,6 +214,15 @@ func readInputLinesFrom(r io.Reader, label string) ([]string, error) {
 func withLiteral(o inputOpts, literal bool) inputOpts {
 	if literal {
 		o.noFile = true
+	}
+	return o
+}
+
+// withWhole makes each file one input. It is the plumbing behind --whole, for
+// the codecs whose representation spans lines.
+func withWhole(o inputOpts, whole bool) inputOpts {
+	if whole {
+		o.whole = true
 	}
 	return o
 }

@@ -28,10 +28,11 @@ func runDecode(args []string) error {
 	rails := fs.Int("r", 2, "rails")
 	literalIn := fs.Bool("string", false, "treat INPUT as literal text even if it names a file")
 	splitSep := fs.String("split", "", "split each INPUT on this separator (e.g. --split ,)")
+	whole := fs.Bool("whole", false, "read each file as ONE input rather than one per line (for PEM, hex dumps and other multi-line forms)")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
-	inputs, err := gatherInputsOpts(fs.Args(), withLiteral(withSplit(payloadInputOpts(), *splitSep), *literalIn))
+	inputs, err := gatherInputsOpts(fs.Args(), withWhole(withLiteral(withSplit(payloadInputOpts(), *splitSep), *literalIn), *whole))
 	if err != nil {
 		return err
 	}
@@ -215,6 +216,18 @@ func decodeTextLimited(text string, typ string, shift int, key string, rails int
 		return string(b), nil
 	case "bubblebabble":
 		b, err := decodeBubbleBabble(text)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	case "basen":
+		b, err := decodeBaseN(text, key)
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	case "hexdump":
+		b, err := decodeHexDump(text)
 		if err != nil {
 			return "", err
 		}

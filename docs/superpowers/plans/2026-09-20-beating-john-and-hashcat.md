@@ -433,11 +433,16 @@ six of this area's blockers for free; the rest is additive.
       the verifiers, identification, decoders, magic, rules and the input layer
 - [x] Recursive magic decode — and it hands off to the identification engine
 - [x] Chained pipeline syntax so a recipe is one invocation
-- [ ] Custom alphabets for every base-N codec; the internals are already parameterised
+- [x] Custom alphabets for every base-N codec — one `basen` codec taking the
+      alphabet from `-k`, since the radix is just the alphabet's length. The
+      roadmap was right that the internals were already parameterised.
 - [x] Punycode and IDNA — the homograph case, and the first Phase 7 item to
       land. Nineteen RFC 3492 vectors as the test, no new dependency.
-- [ ] Hex-dump output formats, brotli/zstd/xz/bzip2, the missing classical
-      ciphers
+- [x] Hex dumps, both ways, matching the system tool byte for byte. Reading one
+      back has a real ambiguity — `xxd` does not delimit its printable column
+      and that column may be indistinguishable from more hex — resolved by the
+      column SPACING rather than by guessing at the text.
+- [ ] brotli/zstd/xz/bzip2, the missing classical ciphers
 - [ ] An importable Go library API, so Hashsmith is embeddable rather than CLI-only
 
 **Acceptance:** codec vectors reach parity with hash vectors; magic decode
