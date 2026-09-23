@@ -1004,6 +1004,55 @@ hashsmith sessions clear           # delete all
 
 A finished run (found or keyspace exhausted) removes its own session file.
 
+## Use as a Go library
+
+Hashsmith is importable. Everything it does to a hash, a record or an encoded
+string is available to another Go program, so a scanner, a test harness or an
+incident-response script does not have to shell out and parse terminal output.
+
+```go
+import hashsmith "hashsmith-go"
+
+// Identify a record, then check a password against it.
+types := hashsmith.Identify(record)                       // ["bcrypt"]
+ok, err := hashsmith.Verify("hunter2", record, hashsmith.WithType("bcrypt"))
+
+// Produce a hash. bcrypt takes a work factor, not a salt: it draws its own.
+h, err := hashsmith.Hash("hunter2", hashsmith.WithType("bcrypt"), hashsmith.WithCost(12))
+
+// Run the verifier in parallel over candidates you supply. The FIRST
+// candidate in your order wins, not the first worker to finish.
+pw, found, err := hashsmith.Crack(record, wordlist, hashsmith.WithType("bcrypt"))
+
+// Any of the eighty codecs, in either direction.
+enc, err := hashsmith.Encode(plain, hashsmith.WithType("zstd"))
+dec, err := hashsmith.Decode(enc, hashsmith.WithType("zstd"), hashsmith.WithLimit(1<<20))
+
+// Or let it find the chain of them.
+for _, c := range hashsmith.Magic(payload, 3) {
+    fmt.Println(c.Codecs, c.Score, c.Value)   // ["hex" "base64"] 0.97 "..."
+}
+
+// Read the records out of a container.
+records, extractor, err := hashsmith.Extract("secrets.kdbx")
+```
+
+**Set `WithLimit` on anything untrusted.** A compressed stream is an
+instruction to allocate: a few hundred bytes of zstd will ask for 64 MiB, which
+is the default ceiling. Choose the one you are actually willing to hold.
+
+**What is deliberately not in the library:** sessions, the potfile, rule
+application, mask enumeration, progress reporting and GPU dispatch. Those own
+the process — they write to the terminal, they read and write files under the
+user's home directory, they install signal handlers — and a library has no
+business doing that to its caller. `Crack` is the verifier over candidates you
+supply, which is the part that belongs in one. For the rest, run the command.
+
+**Stability.** The implementation lives in `internal/smith` and is free to
+change. `hashsmith.go` is the promise; anything not named there is not part of
+it. The import path above is the module's current name — if you are vendoring
+this, rename the module in `go.mod` to the path you fetch it from.
+
 ## Commands
 
 - `encode`
@@ -1159,7 +1208,7 @@ hashsmith crack -w rockyou.txt '<any hash>'     # or just let detection decide
 **What the recognition rate actually means.** Run against Hashsmith's own
 502-vector self-test corpus, `identify` resolves 272/502 = 54.2% of vectors to
 a `certain` or `likely` candidate that names the vector's own type
-(`go test ./cmd/hashsmith -run TestRecognitionAccuracy -v`). That is not the
+(`go test ./internal/smith -run TestRecognitionAccuracy -v`). That is not the
 whole story in either direction. Most of the remaining 209 formats are not
 missed table entries — they are HMAC variants, same-length raw digests, and
 composite MD5/SHA constructions (`md5-md5`, `sha256-sha256pass-salt`, and

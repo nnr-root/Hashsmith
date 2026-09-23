@@ -456,7 +456,30 @@ six of this area's blockers for free; the rest is additive.
       DEFLATE are deliberately held OUT of `magic`: they carry no signature, so
       their decoders accept arbitrary bytes, and magic would report the noise as
       a finding. 62 codecs to 80.
-- [ ] An importable Go library API, so Hashsmith is embeddable rather than CLI-only
+- [x] An importable Go library API. The 336 implementation files moved from
+      `cmd/hashsmith` (package main, which Go cannot import) to
+      `internal/smith`, leaving `cmd/hashsmith/main.go` as a three-line shim,
+      and a curated public package at the module root wraps them:
+      `Identify`, `Hash`, `Verify`, `Crack`, `Encode`, `Decode`, `Magic`,
+      `Extract`, plus the three catalogues.
+
+      The implementation stays internal deliberately. Exporting 78,000 lines
+      wholesale would make every internal rename a breaking change; the public
+      file is the promise, and nothing else is.
+
+      Sessions, the potfile, rules, masks, progress reporting and GPU dispatch
+      are deliberately absent: they own the process, and a library has no
+      business installing signal handlers or writing to a caller's terminal.
+      `Crack` is the verifier over caller-supplied candidates, parallel, and
+      returns the FIRST candidate in the caller's order rather than the first
+      worker to finish — a property test hammers that fifty times, because a
+      naive parallel search returns whoever won the race.
+
+      Writing the external test found a real API defect: bcrypt's work factor
+      travels through the salt channel, and the error a library caller got told
+      them to pass a CLI flag they do not have. Hence `WithCost`.
+
+      Note §7 below deferred this until Phase 3 shipped. It has.
 
 **Acceptance:** codec vectors reach parity with hash vectors; magic decode
 resolves a 3-layer nested payload unaided.
@@ -474,9 +497,17 @@ resolves a 3-layer nested payload unaided.
 - **It does not add new formats before Phase 2 closes.** Adding to a registry
   where 23% of existing modes refuse their canonical record makes the headline
   number worse, not better.
-- **It does not refactor to a module architecture yet.** That lead (§4) is real
-  and probably right, but it is an XL change that would stall every phase above
-  it. Revisit after Phase 3 ships.
+- **~~It does not refactor to a module architecture yet.~~** *(Superseded.)*
+  The original text is kept below because the reasoning was right at the time.
+  Phase 3 has shipped, and Phase 7 did the part that mattered: the
+  implementation is now a package rather than a `package main`, so the toolkit
+  is importable. What it did NOT do is the other half of the §4 lead — there
+  is still no format module interface, and a format's behaviour still lives in
+  ten hand-edited switch statements. That remains open.
+
+  > It does not refactor to a module architecture yet. That lead (§4) is real
+  > and probably right, but it is an XL change that would stall every phase
+  > above it. Revisit after Phase 3 ships.
 
 ---
 

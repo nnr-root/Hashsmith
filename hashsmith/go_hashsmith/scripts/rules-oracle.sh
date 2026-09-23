@@ -5,7 +5,7 @@
 #                                    # local hashcat over its stock rule files
 #   scripts/rules-oracle.sh sweep    # print per-file candidate coverage
 #
-# The committed vectors in cmd/hashsmith/rules_hashcat_compat_test.go let CI
+# The committed vectors in internal/smith/rules_hashcat_compat_test.go let CI
 # run without hashcat installed. This script is the other half: it checks those
 # vectors still describe the real hashcat, and measures end-to-end coverage
 # over every stock rule file — the number that actually matters to a user

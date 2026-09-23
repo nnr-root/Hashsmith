@@ -145,7 +145,7 @@ run_capture() {
 
 # The committed table, as "format<TAB>label".
 committed() {
-  grep -oE '"[a-z0-9_.-]+": *"[A-Za-z0-9_.-]+"' "$root/cmd/hashsmith/hash_john_labels.go" \
+  grep -oE '"[a-z0-9_.-]+": *"[A-Za-z0-9_.-]+"' "$root/internal/smith/hash_john_labels.go" \
     | sed 's/"//g; s/: */\t/'
 }
 

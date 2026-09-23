@@ -65,7 +65,7 @@ jobs:
       - name: Hashcat conformance (coverage ratchet)
         run: |
           cd hashsmith/go_hashsmith
-          go test -timeout 5m -run TestHashcatConformance -v ./cmd/hashsmith \
+          go test -timeout 5m -run TestHashcatConformance -v ./internal/smith \
             | grep -E 'conformance over|CRACKED|REJECTED|NO-SUCH-MODE|NOT-FOUND|WRONG-PLAIN|--- (PASS|FAIL)'
 
   # The bcrypt speedup ratchet measures a wall-clock RATIO, and that ratio is
@@ -161,7 +161,7 @@ jobs:
       - name: Compare against john
         run: |
           cd hashsmith/go_hashsmith
-          go test -v -run 'TestJohnRuleCommandsMatchJohnItself|TestJohnCorpusCoverageDoesNotRegress' ./cmd/hashsmith
+          go test -v -run 'TestJohnRuleCommandsMatchJohnItself|TestJohnCorpusCoverageDoesNotRegress' ./internal/smith
 
   race:
     runs-on: ubuntu-latest
@@ -242,14 +242,14 @@ jobs:
           for target in FuzzVerifyCandidate FuzzDetectHashTypes FuzzDecodeText \
                         FuzzMagicDecode FuzzCompileRuleLine FuzzCollectInputs; do
             echo "=== $target ==="
-            go test ./cmd/hashsmith -run '^$' -fuzz "^$target\$" -fuzztime 60s
+            go test ./internal/smith -run '^$' -fuzz "^$target\$" -fuzztime 60s
           done
       - name: Upload any crashers
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-crashers
-          path: hashsmith/go_hashsmith/cmd/hashsmith/testdata/fuzz/
+          path: hashsmith/go_hashsmith/internal/smith/testdata/fuzz/
           if-no-files-found: ignore
 
   packaging:
@@ -382,7 +382,7 @@ jobs:
         run: |
           cd hashsmith/go_hashsmith
           go test -run '^$' -bench 'BenchmarkMD5AVX2Core|BenchmarkMD5NeonCore|BenchmarkMD5AVX2Group|BenchmarkMD5Group|BenchmarkMD5Scalar|BenchmarkMD4AVX2Group|BenchmarkMD4Group|BenchmarkMD4Scalar' \
-            -benchtime 2s -count 5 -cpu 1 ./cmd/hashsmith | tee /tmp/bench.out
+            -benchtime 2s -count 5 -cpu 1 ./internal/smith | tee /tmp/bench.out
       - name: End-to-end crack rate (fast path vs forced-scalar, same binary)
         run: |
           cd hashsmith/go_hashsmith
