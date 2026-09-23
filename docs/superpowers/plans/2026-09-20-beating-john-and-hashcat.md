@@ -3210,8 +3210,21 @@ covers the request METHOD, which is on the request line, not in the
 Authorization header. A record built from the header alone is well-formed and
 wrong.
 
-Extractors: 48 → 89. Container sniffers: 18 → 30. Of John's 118 converters, 33
-still have no counterpart — down from 76. The remainder is now dominated by the
+TACACS+ and TCP-MD5 followed on the same transport layer. TACACS+ has a bug in
+John's converter worth recording: it rebuilds the version byte as
+`TACACS_PLUS_VERSION_MAJOR << 4 + version_minor`, which Python reads as a shift
+by `4 + minor`. For minor 0 that is right by accident; for minor 1 it is 384,
+which does not fit in a byte and raises. The version byte is already in the
+packet, so it is copied.
+
+TCP-MD5's salt is three layers glued together — a pseudo-header never on the
+wire, the TCP header with its checksum zeroed, and the payload — with the
+addresses coming from the IP header and everything else from the TCP one. Its
+test rebuilds the segment from John's salt, which is the strongest available
+check that the layers go together in the right order.
+
+Extractors: 48 → 89, with pcap2smith covering four protocols. Container
+sniffers: 18 → 30. Of John's 118 converters, 33 still have no counterpart — down from 76. The remainder is now dominated by the
 rest of the capture family (pcap, radius, hccap), Windows and enterprise
 credential stores (DPAPImk, racf, sap, pse, ps_token, sspr), Apple documents
 (iwork, lion, mac, strip) and a long tail of single-product wallets.

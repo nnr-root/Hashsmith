@@ -52,13 +52,21 @@ func extractPCAPRecords(path string) ([]string, error) {
 				add(r)
 			}
 		}
+		if payload, fromServer, ok := tcpPayloadFromPort(f.data, f.linkType, tacacsPort); ok {
+			if r, ok := tacacsRecord(payload, fromServer); ok {
+				add(r)
+			}
+		}
+		if r, ok := tcpMD5Record(f.data, f.linkType); ok {
+			add(r)
+		}
 	}
 
 	if len(records) == 0 {
 		if basicAuth > 0 {
 			return nil, fmt.Errorf("this capture holds %d HTTP Basic Authorization header(s) and no crackable record: Basic auth carries the password itself, base64-encoded, so there is nothing to crack — decode the header", basicAuth)
 		}
-		return nil, errors.New("no HTTP Digest or SNMPv3 credentials in this capture (the other protocols pcap2john reads are not covered here)")
+		return nil, errors.New("no HTTP Digest, SNMPv3, TACACS+ or TCP-MD5 credentials in this capture (the other protocols pcap2john reads are not covered here)")
 	}
 	if basicAuth > 0 {
 		fmt.Printf("note: %d HTTP Basic Authorization header(s) are also present; those carry the password itself and need no cracking\n", basicAuth)
@@ -326,3 +334,152 @@ func udpPayloadToPort(frame []byte, linkType uint32, port uint16) ([]byte, bool)
 }
 
 func bigEndianUint16(b []byte) uint16 { return uint16(b[0])<<8 | uint16(b[1]) }
+
+// ── TACACS+ ───────────────────────────────────────────────────────────────────
+
+const (
+	tacacsPort        = 49
+	tacacsTypeAuthen  = 0x01
+	tacacsUnencrypted = 0x01
+	tacacsVersionHigh = 0x0c
+	tacacsHeaderBytes = 12
+)
+
+// tacacsRecord builds a record from one TACACS+ packet.
+//
+// TACACS+ does not encrypt with a cipher. It XORs the body with a keystream of
+// chained MD5s over the session id, the shared secret, the version byte and
+// the sequence number — so the record carries those three plaintext fields and
+// the body, and cracking is recomputing the keystream.
+//
+// Only the SERVER's reply is taken. The client's request is encrypted the same
+// way, but a reply's decrypted body has a known shape — a status byte followed
+// by two lengths that must agree with what is left — and the request's does
+// not, so a record built from a request has nothing to check against.
+//
+// A packet with the unencrypted flag set carries no secret at all.
+func tacacsRecord(payload []byte, fromServer bool) (string, bool) {
+	if !fromServer || len(payload) <= tacacsHeaderBytes {
+		return "", false
+	}
+	version, kind, seq, flags := payload[0], payload[1], payload[2], payload[3]
+	if flags&tacacsUnencrypted != 0 || kind != tacacsTypeAuthen {
+		return "", false
+	}
+	if version>>4 != tacacsVersionHigh {
+		return "", false
+	}
+	sessionID := payload[4:8]
+	body := payload[tacacsHeaderBytes:]
+
+	// John's converter rebuilds this byte as
+	// TACACS_PLUS_VERSION_MAJOR << 4 + version_minor, which Python reads as
+	// a shift by (4 + minor). For minor 0 that is the right answer by
+	// accident and for minor 1 it overflows a byte and raises. The version
+	// byte is already in the packet, so it is simply copied.
+	return fmt.Sprintf("$tacacs-plus$0$%s$%s$%s",
+		hex.EncodeToString(sessionID), hex.EncodeToString(body),
+		hex.EncodeToString([]byte{version, seq})), true
+}
+
+// ── TCP-MD5 (RFC 2385) ────────────────────────────────────────────────────────
+
+const tcpOptMD5 = 19
+
+// tcpMD5Record builds a record from a TCP segment carrying an MD5 signature.
+//
+// The digest covers a PSEUDO-HEADER that is not on the wire — the two
+// addresses, the protocol number and the segment length — followed by the TCP
+// header with its checksum zeroed, then the payload, then the secret. So the
+// record's salt has to be assembled from three layers, and the addresses come
+// from the IP header while everything else comes from the TCP one.
+//
+// The TCP OPTIONS are not covered, which is what makes the signature stable
+// across a path that rewrites them.
+func tcpMD5Record(frame []byte, linkType uint32) (string, bool) {
+	ipAt, ok := ipv4Offset(frame, linkType)
+	if !ok || len(frame) < ipAt+20 || frame[ipAt]>>4 != 4 || frame[ipAt+9] != 6 {
+		return "", false
+	}
+	ipLen := int(frame[ipAt]&0x0f) * 4
+	total := int(bigEndianUint16(frame[ipAt+2:]))
+	if ipLen < 20 || total < ipLen+20 || ipAt+total > len(frame) {
+		return "", false
+	}
+	segment := frame[ipAt+ipLen : ipAt+total]
+	if len(segment) < 20 {
+		return "", false
+	}
+	headerLen := int(segment[12]>>4) * 4
+	// A segment with no room for options cannot carry a signature.
+	if headerLen < 40 || headerLen > len(segment) {
+		return "", false
+	}
+	signature, ok := tcpOption(segment[20:headerLen], tcpOptMD5)
+	if !ok || len(signature) != 16 {
+		return "", false
+	}
+
+	salt := make([]byte, 0, 12+20+len(segment)-headerLen)
+	salt = append(salt, frame[ipAt+12:ipAt+20]...) // source and destination
+	salt = append(salt, 0, frame[ipAt+9])          // padding, protocol
+	salt = append(salt, byte(len(segment)>>8), byte(len(segment)))
+	salt = append(salt, segment[:16]...) // the header up to the checksum
+	salt = append(salt, 0, 0, 0, 0)      // checksum and urgent pointer, zeroed
+	salt = append(salt, segment[headerLen:]...)
+
+	return fmt.Sprintf("$tcpmd5$%s$%s",
+		hex.EncodeToString(salt), hex.EncodeToString(signature)), true
+}
+
+// tcpOption walks the options for one kind. The list is a sequence of
+// kind/length/value triples with two one-byte exceptions — end of list and
+// no-operation — which is where a naive walk runs off the end.
+func tcpOption(opts []byte, want byte) ([]byte, bool) {
+	for i := 0; i < len(opts); {
+		kind := opts[i]
+		if kind == 0 { // end of option list
+			return nil, false
+		}
+		if kind == 1 { // no-operation, one byte and no length
+			i++
+			continue
+		}
+		if i+1 >= len(opts) {
+			return nil, false
+		}
+		length := int(opts[i+1])
+		if length < 2 || i+length > len(opts) {
+			return nil, false
+		}
+		if kind == want {
+			return opts[i+2 : i+length], true
+		}
+		i += length
+	}
+	return nil, false
+}
+
+// tcpPayloadFromPort returns a TCP payload when either endpoint is the given
+// port, and says whether the port was the SOURCE — which for a
+// client/server protocol is what distinguishes a reply from a request.
+func tcpPayloadFromPort(frame []byte, linkType uint32, port uint16) (payload []byte, fromPort bool, ok bool) {
+	ipAt, good := ipv4Offset(frame, linkType)
+	if !good || len(frame) < ipAt+20 || frame[ipAt]>>4 != 4 || frame[ipAt+9] != 6 {
+		return nil, false, false
+	}
+	ipLen := int(frame[ipAt]&0x0f) * 4
+	if ipLen < 20 || len(frame) < ipAt+ipLen+20 {
+		return nil, false, false
+	}
+	tcpAt := ipAt + ipLen
+	sport, dport := bigEndianUint16(frame[tcpAt:]), bigEndianUint16(frame[tcpAt+2:])
+	if sport != port && dport != port {
+		return nil, false, false
+	}
+	body, good := tcpPayload(frame, linkType)
+	if !good {
+		return nil, false, false
+	}
+	return body, sport == port, true
+}
