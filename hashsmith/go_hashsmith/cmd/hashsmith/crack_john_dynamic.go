@@ -263,6 +263,18 @@ func dynLiteralBytes(s string) []byte {
 			case 't':
 				out, i = append(out, '\t'), i+1
 				continue
+			case 'x':
+				// John writes a constant's bytes as \xNN in its
+				// configuration, and a constant that holds a
+				// control character can be written no other
+				// way. Without this the bytes would go in as
+				// the four characters that spell them.
+				if i+3 < len(s) {
+					if b, err := hex.DecodeString(s[i+2 : i+4]); err == nil {
+						out, i = append(out, b[0]), i+3
+						continue
+					}
+				}
 			}
 		}
 		out = append(out, s[i])

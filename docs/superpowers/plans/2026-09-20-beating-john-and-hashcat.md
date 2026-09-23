@@ -2371,6 +2371,10 @@ dynamic_1507, whose `$const` John keeps in its configuration file rather than
 in the expression — the expression alone does not determine a digest, and no
 amount of hashing will supply it.
 
+> **This paragraph is wrong and is kept as written.** The constant is published
+> in the configuration file John ships. See "CORRECTION: `dynamic_1507` was not
+> unanswerable" near the end of this document.
+
 Everything left is a container format with no reader: PGP disk, GELI, OpenBSD
 softraid, GNOME keyring, KDE wallet, Dashlane, SAP's PSE, Nokia SL3. There is
 no remaining record that Hashsmith can read and cannot answer.
@@ -3120,9 +3124,45 @@ credential stores (DPAPImk, racf, sap, pse, ps_token, sspr), Apple documents
 
 ---
 
-Of 605 records: **603 crack**. One is detected and deliberately not guessed
-(ZipMonster, whose 50,000 MD5s per candidate are four orders of magnitude past
-everything of its width). One cannot be answered from the record at all:
-`dynamic_1507` names a constant that lives in John's configuration file, so the
-expression alone does not determine a digest. Every other format John reads,
-Hashsmith reads.
+### CORRECTION: `dynamic_1507` was not unanswerable
+
+This document said twice, and a commit message said once, that `dynamic_1507`
+could not be answered from the record — that John prints its expression as
+`sha1(utf16($const.$p))` and keeps `$const` in a configuration file, so the
+expression alone does not determine a digest. The first half is true. The
+conclusion was wrong.
+
+The constant is not a per-installation secret. It is in `run/dynamic.conf`,
+which ships with John, on the line after the expression, with two test vectors
+under it: `\x01\x0f\x0d\x33`. It took one `grep` of a file that had been sitting
+in the source tree the whole time.
+
+What made this worth finding was not the format — McAfee's master password is
+not a common target. It was the method. The claim was reached by reading the
+expression John PRINTS and concluding that what it does not say is not knowable,
+which is the same mistake as the six formats earlier in this document that were
+"searched and not found" until someone read the reference implementation. A
+bound on what was searched is not a bound on what is knowable, and it is worth
+noticing that this document had already written that sentence once and then made
+the mistake again.
+
+The measurement that caught it is repeatable: John's `dynamic.conf` defines 58
+formats and publishes 167 test vectors for them. Running all 167 through the
+engine showed five formats with failures. Four of those wanted a USERNAME, which
+John's test lines carry in a third field and which a real record carries as
+`$$U<login>` — supply it the way a record does and all four answer. The fifth
+was `dynamic_1507`, and it was the only real gap.
+
+Finding it needed one more fix: the expression parser could not write the
+constant. Two of its four bytes are control characters, so John writes it as
+`\xNN`, and the parser knew `\n`, `\r` and `\t` but not `\x`. Without that,
+the eight characters that SPELL the bytes go into the digest instead of the four
+bytes, and the format parses, runs and answers nothing.
+
+---
+
+Of 605 records: **604 crack**. The one that does not is detected and
+deliberately not guessed: ZipMonster, whose 50,000 MD5s per candidate are four
+orders of magnitude past everything of its width, so its bare spelling is read
+but it is not offered by shape. Every other format John reads, Hashsmith reads,
+and every one of John's 446 dynamic expressions now parses.

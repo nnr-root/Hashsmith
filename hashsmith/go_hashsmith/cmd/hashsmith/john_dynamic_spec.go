@@ -20,10 +20,15 @@ package main
 // typo in the listing, not a different expression; the balanced form is what
 // John computes, and is what appears below.
 //
-// Every hash name in the table now resolves. The one expression that still
-// does not is dynamic_1507, whose $const John keeps in its configuration file
-// rather than in the expression; a record asking for it is left alone rather
-// than claimed and failed, as any unresolvable expression is.
+// Every hash name in the table now resolves, and so does every expression.
+//
+// dynamic_1507 was the last holdout and it is worth saying why it no longer is.
+// John prints its expression as sha1(utf16($const.$p)), and $const is not in
+// the expression — so for a while this was recorded here as unanswerable. It
+// is not: John keeps the constant in run/dynamic.conf, which ships with John,
+// alongside two test vectors. It is \x01\x0f\x0d\x33, and it is written out
+// below. The lesson is the same one the searched-and-not-found formats taught:
+// a bound on what was searched is not a bound on what is knowable.
 
 var johnDynamicSpecs = map[int]string{
 	0:    `md5($p)`,      // raw-md5
@@ -449,8 +454,11 @@ var johnDynamicSpecs = map[int]string{
 	1503: `sha256(sha256($p).$s)`, // XenForo SHA-256
 	1504: `sha1($s.$p.$s)`,
 	1505: `md5($p.$s.md5($p.$s))`,
-	1506: `md5($u.:XDB:.$p)`,       // Oracle 12c "H" hash
-	1507: `sha1(utf16($const.$p))`, // Mcafee master pass
+	1506: `md5($u.:XDB:.$p)`, // Oracle 12c "H" hash
+	// John's own expression names $const; the four bytes below are what
+	// run/dynamic.conf gives for it, written in place so the expression is
+	// self-contained. See the note at the top of this file.
+	1507: `sha1(utf16(\x01\x0f\x0d\x33.$p))`, // Mcafee master pass
 	1518: `md5(sha1($p).md5($p).sha1($p))`,
 	1528: `sha256($s.$p.$s)`,               // Telegram for Android
 	1529: `sha1($p null_padded_to_len_32)`, // DeepSound

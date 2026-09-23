@@ -13,7 +13,8 @@ import (
 // The count is pinned so that a change which quietly stops reading a family of
 // expressions is a failing test rather than a smaller number nobody notices.
 func TestJohnDynamicCorpus(t *testing.T) {
-	const wantClaimed = 158
+	// 159 with dynamic_1507, which the engine used to decline.
+	const wantClaimed = 159
 	re := regexp.MustCompile(`\$dynamic_\d+\$`)
 	claimed := 0
 	for _, r := range loadJohnCorpus(t) {
@@ -88,8 +89,12 @@ func TestJohnDynamicExpressions(t *testing.T) {
 // then failed, so each of these must be refused at detection.
 func TestJohnDynamicDeclines(t *testing.T) {
 	for _, tc := range []struct{ name, record string }{
-		// An expression whose constant lives in John's configuration file.
-		{"a configured constant", "$dynamic_1507$d4eaf666d09316f9d61b14753353a73d5fbcf048"},
+		// An expression naming a value the expression does not carry.
+		// dynamic_1507 used to be the example here; its constant turned
+		// out to be published, so the case is pinned with an inline
+		// expression instead — the behaviour still has to hold for any
+		// record that names something the expression does not define.
+		{"a value the expression does not carry", "@dynamic=sha1($const.$p)@" + strings.Repeat("ab", 20)},
 		// A number John does not define.
 		{"an undefined number", "$dynamic_99999$5a105e8b9d40e1329780d62ea2265d8a"},
 		// Cisco's PIX and ASA records are dynamic_19 and dynamic_20, but they
@@ -127,14 +132,55 @@ func TestJohnDynamicSpecTable(t *testing.T) {
 	if parsed+unsupported != len(johnDynamicSpecs) {
 		t.Fatal("the spec table lost entries")
 	}
-	// 445 of John's 446 expressions now parse. The one that does not is
-	// dynamic_1507, whose $const is a value John keeps in its configuration
-	// file rather than in the expression, so the expression alone does not
-	// determine a digest and no amount of hashing will supply it.
+	// All 446 of John's expressions now parse. dynamic_1507 was the last
+	// holdout, and it turned out not to be a holdout at all: John prints
+	// its expression with a $const, but the constant is in the
+	// configuration file John ships, not in a per-installation secret. See
+	// john_dynamic_spec.go.
 	//
-	// Every other name in the table resolves: Skein raised this number by 36,
+	// Every name in the table resolves too: Skein raised that number by 36,
 	// HAVAL by 135, Tiger by 9 and Panama by the last 9.
-	if parsed != 445 {
-		t.Errorf("%d of %d expressions parse, want 445", parsed, len(johnDynamicSpecs))
+	if parsed != len(johnDynamicSpecs) {
+		t.Errorf("%d of %d expressions parse, want all of them", parsed, len(johnDynamicSpecs))
+	}
+}
+
+// TestJohnDynamic1507 pins McAfee's master password against the two vectors
+// John publishes for it, in run/dynamic.conf, beside the constant itself.
+//
+// The constant is four bytes and two of them are control characters, so it can
+// only be written as an escape — which is why the expression parser learned
+// \\xNN at the same time. Getting the escape wrong puts the eight characters
+// that spell the bytes into the digest instead of the four bytes, and the
+// result is a format that parses, runs, and answers nothing.
+func TestJohnDynamic1507(t *testing.T) {
+	for _, tc := range []struct{ digest, password string }{
+		{"d4eaf666d09316f9d61b14753353a73d5fbcf048", "test"},
+		{"9dbe0d0ea16ae0a14c0c81a7c962b5a16e777259", "test1"},
+	} {
+		record := "$dynamic_1507$" + tc.digest
+		if !isJohnDynamic(record) {
+			t.Fatalf("%s: the engine still declines this record", tc.password)
+		}
+		ok, err := verifyJohnDynamic(record, tc.password)
+		if err != nil || !ok {
+			t.Errorf("%s: ok=%v err=%v", tc.password, ok, err)
+		}
+		if bad, _ := verifyJohnDynamic(record, tc.password+"x"); bad {
+			t.Errorf("%s: accepted a wrong password", tc.password)
+		}
+	}
+}
+
+// The escape has to produce BYTES, not the characters that spell them.
+func TestDynLiteralHexEscapes(t *testing.T) {
+	got := dynLiteralBytes(`\x01\x0f\x0d\x33`)
+	want := []byte{0x01, 0x0f, 0x0d, 0x33}
+	if string(got) != string(want) {
+		t.Errorf("dynLiteralBytes gave % x, want % x", got, want)
+	}
+	// A truncated or non-hex escape is left alone rather than swallowed.
+	if string(dynLiteralBytes(`\xZZ`)) != `\xZZ` {
+		t.Errorf("a non-hex escape should pass through unchanged")
 	}
 }
