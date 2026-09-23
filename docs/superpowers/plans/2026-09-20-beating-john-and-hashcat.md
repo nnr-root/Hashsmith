@@ -388,6 +388,38 @@ Highest-value leads, by subsystem:
 - **No recursive "magic" decode**, no chained pipeline syntax, no custom alphabets,
   no hex-dump output formats, no brotli/zstd/xz, no Punycode
 
+### 4.1 Verification pass, 2026-09-23
+
+The leads above were recorded as unconfirmed. Nine were checked against the
+built binary. **Six were already closed** by work landed since they were
+written, and saying so matters as much as the confirmations: a stale lead
+costs real effort to re-investigate.
+
+| Lead | Verdict | Evidence |
+|---|---|---|
+| yescrypt is absent | **stale** | implemented; cracks its published vector, identified as `certain` |
+| Zero fuzz targets | **stale** | seven targets, run nightly in CI |
+| Potfile has no hash-type tag, so `--show` can answer with the wrong plaintext | **stale** | it re-verifies the stored plaintext against the requested type and refuses by name. Tried the exact collision: crack `5f4d…cf99` as MD5, then ask `--show -t ntlm` for the same string — it declines and explains why |
+| Markov enumerates zero candidates past int64 | **stale** | saturates and says so ("Keyspace at least 9,223,372,036,854,775,807"), then enumerates normally |
+| Multi-hash cracks buffered in memory; Ctrl-C loses them | **stale** | interrupted a five-target run; all five cracks were already in the potfile |
+| `zip2smith` produces false-positive records | **stale** | a real `zip -P` archive round-trips: the right password is found, a list of wrong ones is not |
+| **`--session` is silently ignored for `-M dict`** | **CONFIRMED** | `-M dict --session dicttest` runs to completion, writes no session, and says nothing. `sessions` lists none. The flag's own help text names brute/mask/markov/hybrid/combinator/prince — dict is absent from it, and passing it anyway is accepted in silence |
+| **Dictionary, hybrid, combinator, markov and prince never reach the SIMD fast path** | **CONFIRMED** | structural, and in one condition: both `fastPathEligible` (keyspace.go:487) and `stdPathEligible` (stdfast.go:296) refuse a layout with `l.gen != nil`, and `gen` is exactly what combinator.go, hybrid.go, markov.go and prince.go set. Measured on the same md5 target with the same worker count and the wordlist fully in page cache: **brute 78.4 MH/s, dict 10.2-10.4 MH/s** across repeated runs. `HASHSMITH_NO_FASTPATH=1` halves brute (16.58 -> 8.11 MH/s on a loaded machine) and leaves dict essentially unchanged (7.62 -> 7.05), which is the direct confirmation that dict was never on it |
+| **descrypt is not bitsliced** | **CONFIRMED** | John, on this machine: 2,945K c/s (`DES 128/128 ASIMD`). Hashsmith, one worker: 10.45 kH/s. Both measured under the same background load, so the absolute numbers are depressed and only the ratio is meaningful — roughly **two orders of magnitude**, which makes the lead's "~400x" the right order rather than an exaggeration |
+
+Not checked: `--gpu` silently ignoring `-s/--salt`, which needs a GPU build.
+
+**What this reorders.** The `l.gen != nil` condition is the highest-value
+finding, because dictionary attacks are the mode real engagements actually
+run, and because it is one condition rather than a diffuse problem. Note that
+`gen` is POSITIONAL — it is `func(i int64) string`, not a stream — so the fast
+paths could fill their transposed lanes through it. Refusing it looks like a
+conservative choice about per-candidate allocation rather than a fundamental
+obstacle.
+
+descrypt's gap is larger in ratio but narrower in reach: one legacy format,
+against a mode that touches every run.
+
 ---
 
 ## 5. Claims checked and found wrong
