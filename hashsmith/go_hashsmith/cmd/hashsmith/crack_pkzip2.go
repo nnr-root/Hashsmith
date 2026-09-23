@@ -3,6 +3,15 @@ package main
 // PKZIP / ZipCrypto archives — Hashcat 17200, 17210, 17220, 17225 and 17230.
 //
 //	$pkzip2$<count>*<checksum size>*<entry>[*<entry>...]*$/pkzip2$
+//	$pkzip$ <count>*<checksum size>*<entry>[*<entry>...]*$/pkzip$
+//
+// The two spellings are the same format with one difference: an entry in the
+// older one carries ONE two-byte check value and an entry in the newer one
+// carries two. The pair exists because different tools wrote different things
+// into the last bytes of the encryption header — some the top of the CRC-32,
+// some the top of the DOS timestamp — and the newer record simply names both
+// so a reader need not guess. Where only one is given it stands for whichever
+// the archive used.
 //
 // One record can describe several files from one archive, because a single
 // ZipCrypto file often cannot settle a password on its own: the cheap check is
@@ -65,12 +74,33 @@ type pkzip2Record struct {
 	entries      []pkzip2Entry
 }
 
+// pkzipSpelling describes one of the two tags and how many check values an
+// entry carries under it.
+type pkzipSpelling struct {
+	prefix, suffix string
+	checksums      int
+}
+
+var pkzipSpellings = []pkzipSpelling{
+	{"$pkzip2$", "*$/pkzip2$", 2},
+	{"$pkzip$", "*$/pkzip$", 1},
+}
+
 func parsePKZIP2(target string) (*pkzip2Record, error) {
 	t := strings.TrimSpace(target)
-	if !strings.HasPrefix(t, "$pkzip2$") || !strings.HasSuffix(t, "*$/pkzip2$") {
-		return nil, errors.New("not a $pkzip2$ record")
+	var spelling pkzipSpelling
+	var body string
+	for _, sp := range pkzipSpellings {
+		if strings.HasPrefix(t, sp.prefix) && strings.HasSuffix(t, sp.suffix) {
+			spelling = sp
+			body = strings.TrimSuffix(strings.TrimPrefix(t, sp.prefix), sp.suffix)
+			break
+		}
 	}
-	f := strings.Split(strings.TrimSuffix(strings.TrimPrefix(t, "$pkzip2$"), "*$/pkzip2$"), "*")
+	if spelling.prefix == "" {
+		return nil, errors.New("not a $pkzip$ or $pkzip2$ record")
+	}
+	f := strings.Split(body, "*")
 	if len(f) < 2 {
 		return nil, errors.New("$pkzip2$ record is missing its header fields")
 	}
@@ -100,8 +130,8 @@ func parsePKZIP2(target string) (*pkzip2Record, error) {
 		var csIdx, dataIdx int
 		switch e.dataType {
 		case pkzipChecksumOnly:
-			// <dt>*<mt>*<ct>*<dl>*<cs>*<tc>*<data>
-			need, csIdx, dataIdx = 7, i+4, i+6
+			// <dt>*<mt>*<ct>*<dl>*<cs>[*<tc>]*<data>
+			need, csIdx, dataIdx = 5+spelling.checksums, i+4, i+4+spelling.checksums
 			if i+need > len(f) {
 				return nil, errors.New("$pkzip2$ checksum-only entry is truncated")
 			}
@@ -109,8 +139,8 @@ func parsePKZIP2(target string) (*pkzip2Record, error) {
 				return nil, errors.New("$pkzip2$ compression type is not hex")
 			}
 		case pkzipFullData:
-			// <dt>*<mt>*<cl>*<ul>*<crc>*<of>*<ox>*<ct>*<dl>*<cs>*<tc>*<data>
-			need, csIdx, dataIdx = 12, i+9, i+11
+			// <dt>*<mt>*<cl>*<ul>*<crc>*<of>*<ox>*<ct>*<dl>*<cs>[*<tc>]*<data>
+			need, csIdx, dataIdx = 10+spelling.checksums, i+9, i+9+spelling.checksums
 			if i+need > len(f) {
 				return nil, errors.New("$pkzip2$ full entry is truncated")
 			}
@@ -129,9 +159,17 @@ func parsePKZIP2(target string) (*pkzip2Record, error) {
 			return nil, errors.New("unsupported $pkzip2$ entry type " + f[i])
 		}
 		cs, err1 := strconv.ParseUint(f[csIdx], 16, 16)
-		tc, err2 := strconv.ParseUint(f[csIdx+1], 16, 16)
-		if err1 != nil || err2 != nil {
+		if err1 != nil {
 			return nil, errors.New("$pkzip2$ entry checksums are not hex")
+		}
+		// With one check value the two readings collapse: the archive
+		// committed to something, the record says what, and which of the two
+		// sources it came from does not matter to the test.
+		tc := cs
+		if spelling.checksums == 2 {
+			if tc, err1 = strconv.ParseUint(f[csIdx+1], 16, 16); err1 != nil {
+				return nil, errors.New("$pkzip2$ entry checksums are not hex")
+			}
 		}
 		e.checksumFromCRC, e.checksumFromTime = uint16(cs), uint16(tc)
 		if e.data, err = hex.DecodeString(f[dataIdx]); err != nil {

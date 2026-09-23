@@ -2680,6 +2680,18 @@ func verifyCandidate(candidate, targetHash, typ, salt, saltMode string) (bool, e
 		return verifySunMD5(targetHash, candidate)
 	case "krb5-des":
 		return verifyKrb5DES(targetHash, candidate)
+	case "openvms":
+		return verifyOpenVMS(targetHash, candidate)
+	case "kwallet":
+		return verifyKWallet(targetHash, candidate)
+	case "krb5-tgt":
+		return verifyKrb5TGT(targetHash, candidate)
+	case "o3logon":
+		return verifyO3Logon(targetHash, candidate)
+	case "o10glogon":
+		return verifyO10gLogon(targetHash, candidate)
+	case "sybase-prop":
+		return verifySybasePROP(targetHash, candidate)
 	case "dummy":
 		return verifyDummy(targetHash, candidate)
 	case "p5k2":

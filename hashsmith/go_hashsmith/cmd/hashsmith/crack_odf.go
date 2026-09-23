@@ -42,21 +42,35 @@ import (
 )
 
 const (
-	odfPrefix         = "$odf$*"
-	odfFieldCount     = 11
-	odfMaxIter        = 10_000_000
-	odfCipherBlowfish = 0
-	odfCipherAES      = 1
+	odfPrefix = "$odf$*"
+	// John writes the same format under StarOffice's older name, with one
+	// extra field: the decrypted content's length is written out rather than
+	// left to be counted, because the checksum covers fewer bytes than the
+	// ciphertext holds.
+	odfStarOfficePrefix = "$sxc$*"
+	odfFieldCount       = 11
+	odfStarFieldCount   = 12
+	odfMaxIter          = 10_000_000
+	odfCipherBlowfish   = 0
+	odfCipherAES        = 1
 )
 
 func verifyODF(target, candidate string) (bool, error) {
 	t := strings.TrimSpace(target)
-	if !strings.HasPrefix(t, odfPrefix) {
+	var f []string
+	switch {
+	case strings.HasPrefix(t, odfPrefix):
+		f = strings.Split(strings.TrimPrefix(t, odfPrefix), "*")
+		if len(f) != odfFieldCount {
+			return false, errors.New("ODF record must have 11 fields")
+		}
+	case strings.HasPrefix(t, odfStarOfficePrefix):
+		f = strings.Split(strings.TrimPrefix(t, odfStarOfficePrefix), "*")
+		if len(f) != odfStarFieldCount {
+			return false, errors.New("StarOffice record must have 12 fields")
+		}
+	default:
 		return false, errors.New("not an ODF record")
-	}
-	f := strings.Split(strings.TrimPrefix(t, odfPrefix), "*")
-	if len(f) != odfFieldCount {
-		return false, errors.New("ODF record must have 11 fields")
 	}
 	cipherType, err := strconv.Atoi(f[0])
 	if err != nil || (cipherType != odfCipherBlowfish && cipherType != odfCipherAES) {
@@ -82,9 +96,22 @@ func verifyODF(target, candidate string) (bool, error) {
 	if err != nil {
 		return false, errors.New("ODF salt must be hex")
 	}
-	content, err := hex.DecodeString(f[10])
+	content, err := hex.DecodeString(f[len(f)-1])
 	if err != nil || len(content) == 0 {
 		return false, errors.New("ODF encrypted data must be hex")
+	}
+	// The StarOffice spelling states how much of the decrypted stream the
+	// checksum covers, and it is not always all of it: the ciphertext is
+	// padded to the cipher's block and the checksum is not.
+	checked := len(content)
+	if len(f) == odfStarFieldCount {
+		n, err := strconv.Atoi(f[9])
+		if err != nil || n < 0 || n > len(content) {
+			return false, errors.New("StarOffice content length is out of range")
+		}
+		if n > 0 {
+			checked = n
+		}
 	}
 
 	// The password hash and the checksum hash move together; the PBKDF2 PRF
@@ -116,7 +143,7 @@ func verifyODF(target, candidate string) (bool, error) {
 			return false, err
 		}
 		cipher.NewCBCDecrypter(block, iv).CryptBlocks(plain, content)
-		got := sha256.Sum256(plain)
+		got := sha256.Sum256(plain[:checked])
 		return subtle.ConstantTimeCompare(got[:], checksum) == 1, nil
 	}
 
@@ -129,6 +156,11 @@ func verifyODF(target, candidate string) (bool, error) {
 	}
 	// ODF 1.1 uses full-block (64-bit) CFB, not the byte-at-a-time variant.
 	cipher.NewCFBDecrypter(block, iv).XORKeyStream(plain, content)
-	got := sha1.Sum(plain)
-	return subtle.ConstantTimeCompare(got[:], checksum) == 1, nil
+	got := sha1.Sum(plain[:checked])
+	if subtle.ConstantTimeCompare(got[:], checksum) == 1 {
+		return true, nil
+	}
+	// And the same bytes under OpenOffice's own SHA-1, which differs from the
+	// real one for one message length in sixteen. See sha1_openoffice.go.
+	return subtle.ConstantTimeCompare(sha1OpenOfficeBuggy(plain[:checked]), checksum) == 1, nil
 }

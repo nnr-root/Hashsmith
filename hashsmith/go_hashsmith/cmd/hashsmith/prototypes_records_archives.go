@@ -115,6 +115,10 @@ func archivePrototypes() []hashid.Prototype {
 		hasPrefixProto("$zip3$", "PKWARE SecureZIP (AES)", 8,
 			"SecureZIP is PKWARE's commercial archiver and its AES records appear mainly in enterprise settings",
 			"securezip"),
+		// John writes the older spelling, which carries one check value per
+		// entry where the newer carries two. The reader takes both.
+		hasPrefixProto("$pkzip$", "PKZIP/ZipCrypto archive (one check value)", 6,
+			"the spelling John writes; ZipCrypto is the encryption every zip tool has been able to read since 1990, which is why archives in it keep turning up", "pkzip"),
 		hasPrefixProto("$pkzip2$", "PKZIP/ZipCrypto archive", 18,
 			"ZipCrypto is the legacy ZIP cipher and is still produced by default by several archivers, so it turns up constantly in file-recovery work",
 			"pkzip"),

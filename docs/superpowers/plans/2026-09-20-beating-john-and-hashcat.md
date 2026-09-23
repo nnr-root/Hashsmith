@@ -2776,8 +2776,123 @@ is its own inverse, or nearly — the last byte is flipped. Hitting one by
 accident is about a one in 2^52 event; the check exists because "about never"
 is not "never".
 
+### OpenVMS, KWallet, and OpenOffice's broken SHA-1
+
+**OpenVMS** is the oldest password function here that is still a password
+function rather than a checksum, and it is built out of number theory: the
+password and username fold into one 64-bit value and that value goes through
+a polynomial evaluated modulo 2^64 − 59, the largest prime that fits in a
+quadword. Purdy proposed it in 1974 — inverting means extracting roots modulo
+a prime, evaluating is a handful of multiplications. Two things have aged
+badly and both are in the record: the output is sixty-four bits, and unless
+the account carries the PWDMIX flag the password is upper-cased first, which
+is why VMS passwords are case-insensitive and the keyspace is smaller than it
+looks. The record also carries the username, packed three characters to a
+sixteen-bit word, because the username is part of the hash.
+
+**KWallet** hashed the password in SIXTEEN-BYTE BLOCKS, each SHA-1'd and then
+re-hashed two thousand times on its own, with the results concatenated. A long
+password is therefore not stronger in the way it looks: its blocks are
+stretched independently, so the work is the same per block rather than per
+password, and a fifty-six-byte key made of four fourteen-byte slices is four
+independent chains rather than one. KDE 4.13 replaced it with PBKDF2-SHA512.
+Its check is that the decrypted header holds at least twelve NULs in
+fifty-two bytes — the entries are length-prefixed UTF-16, so half of every
+ASCII character is a zero byte, and garbage from a wrong key has about two.
+
+**OpenOffice's SHA-1 is wrong.** Its padding unconditionally fills to sixty
+bytes into the block and, when the message ends 52 to 55 bytes into one, adds
+a whole extra block of zeros before the length — where the specification would
+have fitted the padding into the space already there. For every other length
+the two agree exactly, which is why the bug went unnoticed: it shows on one
+message length in sixteen. Files written by affected versions carry the buggy
+digest, so both are computed and either may answer. That required writing out
+SHA-1's compression function, because the difference happens after the last
+point a `hash.Hash` lets anything in.
+
+One mistake in this batch is worth recording. ODF was already implemented, for
+hashcat's spelling, and writing the new file with `cat >` destroyed it. The
+build caught it immediately — a duplicate `case "odf"` — and git had the
+original, so nothing was lost but time. The fix was to extend the existing
+reader with John's `$sxc$` spelling and the buggy digest rather than replace
+it, which is what should have happened in the first place.
+
 ### Where it stands
 
-Of 605 records: **592 crack**, 12 are not detected, 1 is detected and
-deliberately not guessed. Eleven distinct formats remain, plus one expression
-whose constant lives in John's configuration file.
+PKZIP got the same treatment as ODF: John writes `$pkzip$` where hashcat
+writes `$pkzip2$`, and the only difference is that an entry in the older
+spelling carries one two-byte check value where the newer carries two. The
+pair exists because different zip tools wrote different things into the last
+bytes of the encryption header — some the top of the CRC-32, some the top of
+the DOS timestamp — and the newer record names both so a reader need not
+guess.
+
+### n-fold, and what a key derivation looked like before hashes were assumed
+
+A Kerberos 5 TGT under a 3DES key carries no digest at all: a password is
+right when the decrypted ticket contains the word "krbtgt", which it does
+because a ticket names the service it is for.
+
+The derivation is the one place in Kerberos where the design shows its age.
+Password, realm and username are concatenated and **n-folded** — rotated right
+thirteen bits at a time, with the rotations added together using end-around
+carry — which mixes a short string into a fixed width without using a hash
+function, because in 1993 a hash function was not something a protocol assumed
+it had. The folded bits become a 3DES key by inserting a parity bit after
+every seventh, and that key is then run through the DK function twice: once
+with the literal string "kerberos", once with the constant `00 00 00 03 AA`,
+which is what distinguishes a key derived for encryption from one derived for
+signing.
+
+### Oracle, where the thing recovered is the password itself
+
+The two logon exchanges before `$o5logon$` share a property with SAP's PSE:
+Oracle encrypts the password under a key derived from the password, so a
+candidate is checked by decrypting and asking whether what came out is the
+candidate. There is no digest anywhere in the record.
+
+The key derivation predates everything else here. Username and password are
+concatenated as upper-cased UTF-16BE and DES-CBC-encrypted twice — once under
+the fixed key `0123456789ABCDEF`, then again under the last ciphertext block
+of that first pass, with the second pass's last block becoming the key. Oracle
+has been doing this since version 6 and the fixed key has never changed, so it
+is a constant in every client and server in the world.
+
+What the generations differ in is what that key unlocks. 9i wraps a 3DES
+session key and then the password under it, with two fixed entropy strings
+folded into a SHA-1 along the way — one of which is seeded with NINETEEN bytes
+of a previous digest, its last nineteen rather than its first, which is the
+sort of detail only a reference implementation records. 10g wraps an AES
+session key at each end, XORs the two halves and MD5s them into the key the
+password is under, so both the server's and the client's contributions are in
+the record and either alone is useless. In 10g the eight bytes of the fold
+become a 128-bit AES key by zero padding, so half that key is known to
+everyone.
+
+### FEAL-8, and a salt that is not one
+
+Sybase's PROP hash — Replication Server's, not ASE's — is built out of FEAL-8
+and a linear congruential generator, and neither is doing what it looks like.
+
+FEAL was proposed in 1987 as a faster DES and is the cipher that taught
+cryptography how to do differential and linear cryptanalysis: FEAL-4 fell to a
+handful of chosen plaintexts, FEAL-8 to a few thousand, and by 1994 the family
+was finished. Its round function is arithmetic rather than table-driven — two
+bytes added and the sum rotated left two places, which is the entire
+nonlinearity, and which is both why it was fast and why it broke.
+
+The generator is Microsoft's `rand()`, seeded from the record's own first byte
+and used to produce SALT bytes, one per block. Sixteen bits of state and a
+published recurrence means the whole "salt" sequence follows from a value
+stored in the clear beside the hash. And the way a salt byte is mixed in means
+only the first two bytes of a block take it directly, with the rest chaining
+off the second — so a change in byte three or later of the password cannot
+affect byte zero of the key.
+
+What gets encrypted is a fixed sentence. Literally a joke, about a fly, and it
+is the plaintext behind every Sybase PROP hash in the world.
+
+Of 605 records: **601 crack**, 3 are not detected, 1 is detected and
+deliberately not guessed. Two distinct formats remain — BestCrypt and Lotus
+Notes 8.5 — plus one expression whose constant lives in John's configuration
+file.

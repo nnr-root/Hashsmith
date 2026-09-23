@@ -39,6 +39,10 @@ func officePrototypes() []hashid.Prototype {
 			},
 			Prevalence: 10, Rationale: "$oldoffice$ type 3/4 is Hashcat mode 9800, the RC4+SHA-1 verifier for the same 97-2003 encryption; seen less often than the MD5 variant above because most legacy oldoffice dumps predate the SHA-1 revision",
 		},
+		// John writes the same format under StarOffice's older name, and the
+		// reader takes both.
+		hasPrefixProto("$sxc$*", "StarOffice encrypted document", 4,
+			"the spelling OpenOffice's predecessor used; the files are old but the reader is the same one", "odf"),
 		hasPrefixProto("$odf$*", "OpenDocument (ODF) encrypted document", 14,
 			"LibreOffice and OpenOffice documents are common in European public-sector and academic material, so password-protected ODF turns up regularly", "odf"),
 		hasPrefixProto("$office$", "MS Office 2007/2010/2013", 30,
