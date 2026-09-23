@@ -219,6 +219,10 @@ func decodeTextLimited(text string, typ string, shift int, key string, rails int
 			return "", err
 		}
 		return string(b), nil
+	case "punycode":
+		return decodePunycode(text)
+	case "idna":
+		return decodeIDNA(text)
 	case "nato":
 		return decodeNATO(text), nil
 	case "hex":

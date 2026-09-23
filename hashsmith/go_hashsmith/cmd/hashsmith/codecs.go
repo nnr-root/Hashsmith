@@ -110,6 +110,10 @@ func canonicalCodecType(typ string) string {
 		return "a1z26"
 	case "bubble-babble", "bubblebabble":
 		return "bubblebabble"
+	case "puny", "punycode", "rfc3492":
+		return "punycode"
+	case "idn", "idna", "idna2003":
+		return "idna"
 	default:
 		return t
 	}
@@ -151,6 +155,8 @@ var codecCatalogue = []typeGroup{
 		{"gzip", "gzip-compressed data with Base64 transport"},
 		{"zlib", "zlib-compressed data with Base64 transport"},
 		{"bubblebabble", "Pronounceable Bubble Babble binary encoding"},
+		{"punycode", "RFC 3492 Punycode, the bare encoding without a prefix"},
+		{"idna", "Domain names to and from their xn-- ASCII form"},
 	}},
 	{"Escaping and character encodings", [][2]string{
 		{"url", "RFC 3986 percent encoding"},

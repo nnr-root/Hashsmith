@@ -115,6 +115,10 @@ func encodeText(text string, typ string, shift int, key string, rails int) (stri
 		return encodeCompressed([]byte(text), t)
 	case "bubblebabble":
 		return encodeBubbleBabble([]byte(text)), nil
+	case "punycode":
+		return encodePunycode(text)
+	case "idna":
+		return encodeIDNA(text)
 	case "nato":
 		return encodeNATO(text), nil
 	case "hex":

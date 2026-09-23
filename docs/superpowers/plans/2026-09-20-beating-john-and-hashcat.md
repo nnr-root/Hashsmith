@@ -424,7 +424,7 @@ buys 17x. Three honest options:
 on GPU throughput and that call still looks right. But the backends now exist and
 work; leaving the faster one unselected and unshipped wastes work already done.
 
-### Phase 7 — Win where neither competitor is trying `[M-L]` — **STARTED** (d2947ca, 6ca46a5)
+### Phase 7 — Win where neither competitor is trying `[M-L]` — **STARTED** (d2947ca, 6ca46a5, and Punycode)
 
 This is where "best encoding/decoding toolkit" is actually earned. Phase 0 fixes
 six of this area's blockers for free; the rest is additive.
@@ -434,8 +434,10 @@ six of this area's blockers for free; the rest is additive.
 - [x] Recursive magic decode — and it hands off to the identification engine
 - [x] Chained pipeline syntax so a recipe is one invocation
 - [ ] Custom alphabets for every base-N codec; the internals are already parameterised
-- [ ] Hex-dump output formats, brotli/zstd/xz/bzip2, Punycode/IDNA, the missing
-      classical ciphers
+- [x] Punycode and IDNA — the homograph case, and the first Phase 7 item to
+      land. Nineteen RFC 3492 vectors as the test, no new dependency.
+- [ ] Hex-dump output formats, brotli/zstd/xz/bzip2, the missing classical
+      ciphers
 - [ ] An importable Go library API, so Hashsmith is embeddable rather than CLI-only
 
 **Acceptance:** codec vectors reach parity with hash vectors; magic decode

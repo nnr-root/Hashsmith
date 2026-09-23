@@ -164,6 +164,8 @@ func nonHashRecognitionFormatSeed() map[string]string {
 		"bech32":          "Checksummed Bech32 encoding",
 		"bech32m":         "Checksummed Bech32m encoding",
 		"bubblebabble":    "Pronounceable Bubble Babble binary encoding",
+		"punycode":        "RFC 3492 Punycode, the bare encoding without a prefix",
+		"idna":            "Domain names to and from their xn-- ASCII form",
 		"uuid":            "RFC 4122 UUID (8-4-4-4-12 hex groups)",
 		"url":             "RFC 3986 percent encoding",
 		"json":            "JSON string escape sequences",
