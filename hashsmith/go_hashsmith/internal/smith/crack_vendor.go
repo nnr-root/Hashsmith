@@ -124,15 +124,22 @@ func isEpiserver(s string) bool {
 // need the cleartext.
 //
 // Record: v1;PPH1_MD4,<hex salt>,<iterations>,<hex digest>
+// azureSyncKeyMaterial is the per-candidate transform described above —
+// depends only on candidate, never on the target record's salt or
+// iteration count — shared by verifyAzureSync and the lane hasher
+// (pbkdf2_lane_azuresync.go), which runs it once per lane before batching.
+func azureSyncKeyMaterial(candidate string) []byte {
+	nt := md4.New()
+	_, _ = nt.Write(utf16le(candidate))
+	return utf16le(strings.ToUpper(hex.EncodeToString(nt.Sum(nil))))
+}
+
 func verifyAzureSync(targetHash, candidate string) (bool, error) {
 	salt, iter, want, err := parseAzureSync(targetHash)
 	if err != nil {
 		return false, err
 	}
-	nt := md4.New()
-	_, _ = nt.Write(utf16le(candidate))
-	key := utf16le(strings.ToUpper(hex.EncodeToString(nt.Sum(nil))))
-	got := pbkdf2.Key(key, salt, iter, len(want), sha256.New)
+	got := pbkdf2.Key(azureSyncKeyMaterial(candidate), salt, iter, len(want), sha256.New)
 	return bytesEqualCT(got, want), nil
 }
 

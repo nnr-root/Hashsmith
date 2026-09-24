@@ -88,6 +88,40 @@ func parsePasslibPBKDF2(target string) (*passlibPBKDF2Hash, error) {
 	return &passlibPBKDF2Hash{rounds: rounds, salt: salt, digest: digest, newHash: newHash}, nil
 }
 
+// passlibPBKDF2SHA256Record holds one parsed $pbkdf2-sha256$ target — the
+// one Passlib PBKDF2 digest the AVX2 lane hasher (pbkdf2_lane_passlib.go)
+// accelerates. parsePasslibPBKDF2/verifyPasslibPBKDF2 stay generic over
+// sha1/sha256/sha512 and are untouched; this is a second, narrower entry
+// point used only by the lane hasher, whose own tests check it against
+// verifyPasslibPBKDF2 on every candidate.
+type passlibPBKDF2SHA256Record struct {
+	rounds int
+	salt   []byte
+	digest []byte
+}
+
+// parsePasslibPBKDF2SHA256 parses target, refusing anything that is not a
+// $pbkdf2-sha256$ record, with the same field checks parsePasslibPBKDF2 uses.
+func parsePasslibPBKDF2SHA256(target string) (passlibPBKDF2SHA256Record, error) {
+	parts := strings.Split(target, "$")
+	if len(parts) != 5 || parts[0] != "" || strings.ToLower(parts[1]) != "pbkdf2-sha256" {
+		return passlibPBKDF2SHA256Record{}, errors.New("not a Passlib PBKDF2-SHA256 record")
+	}
+	rounds, err := strconv.Atoi(parts[2])
+	if err != nil || rounds < 1 || rounds > maxKDFIterations {
+		return passlibPBKDF2SHA256Record{}, errors.New("invalid Passlib PBKDF2 round count")
+	}
+	salt, err := decodePasslibBase64(parts[3])
+	if err != nil || len(salt) == 0 || len(salt) > maxKDFFieldSize {
+		return passlibPBKDF2SHA256Record{}, errors.New("invalid Passlib PBKDF2 salt")
+	}
+	digest, err := decodePasslibBase64(parts[4])
+	if err != nil || len(digest) != sha256.Size {
+		return passlibPBKDF2SHA256Record{}, errors.New("invalid Passlib PBKDF2 checksum")
+	}
+	return passlibPBKDF2SHA256Record{rounds: rounds, salt: salt, digest: digest}, nil
+}
+
 func verifyPasslibPBKDF2(target, candidate string) (bool, error) {
 	parsed, err := parsePasslibPBKDF2(target)
 	if err != nil {
@@ -187,6 +221,38 @@ func parseWerkzeugHash(target string) (*werkzeugHash, error) {
 	return w, nil
 }
 
+// werkzeugPBKDF2SHA256Record holds one parsed "pbkdf2:sha256:..." target —
+// the one Werkzeug method the AVX2 lane hasher (pbkdf2_lane_werkzeug.go)
+// accelerates. parseWerkzeugHash/verifyWerkzeug stay generic over every
+// digest, scrypt, and the legacy HMAC methods, and are untouched.
+type werkzeugPBKDF2SHA256Record struct {
+	rounds int
+	salt   []byte
+	digest []byte
+}
+
+// parseWerkzeugPBKDF2SHA256 parses target, refusing anything that is not a
+// "pbkdf2:sha256:<rounds>$<salt>$<hex digest>" record.
+func parseWerkzeugPBKDF2SHA256(target string) (werkzeugPBKDF2SHA256Record, error) {
+	parts := strings.SplitN(target, "$", 3)
+	if len(parts) != 3 || parts[1] == "" || len(parts[1]) > maxKDFFieldSize {
+		return werkzeugPBKDF2SHA256Record{}, errors.New("invalid Werkzeug password hash")
+	}
+	method := strings.Split(parts[0], ":")
+	if len(method) != 3 || method[0] != "pbkdf2" || strings.ToLower(method[1]) != "sha256" {
+		return werkzeugPBKDF2SHA256Record{}, errors.New("not a Werkzeug PBKDF2-SHA256 record")
+	}
+	rounds, err := strconv.Atoi(method[2])
+	if err != nil || rounds < 1 || rounds > maxKDFIterations {
+		return werkzeugPBKDF2SHA256Record{}, errors.New("invalid Werkzeug PBKDF2 iteration count")
+	}
+	digest, err := hex.DecodeString(parts[2])
+	if err != nil || len(digest) != sha256.Size {
+		return werkzeugPBKDF2SHA256Record{}, errors.New("invalid Werkzeug password checksum")
+	}
+	return werkzeugPBKDF2SHA256Record{rounds: rounds, salt: []byte(parts[1]), digest: digest}, nil
+}
+
 func verifyWerkzeug(target, candidate string) (bool, error) {
 	w, err := parseWerkzeugHash(target)
 	if err != nil {
@@ -267,6 +333,47 @@ func parseASPNetIdentity(target string) (*aspNetIdentityHash, error) {
 	default:
 		return nil, errors.New("unknown ASP.NET Identity format marker")
 	}
+}
+
+// aspNetIdentitySHA256Record holds one parsed ASP.NET Identity v3 target
+// whose PRF is SHA-256 and whose subkey is short enough for a single PBKDF2
+// block — the one shape the AVX2 lane hasher (pbkdf2_lane_aspnetidentity.go)
+// accelerates. parseASPNetIdentity/verifyASPNetIdentity stay generic over
+// v2 (fixed SHA-1), and v3's SHA-1/SHA-512 PRFs, and are untouched.
+type aspNetIdentitySHA256Record struct {
+	iterations int
+	salt       []byte
+	digest     []byte
+}
+
+// parseASPNetIdentitySHA256 parses target, refusing anything that is not a
+// v3 record with PRF=SHA-256 and a subkey no longer than one SHA-256 block
+// (32 bytes) — a longer subkey needs multi-block PBKDF2, which the batch
+// primitive does not compute.
+func parseASPNetIdentitySHA256(target string) (aspNetIdentitySHA256Record, error) {
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(target))
+	if err != nil || len(raw) == 0 || raw[0] != 1 {
+		return aspNetIdentitySHA256Record{}, errors.New("not an ASP.NET Identity v3 record")
+	}
+	if len(raw) < 13+16+16 {
+		return aspNetIdentitySHA256Record{}, errors.New("invalid ASP.NET Identity v3 payload")
+	}
+	if binary.BigEndian.Uint32(raw[1:5]) != 1 {
+		return aspNetIdentitySHA256Record{}, errors.New("not an ASP.NET Identity SHA-256 record")
+	}
+	iterations := int(binary.BigEndian.Uint32(raw[5:9]))
+	saltLen := int(binary.BigEndian.Uint32(raw[9:13]))
+	if iterations < 1 || iterations > maxKDFIterations || saltLen < 16 || saltLen > maxKDFFieldSize ||
+		13+saltLen > len(raw) {
+		return aspNetIdentitySHA256Record{}, errors.New("invalid ASP.NET Identity v3 parameters")
+	}
+	digest := raw[13+saltLen:]
+	if len(digest) < 16 || len(digest) > sha256.Size {
+		return aspNetIdentitySHA256Record{}, errors.New("invalid ASP.NET Identity v3 subkey")
+	}
+	return aspNetIdentitySHA256Record{
+		iterations: iterations, salt: raw[13 : 13+saltLen], digest: digest,
+	}, nil
 }
 
 func verifyASPNetIdentity(target, candidate string) (bool, error) {

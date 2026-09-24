@@ -295,6 +295,89 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 			}
 			return nil
 		}, pbkdf2Sha256Lanes, true
+	case "passlib-pbkdf2":
+		// Same gate and reasoning as the "1password8" case above. A
+		// sha1/sha512 record falls back to the scalar path on its own,
+		// since newPBKDF2PasslibLaneHasher refuses anything that is not
+		// $pbkdf2-sha256$.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2PasslibLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2PasslibLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
+	case "werkzeug":
+		// Same gate and reasoning as the "1password8" case above. Any other
+		// Werkzeug method falls back to the scalar path on its own, since
+		// newPBKDF2WerkzeugLaneHasher refuses anything that is not
+		// "pbkdf2:sha256:...".
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2WerkzeugLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2WerkzeugLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
+	case "aspnet-identity":
+		// Same gate and reasoning as the "1password8" case above. A v2
+		// record, a v3 record with a non-SHA-256 PRF, or a v3 SHA-256
+		// record with a subkey longer than 32 bytes all fall back to the
+		// scalar path on their own, since newPBKDF2ASPNetIdentityLaneHasher
+		// refuses them.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2ASPNetIdentityLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2ASPNetIdentityLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
+	case "azuresync":
+		// Same gate and reasoning as the "1password8" case above.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2AzureSyncLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2AzureSyncLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
+	case "mozilla-nss":
+		// Same gate and reasoning as the "1password8" case above. A key3.db
+		// record falls back to the scalar path on its own, since
+		// newPBKDF2MozillaLaneHasher refuses anything that is not key4.db's
+		// AES form.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2MozillaLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2MozillaLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
 	}
 	return nil, 0, false
 }

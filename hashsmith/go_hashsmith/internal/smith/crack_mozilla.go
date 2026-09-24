@@ -162,23 +162,45 @@ func verifyMozilla(target, candidate string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var block cipher.Block
-	var iv []byte
 	if m.aes {
 		ek := mozillaEntryKey(m.globalSalt, candidate)
 		key := pbkdf2.Key(ek, m.entrySalt, m.rounds, 32, sha256.New)
-		if block, err = aes.NewCipher(key); err != nil {
-			return false, err
-		}
-		iv = m.iv
-	} else {
-		k := mozillaKey3Key(m, candidate)
-		if block, err = des.NewTripleDESCipher(k[:24]); err != nil {
-			return false, err
-		}
-		iv = k[32:40]
+		return mozillaAESMatches(m, key)
+	}
+	k := mozillaKey3Key(m, candidate)
+	block, err := des.NewTripleDESCipher(k[:24])
+	if err != nil {
+		return false, err
 	}
 	plain := make([]byte, len(m.ct))
-	cipher.NewCBCDecrypter(block, iv).CryptBlocks(plain, m.ct)
+	cipher.NewCBCDecrypter(block, k[32:40]).CryptBlocks(plain, m.ct)
+	return bytes.Equal(plain, mozillaPasswordCheck), nil
+}
+
+// parseMozillaAES parses target via parseMozilla, additionally refusing a
+// key3.db (3DES) record — the AVX2 lane hasher (pbkdf2_lane_mozilla.go)
+// accelerates only key4.db's ordinary PBKDF2, never key3.db's hand-rolled
+// HMAC-SHA1 construction, which falls back to the scalar path.
+func parseMozillaAES(target string) (*mozillaRecord, error) {
+	m, err := parseMozilla(target)
+	if err != nil {
+		return nil, err
+	}
+	if !m.aes {
+		return nil, errors.New("not a Mozilla key4.db (AES) record")
+	}
+	return m, nil
+}
+
+// mozillaAESMatches is the shared "does this derived key unwrap the known
+// plaintext" check for key4.db. Used by verifyMozilla for its single
+// derived key and by the lane hasher for each of a batch's.
+func mozillaAESMatches(m *mozillaRecord, key []byte) (bool, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return false, err
+	}
+	plain := make([]byte, len(m.ct))
+	cipher.NewCBCDecrypter(block, m.iv).CryptBlocks(plain, m.ct)
 	return bytes.Equal(plain, mozillaPasswordCheck), nil
 }
