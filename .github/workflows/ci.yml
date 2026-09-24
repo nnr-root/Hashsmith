@@ -466,6 +466,23 @@ jobs:
             [ -n "$s" ] && echo "    cpu.sha=off:    $s"
           done
 
+      # Diagnostic follow-up to the step above: the first real-hardware run
+      # of this core showed SHA-256 only tying stdlib's generic path and
+      # SHA-1/SHA-512 losing to it outright, contrary to every assumption
+      # the design was built on. This isolates WHERE an iteration's time
+      # actually goes: N scalar calls to the schedule-expansion function
+      # alone (one per lane, matching what the Go-side, unbatched
+      # expansion the design kept out of assembly costs today) against the
+      # batched AVX2 compression call alone (schedules already built,
+      # excluded from the timing). No GODEBUG needed — neither side calls
+      # stdlib.
+      - name: PBKDF2 AVX2 diagnostic (schedule expansion vs compression, isolated)
+        if: matrix.arch == 'amd64'
+        run: |
+          cd hashsmith/go_hashsmith
+          go test -run '^$' -bench 'BenchmarkSHA256ScheduleExpansionScalarX8|BenchmarkSHA256CompressAVX2GroupOnly|BenchmarkSHA1ScheduleExpansionScalarX16|BenchmarkSHA1CompressAVX2GroupOnly|BenchmarkSHA512ScheduleExpansionScalarX4|BenchmarkSHA512CompressAVX2GroupOnly' \
+            -benchtime 2s -count 3 -cpu 1 ./internal/smith
+
   slow-vectors:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest

@@ -1,6 +1,9 @@
 package smith
 
-import "testing"
+import (
+	"math/rand"
+	"testing"
+)
 
 // Real-hardware throughput benchmarks for the PBKDF2 AVX2 multi-buffer
 // project (docs/superpowers/specs/2026-09-24-pbkdf2-avx2-multibuffer-design.md).
@@ -109,6 +112,113 @@ func BenchmarkPBKDF2Sha512StdlibSequential(b *testing.B) {
 		}
 	}
 	b.ReportMetric(float64(b.N*pbkdf2Sha512Lanes)/b.Elapsed().Seconds(), "candidates/s")
+}
+
+// The three pairs below isolate WHERE time goes inside one PBKDF2 hot-loop
+// iteration, to find out whether a disappointing end-to-end result (see
+// the other benchmarks in this file) comes from the AVX2 compression core
+// itself or from the Go-side, per-lane, unbatched schedule expansion the
+// design deliberately kept out of assembly (§4.2 of the design doc). Each
+// pair does the SAME amount of real work two ways: N scalar calls (one per
+// lane, matching what a real iteration does today) vs the batched AVX2
+// call alone (schedule expansion excluded, already-built schedules
+// reused) — the ratio between the two lines is the actual, measurable
+// answer, not a guess.
+
+func BenchmarkSHA256ScheduleExpansionScalarX8(b *testing.B) {
+	block := randomBlock(rand.New(rand.NewSource(20)))
+	var w [64]uint32
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for lane := 0; lane < 8; lane++ {
+			sha256ExpandSchedule(&block, &w)
+		}
+	}
+}
+
+func BenchmarkSHA256CompressAVX2GroupOnly(b *testing.B) {
+	rng := rand.New(rand.NewSource(21))
+	var states [8][8]uint32
+	var schedules [64][8]uint32
+	for lane := 0; lane < 8; lane++ {
+		for w := 0; w < 8; w++ {
+			states[w][lane] = sha256IV[w]
+		}
+		block := randomBlock(rng)
+		var w [64]uint32
+		sha256ExpandSchedule(&block, &w)
+		for step := 0; step < 64; step++ {
+			schedules[step][lane] = w[step]
+		}
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = sha256Group8AVX2(&states, &schedules)
+	}
+}
+
+func BenchmarkSHA1ScheduleExpansionScalarX16(b *testing.B) {
+	block := randomBlock(rand.New(rand.NewSource(22)))
+	var w [80]uint32
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for lane := 0; lane < 16; lane++ {
+			sha1ExpandSchedule(&block, &w)
+		}
+	}
+}
+
+func BenchmarkSHA1CompressAVX2GroupOnly(b *testing.B) {
+	rng := rand.New(rand.NewSource(23))
+	var s [5][16]uint32
+	var schedules [80][16]uint32
+	for lane := 0; lane < 16; lane++ {
+		for w := 0; w < 5; w++ {
+			s[w][lane] = sha1IV[w]
+		}
+		block := randomBlock(rng)
+		var w [80]uint32
+		sha1ExpandSchedule(&block, &w)
+		for step := 0; step < 80; step++ {
+			schedules[step][lane] = w[step]
+		}
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = sha1Group16AVX2(&s, &schedules)
+	}
+}
+
+func BenchmarkSHA512ScheduleExpansionScalarX4(b *testing.B) {
+	block := randomBlock128(rand.New(rand.NewSource(24)))
+	var w [80]uint64
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for lane := 0; lane < 4; lane++ {
+			sha512ExpandSchedule(&block, &w)
+		}
+	}
+}
+
+func BenchmarkSHA512CompressAVX2GroupOnly(b *testing.B) {
+	rng := rand.New(rand.NewSource(25))
+	var states [8][4]uint64
+	var schedules [80][4]uint64
+	for lane := 0; lane < 4; lane++ {
+		for w := 0; w < 8; w++ {
+			states[w][lane] = sha512IV[w]
+		}
+		block := randomBlock128(rng)
+		var w [80]uint64
+		sha512ExpandSchedule(&block, &w)
+		for step := 0; step < 80; step++ {
+			schedules[step][lane] = w[step]
+		}
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = sha512Group4AVX2(&states, &schedules)
+	}
 }
 
 func BenchmarkPBKDF2Sha512LaneHasherAVX2(b *testing.B) {
