@@ -69,6 +69,27 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 			}
 			return nil
 		}, descryptLanes, true
+	case "pbkdf2":
+		if salt != "" {
+			return nil, 0, false
+		}
+		// Runtime-gated, unlike bcrypt/descrypt above: this core is a
+		// straightforward regression on hardware with SHA extensions (the
+		// design doc's §1 measured it directly), so it must not engage
+		// there even when the target record and everything else is
+		// eligible. See pbkdf2Sha256AVX2Eligible's own comment.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2Sha256LaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2Sha256LaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
 	}
 	return nil, 0, false
 }
