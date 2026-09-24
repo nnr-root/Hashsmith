@@ -525,6 +525,39 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 			}
 			return nil
 		}, pbkdf2Sha256Lanes, true
+	case "ldap-pbkdf2":
+		// Same gate and reasoning as the "ansible" case above — another
+		// multi-block-primitive user (256-byte digest, eight blocks).
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2RedHat389LaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2RedHat389LaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
+	case "encdatavault":
+		// Same gate and reasoning as the "ansible" case above — another
+		// multi-block-primitive user (up to 128 bytes with a keychain, four
+		// blocks). The MD5 form falls back to the scalar path on its own,
+		// since newPBKDF2EncDataVaultLaneHasher refuses anything but the
+		// PBKDF2 form.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2EncDataVaultLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2EncDataVaultLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
 	case "metamask":
 		// Same gate and reasoning as the "1password8" case above. The short
 		// variant ("metamask-short", a distinct type name never reaching

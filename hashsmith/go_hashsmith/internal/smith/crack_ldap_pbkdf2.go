@@ -53,7 +53,16 @@ func verifyRedHat389PBKDF2(target, candidate string) (bool, error) {
 		return false, err
 	}
 	got := pbkdf2.Key([]byte(candidate), parsed.salt, parsed.iterations, len(parsed.digest), sha256.New)
-	return bytesEqualCT(got, parsed.digest), nil
+	return redHat389Matches(parsed, got), nil
+}
+
+// redHat389Matches is the shared "does this derived key match" check. Used
+// by verifyRedHat389PBKDF2 for its single derived key and by the lane
+// hasher (pbkdf2_lane_ldap.go) for each of a batch's — needing the
+// multi-block primitive, since the stored digest is 256 bytes, eight
+// SHA-256 blocks.
+func redHat389Matches(parsed *redHat389Hash, got []byte) bool {
+	return bytesEqualCT(got, parsed.digest)
 }
 
 func isRedHat389PBKDF2(target string) bool {

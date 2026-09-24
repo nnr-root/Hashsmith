@@ -185,6 +185,18 @@ func encdvCounterBlock(block cipher.Block, ivs [][]byte, counter uint32) []byte 
 	return sum
 }
 
+// encdvPBKDF2OutputLen is how many bytes of PBKDF2 output a PBKDF2-form
+// record needs: enough to cover every block the record will ask for, one
+// per key, or the full table when a keychain has to be unwrapped. Shared
+// between the scalar path and the lane hasher (pbkdf2_lane_encdatavault.go)
+// so the two never drift.
+func encdvPBKDF2OutputLen(e *encdvRecord) int {
+	if e.keychain != nil {
+		return encdvMaxKeys * encdvBlockSize
+	}
+	return e.nbKeys * encdvBlockSize
+}
+
 func verifyENCDataVault(target, candidate string) (bool, error) {
 	e, err := parseENCDataVault(target)
 	if err != nil {
@@ -192,17 +204,18 @@ func verifyENCDataVault(target, candidate string) (bool, error) {
 	}
 	var derived []byte
 	if e.pbkdf2 {
-		// Enough output to cover every block the record will ask for: one per
-		// key, or the full table when a keychain has to be unwrapped.
-		n := e.nbKeys * encdvBlockSize
-		if e.keychain != nil {
-			n = encdvMaxKeys * encdvBlockSize
-		}
-		derived = pbkdf2.Key([]byte(candidate), e.salt, e.iterations, n, sha256.New)
+		derived = pbkdf2.Key([]byte(candidate), e.salt, e.iterations, encdvPBKDF2OutputLen(e), sha256.New)
 	} else {
 		derived = encdvIteratedMD5(candidate)
 	}
+	return encdvMatches(e, derived)
+}
 
+// encdvMatches is the shared "does this derived key material open the
+// vault" check, given either the MD5 form's fixed accumulator or the
+// PBKDF2 form's derived output. Used by verifyENCDataVault for its single
+// derived value and by the lane hasher for each of a PBKDF2 batch's.
+func encdvMatches(e *encdvRecord, derived []byte) (bool, error) {
 	key := e.encdvKeyMaterial(derived, 0)
 	block, err := aes.NewCipher(key)
 	if err != nil {
