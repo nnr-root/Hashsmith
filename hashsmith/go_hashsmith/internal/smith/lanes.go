@@ -83,10 +83,11 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 		// per-hash naming rather than one shared hash-agnostic function.
 		//
 		// sha256 is tried first only because it is the more common
-		// real-world variant (WPA2, most password managers, Django); a
-		// record naming sha1 always falls through to the sha1 branch
-		// below regardless of this order, since newPBKDF2Sha256LaneHasher
-		// correctly refuses any non-sha256 record.
+		// real-world variant (WPA2, most password managers, Django), then
+		// sha1, then sha512; a record naming any one of the three always
+		// falls through to its own branch regardless of this order, since
+		// each newPBKDF2Sha*LaneHasher correctly refuses every other
+		// algorithm's record (TestNewLaneHasherPBKDF2GateHandlesAllThreeAlgorithms).
 		if pbkdf2Sha256AVX2Eligible() {
 			if newPBKDF2Sha256LaneHasher(targetHash) != nil {
 				return func() laneHasher {
@@ -105,6 +106,16 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 					}
 					return nil
 				}, pbkdf2Sha1Lanes, true
+			}
+		}
+		if pbkdf2Sha512AVX2Eligible() {
+			if newPBKDF2Sha512LaneHasher(targetHash) != nil {
+				return func() laneHasher {
+					if h := newPBKDF2Sha512LaneHasher(targetHash); h != nil {
+						return h
+					}
+					return nil
+				}, pbkdf2Sha512Lanes, true
 			}
 		}
 		return nil, 0, false
