@@ -132,39 +132,65 @@ func verifyCRAMMD5(targetHash, candidate string) (bool, error) {
 
 // ── PostgreSQL SCRAM-SHA-256 ──
 
-func verifySCRAM(targetHash, candidate string) (bool, error) {
-	if !strings.HasPrefix(targetHash, "SCRAM-SHA-256$") {
-		return false, errors.New("invalid SCRAM hash (missing SCRAM-SHA-256$ prefix)")
+// scramRecord holds one parsed SCRAM-SHA-256$ target, shared by the scalar
+// verifySCRAM and the AVX2-batched lane hasher (pbkdf2_lane_scram.go).
+type scramRecord struct {
+	iter      int
+	salt      []byte
+	storedKey []byte
+}
+
+// parseSCRAM parses target, or returns an error identical in wording and
+// condition to what verifySCRAM always returned before this was split out.
+func parseSCRAM(target string) (scramRecord, error) {
+	if !strings.HasPrefix(target, "SCRAM-SHA-256$") {
+		return scramRecord{}, errors.New("invalid SCRAM hash (missing SCRAM-SHA-256$ prefix)")
 	}
-	body := targetHash[len("SCRAM-SHA-256$"):]
+	body := target[len("SCRAM-SHA-256$"):]
 	dollar := strings.IndexByte(body, '$')
 	if dollar < 0 {
-		return false, errors.New("invalid SCRAM hash (missing key section)")
+		return scramRecord{}, errors.New("invalid SCRAM hash (missing key section)")
 	}
 	iterSalt := strings.SplitN(body[:dollar], ":", 2)
 	if len(iterSalt) != 2 {
-		return false, errors.New("invalid SCRAM iter:salt")
+		return scramRecord{}, errors.New("invalid SCRAM iter:salt")
 	}
 	iter, err := strconv.Atoi(iterSalt[0])
 	if err != nil || iter < 1 {
-		return false, errors.New("invalid SCRAM iteration count")
+		return scramRecord{}, errors.New("invalid SCRAM iteration count")
 	}
 	salt, err := base64.StdEncoding.DecodeString(iterSalt[1])
 	if err != nil {
-		return false, errors.New("invalid SCRAM salt")
+		return scramRecord{}, errors.New("invalid SCRAM salt")
 	}
 	keys := strings.SplitN(body[dollar+1:], ":", 2)
 	if len(keys) != 2 {
-		return false, errors.New("invalid SCRAM stored:server keys")
+		return scramRecord{}, errors.New("invalid SCRAM stored:server keys")
 	}
 	storedKey, err := base64.StdEncoding.DecodeString(keys[0])
 	if err != nil || len(storedKey) != 32 {
-		return false, errors.New("invalid SCRAM stored key")
+		return scramRecord{}, errors.New("invalid SCRAM stored key")
 	}
-	saltedPassword := pbkdf2.Key([]byte(candidate), salt, iter, 32, sha256.New)
+	return scramRecord{iter: iter, salt: salt, storedKey: storedKey}, nil
+}
+
+// scramMatches is the shared "does this salted password reach the stored
+// key" check: one Client Key HMAC then one SHA-256, per RFC 5802. Used by
+// verifySCRAM for its single derived salted password and by the lane hasher
+// for each of a batch's.
+func scramMatches(saltedPassword, storedKey []byte) bool {
 	ck := hmac.New(sha256.New, saltedPassword)
 	ck.Write([]byte("Client Key"))
 	clientKey := ck.Sum(nil)
 	got := sha256.Sum256(clientKey)
-	return bytesEqualCT(got[:], storedKey), nil
+	return bytesEqualCT(got[:], storedKey)
+}
+
+func verifySCRAM(targetHash, candidate string) (bool, error) {
+	r, err := parseSCRAM(targetHash)
+	if err != nil {
+		return false, err
+	}
+	saltedPassword := pbkdf2.Key([]byte(candidate), r.salt, r.iter, 32, sha256.New)
+	return scramMatches(saltedPassword, r.storedKey), nil
 }

@@ -126,6 +126,15 @@ func verifyPadlock(target, candidate string) (bool, error) {
 		return false, err
 	}
 	key := pbkdf2.Key([]byte(candidate), r.salt, r.iterations, 32, sha256.New)
+	return padlockDecrypts(&r, key)
+}
+
+// padlockDecrypts is the shared "does this derived key open the vault"
+// check: decrypt the CCM counter-mode payload and apply the same
+// thin-evidence-but-all-we-have plaintext test described above. Used by
+// verifyPadlock for its single derived key and by the lane hasher
+// (pbkdf2_lane_padlock.go) for each of a batch's.
+func padlockDecrypts(r *padlockRecord, key []byte) (bool, error) {
 	plain, err := ccmDecryptNoTag(key, r.iv[:padlockNonceLen], r.ct[:len(r.ct)-r.tagLen])
 	if err != nil {
 		return false, err

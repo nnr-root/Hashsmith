@@ -93,6 +93,14 @@ func verifyLastPassLP(target, candidate string) (bool, error) {
 		return false, err
 	}
 	key := pbkdf2.Key([]byte(candidate), []byte(r.email), r.iterations, 32, sha256.New)
+	return lastpassLPMatches(&r, key)
+}
+
+// lastpassLPMatches is the shared "does this key decrypt to the known
+// extension plaintext" check. Used by verifyLastPassLP for its single
+// derived key and by the lane hasher (pbkdf2_lane_lastpass.go) for each of
+// a batch's.
+func lastpassLPMatches(r *lastpassRecord, key []byte) (bool, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return false, err
@@ -154,6 +162,16 @@ func verifyLastPassCLI(target, candidate string) (bool, error) {
 	} else {
 		key = pbkdf2.Key([]byte(candidate), []byte(r.email), r.iterations, 32, sha256.New)
 	}
+	return lastpassCLIMatches(&r, key)
+}
+
+// lastpassCLIMatches is the shared "does this key encrypt to the known
+// CLI plaintext" check. Used by verifyLastPassCLI for both of its key
+// derivations (the iterations==1 SHA-256 case and the ordinary PBKDF2 case)
+// and by the lane hasher (pbkdf2_lane_lastpass.go), which only ever reaches
+// this with a PBKDF2-derived key — see that hasher's own comment for why
+// the iterations==1 case is refused before it gets here.
+func lastpassCLIMatches(r *lastpassRecord, key []byte) (bool, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return false, err

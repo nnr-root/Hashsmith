@@ -46,24 +46,14 @@ func verifyEthereum(targetHash, candidate string) (bool, error) {
 		return false, errors.New("invalid ethereum hash")
 	}
 
-	var derivedKey []byte
-	var ciphertext, mac []byte
 	switch f[0] {
 	case "p":
-		// p*<iterations>*<salt>*<ciphertext>*<mac>
-		if len(f) != 5 {
-			return false, errors.New("invalid ethereum PBKDF2 hash (need p*iter*salt*ct*mac)")
-		}
-		iter, err := strconv.Atoi(f[1])
-		if err != nil || iter <= 0 {
-			return false, errors.New("invalid ethereum PBKDF2 iteration count")
-		}
-		salt, ct, m, err := decodeEthParts(f[2], f[3], f[4])
+		r, err := parseEthereumPBKDF2Record(targetHash)
 		if err != nil {
 			return false, err
 		}
-		ciphertext, mac = ct, m
-		derivedKey = pbkdf2.Key([]byte(candidate), salt, iter, 32, sha256.New)
+		derivedKey := pbkdf2.Key([]byte(candidate), r.salt, r.iter, 32, sha256.New)
+		return ethereumMatches(derivedKey, r.ciphertext, r.mac), nil
 	case "s":
 		// s*<N>*<r>*<p>*<salt>*<ciphertext>*<mac>
 		if len(f) != 7 {
@@ -75,21 +65,65 @@ func verifyEthereum(targetHash, candidate string) (bool, error) {
 		if err1 != nil || err2 != nil || err3 != nil || n <= 1 || r <= 0 || p <= 0 {
 			return false, errors.New("invalid ethereum scrypt parameters")
 		}
-		salt, ct, m, err := decodeEthParts(f[4], f[5], f[6])
+		salt, ciphertext, mac, err := decodeEthParts(f[4], f[5], f[6])
 		if err != nil {
 			return false, err
 		}
-		ciphertext, mac = ct, m
-		derivedKey, err = scrypt.Key([]byte(candidate), salt, n, r, p, 32)
+		derivedKey, err := scrypt.Key([]byte(candidate), salt, n, r, p, 32)
 		if err != nil {
 			return false, err
 		}
+		return ethereumMatches(derivedKey, ciphertext, mac), nil
 	default:
 		return false, errors.New("unsupported ethereum KDF marker " + f[0] + " (want p or s)")
 	}
+}
 
+// ethereumPBKDF2Record holds one parsed $ethereum$p target, shared by the
+// scalar verifyEthereum and the AVX2-batched lane hasher
+// (pbkdf2_lane_ethereum.go).
+type ethereumPBKDF2Record struct {
+	salt       []byte
+	ciphertext []byte
+	mac        []byte
+	iter       int
+}
+
+// parseEthereumPBKDF2Record parses target, refusing anything that is not a
+// $ethereum$p record (in particular the scrypt "s" variant, which the lane
+// hasher does not accelerate) with the same wording verifyEthereum's "p"
+// case always used before this was split out.
+func parseEthereumPBKDF2Record(target string) (ethereumPBKDF2Record, error) {
+	if !strings.HasPrefix(target, "$ethereum$") {
+		return ethereumPBKDF2Record{}, errors.New("invalid ethereum hash (missing $ethereum$ prefix)")
+	}
+	f := strings.Split(target[len("$ethereum$"):], "*")
+	if len(f) == 0 || f[0] != "p" {
+		return ethereumPBKDF2Record{}, errors.New("not a PBKDF2 ethereum record")
+	}
+	if len(f) != 5 {
+		return ethereumPBKDF2Record{}, errors.New("invalid ethereum PBKDF2 hash (need p*iter*salt*ct*mac)")
+	}
+	iter, err := strconv.Atoi(f[1])
+	if err != nil || iter <= 0 {
+		return ethereumPBKDF2Record{}, errors.New("invalid ethereum PBKDF2 iteration count")
+	}
+	salt, ct, mac, err := decodeEthParts(f[2], f[3], f[4])
+	if err != nil {
+		return ethereumPBKDF2Record{}, err
+	}
+	return ethereumPBKDF2Record{salt: salt, ciphertext: ct, mac: mac, iter: iter}, nil
+}
+
+// ethereumMatches is the shared "does this derived key authenticate the
+// keystore" check, used by verifyEthereum's own two derived-key paths (PBKDF2
+// and scrypt) and by the lane hasher for each of a batch's PBKDF2 keys.
+func ethereumMatches(derivedKey, ciphertext, mac []byte) bool {
+	if len(derivedKey) < 32 {
+		return false
+	}
 	got := keccak256(derivedKey[16:32], ciphertext)
-	return bytesEqualCT(got, mac), nil
+	return bytesEqualCT(got, mac)
 }
 
 // decodeEthParts hex-decodes the salt, ciphertext, and mac fields.

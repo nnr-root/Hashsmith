@@ -66,14 +66,27 @@ func cryptB64MSB(b []byte) string {
 	return out.String()
 }
 
+// ciscoType8Iterations is fixed by the format, unlike every other PBKDF2
+// hash this tool reads — shared between the scalar path and the lane
+// hasher (pbkdf2_lane_cisco8.go) so the two never drift.
+const ciscoType8Iterations = 20000
+
 // verifyCiscoType8 checks a candidate against a $8$ hash.
 func verifyCiscoType8(targetHash, candidate string) (bool, error) {
 	salt, want, err := parseCisco(targetHash, "$8$")
 	if err != nil {
 		return false, err
 	}
-	dk := pbkdf2.Key([]byte(candidate), []byte(salt), 20000, 32, sha256.New)
-	return cryptB64MSB(dk)[:43] == want, nil
+	dk := pbkdf2.Key([]byte(candidate), []byte(salt), ciscoType8Iterations, 32, sha256.New)
+	return ciscoType8Matches(dk, want), nil
+}
+
+// ciscoType8Matches is the shared "does this derived key match" check: the
+// crypt-64 re-encoding is common to type 4/8/9, but this comparison against
+// the stored 43-character hash is type 8's own — used by verifyCiscoType8
+// for its single derived key and by the lane hasher for each of a batch's.
+func ciscoType8Matches(dk []byte, want string) bool {
+	return cryptB64MSB(dk)[:43] == want
 }
 
 // verifyCiscoType9 checks a candidate against a $9$ hash.
