@@ -163,10 +163,7 @@ func verifyCryptCascadeMode(targetHash, candidate, kdf string, bits int, vera, b
 			return false, errors.New("TrueCrypt does not support the SHA-256 KDF")
 		}
 		newHash = sha256.New
-		iter = 500000
-		if boot {
-			iter = 200000
-		}
+		iter = veraCryptSHA256Iterations(boot)
 	case "streebog512":
 		if !vera {
 			return false, errors.New("TrueCrypt does not support the Streebog-512 KDF")
@@ -189,6 +186,17 @@ func verifyCryptCascadeMode(targetHash, candidate, kdf string, bits int, vera, b
 	}
 	key := pbkdf2.Key([]byte(candidate), header[:64], iter, bits/8, newHash)
 	return vcHeaderValidThroughWidth(key, header[64:512], bits), nil
+}
+
+// veraCryptSHA256Iterations is VeraCrypt's fixed SHA-256 KDF iteration
+// count (TrueCrypt never supports this KDF, checked above before this is
+// called). Shared between verifyCryptCascadeMode and the lane hasher
+// (pbkdf2_lane_veracrypt.go) so the two never drift.
+func veraCryptSHA256Iterations(boot bool) int {
+	if boot {
+		return 200000
+	}
+	return 500000
 }
 
 func parseCryptHeader(targetHash string) ([]byte, error) {

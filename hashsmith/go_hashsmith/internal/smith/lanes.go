@@ -62,6 +62,26 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 			return nil
 		}, pbkdf2Sha256Lanes, true
 	}
+	// cryptCascadeModes (VeraCrypt/TrueCrypt's split modes) is the sibling
+	// map to luksModeSpecs above, handled the same way. Only its SHA-256
+	// entries can ever be accelerated — every other KDF
+	// (SHA-512/RIPEMD-160/Whirlpool/Streebog-512, and TrueCrypt, which
+	// never offers SHA-256) falls back to the scalar path via
+	// newPBKDF2VeraCryptSHA256LaneHasher's own gate.
+	if mode, ok := cryptCascadeModes[canon]; ok {
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2VeraCryptSHA256LaneHasher(targetHash, mode) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2VeraCryptSHA256LaneHasher(targetHash, mode); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
+	}
 	switch canon {
 	case "bcrypt":
 		if salt != "" {
