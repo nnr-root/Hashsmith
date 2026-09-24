@@ -697,6 +697,40 @@ care whether a salt is in it — so salted md5 went from 34% of unsalted to 98%.
 A salt that would push a candidate past the one-block limit still declines to
 the batch path rather than digesting a truncated message.
 
+**NTLM's scalar verifier used to cost 49% more than MD4's for reasons that had
+nothing to do with hashing.** This is a separate finding from the table above:
+it is about the one-candidate-at-a-time verifier `hashsmith benchmark`, the
+feasibility guard's cost estimate, and any candidate the SIMD dictionary path
+declines (non-ASCII, oversized) all fall back to — the bulk SIMD dictionary
+path itself (both share the same MD4 core either way) was never affected,
+since its own fill loop does the UTF-16LE byte-doubling directly into the
+transposed layout and never goes through this. `utf16le()`, the function
+every UTF-16LE construction in Hashsmith funnels through — NTLM, NetNTLM,
+MSCash, Office, BitLocker, PeopleSoft, and the John/Hashcat `$utf16le$`
+compat families — allocated three times per call (a `[]rune` conversion, a
+`utf16.Encode` output, and its own returned buffer) even for a plain ASCII
+password, where every UTF-16 code unit is trivially `(byte, 0x00)`. Measured
+on an Apple M2 (`BenchmarkFastVerifierMD4`/`NTLM`, one candidate at a time,
+`go test -bench`, the low-noise way to measure this — see the caveat on CLI
+timing two paragraphs up):
+
+| | time/op | allocs/op |
+|---|---|---|
+| MD4 | 274ns | 1 |
+| NTLM, before | 408ns (+49%) | 3 |
+| NTLM, after | 313ns (+13%), then 391ns (parity) | 2, then 1 |
+
+An ASCII fast path in `utf16le` (one allocation instead of three) took the
+gap from 49% to 13%; a second pass added `utf16leInto`/`utf16leIntoBytes`,
+letting NTLM's two per-candidate hasher closures write the re-encoding into a
+stack buffer instead of calling `utf16le` at all for any candidate up to 128
+ASCII characters. NTLM's allocation profile is now identical to MD4's — one
+allocation, for `md4.New()`, which both pay equally — and the remaining
+timing gap is noise, not algorithm. Every one of the other UTF-16LE formats
+listed above gets the first fix automatically, since they all still call
+`utf16le` directly; only NTLM's two hottest call sites were worth the second,
+buffer-passing pass.
+
 ### The vector cores, both architectures
 
 CI runs the same measurement on every push — identical keyspace, wall clock,

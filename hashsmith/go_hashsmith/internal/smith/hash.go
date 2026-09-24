@@ -599,13 +599,92 @@ func mysql323(text string) string {
 	return fmt.Sprintf("%08x%08x", nr&0x7FFFFFFF, nr2&0x7FFFFFFF)
 }
 
+// utf16le is the single choke point every UTF-16LE-based construction in this
+// codebase goes through: NTLM and NetNTLM, MSCash/DCC, Office, BitLocker,
+// PeopleSoft, and every "$utf16le$"-flavoured compat/John-dynamic format —
+// dozens of per-candidate hot loops across the crack_*.go files, all calling
+// this one function once per candidate.
+//
+// Pure ASCII input (the overwhelming majority of real candidates) takes a
+// fast path: every ASCII rune's UTF-16 code unit is exactly (byte, 0x00) —
+// the same fact lanes_vector.go's and transposed.go's SIMD fill loops rely
+// on for the identical reason — so it is produced directly with one
+// allocation, instead of the three the general path below needs ([]rune(s),
+// utf16.Encode's []uint16, and the returned []byte). Benchmarked on an Apple
+// M2 (BenchmarkFastVerifierMD4/NTLM in hashfast_test.go): this took NTLM's
+// scalar per-candidate verifier from 408ns (49% slower than MD4's 274ns, 3
+// allocations) to 313ns (13% slower, 2 allocations) — a real, measured gap
+// in the fastVerifier/feasibility-estimate path, even though the SIMD batch
+// dictionary-attack path both share was already unaffected by it, since its
+// fill loops do their own byte-doubling directly into the transposed layout
+// and never call this function at all. utf16leInto/utf16leIntoBytes below
+// remove the one allocation still remaining, for callers that can supply
+// their own buffer.
+//
+// Any byte >= 0x80 falls back to the general path unchanged: UTF-8 encodes
+// every code point below 0x80 as that single byte and nothing else does, so
+// the scan below is exact, not a heuristic, and non-ASCII input (surrogate
+// pairs included) is handled exactly as it always was.
 func utf16le(s string) []byte {
-	runes := utf16.Encode([]rune(s))
-	out := make([]byte, 0, len(runes)*2)
-	for _, r := range runes {
-		out = append(out, byte(r), byte(r>>8))
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			runes := utf16.Encode([]rune(s))
+			out := make([]byte, 0, len(runes)*2)
+			for _, r := range runes {
+				out = append(out, byte(r), byte(r>>8))
+			}
+			return out
+		}
+	}
+	out := make([]byte, len(s)*2)
+	for i := 0; i < len(s); i++ {
+		out[i*2] = s[i]
 	}
 	return out
+}
+
+// utf16leInto is utf16le's ASCII fast path with the destination supplied by
+// the caller instead of allocated here: it writes s's UTF-16LE bytes into
+// dst and returns the slice used, or ok=false when s contains a byte >= 0x80
+// or does not fit dst (2*len(s) bytes). A caller that gets false must fall
+// back to utf16le, which allocates but handles every input, including the
+// ones this function declines.
+//
+// This exists for the callers named on utf16le's own comment that can offer
+// a small fixed-size stack buffer instead of paying utf16le's one remaining
+// allocation — currently rawHasher and rawHasherBytes's NTLM cases below,
+// the single-candidate scalar verifier path `hashsmith benchmark` and the
+// feasibility guard's cost estimate both drive.
+func utf16leInto(dst []byte, s string) ([]byte, bool) {
+	if len(s)*2 > len(dst) {
+		return nil, false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return nil, false
+		}
+		dst[i*2] = s[i]
+		dst[i*2+1] = 0
+	}
+	return dst[:len(s)*2], true
+}
+
+// utf16leIntoBytes is utf16leInto for a candidate that is already a []byte —
+// rawHasherBytes's form, the one the batch/benchmark hot loops use — so
+// nothing here pays for a string([]byte) conversion (itself a copy) on top
+// of the encoding it exists to make allocation-free.
+func utf16leIntoBytes(dst, s []byte) ([]byte, bool) {
+	if len(s)*2 > len(dst) {
+		return nil, false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return nil, false
+		}
+		dst[i*2] = s[i]
+		dst[i*2+1] = 0
+	}
+	return dst[:len(s)*2], true
 }
 
 func verifyArgon2(encoded string, password string) bool {

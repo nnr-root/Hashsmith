@@ -53,7 +53,17 @@ func rawHasher(typ string) (func(dst []byte, s string) int, bool) {
 	case "ntlm":
 		return func(dst []byte, s string) int {
 			h := md4.New()
-			_, _ = h.Write(utf16le(s))
+			// A stack buffer covering every candidate up to 128 ASCII
+			// characters — stdMaxCandidateLen's own figure for "long enough
+			// that nothing realistic exceeds it" — so the common case pays
+			// no allocation for the UTF-16LE re-encoding; utf16le is the
+			// correct, allocating fallback for anything longer or non-ASCII.
+			var ubuf [2 * stdMaxCandidateLen]byte
+			if v, ok := utf16leInto(ubuf[:], s); ok {
+				_, _ = h.Write(v)
+			} else {
+				_, _ = h.Write(utf16le(s))
+			}
 			var tmp [16]byte
 			return copy(dst, h.Sum(tmp[:0]))
 		}, true
@@ -98,10 +108,16 @@ func rawHasherBytes(typ string) (func(dst, s []byte) int, bool) {
 	case "ntlm":
 		return func(dst, s []byte) int {
 			h := md4.New()
-			// utf16le takes a string; ntlm's UTF-16 re-encoding already
-			// allocates internally, so this conversion adds no new
-			// allocation class versus the string-taking path.
-			_, _ = h.Write(utf16le(string(s)))
+			// See rawHasher's NTLM case: the same stack-buffer fast path,
+			// taking s directly as bytes so the batch/benchmark hot loop
+			// this function exists for never pays a string(s) conversion
+			// (itself a copy) on top of the encoding.
+			var ubuf [2 * stdMaxCandidateLen]byte
+			if v, ok := utf16leIntoBytes(ubuf[:], s); ok {
+				_, _ = h.Write(v)
+			} else {
+				_, _ = h.Write(utf16le(string(s)))
+			}
 			var tmp [16]byte
 			return copy(dst, h.Sum(tmp[:0]))
 		}, true

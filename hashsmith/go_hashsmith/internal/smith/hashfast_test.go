@@ -87,3 +87,36 @@ func TestRawHasherBytesMatchesRawHasher(t *testing.T) {
 		}
 	}
 }
+
+// BenchmarkFastVerifierMD4 and BenchmarkFastVerifierNTLM measure the exact
+// code path `hashsmith benchmark` and the feasibility-guard's cost estimate
+// both call: fastVerifier.matchBytes, one candidate at a time. NTLM's only
+// difference from MD4 here is the UTF-16LE re-encoding utf16le performs
+// before hashing — see that function's own comment for why an ASCII fast
+// path was added there, and BenchmarkUTF16LEASCII/BenchmarkUTF16LEReferenceASCII
+// (utf16le_test.go) for the isolated allocation counts. These two exist to
+// keep that fix honest at the verifier level, on a benchmark harness with far
+// less run-to-run noise than timing the CLI end to end.
+func BenchmarkFastVerifierMD4(b *testing.B) {
+	fv, ok := newFastVerifier("md4", "00000000000000000000000000000000")
+	if !ok {
+		b.Fatal("md4 fast verifier unavailable")
+	}
+	cand := []byte("benchmarkpassword123")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		fv.matchBytes(cand)
+	}
+}
+
+func BenchmarkFastVerifierNTLM(b *testing.B) {
+	fv, ok := newFastVerifier("ntlm", "00000000000000000000000000000000")
+	if !ok {
+		b.Fatal("ntlm fast verifier unavailable")
+	}
+	cand := []byte("benchmarkpassword123")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		fv.matchBytes(cand)
+	}
+}
