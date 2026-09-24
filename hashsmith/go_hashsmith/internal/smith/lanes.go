@@ -490,6 +490,24 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 			}
 			return nil
 		}, pbkdf2Sha256Lanes, true
+	case "virtualbox-aes128", "virtualbox-aes256":
+		// Same gate and reasoning as the "1password8" case above. Only
+		// AES-128-XTS's 32-byte first-stage key fits a single PBKDF2
+		// block; AES-256-XTS's 64-byte key falls back to the scalar path
+		// on its own, since newPBKDF2VirtualBoxLaneHasher refuses anything
+		// but keyWords==8.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2VirtualBoxLaneHasher(targetHash, canon) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2VirtualBoxLaneHasher(targetHash, canon); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
 	case "metamask":
 		// Same gate and reasoning as the "1password8" case above. The short
 		// variant ("metamask-short", a distinct type name never reaching

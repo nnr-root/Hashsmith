@@ -221,49 +221,85 @@ func decryptXTSZeroTweak(key, ct []byte) ([]byte, error) {
 	return pt, nil
 }
 
-func verifyVirtualBox(target, candidate, algo string) (bool, error) {
+// virtualBoxRecord holds one parsed $vbox$ target, shared by the scalar
+// verifyVirtualBox and the AVX2-batched lane hasher
+// (pbkdf2_lane_virtualbox.go).
+type virtualBoxRecord struct {
+	iter1    int
+	salt1    []byte
+	keyWords int
+	enc      []byte
+	iter2    int
+	salt2    []byte
+	want     []byte
+}
+
+// parseVirtualBox parses target, or returns an error identical in wording
+// and condition to what verifyVirtualBox always returned before this was
+// split out.
+func parseVirtualBox(target, algo string) (virtualBoxRecord, error) {
 	parts := strings.Split(target, "$")
 	if len(parts) != 10 || parts[1] != "vbox" || parts[2] != "0" {
-		return false, errors.New("invalid VirtualBox record")
+		return virtualBoxRecord{}, errors.New("invalid VirtualBox record")
 	}
 	iter1, err := boundedPositiveInt(parts[3], "VirtualBox first iteration count", 100000000)
 	if err != nil {
-		return false, err
+		return virtualBoxRecord{}, err
 	}
 	salt1, err := decodeExactHex(parts[4], 32, "VirtualBox first salt")
 	if err != nil {
-		return false, err
+		return virtualBoxRecord{}, err
 	}
 	keyWords, err := boundedPositiveInt(parts[5], "VirtualBox key length", 16)
 	if err != nil || (keyWords != 8 && keyWords != 16) {
-		return false, errors.New("invalid VirtualBox key length")
+		return virtualBoxRecord{}, errors.New("invalid VirtualBox key length")
 	}
 	if (algo == "virtualbox-aes128" && keyWords != 8) || (algo == "virtualbox-aes256" && keyWords != 16) {
-		return false, errors.New("VirtualBox record does not match selected AES-XTS mode")
+		return virtualBoxRecord{}, errors.New("VirtualBox record does not match selected AES-XTS mode")
 	}
 	enc, err := decodeExactHex(parts[6], keyWords*4, "VirtualBox encrypted password")
 	if err != nil {
-		return false, err
+		return virtualBoxRecord{}, err
 	}
 	iter2, err := boundedPositiveInt(parts[7], "VirtualBox second iteration count", 100000000)
 	if err != nil {
-		return false, err
+		return virtualBoxRecord{}, err
 	}
 	salt2, err := decodeExactHex(parts[8], 32, "VirtualBox second salt")
 	if err != nil {
-		return false, err
+		return virtualBoxRecord{}, err
 	}
 	want, err := decodeExactHex(parts[9], 32, "VirtualBox checksum")
 	if err != nil {
-		return false, err
+		return virtualBoxRecord{}, err
 	}
-	key := pbkdf2.Key([]byte(candidate), salt1, iter1, keyWords*4, sha256.New)
-	plain, err := decryptXTSZeroTweak(key, enc)
+	return virtualBoxRecord{
+		iter1: iter1, salt1: salt1, keyWords: keyWords, enc: enc,
+		iter2: iter2, salt2: salt2, want: want,
+	}, nil
+}
+
+// virtualBoxMatches is the shared "does this first-stage key reach the
+// stored checksum" check: XTS-decrypt the encrypted password with it, then
+// run the second PBKDF2-SHA256 pass over the result. Used by
+// verifyVirtualBox for its single derived key and by the lane hasher for
+// each of a batch's.
+func virtualBoxMatches(r *virtualBoxRecord, key []byte) (bool, error) {
+	plain, err := decryptXTSZeroTweak(key, r.enc)
 	if err != nil {
 		return false, err
 	}
-	got := pbkdf2.Key(plain, salt2, iter2, 32, sha256.New)
-	return bytesEqualCT(got, want), nil
+	got := pbkdf2.Key(plain, r.salt2, r.iter2, 32, sha256.New)
+	return bytesEqualCT(got, r.want), nil
+}
+
+func verifyVirtualBox(target, candidate, algo string) (bool, error) {
+	r, err := parseVirtualBox(target, algo)
+	if err != nil {
+		return false, err
+	}
+	key := pbkdf2.Key([]byte(candidate), r.salt1, r.iter1, r.keyWords*4, sha256.New)
+	return virtualBoxMatches(&r, key)
 }
 
 // metaMaskIterations is fixed by the format, for both the long and short
