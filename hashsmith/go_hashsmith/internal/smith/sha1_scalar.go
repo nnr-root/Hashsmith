@@ -56,7 +56,7 @@ func sha1ScalarCompress(state *[5]uint32, w *[80]uint32) {
 			f = b ^ c ^ d // Parity
 		}
 		temp := sha256Rotr(a, 27) + f + e + sha1K[i] + w[i] // ROTL5(a) == ROTR(a,27)
-		e, d, c, b, a = d, c, sha256Rotr(b, 2), a, temp      // ROTL30(b) == ROTR(b,2)
+		e, d, c, b, a = d, c, sha256Rotr(b, 2), a, temp     // ROTL30(b) == ROTR(b,2)
 	}
 	state[0] += a
 	state[1] += b
