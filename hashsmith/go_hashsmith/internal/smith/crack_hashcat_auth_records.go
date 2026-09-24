@@ -281,24 +281,45 @@ func verifySAPIteratedSHA(target, candidate, variant string) (bool, error) {
 	return bytesEqualCT(digest, want), nil
 }
 
-func verifyStellarWallet(target, candidate string) (bool, error) {
+// stellarWalletIterations is fixed by the format. Shared between the scalar
+// path and the lane hasher (pbkdf2_lane_stellar.go) so the two never drift.
+const stellarWalletIterations = 4096
+
+// stellarWalletRecord holds one parsed $stellar$ target, shared by the
+// scalar verifyStellarWallet and the AVX2-batched lane hasher.
+type stellarWalletRecord struct {
+	salt       []byte
+	iv         []byte
+	ciphertext []byte
+}
+
+// parseStellarWallet parses target, or returns an error identical in
+// wording and condition to what verifyStellarWallet always returned before
+// this was split out.
+func parseStellarWallet(target string) (stellarWalletRecord, error) {
 	parts := strings.Split(target, "$")
 	if len(parts) != 5 || parts[0] != "" || parts[1] != "stellar" {
-		return false, errors.New("invalid Stellar wallet record")
+		return stellarWalletRecord{}, errors.New("invalid Stellar wallet record")
 	}
 	salt, err := base64.StdEncoding.DecodeString(parts[2])
 	if err != nil || len(salt) != 16 {
-		return false, errors.New("invalid Stellar wallet salt")
+		return stellarWalletRecord{}, errors.New("invalid Stellar wallet salt")
 	}
 	iv, err := base64.StdEncoding.DecodeString(parts[3])
 	if err != nil || len(iv) != 12 {
-		return false, errors.New("invalid Stellar wallet IV")
+		return stellarWalletRecord{}, errors.New("invalid Stellar wallet IV")
 	}
 	ciphertext, err := base64.StdEncoding.DecodeString(parts[4])
 	if err != nil || len(ciphertext) != 72 {
-		return false, errors.New("invalid Stellar wallet ciphertext")
+		return stellarWalletRecord{}, errors.New("invalid Stellar wallet ciphertext")
 	}
-	key := pbkdf2.Key([]byte(candidate), salt, 4096, 32, sha256.New)
+	return stellarWalletRecord{salt: salt, iv: iv, ciphertext: ciphertext}, nil
+}
+
+// stellarWalletDecrypts is the shared "does this derived key open the
+// wallet" check. Used by verifyStellarWallet for its single derived key and
+// by the lane hasher for each of a batch's.
+func stellarWalletDecrypts(r *stellarWalletRecord, key []byte) (bool, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return false, err
@@ -307,8 +328,17 @@ func verifyStellarWallet(target, candidate string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	_, err = gcm.Open(nil, iv, ciphertext, nil)
+	_, err = gcm.Open(nil, r.iv, r.ciphertext, nil)
 	return err == nil, nil
+}
+
+func verifyStellarWallet(target, candidate string) (bool, error) {
+	r, err := parseStellarWallet(target)
+	if err != nil {
+		return false, err
+	}
+	key := pbkdf2.Key([]byte(candidate), r.salt, stellarWalletIterations, 32, sha256.New)
+	return stellarWalletDecrypts(&r, key)
 }
 
 func progressCRCTableValue(v byte) uint16 {

@@ -116,19 +116,16 @@ func johnLastPassFields(target string) (email string, iterations int, want []byt
 	return f[0], n, b, true
 }
 
-// verifyLastPassJohn checks John's spelling of a LastPass verifier.
-func verifyLastPassJohn(target, candidate string) (bool, error) {
-	email, iterations, want, ok := johnLastPassFields(target)
-	if !ok {
-		return false, errors.New("invalid LastPass record")
-	}
-	key := pbkdf2.Key([]byte(candidate), []byte(email), iterations, 32, sha256.New)
+// lastPassJohnMatches is the shared "does this key encrypt to the known
+// John-spelling verifier" check: the email address with PKCS#7 padding,
+// encrypted a block at a time with no chaining. Used by verifyLastPassJohn
+// for its single derived key and by the lane hasher
+// (pbkdf2_lane_lastpass_records.go) for each of a batch's.
+func lastPassJohnMatches(email string, key, want []byte) (bool, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return false, err
 	}
-	// The plaintext is the email address with PKCS#7 padding, encrypted a
-	// block at a time with no chaining.
 	pad := aes.BlockSize - len(email)%aes.BlockSize
 	plain := append([]byte(email), bytes.Repeat([]byte{byte(pad)}, pad)...)
 	if len(plain) < len(want) {
@@ -141,41 +138,79 @@ func verifyLastPassJohn(target, candidate string) (bool, error) {
 	return bytesEqualCT(got[:len(want)], want), nil
 }
 
+// verifyLastPassJohn checks John's spelling of a LastPass verifier.
+func verifyLastPassJohn(target, candidate string) (bool, error) {
+	email, iterations, want, ok := johnLastPassFields(target)
+	if !ok {
+		return false, errors.New("invalid LastPass record")
+	}
+	key := pbkdf2.Key([]byte(candidate), []byte(email), iterations, 32, sha256.New)
+	return lastPassJohnMatches(email, key, want)
+}
+
 func isJohnLastPass(target string) bool {
 	_, _, _, ok := johnLastPassFields(target)
 	return ok
+}
+
+// lastPassColonRecord holds one parsed hashcat-native (mode 6800) LastPass
+// target, shared by the scalar verifyLastPass and the AVX2-batched lane
+// hasher (pbkdf2_lane_lastpass_records.go).
+type lastPassColonRecord struct {
+	want []byte
+	iter int
+	salt []byte
+	iv   []byte
+}
+
+// parseLastPassColon parses target, or returns an error identical in
+// wording and condition to what verifyLastPass's colon branch always
+// returned before this was split out.
+func parseLastPassColon(target string) (lastPassColonRecord, error) {
+	parts := strings.Split(target, ":")
+	if len(parts) != 4 || len(parts[0]) != 32 || !isHex(parts[0]) || len(parts[3]) != 32 || !isHex(parts[3]) {
+		return lastPassColonRecord{}, errors.New("invalid LastPass record")
+	}
+	iterations, err := strconv.Atoi(parts[1])
+	if err != nil || iterations < 1 || iterations > maxKDFIterations {
+		return lastPassColonRecord{}, errors.New("invalid LastPass iteration count")
+	}
+	if len(parts[2]) < aes.BlockSize || len(parts[2]) > maxKDFFieldSize {
+		return lastPassColonRecord{}, errors.New("invalid LastPass account salt")
+	}
+	want, _ := hex.DecodeString(parts[0])
+	iv, _ := hex.DecodeString(parts[3])
+	return lastPassColonRecord{want: want, iter: iterations, salt: []byte(parts[2]), iv: iv}, nil
+}
+
+// lastPassColonMatches is the shared "does this key encrypt to the known
+// hashcat-spelling verifier" check. Used by verifyLastPass for its single
+// derived key and by the lane hasher for each of a batch's.
+func lastPassColonMatches(r *lastPassColonRecord, key []byte) (bool, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return false, err
+	}
+	plain := r.salt[:aes.BlockSize]
+	xored := make([]byte, aes.BlockSize)
+	for i := range xored {
+		xored[i] = plain[i] ^ r.iv[i]
+	}
+	got := make([]byte, aes.BlockSize)
+	block.Encrypt(got, xored)
+	return bytesEqualCT(got, r.want), nil
 }
 
 func verifyLastPass(target, candidate string) (bool, error) {
 	if isJohnLastPass(target) {
 		return verifyLastPassJohn(target, candidate)
 	}
-	parts := strings.Split(target, ":")
-	if len(parts) != 4 || len(parts[0]) != 32 || !isHex(parts[0]) || len(parts[3]) != 32 || !isHex(parts[3]) {
-		return false, errors.New("invalid LastPass record")
-	}
-	iterations, err := strconv.Atoi(parts[1])
-	if err != nil || iterations < 1 || iterations > maxKDFIterations {
-		return false, errors.New("invalid LastPass iteration count")
-	}
-	if len(parts[2]) < aes.BlockSize || len(parts[2]) > maxKDFFieldSize {
-		return false, errors.New("invalid LastPass account salt")
-	}
-	want, _ := hex.DecodeString(parts[0])
-	iv, _ := hex.DecodeString(parts[3])
-	key := pbkdf2.Key([]byte(candidate), []byte(parts[2]), iterations, 32, sha256.New)
-	block, err := aes.NewCipher(key)
+	r, err := parseLastPassColon(target)
 	if err != nil {
 		return false, err
 	}
-	plain := []byte(parts[2])[:aes.BlockSize]
-	xored := make([]byte, aes.BlockSize)
-	for i := range xored {
-		xored[i] = plain[i] ^ iv[i]
-	}
-	got := make([]byte, aes.BlockSize)
-	block.Encrypt(got, xored)
-	return bytesEqualCT(got, want), nil
+	key := pbkdf2.Key([]byte(candidate), r.salt, r.iter, 32, sha256.New)
+	return lastPassColonMatches(&r, key)
 }
 
 func verifySAPIsSHA512(target, candidate string) (bool, error) {
@@ -372,32 +407,50 @@ func verifyTACACSPlus(target, candidate string) (bool, error) {
 	return validStatus && flags <= 1 && 6+messageLen+dataLen == len(plaintext), nil
 }
 
-func verifyAppleSecureNotes(target, candidate string) (bool, error) {
+// appleSecureNotesRecord holds one parsed $ASN$ target, shared by the
+// scalar verifyAppleSecureNotes and the AVX2-batched lane hasher
+// (pbkdf2_lane_applesecurenotes.go).
+type appleSecureNotesRecord struct {
+	iterations int
+	salt       []byte
+	wrapped    []byte
+}
+
+// parseAppleSecureNotes parses target, or returns an error identical in
+// wording and condition to what verifyAppleSecureNotes always returned
+// before this was split out.
+func parseAppleSecureNotes(target string) (appleSecureNotesRecord, error) {
 	parts := strings.Split(target, "*")
 	if len(parts) != 5 {
-		return false, errors.New("invalid Apple Secure Notes record")
+		return appleSecureNotesRecord{}, errors.New("invalid Apple Secure Notes record")
 	}
 	id, idErr := strconv.Atoi(parts[1])
 	if parts[0] != "$ASN$" || idErr != nil || id < 1 ||
 		len(parts[3]) != 32 || !isHex(parts[3]) || len(parts[4]) != 48 || !isHex(parts[4]) {
-		return false, errors.New("invalid Apple Secure Notes record")
+		return appleSecureNotesRecord{}, errors.New("invalid Apple Secure Notes record")
 	}
 	iterations, err := strconv.Atoi(parts[2])
 	if err != nil || iterations < 1 || iterations > maxKDFIterations {
-		return false, errors.New("invalid Apple Secure Notes iteration count")
+		return appleSecureNotesRecord{}, errors.New("invalid Apple Secure Notes iteration count")
 	}
 	salt, _ := hex.DecodeString(parts[3])
 	wrapped, _ := hex.DecodeString(parts[4])
-	kek := pbkdf2.Key([]byte(candidate), salt, iterations, aes.BlockSize, sha256.New)
+	return appleSecureNotesRecord{iterations: iterations, salt: salt, wrapped: wrapped}, nil
+}
+
+// appleSecureNotesUnwraps is the shared RFC 3394 AES key-unwrap integrity
+// check. Used by verifyAppleSecureNotes for its single derived KEK and by
+// the lane hasher for each of a batch's.
+func appleSecureNotesUnwraps(r *appleSecureNotesRecord, kek []byte) (bool, error) {
 	block, err := aes.NewCipher(kek)
 	if err != nil {
 		return false, err
 	}
 	var a [8]byte
-	copy(a[:], wrapped[:8])
+	copy(a[:], r.wrapped[:8])
 	p := [2][8]byte{}
-	copy(p[0][:], wrapped[8:16])
-	copy(p[1][:], wrapped[16:24])
+	copy(p[0][:], r.wrapped[8:16])
+	copy(p[1][:], r.wrapped[16:24])
 	var in, out [aes.BlockSize]byte
 	for j := 5; j >= 0; j-- {
 		for i := 1; i >= 0; i-- {
@@ -413,6 +466,15 @@ func verifyAppleSecureNotes(target, candidate string) (bool, error) {
 		}
 	}
 	return bytesEqualCT(a[:], []byte{0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6, 0xa6}), nil
+}
+
+func verifyAppleSecureNotes(target, candidate string) (bool, error) {
+	r, err := parseAppleSecureNotes(target)
+	if err != nil {
+		return false, err
+	}
+	kek := pbkdf2.Key([]byte(candidate), r.salt, r.iterations, aes.BlockSize, sha256.New)
+	return appleSecureNotesUnwraps(&r, kek)
 }
 
 func verifyOracleOTM(target, candidate string) (bool, error) {

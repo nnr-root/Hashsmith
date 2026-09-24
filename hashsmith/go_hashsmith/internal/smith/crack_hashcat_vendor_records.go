@@ -49,13 +49,28 @@ func verifyMSSNTP(target, candidate string) (bool, error) {
 	return strings.EqualFold(hex.EncodeToString(h.Sum(nil)), parts[2]), nil
 }
 
-func verifyCitrixPBKDF2(target, candidate string) (bool, error) {
+// citrixPBKDF2Iterations is fixed by the format. Shared between the scalar
+// path and the lane hasher (pbkdf2_lane_citrix.go) so the two never drift.
+const citrixPBKDF2Iterations = 2500
+
+// parseCitrixPBKDF2 parses target, or returns an error identical in wording
+// and condition to what verifyCitrixPBKDF2 always returned before this was
+// split out.
+func parseCitrixPBKDF2(target string) (salt, want []byte, err error) {
 	if len(target) != 129 || target[0] != '5' || !isHex(target[1:]) {
-		return false, errors.New("invalid Citrix NetScaler PBKDF2 record")
+		return nil, nil, errors.New("invalid Citrix NetScaler PBKDF2 record")
 	}
-	salt, _ := hex.DecodeString(target[1:65])
-	want, _ := hex.DecodeString(target[65:])
-	got := pbkdf2.Key([]byte(candidate), salt, 2500, sha256.Size, sha256.New)
+	salt, _ = hex.DecodeString(target[1:65])
+	want, _ = hex.DecodeString(target[65:])
+	return salt, want, nil
+}
+
+func verifyCitrixPBKDF2(target, candidate string) (bool, error) {
+	salt, want, err := parseCitrixPBKDF2(target)
+	if err != nil {
+		return false, err
+	}
+	got := pbkdf2.Key([]byte(candidate), salt, citrixPBKDF2Iterations, sha256.Size, sha256.New)
 	return bytesEqualCT(got, want), nil
 }
 

@@ -266,6 +266,66 @@ func verifyVirtualBox(target, candidate, algo string) (bool, error) {
 	return bytesEqualCT(got, want), nil
 }
 
+// metaMaskIterations is fixed by the format, for both the long and short
+// records. Shared between the scalar path and the lane hasher
+// (pbkdf2_lane_metamask.go) so the two never drift.
+const metaMaskIterations = 10000
+
+// metaMaskLongRecord holds one parsed $metamask$ (non-short) target, shared
+// by the scalar verifyMetaMask and the AVX2-batched lane hasher. The short
+// variant uses a different, non-standard-GCM construction
+// (gcmCTRDecrypt) and is not accelerated.
+type metaMaskLongRecord struct {
+	salt  []byte
+	nonce []byte
+	ct    []byte
+}
+
+// parseMetaMaskLong parses target, refusing the short variant, with the
+// same field checks verifyMetaMask's long branch uses.
+func parseMetaMaskLong(target string) (metaMaskLongRecord, error) {
+	const prefix = "$metamask$"
+	if !strings.HasPrefix(target, prefix) {
+		return metaMaskLongRecord{}, errors.New("invalid MetaMask record")
+	}
+	parts := strings.Split(strings.TrimPrefix(target, prefix), "$")
+	if len(parts) != 3 {
+		return metaMaskLongRecord{}, errors.New("invalid MetaMask field count")
+	}
+	salt, err := decodeExactBase64(parts[0], 32, "MetaMask salt")
+	if err != nil {
+		return metaMaskLongRecord{}, err
+	}
+	nonce, err := decodeExactBase64(parts[1], 16, "MetaMask IV")
+	if err != nil {
+		return metaMaskLongRecord{}, err
+	}
+	ct, err := decodeExactBase64(parts[2], -1, "MetaMask ciphertext")
+	if err != nil {
+		return metaMaskLongRecord{}, err
+	}
+	if len(ct) < 30 || len(ct) > 3136 || len(ct) < 16 {
+		return metaMaskLongRecord{}, errors.New("invalid MetaMask ciphertext length")
+	}
+	return metaMaskLongRecord{salt: salt, nonce: nonce, ct: ct}, nil
+}
+
+// metaMaskOpens is the shared "does this derived key open the vault" check
+// for the long (standard AES-GCM) variant. Used by verifyMetaMask for its
+// single derived key and by the lane hasher for each of a batch's.
+func metaMaskOpens(r *metaMaskLongRecord, key []byte) (bool, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return false, err
+	}
+	gcm, err := cipher.NewGCMWithNonceSize(block, len(r.nonce))
+	if err != nil {
+		return false, err
+	}
+	_, err = gcm.Open(nil, r.nonce, r.ct, nil)
+	return err == nil, nil
+}
+
 func verifyMetaMask(target, candidate string, short bool) (bool, error) {
 	prefix := "$metamask$"
 	if short {
@@ -290,7 +350,7 @@ func verifyMetaMask(target, candidate string, short bool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	key := pbkdf2.Key([]byte(candidate), salt, 10000, 32, sha256.New)
+	key := pbkdf2.Key([]byte(candidate), salt, metaMaskIterations, 32, sha256.New)
 	if short {
 		if len(ct) != 64 {
 			return false, errors.New("invalid MetaMask short ciphertext length")
@@ -306,16 +366,11 @@ func verifyMetaMask(target, candidate string, short bool) (bool, error) {
 		}
 		return true, nil
 	}
-	if len(ct) < 30 || len(ct) > 3136 || len(ct) < 16 {
-		return false, errors.New("invalid MetaMask ciphertext length")
-	}
-	block, _ := aes.NewCipher(key)
-	gcm, err := cipher.NewGCMWithNonceSize(block, len(nonce))
+	r, err := parseMetaMaskLong(target)
 	if err != nil {
 		return false, err
 	}
-	_, err = gcm.Open(nil, nonce, ct, nil)
-	return err == nil, nil
+	return metaMaskOpens(&r, key)
 }
 
 func gcmMul(x, y [16]byte) [16]byte {
