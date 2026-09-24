@@ -376,7 +376,7 @@ jobs:
         run: |
           echo "arch: ${{ matrix.arch }}"
           grep -m1 -E '^(model name|Model)' /proc/cpuinfo || true
-          grep -o -m1 -E '\b(avx512[a-z]*|avx2|avx|asimd|neon)\b' /proc/cpuinfo | sort -u | tr '\n' ' ' || true
+          grep -o -m1 -E '\b(avx512[a-z]*|avx2|avx|asimd|neon|sha_ni)\b' /proc/cpuinfo | sort -u | tr '\n' ' ' || true
           echo
       - name: Vector core benchmarks (best-of-5, same invocation)
         run: |
@@ -421,6 +421,49 @@ jobs:
           for n in BenchmarkMD5AVX2Core BenchmarkMD5NeonCore BenchmarkMD5AVX2Group BenchmarkMD5Group BenchmarkMD5Scalar BenchmarkMD4AVX2Group BenchmarkMD4Group BenchmarkMD4Scalar; do
             vals=$(grep "^$n" /tmp/bench.out | grep -oE '[0-9.]+ MH/s' | sort -n | tr '\n' ' ')
             [ -n "$vals" ] && echo "$n: $vals"
+          done
+
+      # The PBKDF2 AVX2 multi-buffer core (docs/superpowers/specs/
+      # 2026-09-24-pbkdf2-avx2-multibuffer-design.md) has no ARM64
+      # equivalent by design — hardware SHA extensions already win there
+      # (see that design's §1) — so this step runs on the amd64 leg only.
+      # It is also the FIRST trustworthy measurement of that core's actual
+      # value proposition: every number produced anywhere else in that
+      # project's own development (Docker's amd64 QEMU emulation on an
+      # Apple Silicon machine, explicitly called out above as biased
+      # AGAINST SIMD) is correctness-only, never performance. This step
+      # exists to finally answer the question that design's own §7 left
+      # open.
+      #
+      # Two runs, same binary, same machine: default (whatever SHA
+      # Extensions this specific runner's silicon actually has — the "as
+      # shipped" number) and GODEBUG=cpu.sha=off (forces Go's stdlib
+      # crypto/sha1/256/512 onto their generic, non-hardware-accelerated
+      # path regardless of the runner's real silicon — internal/cpu's own
+      # `{Name: "sha", Feature: &X86.HasSHA}` GODEBUG registration,
+      # confirmed against Go 1.26.3's source). The second run reproduces
+      # this design's actual target hardware class (AVX2 present, SHA-NI
+      # absent) on ANY real x86-64 machine; the gap between the two runs is
+      # the size of SHA-NI's own advantage on whichever runner this happens
+      # to be.
+      - name: PBKDF2 AVX2 multi-buffer core (real hardware, not emulated)
+        if: matrix.arch == 'amd64'
+        run: |
+          cd hashsmith/go_hashsmith
+          BENCH='BenchmarkPBKDF2Sha256StdlibSequential|BenchmarkPBKDF2Sha256LaneHasherAVX2|BenchmarkPBKDF2Sha1StdlibSequential|BenchmarkPBKDF2Sha1LaneHasherAVX2|BenchmarkPBKDF2Sha512StdlibSequential|BenchmarkPBKDF2Sha512LaneHasherAVX2'
+          echo "=== default (whatever SHA Extensions this runner's silicon has) ==="
+          go test -run '^$' -bench "$BENCH" -benchtime 2s -count 3 -cpu 1 ./internal/smith | tee /tmp/pbkdf2-default.out
+          echo
+          echo "=== GODEBUG=cpu.sha=off (this design's actual target: AVX2 present, SHA-NI absent) ==="
+          GODEBUG=cpu.sha=off go test -run '^$' -bench "$BENCH" -benchtime 2s -count 3 -cpu 1 ./internal/smith | tee /tmp/pbkdf2-nosha.out
+          echo
+          echo "=================== SUMMARY: candidates/s, sorted, best last ==================="
+          for n in BenchmarkPBKDF2Sha256StdlibSequential BenchmarkPBKDF2Sha256LaneHasherAVX2 BenchmarkPBKDF2Sha1StdlibSequential BenchmarkPBKDF2Sha1LaneHasherAVX2 BenchmarkPBKDF2Sha512StdlibSequential BenchmarkPBKDF2Sha512LaneHasherAVX2; do
+            d=$(grep "^$n" /tmp/pbkdf2-default.out | grep -oE '[0-9.]+ candidates/s' | sort -n | tr '\n' ' ')
+            s=$(grep "^$n" /tmp/pbkdf2-nosha.out | grep -oE '[0-9.]+ candidates/s' | sort -n | tr '\n' ' ')
+            echo "$n"
+            [ -n "$d" ] && echo "    default:        $d"
+            [ -n "$s" ] && echo "    cpu.sha=off:    $s"
           done
 
   slow-vectors:
