@@ -148,6 +148,37 @@ func sha256OneBlockPaddedSchedule(data []byte, priorBytes int, w *[64]uint32) {
 	sha256ExpandSchedule(&block, w)
 }
 
+// sha256ScheduleFromWords builds and expands the schedule for the PBKDF2
+// hot-loop case directly from the previous compression's own state words —
+// no byte encode/decode round trip. The "message" being padded there is
+// always exactly one prior compression's 8-word (32-byte) digest, itself
+// already a plain uint32 array with no meaningful byte order of its own
+// (state[i] is not "big-endian" or "little-endian" as a number — it only
+// becomes bytes when something chooses to serialize it, and this function
+// chooses not to): w[0..7] = data verbatim, w[8] = 0x80000000 (the 0x80
+// pad byte, as the high byte of the word immediately following the data —
+// exactly where sha256OneBlockPaddedSchedule's byte-oriented version also
+// puts it, just expressed as a word instead of a byte write), w[9..13] = 0,
+// and the 64-bit bit-length split across w[14:15] is a fixed constant for
+// every call this function is used for: priorBytes is always exactly 64
+// (one absorbed ipad/opad block) and data is always exactly 32 bytes (one
+// SHA-256 digest), so the total is always 96 bytes = 768 bits, always small
+// enough that w[14] (the high 32 bits) is always 0.
+//
+// Benchmarked in isolation (BenchmarkSHA256ScheduleExpansionScalarX8):
+// removing the byte round trip does not change the expansion loop's own
+// cost, which is unavoidable scalar work by the design's own §4.2 choice —
+// it removes the marshaling AROUND that loop, which CI's first real-
+// hardware run showed accounted for roughly half of this hasher's total
+// per-candidate time.
+func sha256ScheduleFromWords(data *[8]uint32, w *[64]uint32) {
+	copy(w[0:8], data[:])
+	w[8] = 0x80000000
+	w[9], w[10], w[11], w[12], w[13], w[14] = 0, 0, 0, 0, 0, 0
+	w[15] = 768 // (64 + 32) * 8 bits, constant for every call — see doc comment
+	sha256ExpandRemainingWords(w)
+}
+
 func hmacSHA256FromInnerOuter(innerState, outerState [8]uint32, message []byte) [32]byte {
 	inner := sha256ContinueSum(innerState, 64, message)
 	// The outer hash's own message (the inner digest, 32 bytes) is always

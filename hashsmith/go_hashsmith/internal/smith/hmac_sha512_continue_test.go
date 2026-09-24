@@ -64,6 +64,34 @@ func TestHMACSHA512ContinuationRandomMatchesReference(t *testing.T) {
 	}
 }
 
+// TestSHA512ScheduleFromWordsMatchesByteOrientedPath mirrors
+// TestSHA256ScheduleFromWordsMatchesByteOrientedPath.
+func TestSHA512ScheduleFromWordsMatchesByteOrientedPath(t *testing.T) {
+	rng := rand.New(rand.NewSource(32))
+	for trial := 0; trial < 200; trial++ {
+		var data [8]uint64
+		for i := range data {
+			data[i] = rng.Uint64()
+		}
+		var digestBytes [64]byte
+		for i := 0; i < 8; i++ {
+			for b := 0; b < 8; b++ {
+				digestBytes[i*8+b] = byte(data[i] >> (56 - 8*b))
+			}
+		}
+
+		var wantW [80]uint64
+		sha512OneBlockPaddedSchedule(digestBytes[:], 128, &wantW)
+
+		var gotW [80]uint64
+		sha512ScheduleFromWords(&data, &gotW)
+
+		if gotW != wantW {
+			t.Fatalf("trial %d: sha512ScheduleFromWords = %v, want %v (byte-oriented path)", trial, gotW, wantW)
+		}
+	}
+}
+
 func TestSHA512ScalarSumMatchesCryptoSHA512(t *testing.T) {
 	for _, n := range []int{0, 1, 111, 112, 127, 128, 129, 200, 255, 256, 257} {
 		msg := make([]byte, n)

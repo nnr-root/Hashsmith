@@ -31,6 +31,15 @@ func sha1ExpandSchedule(block *[64]byte, w *[80]uint32) {
 	for i := 0; i < 16; i++ {
 		w[i] = uint32(block[i*4])<<24 | uint32(block[i*4+1])<<16 | uint32(block[i*4+2])<<8 | uint32(block[i*4+3])
 	}
+	sha1ExpandRemainingWords(w)
+}
+
+// sha1ExpandRemainingWords computes w[16..79] from an already-populated
+// w[0..15] — split out from sha1ExpandSchedule for the same reason
+// sha256ExpandRemainingWords was: sha1ScheduleFromWords (hmac_sha1_continue.go)
+// builds those first 16 words directly from a previous digest's own uint32
+// words, with no byte round trip.
+func sha1ExpandRemainingWords(w *[80]uint32) {
 	for i := 16; i < 80; i++ {
 		w[i] = sha256Rotr(w[i-3]^w[i-8]^w[i-14]^w[i-16], 31) // ROTL1(x) == ROTR(x,31)
 	}

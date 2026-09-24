@@ -109,6 +109,26 @@ func sha512OneBlockPaddedSchedule(data []byte, priorBytes int, w *[80]uint64) {
 	sha512ExpandSchedule(&block, w)
 }
 
+// sha512ScheduleFromWords is sha256ScheduleFromWords's SHA-512 twin: builds
+// and expands the schedule directly from a previous compression's 8-word
+// (64-byte) digest, no byte round trip. w[0..7] = data verbatim, w[8] =
+// 0x8000000000000000 (the pad byte as the top byte of the word immediately
+// following the data — SHA-512's digest is exactly 8 64-bit words with no
+// partial word, so this mirrors SHA-256's w[8] case rather than SHA-1's
+// w[5] one), w[9..13] = 0, and SHA-512's 128-bit length field splits across
+// w[14] (high 64 bits, always 0 — no message this project hashes
+// approaches 2^64 bits) and w[15] (low 64 bits) — a fixed constant for
+// every call this is used for: priorBytes is always 128 (one ipad/opad
+// block) and data is always 64 bytes (one SHA-512 digest), so the total is
+// always 192 bytes = 1536 bits.
+func sha512ScheduleFromWords(data *[8]uint64, w *[80]uint64) {
+	copy(w[0:8], data[:])
+	w[8] = 0x8000000000000000
+	w[9], w[10], w[11], w[12], w[13], w[14] = 0, 0, 0, 0, 0, 0
+	w[15] = 1536 // (128 + 64) * 8 bits, constant for every call — see doc comment
+	sha512ExpandRemainingWords(w)
+}
+
 func hmacSHA512FromInnerOuter(innerState, outerState [8]uint64, message []byte) [64]byte {
 	inner := sha512ContinueSum(innerState, 128, message)
 	return sha512FinalizeTail(outerState, 128, inner[:])

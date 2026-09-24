@@ -52,6 +52,15 @@ func sha512ExpandSchedule(block *[128]byte, w *[80]uint64) {
 		}
 		w[i] = v
 	}
+	sha512ExpandRemainingWords(w)
+}
+
+// sha512ExpandRemainingWords computes w[16..79] from an already-populated
+// w[0..15] — split out from sha512ExpandSchedule for the same reason as
+// SHA-256/SHA-1's twins: sha512ScheduleFromWords (hmac_sha512_continue.go)
+// builds those first 16 words directly from a previous digest's own
+// uint64 words, with no byte round trip.
+func sha512ExpandRemainingWords(w *[80]uint64) {
 	for i := 16; i < 80; i++ {
 		s0 := sha512Rotr(w[i-15], 1) ^ sha512Rotr(w[i-15], 8) ^ (w[i-15] >> 7)
 		s1 := sha512Rotr(w[i-2], 19) ^ sha512Rotr(w[i-2], 61) ^ (w[i-2] >> 6)

@@ -103,6 +103,14 @@ func (h *pbkdf2Sha256LaneHasher) Run(pw [][]byte, out []bool) {
 // all pbkdf2Sha256Lanes passwords in lanes, returning each one's full
 // 32-byte T_1 block (the caller truncates to h.want's length — PBKDF2
 // truncates its LAST block, and there is only one block in this v1 scope).
+//
+// The hot loop (step 3) stays entirely in uint32-word space from one
+// compression's output to the next schedule's input, via
+// sha256ScheduleFromWords — no per-iteration byte encode/decode. CI's
+// first real-hardware run of this core found that round trip accounted for
+// roughly half of measured per-candidate time, on top of the schedule
+// expansion the design's own §4.2 already knew was scalar and unavoidable;
+// this removes the half that wasn't.
 func (h *pbkdf2Sha256LaneHasher) runGroup(lanes *[pbkdf2Sha256Lanes][]byte) [pbkdf2Sha256Lanes][32]byte {
 	// Step 1: per-lane HMAC key setup — cheap (XOR only, see
 	// hmacSHA256KeyBlock/hmacSHA256InnerOuterIV), computed scalar per lane
@@ -122,9 +130,10 @@ func (h *pbkdf2Sha256LaneHasher) runGroup(lanes *[pbkdf2Sha256Lanes][]byte) [pbk
 	// more than one block depending on salt length), computed scalar per
 	// lane. Deliberately not vectorized: the hot loop below dominates by
 	// orders of magnitude at any realistic iteration count, so U1's cost is
-	// negligible however it is computed — see the design doc's §4.3.
-	var u [pbkdf2Sha256Lanes][32]byte
-	var t [pbkdf2Sha256Lanes][32]byte
+	// negligible however it is computed — see the design doc's §4.3. Its
+	// byte-oriented result is converted to words ONCE here, at the
+	// boundary into the word-native hot loop, not every iteration.
+	var u, t [pbkdf2Sha256Lanes][8]uint32
 	blockCounter := []byte{0, 0, 0, 1} // INT(1), big-endian, block index is always 1 in this v1 (dkLen<=32) scope
 	saltAndCounter := make([]byte, 0, len(h.salt)+4)
 	saltAndCounter = append(saltAndCounter, h.salt...)
@@ -135,8 +144,12 @@ func (h *pbkdf2Sha256LaneHasher) runGroup(lanes *[pbkdf2Sha256Lanes][]byte) [pbk
 			innerState[w] = innerStates[w][lane]
 			outerState[w] = outerStates[w][lane]
 		}
-		u[lane] = hmacSHA256FromInnerOuter(innerState, outerState, saltAndCounter)
-		t[lane] = u[lane]
+		u1Bytes := hmacSHA256FromInnerOuter(innerState, outerState, saltAndCounter)
+		for w := 0; w < 8; w++ {
+			v := uint32(u1Bytes[w*4])<<24 | uint32(u1Bytes[w*4+1])<<16 | uint32(u1Bytes[w*4+2])<<8 | uint32(u1Bytes[w*4+3])
+			u[lane][w] = v
+			t[lane][w] = v
+		}
 	}
 
 	// Step 3: the hot loop, n = 2..iter. Every U_n is exactly one 32-byte
@@ -148,7 +161,7 @@ func (h *pbkdf2Sha256LaneHasher) runGroup(lanes *[pbkdf2Sha256Lanes][]byte) [pbk
 	for n := 2; n <= h.iter; n++ {
 		for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
 			var w [64]uint32
-			sha256OneBlockPaddedSchedule(u[lane][:], 64, &w)
+			sha256ScheduleFromWords(&u[lane], &w)
 			for step := 0; step < 64; step++ {
 				innerSchedules[step][lane] = w[step]
 			}
@@ -156,16 +169,12 @@ func (h *pbkdf2Sha256LaneHasher) runGroup(lanes *[pbkdf2Sha256Lanes][]byte) [pbk
 		innerOut := sha256Group8AVX2(&innerStates, &innerSchedules)
 
 		for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
-			var innerDigest [32]byte
+			var innerDigest [8]uint32
 			for word := 0; word < 8; word++ {
-				v := innerOut[word][lane]
-				innerDigest[word*4] = byte(v >> 24)
-				innerDigest[word*4+1] = byte(v >> 16)
-				innerDigest[word*4+2] = byte(v >> 8)
-				innerDigest[word*4+3] = byte(v)
+				innerDigest[word] = innerOut[word][lane]
 			}
 			var w [64]uint32
-			sha256OneBlockPaddedSchedule(innerDigest[:], 64, &w)
+			sha256ScheduleFromWords(&innerDigest, &w)
 			for step := 0; step < 64; step++ {
 				outerSchedules[step][lane] = w[step]
 			}
@@ -175,17 +184,23 @@ func (h *pbkdf2Sha256LaneHasher) runGroup(lanes *[pbkdf2Sha256Lanes][]byte) [pbk
 		for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
 			for word := 0; word < 8; word++ {
 				v := outerOut[word][lane]
-				u[lane][word*4] = byte(v >> 24)
-				u[lane][word*4+1] = byte(v >> 16)
-				u[lane][word*4+2] = byte(v >> 8)
-				u[lane][word*4+3] = byte(v)
-				t[lane][word*4] ^= u[lane][word*4]
-				t[lane][word*4+1] ^= u[lane][word*4+1]
-				t[lane][word*4+2] ^= u[lane][word*4+2]
-				t[lane][word*4+3] ^= u[lane][word*4+3]
+				u[lane][word] = v
+				t[lane][word] ^= v
 			}
 		}
 	}
 
-	return t
+	// Convert to bytes exactly once, at the very end, for the caller's
+	// byte-oriented comparison against the target's stored derived key.
+	var result [pbkdf2Sha256Lanes][32]byte
+	for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
+		for word := 0; word < 8; word++ {
+			v := t[lane][word]
+			result[lane][word*4] = byte(v >> 24)
+			result[lane][word*4+1] = byte(v >> 16)
+			result[lane][word*4+2] = byte(v >> 8)
+			result[lane][word*4+3] = byte(v)
+		}
+	}
+	return result
 }

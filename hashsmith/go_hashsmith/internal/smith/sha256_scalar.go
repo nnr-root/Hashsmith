@@ -44,11 +44,24 @@ func sha256Rotr(x uint32, n uint) uint32 { return (x >> n) | (x << (32 - n)) }
 
 // sha256ExpandSchedule expands one 64-byte block into the full 64-word
 // message schedule, per FIPS 180-4 Sec 6.2.2 step 1. w must have length 64;
-// only the first 16 words come from block, the rest are computed.
+// only the first 16 words come from block, the rest are computed by
+// sha256ExpandRemainingWords.
 func sha256ExpandSchedule(block *[64]byte, w *[64]uint32) {
 	for i := 0; i < 16; i++ {
 		w[i] = uint32(block[i*4])<<24 | uint32(block[i*4+1])<<16 | uint32(block[i*4+2])<<8 | uint32(block[i*4+3])
 	}
+	sha256ExpandRemainingWords(w)
+}
+
+// sha256ExpandRemainingWords computes w[16..63] from an already-populated
+// w[0..15], independent of how those first 16 words were produced — split
+// out from sha256ExpandSchedule so a caller whose first 16 words start as
+// uint32s already (never as bytes) can skip the byte-decode step entirely.
+// See sha256ScheduleFromWords, which is exactly that caller: the PBKDF2
+// lane hasher's hot loop, where the "message" being padded is always the
+// previous iteration's own digest words, and round-tripping them through
+// bytes and back was pure waste this function exists to remove.
+func sha256ExpandRemainingWords(w *[64]uint32) {
 	for i := 16; i < 64; i++ {
 		s0 := sha256Rotr(w[i-15], 7) ^ sha256Rotr(w[i-15], 18) ^ (w[i-15] >> 3)
 		s1 := sha256Rotr(w[i-2], 17) ^ sha256Rotr(w[i-2], 19) ^ (w[i-2] >> 10)

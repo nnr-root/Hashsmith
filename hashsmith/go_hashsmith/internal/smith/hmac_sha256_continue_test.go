@@ -73,6 +73,41 @@ func TestHMACSHA256ContinuationRandomMatchesReference(t *testing.T) {
 // (used for hashing down oversized HMAC keys) directly, across the same
 // block-boundary lengths, since it has its own tail-padding logic distinct
 // from sha256FinalizeTail's HMAC-continuation callers.
+// TestSHA256ScheduleFromWordsMatchesByteOrientedPath is the correctness
+// backstop for the word-native fast path: for a random 32-byte digest,
+// building the schedule directly from its uint32 words must produce
+// byte-for-byte the same 64-word schedule as the original byte-oriented
+// route (bytes -> sha256OneBlockPaddedSchedule -> sha256ExpandSchedule),
+// which is itself already proven correct by every PBKDF2 differential test
+// in this package. This is the one property that makes skipping the byte
+// round trip safe rather than merely faster.
+func TestSHA256ScheduleFromWordsMatchesByteOrientedPath(t *testing.T) {
+	rng := rand.New(rand.NewSource(30))
+	for trial := 0; trial < 200; trial++ {
+		var data [8]uint32
+		for i := range data {
+			data[i] = rng.Uint32()
+		}
+		var digestBytes [32]byte
+		for i := 0; i < 8; i++ {
+			digestBytes[i*4] = byte(data[i] >> 24)
+			digestBytes[i*4+1] = byte(data[i] >> 16)
+			digestBytes[i*4+2] = byte(data[i] >> 8)
+			digestBytes[i*4+3] = byte(data[i])
+		}
+
+		var wantW [64]uint32
+		sha256OneBlockPaddedSchedule(digestBytes[:], 64, &wantW)
+
+		var gotW [64]uint32
+		sha256ScheduleFromWords(&data, &gotW)
+
+		if gotW != wantW {
+			t.Fatalf("trial %d: sha256ScheduleFromWords = %v, want %v (byte-oriented path)", trial, gotW, wantW)
+		}
+	}
+}
+
 func TestSHA256ScalarSumMatchesCryptoSHA256(t *testing.T) {
 	for _, n := range []int{0, 1, 55, 56, 63, 64, 65, 119, 120, 121, 200} {
 		msg := make([]byte, n)

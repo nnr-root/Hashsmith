@@ -103,6 +103,24 @@ func sha1OneBlockPaddedSchedule(data []byte, priorBytes int, w *[80]uint32) {
 	sha1ExpandSchedule(&block, w)
 }
 
+// sha1ScheduleFromWords is sha256ScheduleFromWords's SHA-1 twin: builds and
+// expands the schedule directly from a previous compression's 5-word
+// (20-byte) digest, no byte round trip. Layout differs from SHA-256's
+// because 20 bytes is exactly 5 words (not a partial word): w[0..4] = data
+// verbatim, w[5] = 0x80000000 (the pad byte starts a fresh word here,
+// unlike SHA-256's case where it shares word 8 with no data), w[6..13] = 0,
+// and the 64-bit bit length is again a fixed constant for every call this
+// is used for — priorBytes is always 64 (one ipad/opad block) and data is
+// always 20 bytes (one SHA-1 digest), so the total is always 84 bytes =
+// 672 bits, always fitting in w[15] alone.
+func sha1ScheduleFromWords(data *[5]uint32, w *[80]uint32) {
+	copy(w[0:5], data[:])
+	w[5] = 0x80000000
+	w[6], w[7], w[8], w[9], w[10], w[11], w[12], w[13], w[14] = 0, 0, 0, 0, 0, 0, 0, 0, 0
+	w[15] = 672 // (64 + 20) * 8 bits, constant for every call — see doc comment
+	sha1ExpandRemainingWords(w)
+}
+
 func hmacSHA1FromInnerOuter(innerState, outerState [5]uint32, message []byte) [20]byte {
 	inner := sha1ContinueSum(innerState, 64, message)
 	return sha1FinalizeTail(outerState, 64, inner[:])

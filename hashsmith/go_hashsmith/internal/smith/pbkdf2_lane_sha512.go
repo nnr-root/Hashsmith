@@ -81,9 +81,10 @@ func (h *pbkdf2Sha512LaneHasher) Run(pw [][]byte, out []bool) {
 	}
 }
 
-// runGroup mirrors pbkdf2Sha256LaneHasher.runGroup, parametrized for
-// SHA-512's 8-word (64-bit) state, 64-byte digest, 128-byte HMAC block
-// (priorBytes=128, not 64) and 4-lane width.
+// runGroup mirrors pbkdf2Sha256LaneHasher.runGroup, including its
+// word-native hot loop, parametrized for SHA-512's 8-word (64-bit) state,
+// 64-byte digest, 128-byte HMAC block (priorBytes=128, not 64) and 4-lane
+// width.
 func (h *pbkdf2Sha512LaneHasher) runGroup(lanes *[pbkdf2Sha512Lanes][]byte) [pbkdf2Sha512Lanes][64]byte {
 	var innerStates, outerStates [8][pbkdf2Sha512Lanes]uint64
 	for lane := 0; lane < pbkdf2Sha512Lanes; lane++ {
@@ -96,8 +97,7 @@ func (h *pbkdf2Sha512LaneHasher) runGroup(lanes *[pbkdf2Sha512Lanes][]byte) [pbk
 		}
 	}
 
-	var u [pbkdf2Sha512Lanes][64]byte
-	var t [pbkdf2Sha512Lanes][64]byte
+	var u, t [pbkdf2Sha512Lanes][8]uint64
 	blockCounter := []byte{0, 0, 0, 1}
 	saltAndCounter := make([]byte, 0, len(h.salt)+4)
 	saltAndCounter = append(saltAndCounter, h.salt...)
@@ -108,15 +108,22 @@ func (h *pbkdf2Sha512LaneHasher) runGroup(lanes *[pbkdf2Sha512Lanes][]byte) [pbk
 			innerState[w] = innerStates[w][lane]
 			outerState[w] = outerStates[w][lane]
 		}
-		u[lane] = hmacSHA512FromInnerOuter(innerState, outerState, saltAndCounter)
-		t[lane] = u[lane]
+		u1Bytes := hmacSHA512FromInnerOuter(innerState, outerState, saltAndCounter)
+		for w := 0; w < 8; w++ {
+			var v uint64
+			for b := 0; b < 8; b++ {
+				v = v<<8 | uint64(u1Bytes[w*8+b])
+			}
+			u[lane][w] = v
+			t[lane][w] = v
+		}
 	}
 
 	var innerSchedules, outerSchedules [80][pbkdf2Sha512Lanes]uint64
 	for n := 2; n <= h.iter; n++ {
 		for lane := 0; lane < pbkdf2Sha512Lanes; lane++ {
 			var w [80]uint64
-			sha512OneBlockPaddedSchedule(u[lane][:], 128, &w)
+			sha512ScheduleFromWords(&u[lane], &w)
 			for step := 0; step < 80; step++ {
 				innerSchedules[step][lane] = w[step]
 			}
@@ -124,15 +131,12 @@ func (h *pbkdf2Sha512LaneHasher) runGroup(lanes *[pbkdf2Sha512Lanes][]byte) [pbk
 		innerOut := sha512Group4AVX2(&innerStates, &innerSchedules)
 
 		for lane := 0; lane < pbkdf2Sha512Lanes; lane++ {
-			var innerDigest [64]byte
+			var innerDigest [8]uint64
 			for word := 0; word < 8; word++ {
-				v := innerOut[word][lane]
-				for b := 0; b < 8; b++ {
-					innerDigest[word*8+b] = byte(v >> (56 - 8*b))
-				}
+				innerDigest[word] = innerOut[word][lane]
 			}
 			var w [80]uint64
-			sha512OneBlockPaddedSchedule(innerDigest[:], 128, &w)
+			sha512ScheduleFromWords(&innerDigest, &w)
 			for step := 0; step < 80; step++ {
 				outerSchedules[step][lane] = w[step]
 			}
@@ -142,14 +146,20 @@ func (h *pbkdf2Sha512LaneHasher) runGroup(lanes *[pbkdf2Sha512Lanes][]byte) [pbk
 		for lane := 0; lane < pbkdf2Sha512Lanes; lane++ {
 			for word := 0; word < 8; word++ {
 				v := outerOut[word][lane]
-				for b := 0; b < 8; b++ {
-					byteVal := byte(v >> (56 - 8*b))
-					u[lane][word*8+b] = byteVal
-					t[lane][word*8+b] ^= byteVal
-				}
+				u[lane][word] = v
+				t[lane][word] ^= v
 			}
 		}
 	}
 
-	return t
+	var result [pbkdf2Sha512Lanes][64]byte
+	for lane := 0; lane < pbkdf2Sha512Lanes; lane++ {
+		for word := 0; word < 8; word++ {
+			v := t[lane][word]
+			for b := 0; b < 8; b++ {
+				result[lane][word*8+b] = byte(v >> (56 - 8*b))
+			}
+		}
+	}
+	return result
 }
