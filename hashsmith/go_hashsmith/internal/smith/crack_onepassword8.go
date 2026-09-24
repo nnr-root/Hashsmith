@@ -34,14 +34,34 @@ import (
 
 const onePassword8KeyLen = 32
 
-func verifyOnePassword8(target, candidate string) (bool, error) {
+// onePassword8Record holds one parsed $mobilekeychain$ target, shared by
+// the scalar verifyOnePassword8 and the AVX2-batched lane hasher
+// (pbkdf2_lane_onepassword8.go) so the two never parse the record two
+// different ways — a parsing discrepancy between a fast path and its
+// scalar fallback is exactly the kind of thing that would surface only as
+// silent false negatives on whichever path a given target happened not to
+// exercise in testing.
+type onePassword8Record struct {
+	salt      []byte
+	secondKey []byte
+	iter      int
+	iv        []byte
+	ct        []byte
+	tag       []byte
+}
+
+// parseOnePassword8Record parses target, or returns an error identical in
+// wording and condition to what verifyOnePassword8 always returned before
+// this was split out — this refactor changes nothing about which records
+// are accepted or rejected, only where the parsing logic lives.
+func parseOnePassword8Record(target string) (onePassword8Record, error) {
 	t := strings.TrimSpace(target)
 	if !strings.HasPrefix(t, "$mobilekeychain$") {
-		return false, errors.New("not a 1Password 8 mobile keychain record")
+		return onePassword8Record{}, errors.New("not a 1Password 8 mobile keychain record")
 	}
 	f := strings.Split(strings.TrimPrefix(t, "$mobilekeychain$"), "$")
 	if len(f) != 7 {
-		return false, errors.New("1Password 8 record must have 7 fields")
+		return onePassword8Record{}, errors.New("1Password 8 record must have 7 fields")
 	}
 	unhex := func(s string, want int) ([]byte, error) {
 		b, err := hex.DecodeString(s)
@@ -53,45 +73,64 @@ func verifyOnePassword8(target, candidate string) (bool, error) {
 		}
 		return b, nil
 	}
-	salt, err := unhex(f[1], onePassword8KeyLen)
+	var r onePassword8Record
+	var err error
+	r.salt, err = unhex(f[1], onePassword8KeyLen)
 	if err != nil {
-		return false, err
+		return onePassword8Record{}, err
 	}
-	secondKey, err := unhex(f[2], onePassword8KeyLen)
+	r.secondKey, err = unhex(f[2], onePassword8KeyLen)
 	if err != nil {
-		return false, err
+		return onePassword8Record{}, err
 	}
-	iterations, err := strconv.Atoi(f[3])
-	if err != nil || iterations < 1 {
-		return false, errors.New("1Password 8 iterations must be a positive integer")
+	r.iter, err = strconv.Atoi(f[3])
+	if err != nil || r.iter < 1 {
+		return onePassword8Record{}, errors.New("1Password 8 iterations must be a positive integer")
 	}
-	iv, err := unhex(f[4], 0)
-	if err != nil || len(iv) == 0 {
-		return false, errors.New("1Password 8 IV is not hex")
+	r.iv, err = unhex(f[4], 0)
+	if err != nil || len(r.iv) == 0 {
+		return onePassword8Record{}, errors.New("1Password 8 IV is not hex")
 	}
-	ct, err := unhex(f[5], 0)
-	if err != nil || len(ct) == 0 {
-		return false, errors.New("1Password 8 ciphertext is not hex")
+	r.ct, err = unhex(f[5], 0)
+	if err != nil || len(r.ct) == 0 {
+		return onePassword8Record{}, errors.New("1Password 8 ciphertext is not hex")
 	}
-	tag, err := unhex(f[6], 0)
-	if err != nil || len(tag) == 0 {
-		return false, errors.New("1Password 8 tag is not hex")
+	r.tag, err = unhex(f[6], 0)
+	if err != nil || len(r.tag) == 0 {
+		return onePassword8Record{}, errors.New("1Password 8 tag is not hex")
 	}
+	return r, nil
+}
 
-	derived := pbkdf2.Key([]byte(candidate), salt, iterations, onePassword8KeyLen, sha256.New)
+func verifyOnePassword8(target, candidate string) (bool, error) {
+	r, err := parseOnePassword8Record(target)
+	if err != nil {
+		return false, err
+	}
+	derived := pbkdf2.Key([]byte(candidate), r.salt, r.iter, onePassword8KeyLen, sha256.New)
+	return onePassword8Decrypts(&r, derived)
+}
+
+// onePassword8Decrypts is the shared "does this derived key open the
+// record" check: XOR in the second key, build the AES-256-GCM cipher, and
+// attempt to open the stored ciphertext+tag under the record's IV. Used by
+// verifyOnePassword8 for its single derived key and by the lane hasher for
+// each of a batch's derived keys — the expensive part (PBKDF2) is what
+// batching helps; this per-candidate tail is cheap regardless.
+func onePassword8Decrypts(r *onePassword8Record, derived []byte) (bool, error) {
 	muk := make([]byte, onePassword8KeyLen)
 	for i := range muk {
-		muk[i] = derived[i] ^ secondKey[i]
+		muk[i] = derived[i] ^ r.secondKey[i]
 	}
 	block, err := aes.NewCipher(muk)
 	if err != nil {
 		return false, err
 	}
-	gcm, err := cipher.NewGCMWithNonceSize(block, len(iv))
+	gcm, err := cipher.NewGCMWithNonceSize(block, len(r.iv))
 	if err != nil {
 		return false, err
 	}
-	if _, err := gcm.Open(nil, iv, append(append([]byte(nil), ct...), tag...), nil); err != nil {
+	if _, err := gcm.Open(nil, r.iv, append(append([]byte(nil), r.ct...), r.tag...), nil); err != nil {
 		return false, nil
 	}
 	return true, nil

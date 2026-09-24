@@ -119,6 +119,44 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 			}
 		}
 		return nil, 0, false
+	case "1password8":
+		// Format-specific reuse of the same SHA-256 core and eligibility
+		// gate as the generic "pbkdf2" case above — see
+		// pbkdf2Onepassword8LaneHasher's own comment for why this format
+		// specifically was the first one wired this way. salt != ""
+		// is not checked here: 1Password 8's own salt lives in the target
+		// record's own field, never in the generic -s/-S mechanism, and
+		// nothing about this format accepts an external salt argument at
+		// all — unlike bcrypt/descrypt/pbkdf2 above, which are also usable
+		// as bare, salt-less raw digests via -s/-S, this crack.go dispatch
+		// entry for "1password8" never threads a salt argument through, so
+		// there is nothing to reject.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2Onepassword8LaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2Onepassword8LaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
+	case "dogechain":
+		// Same gate and reasoning as the "1password8" case above.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2DogechainLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2DogechainLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
 	}
 	return nil, 0, false
 }

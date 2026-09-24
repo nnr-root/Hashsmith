@@ -99,25 +99,50 @@ func (h *pbkdf2Sha256LaneHasher) Run(pw [][]byte, out []bool) {
 	}
 }
 
-// runGroup computes PBKDF2-HMAC-SHA256(password, h.salt, h.iter, 32) for
-// all pbkdf2Sha256Lanes passwords in lanes, returning each one's full
-// 32-byte T_1 block (the caller truncates to h.want's length — PBKDF2
-// truncates its LAST block, and there is only one block in this v1 scope).
-//
-// The hot loop (step 3) stays entirely in uint32-word space from one
-// compression's output to the next schedule's input, via
-// sha256ScheduleFromWords — no per-iteration byte encode/decode. CI's
-// first real-hardware run of this core found that round trip accounted for
-// roughly half of measured per-candidate time, on top of the schedule
-// expansion the design's own §4.2 already knew was scalar and unavoidable;
-// this removes the half that wasn't.
+// runGroup calls the shared batched-derivation primitive with this
+// hasher's own (salt, iter) — see pbkdf2HMACSHA256DeriveBatch for the
+// actual work. Kept as its own method (rather than inlining the call at
+// Run's call site) only because it is the name the generic-PBKDF2 lane
+// hasher's own tests already know.
 func (h *pbkdf2Sha256LaneHasher) runGroup(lanes *[pbkdf2Sha256Lanes][]byte) [pbkdf2Sha256Lanes][32]byte {
+	return pbkdf2HMACSHA256DeriveBatch(lanes, h.salt, h.iter)
+}
+
+// pbkdf2HMACSHA256DeriveBatch computes PBKDF2-HMAC-SHA256(password, salt,
+// iter, 32) for all pbkdf2Sha256Lanes passwords in passwords at once,
+// returning each one's full 32-byte T_1 block (PBKDF2's first and only
+// block for any derived-key length up to 32 bytes — a caller wanting fewer
+// bytes truncates; a caller wanting more needs a second block, which this
+// function does not compute — see the design doc's §3 non-goal on
+// dkLen > hashLen).
+//
+// This is the reusable core every PBKDF2-HMAC-SHA256 format in this
+// project can batch through, not only the generic "-t pbkdf2" crack type
+// pbkdf2Sha256LaneHasher wraps it for: any format whose own verify
+// function currently calls golang.org/x/crypto/pbkdf2.Key with sha256.New,
+// a single shared salt across the batch, and a derived key of 32 bytes or
+// fewer can call this directly and do its own (usually cheap — an XOR, an
+// HMAC, a decrypt-and-check) per-lane post-processing on the result,
+// exactly as its scalar verify function already does on one pbkdf2.Key
+// call's output. See pbkdf2Sha1PasswordLaneHasher (crack_onepassword8.go)
+// and the Dogechain wallet's lane hasher (crack_dogechain.go) for two
+// worked examples — one needing no password transform, one needing a
+// cheap per-lane one before this function is called at all.
+//
+// The hot loop stays entirely in uint32-word space from one compression's
+// output to the next schedule's input, via sha256ScheduleFromWords — no
+// per-iteration byte encode/decode. CI's first real-hardware run of this
+// core found that round trip accounted for roughly half of measured
+// per-candidate time, on top of the schedule expansion the design's own
+// §4.2 already knew was scalar and unavoidable; this removes the half
+// that wasn't.
+func pbkdf2HMACSHA256DeriveBatch(passwords *[pbkdf2Sha256Lanes][]byte, salt []byte, iter int) [pbkdf2Sha256Lanes][32]byte {
 	// Step 1: per-lane HMAC key setup — cheap (XOR only, see
 	// hmacSHA256KeyBlock/hmacSHA256InnerOuterIV), computed scalar per lane
 	// since it happens once per Run() call, not once per iteration.
 	var innerStates, outerStates [8][pbkdf2Sha256Lanes]uint32
 	for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
-		kb := hmacSHA256KeyBlock(lanes[lane])
+		kb := hmacSHA256KeyBlock(passwords[lane])
 		inner := hmacSHA256InnerOuterIV(kb, 0x36)
 		outer := hmacSHA256InnerOuterIV(kb, 0x5c)
 		for w := 0; w < 8; w++ {
@@ -126,7 +151,7 @@ func (h *pbkdf2Sha256LaneHasher) runGroup(lanes *[pbkdf2Sha256Lanes][]byte) [pbk
 		}
 	}
 
-	// Step 2: U_1 — one-time, variable length (h.salt || INT(1) can span
+	// Step 2: U_1 — one-time, variable length (salt || INT(1) can span
 	// more than one block depending on salt length), computed scalar per
 	// lane. Deliberately not vectorized: the hot loop below dominates by
 	// orders of magnitude at any realistic iteration count, so U1's cost is
@@ -135,8 +160,8 @@ func (h *pbkdf2Sha256LaneHasher) runGroup(lanes *[pbkdf2Sha256Lanes][]byte) [pbk
 	// boundary into the word-native hot loop, not every iteration.
 	var u, t [pbkdf2Sha256Lanes][8]uint32
 	blockCounter := []byte{0, 0, 0, 1} // INT(1), big-endian, block index is always 1 in this v1 (dkLen<=32) scope
-	saltAndCounter := make([]byte, 0, len(h.salt)+4)
-	saltAndCounter = append(saltAndCounter, h.salt...)
+	saltAndCounter := make([]byte, 0, len(salt)+4)
+	saltAndCounter = append(saltAndCounter, salt...)
 	saltAndCounter = append(saltAndCounter, blockCounter...)
 	for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
 		var innerState, outerState [8]uint32
@@ -158,7 +183,7 @@ func (h *pbkdf2Sha256LaneHasher) runGroup(lanes *[pbkdf2Sha256Lanes][]byte) [pbk
 	// the inner and outer continuation here are exactly one AVX2
 	// compression per lane, batched across all 8 lanes at once.
 	var innerSchedules, outerSchedules [64][pbkdf2Sha256Lanes]uint32
-	for n := 2; n <= h.iter; n++ {
+	for n := 2; n <= iter; n++ {
 		for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
 			var w [64]uint32
 			sha256ScheduleFromWords(&u[lane], &w)
