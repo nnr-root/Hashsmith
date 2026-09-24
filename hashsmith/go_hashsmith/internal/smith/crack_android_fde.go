@@ -139,22 +139,49 @@ const (
 	samsungFDESaltLen = 16
 )
 
-func verifyAndroidSamsungFDE(target, candidate string) (bool, error) {
+// androidSamsungFDERecord holds one parsed 12900 record, shared by the
+// scalar verifyAndroidSamsungFDE and the AVX2-batched lane hasher
+// (pbkdf2_lane_android_samsung_fde.go).
+type androidSamsungFDERecord struct {
+	data []byte
+	mac  []byte
+	salt []byte
+}
+
+// parseAndroidSamsungFDERecord parses target, or returns an error identical
+// in wording and condition to what verifyAndroidSamsungFDE always returned
+// before this was split out.
+func parseAndroidSamsungFDERecord(target string) (androidSamsungFDERecord, error) {
 	t := strings.TrimSpace(target)
 	want := 2 * (samsungFDEDataLen + samsungFDEMACLen + samsungFDESaltLen)
 	if len(t) != want || !isHex(t) {
-		return false, errors.New("Samsung Android FDE record must be 160 hex characters")
+		return androidSamsungFDERecord{}, errors.New("Samsung Android FDE record must be 160 hex characters")
 	}
 	raw, err := hex.DecodeString(t)
 	if err != nil {
+		return androidSamsungFDERecord{}, err
+	}
+	return androidSamsungFDERecord{
+		data: raw[:samsungFDEDataLen],
+		mac:  raw[samsungFDEDataLen : samsungFDEDataLen+samsungFDEMACLen],
+		salt: raw[samsungFDEDataLen+samsungFDEMACLen:],
+	}, nil
+}
+
+// androidSamsungFDEMatches is the shared "does this derived key authenticate
+// the record" check. Used by verifyAndroidSamsungFDE for its single derived
+// key and by the lane hasher for each of a batch's.
+func androidSamsungFDEMatches(key []byte, r *androidSamsungFDERecord) bool {
+	h := hmac.New(sha256.New, key)
+	_, _ = h.Write(r.data)
+	return hmac.Equal(h.Sum(nil), r.mac)
+}
+
+func verifyAndroidSamsungFDE(target, candidate string) (bool, error) {
+	r, err := parseAndroidSamsungFDERecord(target)
+	if err != nil {
 		return false, err
 	}
-	data := raw[:samsungFDEDataLen]
-	mac := raw[samsungFDEDataLen : samsungFDEDataLen+samsungFDEMACLen]
-	salt := raw[samsungFDEDataLen+samsungFDEMACLen:]
-
-	key := pbkdf2.Key([]byte(candidate), salt, androidSamsungIterations, 32, sha256.New)
-	h := hmac.New(sha256.New, key)
-	_, _ = h.Write(data)
-	return hmac.Equal(h.Sum(nil), mac), nil
+	key := pbkdf2.Key([]byte(candidate), r.salt, androidSamsungIterations, 32, sha256.New)
+	return androidSamsungFDEMatches(key, &r), nil
 }

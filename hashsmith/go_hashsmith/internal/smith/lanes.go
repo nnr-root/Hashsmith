@@ -247,6 +247,54 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 			}
 			return nil
 		}, pbkdf2Sha256Lanes, true
+	case "django":
+		// Same gate and reasoning as the "1password8" case above. A
+		// pbkdf2_sha1 (or any other Django algorithm) record falls back to
+		// the scalar path on its own, since newPBKDF2DjangoLaneHasher
+		// refuses anything that is not pbkdf2_sha256.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2DjangoLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2DjangoLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
+	case "aix":
+		// Same gate and reasoning as the "1password8" case above. A
+		// {smd5}/{ssha1}/{ssha512} record falls back to the scalar path on
+		// its own, since newPBKDF2AIXLaneHasher refuses anything that is
+		// not {ssha256}.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2AIXLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2AIXLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
+	case "android-fde-samsung":
+		// Same gate and reasoning as the "1password8" case above.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2AndroidSamsungFDELaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2AndroidSamsungFDELaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
 	}
 	return nil, 0, false
 }

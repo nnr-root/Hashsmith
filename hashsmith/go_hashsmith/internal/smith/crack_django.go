@@ -79,6 +79,39 @@ func verifyDjango(targetHash, candidate string) (bool, error) {
 	}
 }
 
+// djangoPBKDF2SHA256Record holds one parsed pbkdf2_sha256$ target — the one
+// Django algorithm the AVX2 lane hasher (pbkdf2_lane_django.go) accelerates.
+// verifyDjangoPBKDF2 above stays generic over both pbkdf2_sha1 and
+// pbkdf2_sha256 and is untouched; this is a second, narrower entry point
+// used only by the lane hasher, whose own tests check it against
+// verifyDjango on every candidate so the two can never silently drift.
+type djangoPBKDF2SHA256Record struct {
+	salt []byte
+	iter int
+	want []byte
+}
+
+// parseDjangoPBKDF2SHA256Record parses target, refusing anything that is not
+// a pbkdf2_sha256 record, with the same field checks verifyDjangoPBKDF2 uses.
+func parseDjangoPBKDF2SHA256Record(target string) (djangoPBKDF2SHA256Record, error) {
+	parts := strings.Split(target, "$")
+	if len(parts) == 0 || parts[0] != "pbkdf2_sha256" {
+		return djangoPBKDF2SHA256Record{}, errors.New("not a Django PBKDF2-SHA256 record")
+	}
+	if len(parts) != 4 || parts[2] == "" || len(parts[2]) > maxKDFFieldSize {
+		return djangoPBKDF2SHA256Record{}, errors.New("invalid Django PBKDF2 hash")
+	}
+	iter, err := strconv.Atoi(parts[1])
+	if err != nil || iter < 1 || iter > maxKDFIterations {
+		return djangoPBKDF2SHA256Record{}, errors.New("invalid Django iteration count")
+	}
+	want, err := base64.StdEncoding.DecodeString(parts[3])
+	if err != nil || len(want) != sha256.Size {
+		return djangoPBKDF2SHA256Record{}, errors.New("invalid Django base64 digest")
+	}
+	return djangoPBKDF2SHA256Record{salt: []byte(parts[2]), iter: iter, want: want}, nil
+}
+
 func verifyDjangoPBKDF2(parts []string, candidate string, newHash func() hash.Hash) (bool, error) {
 	if len(parts) != 4 || parts[2] == "" || len(parts[2]) > maxKDFFieldSize {
 		return false, errors.New("invalid Django PBKDF2 hash")

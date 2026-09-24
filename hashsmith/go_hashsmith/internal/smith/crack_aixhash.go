@@ -81,6 +81,48 @@ func verifyAIX(targetHash, candidate string) (bool, error) {
 	return got[:len(f[2])] == f[2], nil
 }
 
+// aixSHA256Record holds one parsed {ssha256} target — the one AIX digest
+// the AVX2 lane hasher (pbkdf2_lane_aix.go) accelerates. verifyAIX above
+// stays generic over {smd5}/{ssha1}/{ssha256}/{ssha512} and is untouched;
+// this is a second, narrower entry point used only by the lane hasher,
+// whose own tests check it against verifyAIX on every candidate.
+type aixSHA256Record struct {
+	salt       string
+	want       string
+	iterations int
+}
+
+// parseAIXSHA256Record parses target, refusing anything that is not a
+// {ssha256} record, with the same field checks verifyAIX uses for it.
+func parseAIXSHA256Record(target string) (aixSHA256Record, error) {
+	if !strings.HasPrefix(target, "{ssha256}") {
+		return aixSHA256Record{}, errors.New("not an AIX {ssha256} record")
+	}
+	f := strings.Split(target[len("{ssha256}"):], "$")
+	if len(f) != 3 {
+		return aixSHA256Record{}, errors.New("invalid AIX hash (need NN$salt$hash)")
+	}
+	nn, err := strconv.Atoi(f[0])
+	if err != nil || nn < 0 || nn > 30 {
+		return aixSHA256Record{}, errors.New("invalid AIX iteration exponent")
+	}
+	if f[2] == "" {
+		return aixSHA256Record{}, errors.New("invalid AIX checksum length")
+	}
+	return aixSHA256Record{salt: f[1], want: f[2], iterations: 1 << uint(nn)}, nil
+}
+
+// aixMatches is the shared "does this derived key match" check: re-encode
+// with the AIX crypt-64 variant and compare the stored (possibly truncated)
+// checksum length, exactly as verifyAIX does for any of its three digests.
+func aixMatches(dk []byte, want string) bool {
+	got := aixB64(dk)
+	if len(want) == 0 || len(want) > len(got) {
+		return false
+	}
+	return got[:len(want)] == want
+}
+
 func isAIX(s string) bool {
 	return strings.HasPrefix(s, "{smd5}") || strings.HasPrefix(s, "{ssha1}") ||
 		strings.HasPrefix(s, "{ssha256}") || strings.HasPrefix(s, "{ssha512}")
