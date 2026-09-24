@@ -2,6 +2,7 @@ package smith
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -139,6 +140,110 @@ func TestComparisonForkAppliesOnlyToJohn(t *testing.T) {
 			if strings.HasPrefix(a, "--fork") {
 				t.Fatalf("%s args must not contain --fork: %q", name, args)
 			}
+		}
+	}
+}
+
+// TestWriteMissWordlist guards the property measureStartupOverhead depends
+// on: none of these candidates may equal comparisonPassword (or the
+// benchmark harness's target could accidentally get "found" during an
+// overhead probe, turning a startup measurement into a real timed run).
+func TestWriteMissWordlist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "miss.txt")
+	if err := writeMissWordlist(path); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) == 0 {
+		t.Fatal("miss wordlist is empty")
+	}
+	for _, line := range lines {
+		if line == comparisonPassword {
+			t.Fatalf("miss wordlist must never contain the real target password: %q", lines)
+		}
+		if line == "" {
+			t.Fatalf("miss wordlist must not contain a blank candidate: %q", lines)
+		}
+	}
+}
+
+// TestAdjustForStartupNegligibleOverhead covers the common case: a fast
+// overhead relative to the run should barely move the throughput number,
+// should never be flagged as startup-dominated, and should be reported.
+func TestAdjustForStartupNegligibleOverhead(t *testing.T) {
+	rate, dominated, measurable := adjustForStartup(1_000_000, 10.0, 0.05)
+	if dominated {
+		t.Fatalf("5%% overhead of the median must not be flagged startup-dominated")
+	}
+	if !measurable {
+		t.Fatal("5% overhead is well-conditioned and must be reported as measurable")
+	}
+	want := 1_000_000.0 / (10.0 - 0.05)
+	if math.Abs(rate-want) > 1e-6 {
+		t.Fatalf("adjusted rate = %v, want %v", rate, want)
+	}
+}
+
+// TestAdjustForStartupDominatedButMeasurable covers the middle band: overhead
+// large enough to be flagged (worth a warning) but not so large relative to
+// the run that subtracting it is unreliable — the subtraction is still
+// well-conditioned and a number should be reported.
+func TestAdjustForStartupDominatedButMeasurable(t *testing.T) {
+	// overhead/median = 0.583, above startupDominatedThreshold (0.30) and
+	// below startupUnmeasurableThreshold (0.70).
+	rate, dominated, measurable := adjustForStartup(200_000, 0.389, 0.227)
+	if !dominated {
+		t.Fatal("overhead at 58% of median must be flagged startup-dominated")
+	}
+	if !measurable {
+		t.Fatal("overhead at 58% of median is still a well-conditioned subtraction and must be measurable")
+	}
+	want := 200_000.0 / (0.389 - 0.227)
+	if math.Abs(rate-want) > 1e-6 {
+		t.Fatalf("adjusted rate = %v, want %v", rate, want)
+	}
+}
+
+// TestAdjustForStartupUnmeasurable reproduces the motivating case: a GPU
+// tool whose ~1.8s Metal init/compile cost is nearly the entirety of a short
+// dictionary run's wall time. median-overhead here is a difference of two
+// close, noisy quantities, so no number should be fabricated — this is
+// exactly the case where an earlier version of this code produced a
+// precise-looking figure ~335x below hashcat's real native throughput by
+// flooring the denominator instead of admitting the measurement can't
+// separate the two.
+func TestAdjustForStartupUnmeasurable(t *testing.T) {
+	rate, dominated, measurable := adjustForStartup(10_000_000, 1.879, 1.8)
+	if !dominated {
+		t.Fatal("overhead at 96% of median must be flagged startup-dominated")
+	}
+	if measurable {
+		t.Fatal("overhead at 96% of median must not be reported as a measurable rate")
+	}
+	if rate != 0 {
+		t.Fatalf("an unmeasurable rate must be exactly 0 (so JSON omits it), got %v", rate)
+	}
+}
+
+// TestAdjustForStartupNeverDividesByZeroOrNegative guards the case where a
+// noisy overhead probe lands at or past the timed median entirely: the
+// function must recognize this as unmeasurable rather than attempt a
+// division that produces an infinite, NaN, or negative throughput.
+func TestAdjustForStartupNeverDividesByZeroOrNegative(t *testing.T) {
+	for _, overhead := range []float64{0.71, 1.0, 1.0000001, 5.0, 100.0} {
+		rate, dominated, measurable := adjustForStartup(1000, 1.0, overhead)
+		if !dominated {
+			t.Fatalf("overhead %v >= median must be startup-dominated", overhead)
+		}
+		if measurable {
+			t.Fatalf("overhead %v this close to or past the median must not be measurable", overhead)
+		}
+		if rate != 0 {
+			t.Fatalf("overhead %v produced a nonzero rate despite being unmeasurable: %v", overhead, rate)
 		}
 	}
 }

@@ -740,6 +740,42 @@ the wordlist and available binaries. A Metal/OpenCL build can add `--gpu` to
 exercise Hashsmith's GPU dictionary path; formats without a dictionary kernel
 fall back to Hashsmith's optimized CPU verifier and say so explicitly.
 
+**Startup cost is measured, not hidden.** At small `--candidates` counts a
+GPU tool's one-time device init and kernel compile can be most of its wall
+time — on this machine Hashcat pays a fixed ~1.8s per invocation regardless
+of candidate count, so a 200,000-candidate dictionary run mostly times that
+compile, not hashing speed. Rather than publish the raw ratio that produces
+(Hashsmith looked ~90x faster than Hashcat's own `-b` throughput at that
+size, which is not a real result), `--compare` measures each tool's own
+startup cost separately — by timing the identical command against a
+three-candidate wordlist that cannot contain the target — and reports it
+alongside the raw number:
+
+```
+  md5       hashsmith    0.028s (7.14 MH/s)*  john      0.404s (494.94 kH/s)*  hashcat   1.807s (110.67 kH/s)*
+    * this run's time is mostly one-time startup (device init / kernel compile), not
+      hashing speed — the rate above is not a fair speed comparison at this --candidates
+      size; see throughput_candidates_per_second in --json, or use a larger run.
+        hashsmith startup ~0.015s of 0.028s -> adjusted 15.45 MH/s
+        john      startup ~0.199s of 0.404s -> adjusted 974.12 kH/s
+        hashcat   startup ~1.779s of 1.807s -> not reliably measurable at this scale; use hashcat's native benchmark
+```
+
+When overhead is a large majority of the run, `median - overhead` is a
+difference of two close, individually noisy numbers, and no adjusted rate is
+printed for it — an earlier version of this subtraction floored the
+denominator instead and produced a precise-looking "5.5 MH/s" for Hashcat
+against its own true native GPU throughput (`hashcat -b`) of ~1,845 MH/s on
+the same machine, wrong by roughly 335x. A number that specific and that
+wrong is worse than none, so past that point `--compare` says the rate
+can't be estimated here and points at the tool's native benchmark instead
+of guessing. **This harness still cannot measure Hashcat's or a GPU's true
+peak throughput** even when a number is reported — every tool is capped by
+disk I/O reading the same wordlist file, and no `--candidates` size
+practical for a file-based dictionary run comes close to amortizing a
+modern GPU's real speed. For that, see the mask-attack table above, or run
+`hashcat -b` / `john --test` directly.
+
 ## Feasibility guard
 
 Every attack estimates its throughput and prints an ETA before it starts, and
