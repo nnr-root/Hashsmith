@@ -227,3 +227,24 @@ func TestDescryptLaneHasherRefusesNonRecords(t *testing.T) {
 		}
 	}
 }
+
+// BenchmarkDescryptLaneHasherRun measures the hot verdict path: one Run()
+// call per group of descryptLanes candidates, all non-matching (the common
+// case in a real crack). It exists to keep descryptPackInto's zero-allocation
+// claim honest against a benchmark rather than a comment.
+func BenchmarkDescryptLaneHasherRun(b *testing.B) {
+	const record = "abJnggxhB/yWI"
+	h := newDescryptLaneHasher(record)
+	if h == nil {
+		b.Fatal("newDescryptLaneHasher refused a valid descrypt record")
+	}
+	pw := make([][]byte, descryptLanes)
+	for i := range pw {
+		pw[i] = []byte("wrongpw1")
+	}
+	out := make([]bool, descryptLanes)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		h.Run(pw, out)
+	}
+}

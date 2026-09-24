@@ -224,6 +224,35 @@ func descryptRaw(password, salt string) (string, error) {
 // both traditional crypt and BSDi extended crypt end with: MSB-first in 6-bit
 // groups, three bytes to four characters, with the trailing two bytes giving
 // three.
+// descryptPackInto writes the 11 crypt-base64 characters into a caller-owned
+// buffer, allocating nothing.
+//
+// descryptPack below returns a string, which costs two allocations — the
+// working slice and the conversion — and a caller comparing it against a
+// record costs a third for the concatenation. That is three allocations per
+// CANDIDATE, and after the lane interleaving made the hashing itself about
+// twice as fast, a profile put the resulting GC at 10.5% of a descrypt run
+// (runtime.madvise), against 52,757 allocations for 17,576 candidates.
+//
+// The verdict path runs once per candidate and produces one bool. It has no
+// business allocating at all.
+func descryptPackInto(block uint64, out *[11]byte) {
+	var q [8]byte
+	for i := 0; i < 8; i++ {
+		q[i] = byte(block >> uint(56-8*i))
+	}
+	n := 0
+	emit := func(l uint32, count int) {
+		for i := 0; i < count; i++ {
+			out[n] = itoa64[(l>>uint(18-6*i))&0x3f]
+			n++
+		}
+	}
+	emit(uint32(q[0])<<16|uint32(q[1])<<8|uint32(q[2]), 4)
+	emit(uint32(q[3])<<16|uint32(q[4])<<8|uint32(q[5]), 4)
+	emit(uint32(q[6])<<16|uint32(q[7])<<8, 3)
+}
+
 func descryptPack(block uint64) string {
 	var q [8]byte
 	for i := 0; i < 8; i++ {

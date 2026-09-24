@@ -41,9 +41,11 @@ const descryptLanes = 4
 // descryptLanes at a time. It carries reusable scratch and belongs to one
 // goroutine, exactly like bcryptlane.Hasher.
 type descryptLaneHasher struct {
-	target   string // the full 13-character record
+	target   string   // the full 13-character record
+	want     [11]byte // the record's hash half, for an allocation-free compare
 	saltMask uint64
 	ks       [descryptLanes][16]uint64
+	packBuf  [11]byte
 }
 
 // newDescryptLaneHasher returns a hasher for this record, or nil when the
@@ -57,10 +59,12 @@ func newDescryptLaneHasher(targetHash string) *descryptLaneHasher {
 	if !ok0 || !ok1 {
 		return nil
 	}
-	return &descryptLaneHasher{
+	h := &descryptLaneHasher{
 		target:   targetHash,
 		saltMask: descryptSaltMask(s0 | (s1 << 6)),
 	}
+	copy(h.want[:], targetHash[2:])
+	return h
 }
 
 // descryptKeyFromPassword builds the 64-bit DES key: each of the first eight
@@ -102,7 +106,12 @@ func (h *descryptLaneHasher) Run(pw [][]byte, out []bool) {
 		}
 		blocks := descryptIterateLanes(&h.ks, h.saltMask)
 		for k := 0; k < n; k++ {
-			out[i+k] = h.target[:2]+descryptPack(blocks[k]) == h.target
+			// Compare the packed bytes directly. The salt half is fixed by
+			// construction — it is where saltMask came from — so only the
+			// hash half can differ, and building a string to say so would
+			// allocate three times per candidate.
+			descryptPackInto(blocks[k], &h.packBuf)
+			out[i+k] = h.packBuf == h.want
 		}
 		i += n
 	}

@@ -21,6 +21,11 @@ import (
 // addressing a load until round j-1 has resolved.
 type laneHasher interface {
 	// Run verifies len(pw) candidates, writing each verdict to out.
+	//
+	// An implementation must not retain pw or its elements beyond the call.
+	// Callers reuse those byte slices between batches, so keeping one would
+	// see it overwritten by the next group rather than hold the candidate it
+	// was handed.
 	Run(pw [][]byte, out []bool)
 }
 
@@ -151,6 +156,15 @@ func runLayoutLanes(ctx context.Context, l *keyspaceLayout, resumeFrom, limit in
 				cands := make([]string, 0, lanes)
 				pwBuf := make([][]byte, lanes)
 				outBuf := make([]bool, lanes)
+				// One reusable byte buffer per lane. `pw[i] = []byte(c)`
+				// allocated once per CANDIDATE, which after the interleaving
+				// made descrypt's hashing about twice as fast was a
+				// measurable share of the run rather than a rounding error.
+				// The laneHasher contract above is what makes reuse safe.
+				pwScratch := make([][]byte, lanes)
+				for i := range pwScratch {
+					pwScratch[i] = make([]byte, 0, 64)
+				}
 
 				// flush tests everything buffered, reporting the FIRST hit in
 				// buffer order so a laned run reports the same candidate an
@@ -161,7 +175,8 @@ func runLayoutLanes(ctx context.Context, l *keyspaceLayout, resumeFrom, limit in
 					}
 					pw := pwBuf[:len(cands)]
 					for i, c := range cands {
-						pw[i] = []byte(c)
+						pw[i] = append(pwScratch[i][:0], c...)
+						pwScratch[i] = pw[i]
 					}
 					lh.Run(pw, outBuf[:len(cands)])
 					local += int64(len(cands))
