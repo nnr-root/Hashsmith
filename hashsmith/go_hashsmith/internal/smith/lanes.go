@@ -73,23 +73,41 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 		if salt != "" {
 			return nil, 0, false
 		}
-		// Runtime-gated, unlike bcrypt/descrypt above: this core is a
+		// Runtime-gated, unlike bcrypt/descrypt above: both cores are a
 		// straightforward regression on hardware with SHA extensions (the
-		// design doc's §1 measured it directly), so it must not engage
+		// design doc's §1 measured it directly), so neither must engage
 		// there even when the target record and everything else is
-		// eligible. See pbkdf2Sha256AVX2Eligible's own comment.
-		if !pbkdf2Sha256AVX2Eligible() {
-			return nil, 0, false
-		}
-		if newPBKDF2Sha256LaneHasher(targetHash) == nil {
-			return nil, 0, false
-		}
-		return func() laneHasher {
-			if h := newPBKDF2Sha256LaneHasher(targetHash); h != nil {
-				return h
+		// eligible. Each hash checks its own eligibility function — both
+		// currently reduce to the same AVX2-present/SHA-NI-absent check,
+		// kept as separate names per hasSHA1AVX2/hasSHA256AVX2's own
+		// per-hash naming rather than one shared hash-agnostic function.
+		//
+		// sha256 is tried first only because it is the more common
+		// real-world variant (WPA2, most password managers, Django); a
+		// record naming sha1 always falls through to the sha1 branch
+		// below regardless of this order, since newPBKDF2Sha256LaneHasher
+		// correctly refuses any non-sha256 record.
+		if pbkdf2Sha256AVX2Eligible() {
+			if newPBKDF2Sha256LaneHasher(targetHash) != nil {
+				return func() laneHasher {
+					if h := newPBKDF2Sha256LaneHasher(targetHash); h != nil {
+						return h
+					}
+					return nil
+				}, pbkdf2Sha256Lanes, true
 			}
-			return nil
-		}, pbkdf2Sha256Lanes, true
+		}
+		if pbkdf2Sha1AVX2Eligible() {
+			if newPBKDF2Sha1LaneHasher(targetHash) != nil {
+				return func() laneHasher {
+					if h := newPBKDF2Sha1LaneHasher(targetHash); h != nil {
+						return h
+					}
+					return nil
+				}, pbkdf2Sha1Lanes, true
+			}
+		}
+		return nil, 0, false
 	}
 	return nil, 0, false
 }
