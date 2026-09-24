@@ -41,7 +41,28 @@ type laneHasher interface {
 // they must share one cost and one salt — true of one target, false of a dump.
 // Dumps keep the scalar path.
 func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, int, bool) {
-	switch canonicalHashType(typ) {
+	canon := canonicalHashType(typ)
+	// LUKS's split types (luksModeSpecs) number in the dozens across
+	// hash/cipher combinations, so they are handled once here via the same
+	// map crack.go's own dispatch uses, rather than one switch case per
+	// combination below. Only the SHA-256 ones can ever be accelerated —
+	// newPBKDF2LUKSModeLaneHasher's own gate refuses the rest, falling back
+	// to the scalar path exactly as every other case in this function does.
+	if mode, ok := luksModeSpecs[canon]; ok {
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2LUKSModeLaneHasher(targetHash, mode) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2LUKSModeLaneHasher(targetHash, mode); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
+	}
+	switch canon {
 	case "bcrypt":
 		if salt != "" {
 			return nil, 0, false
@@ -448,6 +469,23 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 		}
 		return func() laneHasher {
 			if h := newPBKDF2LastPassRecordsLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
+	case "luks":
+		// Same gate and reasoning as the "1password8" case above. Any hash
+		// spec/key size the SHA-256/≤32-byte-key gate does not cover falls
+		// back to the scalar path on its own, since
+		// newPBKDF2LUKSLaneHasher refuses it.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2LUKSLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2LUKSLaneHasher(targetHash); h != nil {
 				return h
 			}
 			return nil

@@ -214,9 +214,22 @@ func verifyLUKSParams(p *luksParams, candidate string) (bool, error) {
 		return false, errors.New("LUKS key material size mismatch")
 	}
 
-	// 1. Slot key from the passphrase.
+	// 1. Slot key from the passphrase — the expensive step, since slotIter is
+	// where a real LUKS volume's cost lives; mkIter below is typically small
+	// by comparison. This is the step the AVX2 lane hasher
+	// (pbkdf2_lane_luks.go) batches, when the hash is SHA-256 and the key is
+	// short enough for one PBKDF2 block; everything from here down runs the
+	// same either way.
 	slotKey := pbkdf2.Key([]byte(candidate), p.slotSalt, p.slotIter, p.keyBytes, newHash)
+	return luksSlotKeyMatches(p, slotKey, newHash)
+}
 
+// luksSlotKeyMatches runs the rest of the LUKS pipeline given an already-
+// derived slot key: decrypt the keyslot's key material, AF-merge it into a
+// candidate master key, and confirm it. Used by verifyLUKSParams for its
+// single scalar-derived slot key and by the lane hasher for each of a
+// batch's.
+func luksSlotKeyMatches(p *luksParams, slotKey []byte, newHash func() hash.Hash) (bool, error) {
 	// 2. Decrypt the keyslot's key material.
 	decrypted, err := luksDecrypt(p, slotKey)
 	if err != nil {
