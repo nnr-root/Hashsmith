@@ -508,6 +508,23 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 			}
 			return nil
 		}, pbkdf2Sha256Lanes, true
+	case "ansible":
+		// Same gate and reasoning as the "1password8" case above — the
+		// first case wired through the multi-block primitive
+		// (pbkdf2HMACSHA256DeriveBatchN) rather than the single-block one,
+		// since Ansible's derived key is 80 bytes.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2AnsibleLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2AnsibleLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
 	case "metamask":
 		// Same gate and reasoning as the "1password8" case above. The short
 		// variant ("metamask-short", a distinct type name never reaching

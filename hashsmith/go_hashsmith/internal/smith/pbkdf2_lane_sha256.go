@@ -137,10 +137,17 @@ func (h *pbkdf2Sha256LaneHasher) runGroup(lanes *[pbkdf2Sha256Lanes][]byte) [pbk
 // §4.2 already knew was scalar and unavoidable; this removes the half
 // that wasn't.
 func pbkdf2HMACSHA256DeriveBatch(passwords *[pbkdf2Sha256Lanes][]byte, salt []byte, iter int) [pbkdf2Sha256Lanes][32]byte {
-	// Step 1: per-lane HMAC key setup — cheap (XOR only, see
-	// hmacSHA256KeyBlock/hmacSHA256InnerOuterIV), computed scalar per lane
-	// since it happens once per Run() call, not once per iteration.
-	var innerStates, outerStates [8][pbkdf2Sha256Lanes]uint32
+	innerStates, outerStates := pbkdf2HMACSHA256KeySetup(passwords)
+	return pbkdf2Sha256Block(&innerStates, &outerStates, salt, iter, 1)
+}
+
+// pbkdf2HMACSHA256KeySetup is PBKDF2's per-lane HMAC key setup — cheap
+// (XOR only, see hmacSHA256KeyBlock/hmacSHA256InnerOuterIV) and, critically,
+// independent of both the iteration count and the PBKDF2 block index. Split
+// out so pbkdf2HMACSHA256DeriveBatchN (multi-block) computes it once and
+// reuses it across every T_i, rather than repeating it once per block for
+// no reason.
+func pbkdf2HMACSHA256KeySetup(passwords *[pbkdf2Sha256Lanes][]byte) (innerStates, outerStates [8][pbkdf2Sha256Lanes]uint32) {
 	for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
 		kb := hmacSHA256KeyBlock(passwords[lane])
 		inner := hmacSHA256InnerOuterIV(kb, 0x36)
@@ -150,8 +157,17 @@ func pbkdf2HMACSHA256DeriveBatch(passwords *[pbkdf2Sha256Lanes][]byte, salt []by
 			outerStates[w][lane] = outer[w]
 		}
 	}
+	return innerStates, outerStates
+}
 
-	// Step 2: U_1 — one-time, variable length (salt || INT(1) can span
+// pbkdf2Sha256Block computes one PBKDF2 block, T_block = U_1 XOR U_2 XOR
+// ... XOR U_iter, for all pbkdf2Sha256Lanes lanes at once, given their
+// already-computed HMAC key setup (pbkdf2HMACSHA256KeySetup) — the shared
+// core both pbkdf2HMACSHA256DeriveBatch (block fixed at 1) and
+// pbkdf2HMACSHA256DeriveBatchN (any block, for a multi-block derived key)
+// call.
+func pbkdf2Sha256Block(innerStates, outerStates *[8][pbkdf2Sha256Lanes]uint32, salt []byte, iter int, block uint32) [pbkdf2Sha256Lanes][32]byte {
+	// Step 1: U_1 — one-time, variable length (salt || INT(block) can span
 	// more than one block depending on salt length), computed scalar per
 	// lane. Deliberately not vectorized: the hot loop below dominates by
 	// orders of magnitude at any realistic iteration count, so U1's cost is
@@ -159,7 +175,7 @@ func pbkdf2HMACSHA256DeriveBatch(passwords *[pbkdf2Sha256Lanes][]byte, salt []by
 	// byte-oriented result is converted to words ONCE here, at the
 	// boundary into the word-native hot loop, not every iteration.
 	var u, t [pbkdf2Sha256Lanes][8]uint32
-	blockCounter := []byte{0, 0, 0, 1} // INT(1), big-endian, block index is always 1 in this v1 (dkLen<=32) scope
+	blockCounter := []byte{byte(block >> 24), byte(block >> 16), byte(block >> 8), byte(block)}
 	saltAndCounter := make([]byte, 0, len(salt)+4)
 	saltAndCounter = append(saltAndCounter, salt...)
 	saltAndCounter = append(saltAndCounter, blockCounter...)
@@ -177,7 +193,7 @@ func pbkdf2HMACSHA256DeriveBatch(passwords *[pbkdf2Sha256Lanes][]byte, salt []by
 		}
 	}
 
-	// Step 3: the hot loop, n = 2..iter. Every U_n is exactly one 32-byte
+	// Step 2: the hot loop, n = 2..iter. Every U_n is exactly one 32-byte
 	// hash output — fixed length, always fitting padding in the very next
 	// block after the precomputed ipad/opad block (32+1+23+8=64) — so both
 	// the inner and outer continuation here are exactly one AVX2
@@ -191,7 +207,7 @@ func pbkdf2HMACSHA256DeriveBatch(passwords *[pbkdf2Sha256Lanes][]byte, salt []by
 				innerSchedules[step][lane] = w[step]
 			}
 		}
-		innerOut := sha256Group8AVX2(&innerStates, &innerSchedules)
+		innerOut := sha256Group8AVX2(innerStates, &innerSchedules)
 
 		for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
 			var innerDigest [8]uint32
@@ -204,7 +220,7 @@ func pbkdf2HMACSHA256DeriveBatch(passwords *[pbkdf2Sha256Lanes][]byte, salt []by
 				outerSchedules[step][lane] = w[step]
 			}
 		}
-		outerOut := sha256Group8AVX2(&outerStates, &outerSchedules)
+		outerOut := sha256Group8AVX2(outerStates, &outerSchedules)
 
 		for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
 			for word := 0; word < 8; word++ {
@@ -228,4 +244,38 @@ func pbkdf2HMACSHA256DeriveBatch(passwords *[pbkdf2Sha256Lanes][]byte, salt []by
 		}
 	}
 	return result
+}
+
+// pbkdf2HMACSHA256DeriveBatchN computes PBKDF2-HMAC-SHA256(password, salt,
+// iter, dkLen) for all pbkdf2Sha256Lanes passwords at once, for any dkLen —
+// PBKDF2's multi-block T_1||T_2||...||T_l construction (RFC 8018 §5.2),
+// generalizing pbkdf2HMACSHA256DeriveBatch (dkLen<=32 only, T_1 alone) to
+// any length.
+//
+// The HMAC key setup is independent of the block index, so it runs once
+// (pbkdf2HMACSHA256KeySetup) regardless of how many blocks dkLen needs;
+// only the hot loop — pbkdf2Sha256Block's `iter` HMAC iterations — repeats
+// per block, each restarting its own U_1 from the block's own big-endian
+// counter appended to the salt.
+func pbkdf2HMACSHA256DeriveBatchN(passwords *[pbkdf2Sha256Lanes][]byte, salt []byte, iter, dkLen int) [pbkdf2Sha256Lanes][]byte {
+	innerStates, outerStates := pbkdf2HMACSHA256KeySetup(passwords)
+
+	numBlocks := (dkLen + 31) / 32
+	if numBlocks < 1 {
+		numBlocks = 1
+	}
+	var out [pbkdf2Sha256Lanes][]byte
+	for lane := range out {
+		out[lane] = make([]byte, 0, numBlocks*32)
+	}
+	for block := 1; block <= numBlocks; block++ {
+		blockBytes := pbkdf2Sha256Block(&innerStates, &outerStates, salt, iter, uint32(block))
+		for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
+			out[lane] = append(out[lane], blockBytes[lane][:]...)
+		}
+	}
+	for lane := range out {
+		out[lane] = out[lane][:dkLen]
+	}
+	return out
 }
