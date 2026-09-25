@@ -578,6 +578,23 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 			}
 			return nil
 		}, pbkdf2Sha256Lanes, true
+	case "bitwarden":
+		// Same gate and reasoning as the "1password8" case above. Covers
+		// both record shapes verifyBitwarden itself dispatches between —
+		// see pbkdf2BitwardenLaneHasher's own comment for why its second
+		// round needs the per-lane-salt primitive.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2BitwardenLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2BitwardenLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
 	case "metamask":
 		// Same gate and reasoning as the "1password8" case above. The short
 		// variant ("metamask-short", a distinct type name never reaching

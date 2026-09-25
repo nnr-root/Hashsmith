@@ -162,19 +162,36 @@ func pbkdf2HMACSHA256KeySetup(passwords *[pbkdf2Sha256Lanes][]byte) (innerStates
 
 // pbkdf2Sha256Block computes one PBKDF2 block, T_block = U_1 XOR U_2 XOR
 // ... XOR U_iter, for all pbkdf2Sha256Lanes lanes at once, given their
-// already-computed HMAC key setup (pbkdf2HMACSHA256KeySetup) — the shared
-// core both pbkdf2HMACSHA256DeriveBatch (block fixed at 1) and
-// pbkdf2HMACSHA256DeriveBatchN (any block, for a multi-block derived key)
-// call.
+// already-computed HMAC key setup (pbkdf2HMACSHA256KeySetup) and ONE salt
+// shared by every lane — the shape both pbkdf2HMACSHA256DeriveBatch (block
+// fixed at 1) and pbkdf2HMACSHA256DeriveBatchN (any block, for a
+// multi-block derived key) need. See pbkdf2Sha256BlockPerLaneSalt for the
+// rarer shape where each lane needs its own salt.
 func pbkdf2Sha256Block(innerStates, outerStates *[8][pbkdf2Sha256Lanes]uint32, salt []byte, iter int, block uint32) [pbkdf2Sha256Lanes][32]byte {
-	// Step 1: U_1 — one-time, variable length (salt || INT(block) can span
-	// more than one block depending on salt length), computed scalar per
-	// lane. Deliberately not vectorized: the hot loop below dominates by
-	// orders of magnitude at any realistic iteration count, so U1's cost is
-	// negligible however it is computed — see the design doc's §4.3. Its
-	// byte-oriented result is converted to words ONCE here, at the
-	// boundary into the word-native hot loop, not every iteration.
-	var u, t [pbkdf2Sha256Lanes][8]uint32
+	u1 := pbkdf2Sha256U1Shared(innerStates, outerStates, salt, block)
+	return pbkdf2Sha256HotLoop(innerStates, outerStates, u1, iter)
+}
+
+// pbkdf2Sha256BlockPerLaneSalt is pbkdf2Sha256Block's twin for the format
+// shape where each lane needs its own salt rather than one shared across
+// the whole batch — e.g. Bitwarden's second PBKDF2 round, salted by each
+// candidate's own password (pbkdf2_lane_bitwarden.go). Only U_1 differs
+// between the two (a per-lane salt||INT(block) instead of one shared
+// computation); the hot loop is identical either way, since it never
+// touches salt again once U_1 is computed.
+func pbkdf2Sha256BlockPerLaneSalt(innerStates, outerStates *[8][pbkdf2Sha256Lanes]uint32, salts *[pbkdf2Sha256Lanes][]byte, iter int, block uint32) [pbkdf2Sha256Lanes][32]byte {
+	u1 := pbkdf2Sha256U1PerLane(innerStates, outerStates, salts, block)
+	return pbkdf2Sha256HotLoop(innerStates, outerStates, u1, iter)
+}
+
+// pbkdf2Sha256U1Shared computes U_1 — one-time, variable length (salt ||
+// INT(block) can span more than one block depending on salt length),
+// computed scalar per lane. Deliberately not vectorized: the hot loop
+// dominates by orders of magnitude at any realistic iteration count, so
+// U1's cost is negligible however it is computed — see the design doc's
+// §4.3. Its byte-oriented result is converted to words ONCE here, at the
+// boundary into the word-native hot loop, not every iteration.
+func pbkdf2Sha256U1Shared(innerStates, outerStates *[8][pbkdf2Sha256Lanes]uint32, salt []byte, block uint32) (u [pbkdf2Sha256Lanes][8]uint32) {
 	blockCounter := []byte{byte(block >> 24), byte(block >> 16), byte(block >> 8), byte(block)}
 	saltAndCounter := make([]byte, 0, len(salt)+4)
 	saltAndCounter = append(saltAndCounter, salt...)
@@ -187,17 +204,45 @@ func pbkdf2Sha256Block(innerStates, outerStates *[8][pbkdf2Sha256Lanes]uint32, s
 		}
 		u1Bytes := hmacSHA256FromInnerOuter(innerState, outerState, saltAndCounter)
 		for w := 0; w < 8; w++ {
-			v := uint32(u1Bytes[w*4])<<24 | uint32(u1Bytes[w*4+1])<<16 | uint32(u1Bytes[w*4+2])<<8 | uint32(u1Bytes[w*4+3])
-			u[lane][w] = v
-			t[lane][w] = v
+			u[lane][w] = uint32(u1Bytes[w*4])<<24 | uint32(u1Bytes[w*4+1])<<16 | uint32(u1Bytes[w*4+2])<<8 | uint32(u1Bytes[w*4+3])
 		}
 	}
+	return u
+}
 
-	// Step 2: the hot loop, n = 2..iter. Every U_n is exactly one 32-byte
-	// hash output — fixed length, always fitting padding in the very next
-	// block after the precomputed ipad/opad block (32+1+23+8=64) — so both
-	// the inner and outer continuation here are exactly one AVX2
-	// compression per lane, batched across all 8 lanes at once.
+// pbkdf2Sha256U1PerLane is pbkdf2Sha256U1Shared's twin for a per-lane salt
+// — the only place a per-lane salt can matter, since everything after U_1
+// never references salt again.
+func pbkdf2Sha256U1PerLane(innerStates, outerStates *[8][pbkdf2Sha256Lanes]uint32, salts *[pbkdf2Sha256Lanes][]byte, block uint32) (u [pbkdf2Sha256Lanes][8]uint32) {
+	blockCounter := []byte{byte(block >> 24), byte(block >> 16), byte(block >> 8), byte(block)}
+	for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
+		var innerState, outerState [8]uint32
+		for w := 0; w < 8; w++ {
+			innerState[w] = innerStates[w][lane]
+			outerState[w] = outerStates[w][lane]
+		}
+		saltAndCounter := make([]byte, 0, len(salts[lane])+4)
+		saltAndCounter = append(saltAndCounter, salts[lane]...)
+		saltAndCounter = append(saltAndCounter, blockCounter...)
+		u1Bytes := hmacSHA256FromInnerOuter(innerState, outerState, saltAndCounter)
+		for w := 0; w < 8; w++ {
+			u[lane][w] = uint32(u1Bytes[w*4])<<24 | uint32(u1Bytes[w*4+1])<<16 | uint32(u1Bytes[w*4+2])<<8 | uint32(u1Bytes[w*4+3])
+		}
+	}
+	return u
+}
+
+// pbkdf2Sha256HotLoop runs PBKDF2's n = 2..iter loop given U_1, shared by
+// both salt shapes above since neither salt nor block index appears again
+// after U_1. Every U_n is exactly one 32-byte hash output — fixed length,
+// always fitting padding in the very next block after the precomputed
+// ipad/opad block (32+1+23+8=64) — so both the inner and outer
+// continuation here are exactly one AVX2 compression per lane, batched
+// across all 8 lanes at once.
+func pbkdf2Sha256HotLoop(innerStates, outerStates *[8][pbkdf2Sha256Lanes]uint32, u1 [pbkdf2Sha256Lanes][8]uint32, iter int) [pbkdf2Sha256Lanes][32]byte {
+	u := u1
+	t := u1
+
 	var innerSchedules, outerSchedules [64][pbkdf2Sha256Lanes]uint32
 	for n := 2; n <= iter; n++ {
 		for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
@@ -270,6 +315,36 @@ func pbkdf2HMACSHA256DeriveBatchN(passwords *[pbkdf2Sha256Lanes][]byte, salt []b
 	}
 	for block := 1; block <= numBlocks; block++ {
 		blockBytes := pbkdf2Sha256Block(&innerStates, &outerStates, salt, iter, uint32(block))
+		for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
+			out[lane] = append(out[lane], blockBytes[lane][:]...)
+		}
+	}
+	for lane := range out {
+		out[lane] = out[lane][:dkLen]
+	}
+	return out
+}
+
+// pbkdf2HMACSHA256DeriveBatchNPerLaneSalt is pbkdf2HMACSHA256DeriveBatchN's
+// twin for the (rare) shape where each lane needs its own salt rather than
+// one shared across the batch — see pbkdf2Sha256BlockPerLaneSalt's own
+// comment. Multi-block from the start, unlike the single-block
+// pbkdf2HMACSHA256DeriveBatch/pbkdf2HMACSHA256KeySetup split: no format
+// wired through this needs it single-block only, and one function is
+// simpler than mirroring that split a second time for one caller.
+func pbkdf2HMACSHA256DeriveBatchNPerLaneSalt(passwords, salts *[pbkdf2Sha256Lanes][]byte, iter, dkLen int) [pbkdf2Sha256Lanes][]byte {
+	innerStates, outerStates := pbkdf2HMACSHA256KeySetup(passwords)
+
+	numBlocks := (dkLen + 31) / 32
+	if numBlocks < 1 {
+		numBlocks = 1
+	}
+	var out [pbkdf2Sha256Lanes][]byte
+	for lane := range out {
+		out[lane] = make([]byte, 0, numBlocks*32)
+	}
+	for block := 1; block <= numBlocks; block++ {
+		blockBytes := pbkdf2Sha256BlockPerLaneSalt(&innerStates, &outerStates, salts, iter, uint32(block))
 		for lane := 0; lane < pbkdf2Sha256Lanes; lane++ {
 			out[lane] = append(out[lane], blockBytes[lane][:]...)
 		}
