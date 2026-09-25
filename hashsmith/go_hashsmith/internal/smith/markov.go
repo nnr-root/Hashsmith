@@ -38,7 +38,7 @@ func dedupeBytes(s string) []byte {
 
 // rankCharset orders the charset by count desc, breaking ties by original index
 // so every ranking is a full permutation (unseen chars fall to the end).
-func rankCharset(charset []byte, count *[256]int64) []byte {
+func rankCharset(charset []byte, count *[256]uint64) []byte {
 	idx := make([]int, len(charset))
 	for i := range idx {
 		idx[i] = i
@@ -67,8 +67,8 @@ func trainMarkov(charset string, wordlistPath string) (*markovModel, error) {
 	}
 	defer f.Close()
 
-	var firstCount [256]int64
-	var transCount [256][256]int64
+	var firstCount [256]uint64
+	var transCount [256][256]uint64
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	for sc.Scan() {
