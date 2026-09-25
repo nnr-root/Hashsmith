@@ -643,6 +643,100 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 			}
 			return nil
 		}, pbkdf2Sha512Lanes, true
+	case "geli":
+		// Same gate and reasoning as the "mega" case above.
+		if !pbkdf2Sha512AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2GELILaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2GELILaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha512Lanes, true
+	case "kwallet":
+		// Same gate and reasoning as the "mega" case above. A legacy
+		// (minor 0) record falls back to the scalar path on its own,
+		// since newPBKDF2KWalletLaneHasher refuses anything but minor 1.
+		if !pbkdf2Sha512AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2KWalletLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2KWalletLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha512Lanes, true
+	case "axcrypt2-128", "axcrypt2-256":
+		// Same gate and reasoning as the "mega" case above. AxCrypt 1
+		// falls back to the scalar path on its own, since
+		// newPBKDF2AxCrypt2LaneHasher refuses anything but version 2.
+		if !pbkdf2Sha512AVX2Eligible() {
+			return nil, 0, false
+		}
+		axKeyLen := 16
+		if canon == "axcrypt2-256" {
+			axKeyLen = 32
+		}
+		if newPBKDF2AxCrypt2LaneHasher(targetHash, axKeyLen) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2AxCrypt2LaneHasher(targetHash, axKeyLen); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha512Lanes, true
+	case "metamask-mobile":
+		// Same gate and reasoning as the "mega" case above.
+		if !pbkdf2Sha512AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2MetaMaskMobileLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2MetaMaskMobileLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha512Lanes, true
+	case "grub2":
+		// Same gate and reasoning as the "mega" case above. A digest
+		// longer than 64 bytes falls back to the scalar path on its own,
+		// since newPBKDF2GRUB2LaneHasher refuses it.
+		if !pbkdf2Sha512AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2GRUB2LaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2GRUB2LaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha512Lanes, true
+	case "oracle12c":
+		// Same gate and reasoning as the "mega" case above.
+		if !pbkdf2Sha512AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2Oracle12cLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2Oracle12cLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha512Lanes, true
 	case "metamask":
 		// Same gate and reasoning as the "1password8" case above. The short
 		// variant ("metamask-short", a distinct type name never reaching

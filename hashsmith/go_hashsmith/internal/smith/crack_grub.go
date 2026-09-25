@@ -50,7 +50,15 @@ func verifyGRUB2(target, candidate string) (bool, error) {
 		return false, err
 	}
 	got := pbkdf2.Key([]byte(candidate), parsed.salt, parsed.iterations, len(parsed.digest), sha512.New)
-	return bytesEqualCT(got, parsed.digest), nil
+	return grub2Matches(got, parsed.digest), nil
+}
+
+// grub2Matches is the shared "does this derived key match" check. Used by
+// verifyGRUB2 for its single derived key and by the lane hasher
+// (pbkdf2_lane_grub2.go, digests up to 64 bytes only) for each of a
+// batch's.
+func grub2Matches(got, digest []byte) bool {
+	return bytesEqualCT(got, digest)
 }
 
 func isGRUB2(target string) bool {

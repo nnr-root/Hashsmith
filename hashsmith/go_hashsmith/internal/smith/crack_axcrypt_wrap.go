@@ -190,6 +190,15 @@ func verifyAxCrypt2(target, candidate string, keyLen int) (bool, error) {
 		return false, errors.New("AxCrypt 2 wrapped key is too short for this cipher width")
 	}
 	derived := pbkdf2.Key([]byte(candidate), a.kdfSalt, a.kdfRounds, 64, sha512.New)
+	return axcrypt2Matches(a, derived, keyLen, wrappedLen)
+}
+
+// axcrypt2Matches is the shared "does this PBKDF2 output unwrap the key"
+// check: fold the derived bytes down to the KEK for this cipher width, XOR
+// in the record's own salt, and attempt the RFC 3394 unwrap. Used by
+// verifyAxCrypt2 for its single derived value and by the lane hasher
+// (pbkdf2_lane_axcrypt2.go) for each of a batch's.
+func axcrypt2Matches(a *axcryptRecord, derived []byte, keyLen, wrappedLen int) (bool, error) {
 	kek := make([]byte, keyLen)
 	for i := 0; i < keyLen; i++ {
 		kek[i] = derived[i] ^ derived[keyLen+i]

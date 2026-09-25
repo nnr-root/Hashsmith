@@ -170,6 +170,14 @@ func verifyKWallet(target, candidate string) (bool, error) {
 	} else {
 		key = kwalletLegacyKey(candidate)
 	}
+	return kwalletMatches(&r, key)
+}
+
+// kwalletMatches is the shared "does this key decrypt a plausible wallet
+// header" check, for either derivation. Used by verifyKWallet for its
+// single derived key and by the lane hasher (pbkdf2_lane_kwallet.go, minor
+// version 1 only) for each of a batch's.
+func kwalletMatches(r *kwalletRecord, key []byte) (bool, error) {
 	if len(key) == 0 {
 		return false, nil
 	}

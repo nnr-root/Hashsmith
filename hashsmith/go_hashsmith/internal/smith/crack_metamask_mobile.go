@@ -89,6 +89,14 @@ func verifyMetaMaskMobile(target, candidate string) (bool, error) {
 		return false, err
 	}
 	key := pbkdf2.Key([]byte(candidate), m.salt, metamaskMobileIterations, 32, sha512.New)
+	return metamaskMobileMatches(m, key)
+}
+
+// metamaskMobileMatches is the shared "does this key decrypt to a plausible
+// vault" check. Used by verifyMetaMaskMobile for its single derived key
+// and by the lane hasher (pbkdf2_lane_metamask_mobile.go) for each of a
+// batch's.
+func metamaskMobileMatches(m *metamaskMobileRecord, key []byte) (bool, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return false, err

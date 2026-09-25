@@ -96,6 +96,14 @@ func verifyGELI(target, candidate string) (bool, error) {
 		return false, err
 	}
 	pass := pbkdf2.Key([]byte(candidate), r.salt, r.iterations, geliUserKeyLen, sha512.New)
+	return geliMatches(&r, pass)
+}
+
+// geliMatches is the shared "does this PBKDF2 output open a slot" check:
+// the empty-key-file fold, the enc/mac key split, and the per-slot unwrap
+// and HMAC comparison. Used by verifyGELI for its single derived value and
+// by the lane hasher (pbkdf2_lane_geli.go) for each of a batch's.
+func geliMatches(r *geliRecord, pass []byte) (bool, error) {
 	// The fold that would mix in a key file, run with nothing to mix.
 	fold := hmac.New(sha512.New, nil)
 	_, _ = fold.Write(pass)

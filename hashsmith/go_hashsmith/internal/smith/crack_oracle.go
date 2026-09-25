@@ -45,26 +45,54 @@ func oracle11gCanonical(s string) string {
 	return s[:40] + s[41:]
 }
 
+// oracle12cIterations is fixed by the format. Shared between the scalar
+// path and the lane hasher (pbkdf2_lane_oracle12c.go) so the two never
+// drift.
+const oracle12cIterations = 4096
+
+// oracle12cRecord holds one parsed Oracle 12c "T:" target, shared by the
+// scalar verifyOracle12c and the AVX2-batched lane hasher.
+type oracle12cRecord struct {
+	pbkdf2Salt []byte // salt . "AUTH_PBKDF2_SPEEDY_KEY" — the actual PBKDF2 salt
+	salt       []byte // the record's own 16-byte salt, appended after the key
+	want       string
+}
+
+// parseOracle12c parses target, or returns an error identical in wording
+// and condition to what verifyOracle12c always returned before this was
+// split out.
+func parseOracle12c(targetHash string) (oracle12cRecord, error) {
+	if len(targetHash) != 160 || !isHex(targetHash) {
+		return oracle12cRecord{}, errors.New("invalid Oracle 12c hash (need 160 hex chars)")
+	}
+	salt, err := hex.DecodeString(targetHash[128:])
+	if err != nil {
+		return oracle12cRecord{}, errors.New("invalid Oracle 12c salt")
+	}
+	pbkdf2Salt := append(append([]byte(nil), salt...), []byte("AUTH_PBKDF2_SPEEDY_KEY")...)
+	return oracle12cRecord{pbkdf2Salt: pbkdf2Salt, salt: salt, want: targetHash[:128]}, nil
+}
+
+// oracle12cMatches is the shared "does this derived key reach the stored
+// digest" check. Used by verifyOracle12c for its single derived key and by
+// the lane hasher for each of a batch's.
+func oracle12cMatches(r *oracle12cRecord, key []byte) bool {
+	h := sha512.Sum512(append(append([]byte(nil), key...), r.salt...))
+	return strings.EqualFold(hex.EncodeToString(h[:]), r.want)
+}
+
 // verifyOracle12c checks a candidate against an Oracle 12c "T:" verifier (160
 // hex = 64-byte SHA-512 digest + 16-byte salt):
 //
 //	key = PBKDF2-HMAC-SHA512(password, salt . "AUTH_PBKDF2_SPEEDY_KEY", 4096, 64)
 //	H   = SHA-512(key . salt)   (compared against the first 128 hex chars)
 func verifyOracle12c(targetHash, candidate string) (bool, error) {
-	if len(targetHash) != 160 || !isHex(targetHash) {
-		return false, errors.New("invalid Oracle 12c hash (need 160 hex chars)")
-	}
-	salt, err := hex.DecodeString(targetHash[128:])
+	r, err := parseOracle12c(targetHash)
 	if err != nil {
-		return false, errors.New("invalid Oracle 12c salt")
+		return false, err
 	}
-	key := pbkdf2Sha512(candidate, append(salt, []byte("AUTH_PBKDF2_SPEEDY_KEY")...))
-	h := sha512.Sum512(append(key, salt...))
-	return strings.EqualFold(hex.EncodeToString(h[:]), targetHash[:128]), nil
-}
-
-func pbkdf2Sha512(password string, salt []byte) []byte {
-	return pbkdf2.Key([]byte(password), salt, 4096, 64, sha512.New)
+	key := pbkdf2.Key([]byte(candidate), r.pbkdf2Salt, oracle12cIterations, 64, sha512.New)
+	return oracle12cMatches(&r, key), nil
 }
 
 func isOracle12c(s string) bool { return len(s) == 160 && isHex(s) }
