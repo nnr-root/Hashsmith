@@ -843,13 +843,18 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 				total = satMul(total, int64(1+rules.count()))
 			}
 		}
-	case "brute", "markov":
+	case "brute":
 		total = boundWordIdx(calcBruteTotal(charset, minLen, maxLen))
 		if exact, overflowed := calcBruteTotalExact(charset, minLen, maxLen); overflowed {
 			warnKeyspaceNotExhaustive(exact)
 		}
-		if m == "brute" {
-			bruteLay = bruteLayout(charset, minLen, maxLen)
+		bruteLay = bruteLayout(charset, minLen, maxLen)
+	case "markov":
+		radix := markovKeyspaceRadix(charset, hcstat2, markovThreshold)
+		markovCharset := strings.Repeat("x", radix)
+		total = boundWordIdx(calcBruteTotal(markovCharset, minLen, maxLen))
+		if exact, overflowed := calcBruteTotalExact(markovCharset, minLen, maxLen); overflowed {
+			warnKeyspaceNotExhaustive(exact)
 		}
 	case "mask":
 		if mc != nil {

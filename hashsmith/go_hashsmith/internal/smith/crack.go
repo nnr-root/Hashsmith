@@ -1340,13 +1340,22 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 				total = satMul(total, int64(1+rules.count()))
 			}
 		}
-	} else if m == "brute" || m == "markov" {
+	} else if m == "brute" {
 		total = boundWordIdx(calcBruteTotal(charset, minLen, maxLen))
 		if exact, overflowed := calcBruteTotalExact(charset, minLen, maxLen); overflowed {
 			warnKeyspaceNotExhaustive(exact)
 		}
-		if m == "brute" {
-			bruteLay = bruteLayout(charset, minLen, maxLen)
+		bruteLay = bruteLayout(charset, minLen, maxLen)
+	} else if m == "markov" {
+		hcstat2Val, markovThresholdVal := "", 0
+		if cc != nil {
+			hcstat2Val, markovThresholdVal = cc.hcstat2, cc.markovThreshold
+		}
+		radix := markovKeyspaceRadix(charset, hcstat2Val, markovThresholdVal)
+		markovCharset := strings.Repeat("x", radix)
+		total = boundWordIdx(calcBruteTotal(markovCharset, minLen, maxLen))
+		if exact, overflowed := calcBruteTotalExact(markovCharset, minLen, maxLen); overflowed {
+			warnKeyspaceNotExhaustive(exact)
 		}
 	} else if m == "mask" && mc != nil {
 		total = boundWordIdx(calcMaskTotal(mc))
@@ -2490,6 +2499,20 @@ func exactWordlistCount(path string) (int64, error) {
 	return n, nil
 }
 
+// markovKeyspaceRadix resolves the per-position choice count a markov
+// keyspace will actually use — 256 (thresholded) for a real .hcstat2 file,
+// or the live-trained deduplicated charset (thresholded) otherwise. Shared
+// by printKeyspace and every feasibility-guard call site that estimates a
+// markov run's cost, so all of them describe the same keyspace the attack
+// will actually walk.
+func markovKeyspaceRadix(charset, hcstat2 string, markovThreshold int) int {
+	domain := len(dedupeBytes(charset))
+	if hcstat2 != "" {
+		domain = 256
+	}
+	return markovRadix(markovThreshold, domain)
+}
+
 func printKeyspace(mode, wordlist, wordlist2, charset string, minLen, maxLen, princeElems int, mc *maskConfig, hcstat2 string, markovThreshold int) error {
 	m := strings.ToLower(mode)
 	var exact *big.Int
@@ -2503,11 +2526,7 @@ func printKeyspace(mode, wordlist, wordlist2, charset string, minLen, maxLen, pr
 		if minLen < 1 || maxLen < minLen {
 			return errors.New("invalid -n/-x range")
 		}
-		domain := len([]rune(charset))
-		if hcstat2 != "" {
-			domain = 256
-		}
-		radix := markovRadix(markovThreshold, domain)
+		radix := markovKeyspaceRadix(charset, hcstat2, markovThreshold)
 		exact, _ = calcBruteTotalExact(strings.Repeat("x", radix), minLen, maxLen)
 	case "mask":
 		if mc == nil {

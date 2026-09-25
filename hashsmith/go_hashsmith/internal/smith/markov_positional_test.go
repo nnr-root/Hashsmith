@@ -2,6 +2,7 @@
 package smith
 
 import (
+	"math"
 	"os"
 	"testing"
 )
@@ -91,5 +92,38 @@ func TestTrainMarkovThresholdShrinksRadix(t *testing.T) {
 	}
 	if len(m.first) != 2 || len(m.cond['a']) != 2 {
 		t.Fatalf("ranked lists were not truncated to the threshold")
+	}
+}
+
+func TestMarkovLayoutSaturatesInsteadOfWrapping(t *testing.T) {
+	m, err := loadHCStat2("testdata/hcstat2_sample.hcstat2", 0)
+	if err != nil {
+		t.Fatalf("loadHCStat2: %v", err)
+	}
+	// 256^8 vastly exceeds math.MaxInt64 — before the fix this wrapped to a
+	// small or zero total via plain int64 multiplication, silently making
+	// an 8-character hcstat2 run find nothing. It must now saturate instead.
+	layout := markovLayout(m, 8, 8)
+	if layout.total <= 0 {
+		t.Fatalf("total = %d, want a large saturated value (not zero or negative — an overflow wrap)", layout.total)
+	}
+	if layout.total != math.MaxInt64 {
+		t.Errorf("total = %d, want math.MaxInt64 (256^8 saturates completely)", layout.total)
+	}
+	// A saturated layout must still decode candidate 0 without panicking.
+	_ = layout.candidate(0)
+}
+
+func TestMarkovLayoutClampsLengthPastPositionalTableSize(t *testing.T) {
+	m, err := loadHCStat2("testdata/hcstat2_sample.hcstat2", 0)
+	if err != nil {
+		t.Fatalf("loadHCStat2: %v", err)
+	}
+	// The positional tables are indexed by position 0..255 (hcstat2PWMax).
+	// Requesting only lengths past that must yield an empty keyspace, not
+	// panic decoding a candidate whose position is out of range.
+	layout := markovLayout(m, 300, 300)
+	if layout.total != 0 {
+		t.Errorf("total = %d, want 0 for a length entirely past the positional table size", layout.total)
 	}
 }

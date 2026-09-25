@@ -192,14 +192,22 @@ func markovLayout(m *markovModel, minLen, maxLen int) *keyspaceLayout {
 	var offs []int64
 	var lens []int
 	var off int64
-	for L := minLen; L <= maxLen; L++ {
+	effectiveMax := maxLen
+	if m.positional && effectiveMax > hcstat2PWMax {
+		// The positional model's tables are indexed by position 0..255
+		// (hcstat2PWMax); decode would index out of range past that. There
+		// is no real password this long, so lengths beyond it simply
+		// contribute no segments (an empty tail), not a panic.
+		effectiveMax = hcstat2PWMax
+	}
+	for L := minLen; L <= effectiveMax; L++ {
 		offs = append(offs, off)
 		lens = append(lens, L)
 		p := int64(1)
 		for k := 0; k < L; k++ {
-			p *= base
+			p = satMul(p, base)
 		}
-		off += p
+		off = satAdd(off, p)
 	}
 	layout := &keyspaceLayout{total: off}
 	layout.gen = func(i int64) string {
