@@ -27,13 +27,25 @@ type markovModel struct {
 	// threshold field.
 	radix int
 
-	// live -w-trained path:
+	// path trained live from -w:
 	first []byte      // charset ranked by start-frequency (most likely first)
 	cond  [256][]byte // cond[c] = charset ranked by P(next | c)
 
-	// hcstat2-loaded path:
+	// path loaded from a real .hcstat2 file:
 	posFirst [256][]byte
 	posCond  [256][256][]byte
+}
+
+// buildMarkovModel resolves which markovModel a "-a markov" run should use:
+// a real .hcstat2 file when one is given, otherwise the path trained live
+// from -w. Shared by every markov invocation site (doCrack, batchRunType,
+// streamCandidates) so the selection logic exists in exactly one place
+// instead of being repeated at each call site.
+func buildMarkovModel(hcstat2, charset, wordlist string, markovThreshold int) (*markovModel, error) {
+	if hcstat2 != "" {
+		return loadHCStat2(hcstat2, markovThreshold)
+	}
+	return trainMarkov(charset, wordlist, markovThreshold)
 }
 
 // markovRadix resolves --markov-threshold against a domain size: threshold

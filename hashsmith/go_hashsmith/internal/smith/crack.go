@@ -675,6 +675,13 @@ func runCrack(args []string) error {
 			"(GECOS-derived seeds only apply to --single)")
 	}
 
+	// --hcstat2/--markov-threshold only feed -a markov; using either with a
+	// different mode isn't wrong, just pointless. Same "make a no-op loud"
+	// principle as --passwd above.
+	if !strings.EqualFold(*mode, "markov") && (*hcstat2Flag != "" || *markovThreshold != 0) {
+		clrYellow.Fprintln(os.Stderr, "--hcstat2/--markov-threshold given without -a markov; ignored")
+	}
+
 	// Resolve wordlist from either -w or its --wordlist alias. An empty value
 	// falls through to the built-in common.txt inside doCrack/dictAttack.
 	wl := *wordlist
@@ -1576,17 +1583,11 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			tickCancel()
 			return false, errors.New("invalid -n/-x range")
 		}
-		var model *markovModel
-		var e error
-		threshold := 0
+		hcstat2Val, thresholdVal := "", 0
 		if cc != nil {
-			threshold = cc.markovThreshold
+			hcstat2Val, thresholdVal = cc.hcstat2, cc.markovThreshold
 		}
-		if cc != nil && cc.hcstat2 != "" {
-			model, e = loadHCStat2(cc.hcstat2, threshold)
-		} else {
-			model, e = trainMarkov(charset, wordlist, threshold)
-		}
+		model, e := buildMarkovModel(hcstat2Val, charset, wordlist, thresholdVal)
 		if e != nil {
 			tickCancel()
 			return false, e
