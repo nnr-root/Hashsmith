@@ -106,6 +106,8 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 		}
 		_, err = runLayout(context.Background(), layout, skip, limit, 1, &dummy, nil, emit)
 		return err
+	case "association":
+		return errors.New("--stdout does not support association mode: candidates differ per target, there is no single shared stream to preview")
 	default: // dict
 		f, _, err := openWordlist(wordlist)
 		if err != nil {

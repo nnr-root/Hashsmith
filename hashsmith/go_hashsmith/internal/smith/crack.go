@@ -599,6 +599,8 @@ func runCrack(args []string) error {
 	useRules := fs.Bool("r", false, "enable the built-in mangling rules in dict mode")
 	var rulesFiles stringSliceFlag
 	fs.Var(&rulesFiles, "rules", "path to a rule file (dict mode; overrides -r); repeatable to stack rule files left-to-right, e.g. --rules a.rule --rules b.rule")
+	var assocWordlists stringSliceFlag
+	fs.Var(&assocWordlists, "assoc-wordlist", "association mode (-M association): a wordlist paired 1:1 by line with the target list — target line i is tried only against word i, never any other target's word; repeatable, each wordlist independently paired with the targets (hashcat's -a 9); every file must have exactly as many lines as there are targets")
 	rulesLenient := fs.Bool("rules-lenient", false, "skip rule lines that cannot be parsed instead of refusing to run (the skipped candidates are never tried)")
 	maskStr := fs.String("mask", "", "mask for -M mask (e.g. ?u?l?l?l?d?d)")
 	cs1 := fs.String("1", "", "custom charset 1 (mask -1)")
@@ -864,10 +866,28 @@ func runCrack(args []string) error {
 		targets = remainingTargets(lines, cc)
 	}
 
-	runErr := crackTargets(targets, *typ, *mode, wl, *charset,
-		*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, engine, mc, cc)
-	if runErr != nil {
-		return runErr
+	isAssociation := strings.EqualFold(*mode, "association")
+	if isAssociation {
+		if len(assocWordlists.values) == 0 {
+			return errors.New("association mode requires at least one --assoc-wordlist")
+		}
+		wordlists := make([][]string, 0, len(assocWordlists.values))
+		for _, p := range assocWordlists.values {
+			words, err := loadAssociationWordlist(p, len(lines))
+			if err != nil {
+				return err
+			}
+			wordlists = append(wordlists, words)
+		}
+		if err := runAssociationCrack(lines, wordlists, *typ, w, *salt, *saltMode, *outFile, *copyResult, engine, cc); err != nil {
+			return err
+		}
+	} else {
+		runErr := crackTargets(targets, *typ, *mode, wl, *charset,
+			*minLen, *maxLen, w, *salt, *saltMode, *outFile, *copyResult, engine, mc, cc)
+		if runErr != nil {
+			return runErr
+		}
 	}
 
 	if *loopback {
@@ -875,7 +895,7 @@ func runCrack(args []string) error {
 			return err
 		}
 	}
-	if *single || *loopback {
+	if *single || *loopback || isAssociation {
 		// crackTargets/runBatch only ever SET exitCode = 1 (once, on their own
 		// call's uncracked count) — never clear it back to 0. --single's own
 		// per-target crackTargets calls (in runSingleCrack) can set it for a
@@ -2582,8 +2602,10 @@ func printKeyspace(mode, wordlist, wordlist2, charset string, minLen, maxLen, pr
 			return err
 		}
 		exact = big.NewInt(n)
+	case "association":
+		return errors.New("--keyspace does not support association mode: each target's candidate count depends on its own paired words, not one shared total")
 	default:
-		return errors.New("unknown mode: use dict, brute, mask, markov, hybrid, combinator or prince")
+		return errors.New("unknown mode: use dict, brute, mask, markov, hybrid, combinator, prince or association")
 	}
 	if exact.Cmp(maxInt64Big) > 0 {
 		return fmt.Errorf("true keyspace is %s candidates, which exceeds %d (max int64) — "+
