@@ -590,7 +590,7 @@ func TestPrintKeyspaceOnGzipIsExact(t *testing.T) {
 	gz := writeGzipWordlist(t, filepath.Join(dir, "words.txt.gz"), "a\nb\nc\nd\n")
 
 	out := captureWordlistStdout(t, func() {
-		if err := printKeyspace("dict", gz, "", "", 0, 0, princeDefaultElems, nil); err != nil {
+		if err := printKeyspace("dict", gz, "", "", 0, 0, princeDefaultElems, nil, "", 0); err != nil {
 			t.Fatalf("printKeyspace: %v", err)
 		}
 	})

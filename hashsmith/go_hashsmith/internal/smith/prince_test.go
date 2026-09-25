@@ -680,7 +680,7 @@ func TestPrinceCracksMultiWordPasswordDictCannot(t *testing.T) {
 	path := writeElemFile(t, elems)
 	target := princeMD5Hex("loveyou123")
 
-	cc, err := newCrackCtx("", true, "", false, "", false, 0, 0)
+	cc, err := newCrackCtx("", true, "", false, "", false, 0, 0, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -696,7 +696,7 @@ func TestPrinceCracksMultiWordPasswordDictCannot(t *testing.T) {
 	}
 
 	// The same list under a plain dict attack must NOT find it.
-	cc2, err := newCrackCtx("", true, "", false, "", false, 0, 0)
+	cc2, err := newCrackCtx("", true, "", false, "", false, 0, 0, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -719,7 +719,7 @@ func TestPrinceStdoutAndKeyspaceAgree(t *testing.T) {
 	l := mustLayout(t, elems, 1, 8, 2)
 
 	out := captureStdout(t, func() error {
-		return streamCandidates("prince", path, "", "", 1, 8, 2, nil, nil, 0, 0)
+		return streamCandidates("prince", path, "", "", 1, 8, 2, nil, nil, 0, 0, "", 0)
 	})
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	if out == "" {
@@ -731,7 +731,7 @@ func TestPrinceStdoutAndKeyspaceAgree(t *testing.T) {
 	}
 
 	ks := captureStdout(t, func() error {
-		return printKeyspace("prince", path, "", "", 1, 8, 2, nil)
+		return printKeyspace("prince", path, "", "", 1, 8, 2, nil, "", 0)
 	})
 	if strings.TrimSpace(ks) != fmt.Sprint(l.total) {
 		t.Fatalf("--keyspace: want %d got %q", l.total, strings.TrimSpace(ks))
@@ -746,7 +746,7 @@ func TestPrinceKeyspaceRefusesSaturated(t *testing.T) {
 		elems[i] = string(rune('a' + i%26))
 	}
 	path := writeElemFile(t, elems)
-	err := printKeyspace("prince", path, "", "", 8, 8, 8, nil)
+	err := printKeyspace("prince", path, "", "", 8, 8, 8, nil, "", 0)
 	if err == nil {
 		t.Fatal("want a refusal for a keyspace past int64, got nil")
 	}

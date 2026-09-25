@@ -355,7 +355,7 @@ func TestDoCrackSessionResumeFindsPasswordAtCheckpoint(t *testing.T) {
 
 	// Phase 1: bounded to [0,6000), which excludes the password. The slice
 	// exhausts, so the session is saved at checkpoint 6000.
-	cc, err := newCrackCtx("", true, sessName, false, "", false, 0, cut)
+	cc, err := newCrackCtx("", true, sessName, false, "", false, 0, cut, "", 0)
 	if err != nil {
 		t.Fatalf("newCrackCtx: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestDoCrackSessionResumeFindsPasswordAtCheckpoint(t *testing.T) {
 
 	// Phase 2: same target, no bound, resuming from the saved checkpoint. The
 	// password is the very first candidate the resume touches.
-	cc2, err := newCrackCtx("", true, sessName, false, "", false, 0, 0)
+	cc2, err := newCrackCtx("", true, sessName, false, "", false, 0, 0, "", 0)
 	if err != nil {
 		t.Fatalf("newCrackCtx (resume): %v", err)
 	}
@@ -415,7 +415,7 @@ func TestSessionSkipLimitComposeOverFastPath(t *testing.T) {
 		want  bool
 	}{{"inside the slice", inside, true}, {"outside the slice", outside, false}} {
 		t.Run(tc.name, func(t *testing.T) {
-			cc, err := newCrackCtx("", true, sessName, false, "", false, skip, limit)
+			cc, err := newCrackCtx("", true, sessName, false, "", false, skip, limit, "", 0)
 			if err != nil {
 				t.Fatalf("newCrackCtx: %v", err)
 			}
@@ -509,7 +509,7 @@ func TestNonEligibleModesStayOnTheScalarPath(t *testing.T) {
 func TestSaltedSessionRunUnchanged(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	const sessName = "salted-session-test"
-	cc, err := newCrackCtx("", true, sessName, false, "", false, 0, 0)
+	cc, err := newCrackCtx("", true, sessName, false, "", false, 0, 0, "", 0)
 	if err != nil {
 		t.Fatalf("newCrackCtx: %v", err)
 	}
@@ -540,7 +540,7 @@ func TestNoFastPathEnvForcesScalarWithoutChangingResults(t *testing.T) {
 	}
 
 	t.Setenv("HOME", t.TempDir())
-	cc, err := newCrackCtx("", true, "envsess", false, "", false, 0, 0)
+	cc, err := newCrackCtx("", true, "envsess", false, "", false, 0, 0, "", 0)
 	if err != nil {
 		t.Fatalf("newCrackCtx: %v", err)
 	}

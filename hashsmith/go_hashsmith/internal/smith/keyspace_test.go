@@ -100,7 +100,7 @@ func TestKeyspaceUnitIsSkipStepsToCoverDictRun(t *testing.T) {
 
 	// --keyspace's own reported value, via the real --keyspace code path.
 	out := captureStdout(t, func() error {
-		return printKeyspace("dict", wordlistPath, "", "", 0, 0, princeDefaultElems, nil)
+		return printKeyspace("dict", wordlistPath, "", "", 0, 0, princeDefaultElems, nil, "", 0)
 	})
 	var keyspace int64
 	if _, err := fmt.Sscanf(strings.TrimSpace(out), "%d", &keyspace); err != nil {

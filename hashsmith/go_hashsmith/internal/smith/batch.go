@@ -436,9 +436,15 @@ func runBatch(targets []string, typ, mode, wordlist, charset string,
 					continue
 				}
 			}
+			hcstat2Val := ""
+			markovThresholdVal := 0
+			if cc != nil {
+				hcstat2Val = cc.hcstat2
+				markovThresholdVal = cc.markovThreshold
+			}
 			intr, err := batchRunType(runCtx, t, mode, active, batch, &remaining,
 				wordlist, wl2, charset, minLen, maxLen, princeElemsFor(cc), workers, rules, mc,
-				gsalt, saltMode, cc != nil && cc.force, sess, resumeFrom, limit)
+				gsalt, saltMode, cc != nil && cc.force, sess, resumeFrom, limit, hcstat2Val, markovThresholdVal)
 			if intr {
 				interrupted = true
 			}
@@ -698,7 +704,7 @@ func batchSession(ctx *context.Context, targets []string, typeOrder, runSalts []
 func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*batchTarget,
 	remaining *int64, wordlist, wordlist2, charset string, minLen, maxLen, princeElems, workers int,
 	rules *ruleEngine, mc *maskConfig, salt, saltMode string, force bool,
-	sess *sessionState, resumeFrom, limit int64) (bool, error) {
+	sess *sessionState, resumeFrom, limit int64, hcstat2 string, markovThreshold int) (bool, error) {
 
 	start := time.Now()
 	var atomicAttempts int64
@@ -1025,7 +1031,14 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 			}
 		}
 	case "markov":
-		if model, err := trainMarkov(charset, wordlist, 0); err == nil {
+		var model *markovModel
+		var err error
+		if hcstat2 != "" {
+			model, err = loadHCStat2(hcstat2, markovThreshold)
+		} else {
+			model, err = trainMarkov(charset, wordlist, markovThreshold)
+		}
+		if err == nil {
 			runPass(markovLayout(model, minLen, maxLen), false)
 		}
 	case "combinator":

@@ -109,7 +109,7 @@ func TestSessionSavedWhenLimitBoundedSliceExhausts(t *testing.T) {
 	}
 
 	const sessName = "distsess-limit-test"
-	cc, err := newCrackCtx("", true, sessName, false, "", false, 0, targetIdx) // --limit targetIdx, slice = [0, targetIdx)
+	cc, err := newCrackCtx("", true, sessName, false, "", false, 0, targetIdx, "", 0) // --limit targetIdx, slice = [0, targetIdx)
 	if err != nil {
 		t.Fatalf("newCrackCtx: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestStdoutDictMatchesAttackSlicing(t *testing.T) {
 				attempted := collectDictAttempts(t, wordlistPath, eng.e, c.skip, c.limit)
 
 				out := captureStdout(t, func() error {
-					return streamCandidates("dict", wordlistPath, "", "", 0, 0, princeDefaultElems, nil, eng.e, c.skip, c.limit)
+					return streamCandidates("dict", wordlistPath, "", "", 0, 0, princeDefaultElems, nil, eng.e, c.skip, c.limit, "", 0)
 				})
 				var printed []string
 				if out != "" {

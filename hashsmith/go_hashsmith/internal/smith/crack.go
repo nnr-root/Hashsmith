@@ -197,6 +197,15 @@ type crackCtx struct {
 	// resolves it to princeDefaultElems.
 	princeElems int
 
+	// hcstat2 is --hcstat2: a path to a real hashcat-compatible positional
+	// Markov statistics file, used by -a markov instead of live-training
+	// from -w. "" means unset (today's live-trained behavior).
+	hcstat2 string
+	// markovThreshold is --markov-threshold: keep only the top-N most
+	// likely bytes at each Markov position/node. 0 = unlimited, applies to
+	// both the hcstat2 path and the live-trained path.
+	markovThreshold int
+
 	// ── pipeline plumbing (--username / --left / --outfile-format) ──────────
 	username bool                // --username: input lines are "user:hash"
 	left     bool                // --left: report still-uncracked targets instead of/after results
@@ -375,8 +384,8 @@ func (cc *crackCtx) resultLine(hashKey, hashField, password string) (string, boo
 
 // newCrackCtx loads the potfile (unless disabled) and any saved session. A nil
 // return is never produced — a disabled potfile simply yields a nil p.pot.
-func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool, wordlist2 string, useGPU bool, skip, limit int64) (*crackCtx, error) {
-	cc := &crackCtx{sessName: sessName, showOnly: showOnly, wordlist2: wordlist2, useGPU: useGPU, skip: skip, limit: limit}
+func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool, wordlist2 string, useGPU bool, skip, limit int64, hcstat2 string, markovThreshold int) (*crackCtx, error) {
+	cc := &crackCtx{sessName: sessName, showOnly: showOnly, wordlist2: wordlist2, useGPU: useGPU, skip: skip, limit: limit, hcstat2: hcstat2, markovThreshold: markovThreshold}
 	if !noPot {
 		p, err := loadPotfile(potPath)
 		if err != nil {
@@ -606,6 +615,8 @@ func runCrack(args []string) error {
 	wordlist2 := fs.String("wordlist2", "", "right-hand wordlist for -M combinator")
 	w2 := fs.String("w2", "", "alias for --wordlist2")
 	princeElems := fs.Int("prince-elems", princeDefaultElems, "maximum elements concatenated into one chain (-M prince)")
+	hcstat2Flag := fs.String("hcstat2", "", "path to a hashcat-compatible .hcstat2 file (markov mode; loads real positional statistics instead of training live from -w)")
+	markovThreshold := fs.Int("markov-threshold", 0, "markov mode: keep only the top-N most likely bytes at each position (0 = unlimited)")
 	stdoutMode := fs.Bool("stdout", false, "emit the candidate stream to stdout instead of cracking (no hash needed)")
 	useGPU := fs.Bool("gpu", false, "use GPU dictionary/brute/mask kernels when supported")
 	keyspaceOnly := fs.Bool("keyspace", false, "print the total candidate count to stdout and exit, without attacking (dict mode: word count, not words×rules — matches --skip/--limit's unit)")
@@ -683,15 +694,23 @@ func runCrack(args []string) error {
 	// embedded default's 230,930 words while the attack actually ran a
 	// 14M-word rockyou, which is exactly the kind of confidently wrong number
 	// the feasibility guard exists to prevent.
-	wlChoice, err := resolveWordlistForMode(*mode, wl, *noAutoWordlist)
-	if err != nil {
-		return err
-	}
-	wl = wlChoice.path
+	var wlChoice wordlistChoice
+	if strings.EqualFold(*mode, "markov") && *hcstat2Flag != "" {
+		if wl != "" {
+			return errors.New("markov mode: --hcstat2 and -w are mutually exclusive")
+		}
+	} else {
+		var err error
+		wlChoice, err = resolveWordlistForMode(*mode, wl, *noAutoWordlist)
+		if err != nil {
+			return err
+		}
+		wl = wlChoice.path
 
-	// A distributed slice built on a per-machine default does not line up.
-	if warn := distributedWordlistWarning(wlChoice, *skip, *limit, *keyspaceOnly); warn != "" {
-		clrYellow.Fprintln(os.Stderr, warn)
+		// A distributed slice built on a per-machine default does not line up.
+		if warn := distributedWordlistWarning(wlChoice, *skip, *limit, *keyspaceOnly); warn != "" {
+			clrYellow.Fprintln(os.Stderr, warn)
+		}
 	}
 
 	mc := buildMaskConfig(*maskStr, *cs1, *cs2, *cs3, *cs4, *increment, *minLen, *maskFirst)
@@ -700,7 +719,7 @@ func runCrack(args []string) error {
 	// hashing required, and no attack runs. Handled before --stdout / gatherInputs
 	// so it works with or without a hash argument.
 	if *keyspaceOnly {
-		return printKeyspace(*mode, wl, wl2, *charset, *minLen, *maxLen, *princeElems, mc)
+		return printKeyspace(*mode, wl, wl2, *charset, *minLen, *maxLen, *princeElems, mc, *hcstat2Flag, *markovThreshold)
 	}
 
 	// --stdout: generate candidates only, no target or hashing required.
@@ -709,7 +728,7 @@ func runCrack(args []string) error {
 		if err != nil {
 			return err
 		}
-		return streamCandidates(*mode, wl, wl2, *charset, *minLen, *maxLen, *princeElems, mc, engine, *skip, *limit)
+		return streamCandidates(*mode, wl, wl2, *charset, *minLen, *maxLen, *princeElems, mc, engine, *skip, *limit, *hcstat2Flag, *markovThreshold)
 	}
 
 	outFmt, err := parseOutfileFormat(*outfileFormat)
@@ -762,7 +781,7 @@ func runCrack(args []string) error {
 	if sn == "" {
 		sn = *restore
 	}
-	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2, *useGPU, *skip, *limit)
+	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2, *useGPU, *skip, *limit, *hcstat2Flag, *markovThreshold)
 	if err != nil {
 		return err
 	}
@@ -1548,7 +1567,17 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			tickCancel()
 			return false, errors.New("invalid -n/-x range")
 		}
-		model, e := trainMarkov(charset, wordlist, 0)
+		var model *markovModel
+		var e error
+		threshold := 0
+		if cc != nil {
+			threshold = cc.markovThreshold
+		}
+		if cc != nil && cc.hcstat2 != "" {
+			model, e = loadHCStat2(cc.hcstat2, threshold)
+		} else {
+			model, e = trainMarkov(charset, wordlist, threshold)
+		}
 		if e != nil {
 			tickCancel()
 			return false, e
@@ -1792,7 +1821,7 @@ func showPotEntry(cc *crackCtx, origKey, target, explicitType, salt, saltMode, o
 func crackReport(targetHash, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
 	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
-	cc, _ := newCrackCtx("", false, "", false, "", false, 0, 0)
+	cc, _ := newCrackCtx("", false, "", false, "", false, 0, 0, "", 0)
 	var engine *ruleEngine
 	if useRules {
 		engine = builtinRuleEngine()
@@ -2461,15 +2490,25 @@ func exactWordlistCount(path string) (int64, error) {
 	return n, nil
 }
 
-func printKeyspace(mode, wordlist, wordlist2, charset string, minLen, maxLen, princeElems int, mc *maskConfig) error {
+func printKeyspace(mode, wordlist, wordlist2, charset string, minLen, maxLen, princeElems int, mc *maskConfig, hcstat2 string, markovThreshold int) error {
 	m := strings.ToLower(mode)
 	var exact *big.Int
 	switch m {
-	case "brute", "markov":
+	case "brute":
 		if minLen < 1 || maxLen < minLen {
 			return errors.New("invalid -n/-x range")
 		}
 		exact, _ = calcBruteTotalExact(charset, minLen, maxLen)
+	case "markov":
+		if minLen < 1 || maxLen < minLen {
+			return errors.New("invalid -n/-x range")
+		}
+		domain := len([]rune(charset))
+		if hcstat2 != "" {
+			domain = 256
+		}
+		radix := markovRadix(markovThreshold, domain)
+		exact, _ = calcBruteTotalExact(strings.Repeat("x", radix), minLen, maxLen)
 	case "mask":
 		if mc == nil {
 			return errors.New("mask mode requires --mask <mask>")

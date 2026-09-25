@@ -613,7 +613,7 @@ func TestSaltedVectorSessionRuns(t *testing.T) {
 	for _, mode := range []string{"prefix", "suffix"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			cc, err := newCrackCtx("", true, "salted-vector-session-"+mode, false, "", false, 0, 0)
+			cc, err := newCrackCtx("", true, "salted-vector-session-"+mode, false, "", false, 0, 0, "", 0)
 			if err != nil {
 				t.Fatalf("newCrackCtx: %v", err)
 			}

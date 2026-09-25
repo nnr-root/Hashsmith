@@ -26,7 +26,8 @@ import (
 )
 
 func streamCandidates(mode, wordlist, wordlist2, charset string,
-	minLen, maxLen, princeElems int, mc *maskConfig, rules *ruleEngine, skip, limit int64) error {
+	minLen, maxLen, princeElems int, mc *maskConfig, rules *ruleEngine, skip, limit int64,
+	hcstat2 string, markovThreshold int) error {
 
 	w := bufio.NewWriterSize(os.Stdout, 1<<20)
 	defer w.Flush()
@@ -60,7 +61,13 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 		if minLen < 1 || maxLen < minLen {
 			return errors.New("invalid -n/-x range")
 		}
-		model, err := trainMarkov(charset, wordlist, 0)
+		var model *markovModel
+		var err error
+		if hcstat2 != "" {
+			model, err = loadHCStat2(hcstat2, markovThreshold)
+		} else {
+			model, err = trainMarkov(charset, wordlist, markovThreshold)
+		}
 		if err != nil {
 			return err
 		}

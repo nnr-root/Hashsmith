@@ -325,7 +325,7 @@ func TestBcryptBruteThroughProductionDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cc, err := newCrackCtx("", true, "", false, "", false, 0, 0)
+	cc, err := newCrackCtx("", true, "", false, "", false, 0, 0, "", 0)
 	if err != nil {
 		t.Fatalf("newCrackCtx: %v", err)
 	}
