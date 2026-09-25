@@ -128,30 +128,31 @@ type markovModel struct {
 }
 ```
 
-**Why every node's ranked list is truncated to a *uniform* `min(threshold,
-256)` length, unlike hashcat's per-node variable length:** `markovLayout`'s
-`decode(idx, L)` is a mixed-radix odometer — `keyspaceLayout.total` and
-direct index→candidate mapping (both required for `--skip`/`--limit`/session
-resume, which this project's Markov mode already plugs into via the same
-`keyspaceLayout.gen` seam every other attack mode uses) depend on every
-position having a *fixed*, known-in-advance radix. hashcat's per-node
-variable-length lists (a rare bigram might have fewer than `threshold`
-distinct observed successors) make its own keyspace-size a documented
-approximation (`sp_get_sum` uses `root_css_buf[i].cs_len` as a stand-in for
-every node at position `i`, which is not always exact). This project instead
-pads a short list by falling back to that position's `posFirst` ranking, and
-if `posFirst` itself falls short (possible at a rarely-reached position —
-e.g. position 200 in a corpus of mostly short passwords), pads further with
-whichever byte values are still unused, in ascending order — a fixed,
-deterministic rule that guarantees every node reaches exactly
-`min(threshold, 256)` entries unconditionally, however sparse its training
-data. The result: exact `total`, exact direct-index decode, at the cost of
-occasionally trying a low-probability (or, at the extreme, arbitrary) byte at
-a node with sparse training data — a fully acceptable trade given how much
-this project's resumability already leans on the odometer being exact.
+**Every node's ranked list is a uniform `min(threshold, 256)` long, with no
+padding logic needed at all — unlike hashcat's own per-node variable
+length.** `root[pos]` and `markov[pos][prevByte]` are each already a fully
+dense array over all 256 possible byte values (hashcat's C loops both run
+`0..255` unconditionally; a byte that was never observed simply keeps its
+zero count from `calloc`, it is never absent from the array). Ranking this
+domain by count, descending, with a deterministic tie-break for equal counts
+(ties fall to the byte value already ordered by the existing `rankCharset`
+helper's stable sort — reused here, generalized from `*[256]int64` to
+`*[256]uint64` since hcstat2 counts are unsigned, a trivial, behavior-
+preserving change for `trainMarkov`'s existing call site since counts are
+never negative there either), **always** produces a full 256-entry
+permutation, whatever the underlying counts. Thresholding is then nothing
+more than slicing that permutation to its first `min(threshold, 256)`
+entries — no fallback, no padding, no edge case. hashcat's own per-node
+variable length comes from a different design entirely (it ONLY keeps
+entries whose byte also survives a separate custom-charset filter,
+`uniq_tbls`, which this project's v1 does not implement — see §4's
+non-goals); once that filter is out of scope, the "variable length" problem
+it caused doesn't arise here in the first place. The result: exact `total`,
+exact direct-index decode, no approximation and no simplification to
+disclose.
 
 `loadHCStat2(path string) (*markovModel, error)` (new file, `hcstat2.go`)
-does the decode from §2 and the ranking/truncation/padding from above.
+does the decode from §2 and the ranking/truncation from above.
 `markovLayout` gains a positional branch in `decode` (reads `posFirst`/
 `posCond` instead of `first`/`cond` when `m.positional`); everything else
 about the mixed-radix walk is unchanged.
@@ -167,10 +168,10 @@ exclusive — the mode trains from one or the other, never both);
   compressed to `testdata/`) decodes to hand-computable expected root/markov
   counts — checked directly, not just internal self-consistency, per this
   project's established standard for correctness-critical binary parsing.
-- **Ranking/threshold/padding**: unit-tested against small synthetic count
-  tables directly — no compression involved, fast, exercises the padding
-  fallback explicitly (a node engineered to have fewer than `threshold`
-  observed successors).
+- **Ranking/threshold**: unit-tested against small synthetic count tables
+  directly — no compression involved, fast; checks both that ranking is a
+  full 256-entry permutation regardless of how sparse the counts are, and
+  that thresholding is a plain slice of it.
 - **`decode`/keyspace invariants**: the same statelessness and
   batch-size-independence checks this project already runs for every other
   keyspace generator and lane hasher — `decode(i)` is a pure function of
@@ -188,7 +189,7 @@ exclusive — the mode trains from one or the other, never both);
 |---|---|
 | Getting the raw-LZMA1 properties/header wrong silently produces garbage, not an error | Already de-risked: decode path validated against a real, independently-built fixture before this spec was written (§2), not assumed from documentation alone |
 | A real-world `.hcstat2` file (e.g. hashcat's own shipped default) was built with different LZMA parameters than `0x1c` | hashcat's own reader hardcodes `0x1c` for every file it accepts — if a file doesn't match, hashcat itself cannot read it either. Loader must still surface a clear decompression error (not a silent garbage decode) if a file fails |
-| Uniform-radix padding changes candidate ORDER at sparse nodes relative to true hashcat behavior | Documented as a deliberate, disclosed simplification (§5), not a bug; exactness of resumability was judged worth more than exact hashcat parity, since the mode's job (surface likely passwords earlier) still holds |
+| Candidate order at low-count nodes diverges from hashcat's own tie-breaking (hashcat's C `qsort` is not documented as stable) | This project's ranking uses a stable sort with a fixed tie-break (ascending byte value), reusing the existing `rankCharset` helper — deterministic and reproducible, even if not bit-for-bit identical to hashcat's own tie order in rare cases |
 | 134 MB decompressed table per loaded model | In-memory only, one model per run, same order of magnitude as this project's other bulk-data structures (wordlist slices) — no new concern |
 
 ## 8. Non-goals
