@@ -22,6 +22,10 @@ import (
 // passed in; flags and the positional target are separated by the flexible
 // parser.
 func runAuto(args []string) error {
+	var err error
+	if args, err = translateCompatArgs(args); err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("auto", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	typ := fs.String("t", "", "hash type (omit or 'auto' to auto-detect)")

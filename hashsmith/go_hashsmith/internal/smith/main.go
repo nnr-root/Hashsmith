@@ -186,6 +186,7 @@ func printHelp() {
 	fmt.Println("  hash          -t <type> [-s salt] [-S prefix|suffix] [-e encoding] [-o out] [-c]  INPUT...")
 	fmt.Println("  crack         [-t <type|auto>] [-M dict|brute|mask|markov|hybrid|combinator|prince|association] [-w wordlist] [--wordlist2 list2] [--assoc-wordlist file...] [--prince-elems N] [-r | --rules <file>...] [--mask ?l?d..] [-1..-4 set] [--increment] [--mask-first] [--stdout]")
 	fmt.Println("                [--session <name>] [--restore <name>] [--gpu] [--show] [--no-pot] [--no-auto-wordlist] [-C charset] [-n min] [-x max] [-s salt] [-S mode] [-o out] [-c]  INPUT...")
+	fmt.Println("                also accepts a real hashcat (-a, -m, --format) or John (--format=) command line pasted close to verbatim")
 	fmt.Println("  selftest      [-t type] [-v] [-gaps]   verify built-in known-answer vectors")
 	fmt.Println("  types         list every supported -t hash type")
 	fmt.Println("  encodings     list every supported encode/decode -t type (alias: codecs)")

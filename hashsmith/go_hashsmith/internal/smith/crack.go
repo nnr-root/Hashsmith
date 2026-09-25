@@ -581,6 +581,10 @@ func parseUsernameLines(raws []string, typ, salt, saltMode string) ([]inputLine,
 // ── CLI entry ────────────────────────────────────────────────────────────────
 
 func runCrack(args []string) error {
+	var err error
+	if args, err = translateCompatArgs(args); err != nil {
+		return err
+	}
 	fs := flag.NewFlagSet("crack", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	typ := fs.String("t", "", "hash type (omit or 'auto' to auto-detect)")
