@@ -11,7 +11,7 @@ func TestMarkovBijection(t *testing.T) {
 	dir := t.TempDir()
 	wl := filepath.Join(dir, "t.txt")
 	os.WriteFile(wl, []byte("abc\ncab\nbca\n"), 0644)
-	m, err := trainMarkov("abc", wl)
+	m, err := trainMarkov("abc", wl, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestMarkovOrdersLikelyFirst(t *testing.T) {
 	wl := filepath.Join(dir, "t.txt")
 	// every word starts with 'z'; 'z' must therefore rank first for position 0.
 	os.WriteFile(wl, []byte("za\nzb\nzc\nzz\n"), 0644)
-	m, err := trainMarkov("abz", wl)
+	m, err := trainMarkov("abz", wl, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

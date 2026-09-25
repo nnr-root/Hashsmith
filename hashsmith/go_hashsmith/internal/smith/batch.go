@@ -1025,7 +1025,7 @@ func batchRunType(ctx context.Context, typ, mode string, active []int, batch []*
 			}
 		}
 	case "markov":
-		if model, err := trainMarkov(charset, wordlist); err == nil {
+		if model, err := trainMarkov(charset, wordlist, 0); err == nil {
 			runPass(markovLayout(model, minLen, maxLen), false)
 		}
 	case "combinator":

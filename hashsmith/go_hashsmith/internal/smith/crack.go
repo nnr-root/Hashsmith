@@ -1548,7 +1548,7 @@ func doCrack(targetHash, typ, mode, wordlist, charset string,
 			tickCancel()
 			return false, errors.New("invalid -n/-x range")
 		}
-		model, e := trainMarkov(charset, wordlist)
+		model, e := trainMarkov(charset, wordlist, 0)
 		if e != nil {
 			tickCancel()
 			return false, e

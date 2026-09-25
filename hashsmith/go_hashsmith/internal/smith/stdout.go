@@ -60,7 +60,7 @@ func streamCandidates(mode, wordlist, wordlist2, charset string,
 		if minLen < 1 || maxLen < minLen {
 			return errors.New("invalid -n/-x range")
 		}
-		model, err := trainMarkov(charset, wordlist)
+		model, err := trainMarkov(charset, wordlist, 0)
 		if err != nil {
 			return err
 		}
