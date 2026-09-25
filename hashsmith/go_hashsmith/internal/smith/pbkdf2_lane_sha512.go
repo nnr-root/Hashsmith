@@ -81,18 +81,38 @@ func (h *pbkdf2Sha512LaneHasher) Run(pw [][]byte, out []bool) {
 	}
 }
 
-// runGroup mirrors pbkdf2Sha256LaneHasher.runGroup, including its
-// word-native hot loop, parametrized for SHA-512's 8-word (64-bit) state,
-// 64-byte digest, 128-byte HMAC block (priorBytes=128, not 64) and 4-lane
-// width — with one further optimization SHA-256 has not needed: the
-// diagnostic benchmark found schedule expansion, not compression, the
-// larger remaining cost here after the word-native fix, so the schedule
-// is expanded by sha512ScheduleExpand4AVX2 (all 4 lanes in one AVX2 call)
-// rather than sha512ExpandRemainingWords run once per lane in Go.
+// runGroup calls the shared batched-derivation primitive with this
+// hasher's own (salt, iter) — see pbkdf2HMACSHA512DeriveBatch for the
+// actual work. Kept as its own method for the same reason
+// pbkdf2Sha256LaneHasher.runGroup is.
 func (h *pbkdf2Sha512LaneHasher) runGroup(lanes *[pbkdf2Sha512Lanes][]byte) [pbkdf2Sha512Lanes][64]byte {
+	return pbkdf2HMACSHA512DeriveBatch(lanes, h.salt, h.iter)
+}
+
+// pbkdf2HMACSHA512DeriveBatch computes PBKDF2-HMAC-SHA512(password, salt,
+// iter, 64) for all pbkdf2Sha512Lanes passwords at once, returning each
+// one's full 64-byte T_1 block — SHA-256's pbkdf2HMACSHA256DeriveBatch,
+// parametrized for SHA-512's 8-word (64-bit) state, 64-byte digest,
+// 128-byte HMAC block (priorBytes=128, not 64) and 4-lane width, with one
+// further optimization SHA-256 has not needed: the diagnostic benchmark
+// found schedule expansion, not compression, the larger remaining cost
+// here after the word-native fix, so the schedule is expanded by
+// sha512ScheduleExpand4AVX2 (all 4 lanes in one AVX2 call) rather than
+// sha512ExpandRemainingWords run once per lane in Go — the fix that took
+// this hash from losing to stdlib by 13% to beating it by roughly
+// two-thirds on real hardware (see the project memory for the numbers).
+//
+// Like its SHA-256 twin, any format whose own verify function calls
+// golang.org/x/crypto/pbkdf2.Key with sha512.New, a single shared salt
+// across the batch, and a derived key of 64 bytes or fewer can call this
+// directly. v1 scope only: dkLen > 64 needs a second block, which this
+// does not compute (compare pbkdf2HMACSHA256DeriveBatch vs
+// pbkdf2HMACSHA256DeriveBatchN — no SHA-512 multi-block primitive exists
+// yet, since no wired format has needed one).
+func pbkdf2HMACSHA512DeriveBatch(passwords *[pbkdf2Sha512Lanes][]byte, salt []byte, iter int) [pbkdf2Sha512Lanes][64]byte {
 	var innerStates, outerStates [8][pbkdf2Sha512Lanes]uint64
 	for lane := 0; lane < pbkdf2Sha512Lanes; lane++ {
-		kb := hmacSHA512KeyBlock(lanes[lane])
+		kb := hmacSHA512KeyBlock(passwords[lane])
 		inner := hmacSHA512InnerOuterIV(kb, 0x36)
 		outer := hmacSHA512InnerOuterIV(kb, 0x5c)
 		for w := 0; w < 8; w++ {
@@ -103,8 +123,8 @@ func (h *pbkdf2Sha512LaneHasher) runGroup(lanes *[pbkdf2Sha512Lanes][]byte) [pbk
 
 	var u, t [pbkdf2Sha512Lanes][8]uint64
 	blockCounter := []byte{0, 0, 0, 1}
-	saltAndCounter := make([]byte, 0, len(h.salt)+4)
-	saltAndCounter = append(saltAndCounter, h.salt...)
+	saltAndCounter := make([]byte, 0, len(salt)+4)
+	saltAndCounter = append(saltAndCounter, salt...)
 	saltAndCounter = append(saltAndCounter, blockCounter...)
 	for lane := 0; lane < pbkdf2Sha512Lanes; lane++ {
 		var innerState, outerState [8]uint64
@@ -124,7 +144,7 @@ func (h *pbkdf2Sha512LaneHasher) runGroup(lanes *[pbkdf2Sha512Lanes][]byte) [pbk
 	}
 
 	var innerSchedules, outerSchedules [80][pbkdf2Sha512Lanes]uint64
-	for n := 2; n <= h.iter; n++ {
+	for n := 2; n <= iter; n++ {
 		sha512ScheduleFirst16FromWords(&u, &innerSchedules)
 		sha512ScheduleExpand4AVX2(&innerSchedules)
 		innerOut := sha512Group4AVX2(&innerStates, &innerSchedules)

@@ -98,9 +98,16 @@ func verifyMegaLink(target, candidate string) (bool, error) {
 		return false, err
 	}
 	derived := pbkdf2.Key([]byte(candidate), link.salt, megaIterations, 64, sha512.New)
+	return megaLinkMatches(link, derived), nil
+}
+
+// megaLinkMatches is the shared "does this derived key authenticate the
+// link" check. Used by verifyMegaLink for its single derived key and by
+// the lane hasher (pbkdf2_lane_mega.go) for each of a batch's.
+func megaLinkMatches(link *megaLink, derived []byte) bool {
 	mac := hmac.New(sha256.New, derived[32:])
 	_, _ = mac.Write(link.data)
-	return bytes.Equal(mac.Sum(nil)[:16], link.mac[:16]), nil
+	return bytes.Equal(mac.Sum(nil)[:16], link.mac[:16])
 }
 
 // looksLikeMegaLink reports whether a string is a mega.nz protected link.

@@ -64,9 +64,17 @@ func verifyOnePasswordCloud(target, candidate string) (bool, error) {
 		return false, err
 	}
 	derived := pbkdf2.Key([]byte(candidate), r.salt, r.iterations, 64, sha512.New)
+	return onePasswordCloudMatches(r, derived), nil
+}
+
+// onePasswordCloudMatches is the shared "does this derived key authenticate
+// the keychain" check. Used by verifyOnePasswordCloud for its single
+// derived key and by the lane hasher (pbkdf2_lane_onepassword_cloud.go)
+// for each of a batch's.
+func onePasswordCloudMatches(r *onePasswordCloudRecord, derived []byte) bool {
 	mac := hmac.New(sha256.New, derived[32:])
 	_, _ = mac.Write(r.data)
-	return hmac.Equal(mac.Sum(nil), r.want), nil
+	return hmac.Equal(mac.Sum(nil), r.want)
 }
 
 // looksLikeOnePasswordCloud reports whether a line is a 1Password cloud

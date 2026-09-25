@@ -612,6 +612,37 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 			}
 			return nil
 		}, pbkdf2Sha256Lanes, true
+	case "mega":
+		// Same gate and reasoning as the "1password8" case above, gated on
+		// the SHA-512 core's own eligibility (the same AVX2-present/
+		// SHA-NI-absent check, SHA-512 having no hardware acceleration of
+		// its own to avoid).
+		if !pbkdf2Sha512AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2MegaLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2MegaLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha512Lanes, true
+	case "1password-cloud":
+		// Same gate and reasoning as the "mega" case above.
+		if !pbkdf2Sha512AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2OnePasswordCloudLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2OnePasswordCloudLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha512Lanes, true
 	case "metamask":
 		// Same gate and reasoning as the "1password8" case above. The short
 		// variant ("metamask-short", a distinct type name never reaching
