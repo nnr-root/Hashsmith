@@ -25,14 +25,12 @@ package smith
 
 import (
 	"crypto/ed25519"
-	"crypto/hmac"
 	"crypto/sha512"
 	"encoding/hex"
 	"errors"
 	"strconv"
 	"strings"
 
-	"golang.org/x/crypto/blake2b"
 	"golang.org/x/crypto/pbkdf2"
 )
 
@@ -89,13 +87,7 @@ func verifyTezos(target, candidate string) (bool, error) {
 	}
 	seed := pbkdf2.Key([]byte(r.mnemonic), []byte("mnemonic"+r.email+candidate),
 		r.iterations, ed25519.SeedSize*2, sha512.New)
-	pub := ed25519.NewKeyFromSeed(seed[:ed25519.SeedSize]).Public().(ed25519.PublicKey)
-	h, err := blake2b.New(tezosKeyHashSize, nil)
-	if err != nil {
-		return false, err
-	}
-	_, _ = h.Write(pub)
-	return hmac.Equal(h.Sum(nil), r.keyHash), nil
+	return tezosSeedMatches(seed, r.keyHash), nil
 }
 
 func isTezos(target string) bool {

@@ -737,6 +737,80 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 			}
 			return nil
 		}, pbkdf2Sha512Lanes, true
+	case "diskcryptor-xts512", "diskcryptor-xts1024", "diskcryptor-xts1536":
+		// Same gate and reasoning as the "mega" case above. The mode name
+		// picks the cascade width (1/2/3 ciphers, 64 bytes of derived key
+		// each); newPBKDF2DiskCryptorLaneHasher only ever refuses a record
+		// that fails to parse at all, which the scalar path would refuse
+		// too.
+		if !pbkdf2Sha512AVX2Eligible() {
+			return nil, 0, false
+		}
+		maxCiphers := 1
+		switch canon {
+		case "diskcryptor-xts1024":
+			maxCiphers = 2
+		case "diskcryptor-xts1536":
+			maxCiphers = 3
+		}
+		if newPBKDF2DiskCryptorLaneHasher(targetHash, maxCiphers) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2DiskCryptorLaneHasher(targetHash, maxCiphers); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha512Lanes, true
+	case "telegram-desktop":
+		// Same gate and reasoning as the "mega" case above. Version 1
+		// (SHA-1) records fall back to the scalar path on their own, since
+		// newPBKDF2TelegramDesktopV2LaneHasher refuses anything but
+		// version 2.
+		if !pbkdf2Sha512AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2TelegramDesktopV2LaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2TelegramDesktopV2LaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha512Lanes, true
+	case "tezos":
+		// Same gate and reasoning as the "mega" case above.
+		// newPBKDF2TezosLaneHasher only ever refuses a record that fails
+		// to parse at all, which the scalar path would refuse too.
+		if !pbkdf2Sha512AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2TezosLaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2TezosLaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha512Lanes, true
+	case "vdi":
+		// Same gate and reasoning as the "mega" case above. SHA-256
+		// records fall back to the scalar path on their own, since
+		// newPBKDF2VDILaneHasher refuses anything but SHA-512.
+		if !pbkdf2Sha512AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2VDILaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2VDILaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha512Lanes, true
 	case "metamask":
 		// Same gate and reasoning as the "1password8" case above. The short
 		// variant ("metamask-short", a distinct type name never reaching
