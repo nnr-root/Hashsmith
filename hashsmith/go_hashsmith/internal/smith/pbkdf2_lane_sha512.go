@@ -84,7 +84,11 @@ func (h *pbkdf2Sha512LaneHasher) Run(pw [][]byte, out []bool) {
 // runGroup mirrors pbkdf2Sha256LaneHasher.runGroup, including its
 // word-native hot loop, parametrized for SHA-512's 8-word (64-bit) state,
 // 64-byte digest, 128-byte HMAC block (priorBytes=128, not 64) and 4-lane
-// width.
+// width — with one further optimization SHA-256 has not needed: the
+// diagnostic benchmark found schedule expansion, not compression, the
+// larger remaining cost here after the word-native fix, so the schedule
+// is expanded by sha512ScheduleExpand4AVX2 (all 4 lanes in one AVX2 call)
+// rather than sha512ExpandRemainingWords run once per lane in Go.
 func (h *pbkdf2Sha512LaneHasher) runGroup(lanes *[pbkdf2Sha512Lanes][]byte) [pbkdf2Sha512Lanes][64]byte {
 	var innerStates, outerStates [8][pbkdf2Sha512Lanes]uint64
 	for lane := 0; lane < pbkdf2Sha512Lanes; lane++ {
@@ -121,26 +125,18 @@ func (h *pbkdf2Sha512LaneHasher) runGroup(lanes *[pbkdf2Sha512Lanes][]byte) [pbk
 
 	var innerSchedules, outerSchedules [80][pbkdf2Sha512Lanes]uint64
 	for n := 2; n <= h.iter; n++ {
-		for lane := 0; lane < pbkdf2Sha512Lanes; lane++ {
-			var w [80]uint64
-			sha512ScheduleFromWords(&u[lane], &w)
-			for step := 0; step < 80; step++ {
-				innerSchedules[step][lane] = w[step]
-			}
-		}
+		sha512ScheduleFirst16FromWords(&u, &innerSchedules)
+		sha512ScheduleExpand4AVX2(&innerSchedules)
 		innerOut := sha512Group4AVX2(&innerStates, &innerSchedules)
 
+		var innerDigest [pbkdf2Sha512Lanes][8]uint64
 		for lane := 0; lane < pbkdf2Sha512Lanes; lane++ {
-			var innerDigest [8]uint64
 			for word := 0; word < 8; word++ {
-				innerDigest[word] = innerOut[word][lane]
-			}
-			var w [80]uint64
-			sha512ScheduleFromWords(&innerDigest, &w)
-			for step := 0; step < 80; step++ {
-				outerSchedules[step][lane] = w[step]
+				innerDigest[lane][word] = innerOut[word][lane]
 			}
 		}
+		sha512ScheduleFirst16FromWords(&innerDigest, &outerSchedules)
+		sha512ScheduleExpand4AVX2(&outerSchedules)
 		outerOut := sha512Group4AVX2(&outerStates, &outerSchedules)
 
 		for lane := 0; lane < pbkdf2Sha512Lanes; lane++ {

@@ -129,6 +129,25 @@ func sha512ScheduleFromWords(data *[8]uint64, w *[80]uint64) {
 	sha512ExpandRemainingWords(w)
 }
 
+// sha512ScheduleFirst16FromWords is sha512ScheduleFromWords's vectorized
+// twin: populates the first 16 (of 80) schedule words for all
+// pbkdf2Sha512Lanes lanes at once, in the [80][lanes]uint64 layout
+// sha512Group4AVX2 and sha512ScheduleExpand4AVX2 both expect. Same fixed
+// values for the same reason as sha512ScheduleFromWords — every call here
+// is exactly one SHA-512 digest continuing one ipad/opad block — just
+// written into every lane instead of one.
+func sha512ScheduleFirst16FromWords(data *[pbkdf2Sha512Lanes][8]uint64, w *[80][pbkdf2Sha512Lanes]uint64) {
+	for lane := 0; lane < pbkdf2Sha512Lanes; lane++ {
+		for word := 0; word < 8; word++ {
+			w[word][lane] = data[lane][word]
+		}
+		w[8][lane] = 0x8000000000000000
+		w[9][lane], w[10][lane], w[11][lane], w[12][lane], w[13][lane] = 0, 0, 0, 0, 0
+		w[14][lane] = 0
+		w[15][lane] = 1536
+	}
+}
+
 func hmacSHA512FromInnerOuter(innerState, outerState [8]uint64, message []byte) [64]byte {
 	inner := sha512ContinueSum(innerState, 128, message)
 	return sha512FinalizeTail(outerState, 128, inner[:])
