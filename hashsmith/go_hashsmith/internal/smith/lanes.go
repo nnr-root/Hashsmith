@@ -595,6 +595,23 @@ func newLaneHasher(typ, targetHash, salt, saltMode string) (func() laneHasher, i
 			}
 			return nil
 		}, pbkdf2Sha256Lanes, true
+	case "mongodb":
+		// Same gate and reasoning as the "1password8" case above. The
+		// legacy MONGODB-CR and SCRAM-SHA-1 shapes fall back to the
+		// scalar path on their own, since newPBKDF2MongoDBSCRAM256LaneHasher
+		// refuses anything but SCRAM-SHA-256.
+		if !pbkdf2Sha256AVX2Eligible() {
+			return nil, 0, false
+		}
+		if newPBKDF2MongoDBSCRAM256LaneHasher(targetHash) == nil {
+			return nil, 0, false
+		}
+		return func() laneHasher {
+			if h := newPBKDF2MongoDBSCRAM256LaneHasher(targetHash); h != nil {
+				return h
+			}
+			return nil
+		}, pbkdf2Sha256Lanes, true
 	case "metamask":
 		// Same gate and reasoning as the "1password8" case above. The short
 		// variant ("metamask-short", a distinct type name never reaching

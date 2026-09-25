@@ -25,6 +25,100 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
+// mongoDBSCRAM256Record holds one parsed SCRAM-SHA-256 (version 1 or 2)
+// $mongodb-scram$ target — the one MongoDB shape the AVX2 lane hasher
+// (pbkdf2_lane_mongodb.go) accelerates. verifyMongoDB above stays generic
+// over the legacy MONGODB-CR and SCRAM-SHA-1 shapes as well, and is
+// untouched; this is a second, narrower, fully independent parser used
+// only by the lane hasher, whose own tests check it against verifyMongoDB
+// on every candidate so the two can never silently drift. It duplicates
+// verifyMongoDB's field parsing and dialect handling rather than sharing
+// code with it, because verifyMongoDB's SHA-1 branches are woven through
+// the same fields (the username, needed only for the MD5 legacy
+// transform) in a way that resists a clean split without touching a
+// working, already-shipped scalar path.
+type mongoDBSCRAM256Record struct {
+	salt       []byte
+	iter       int
+	label      string // "Client Key" or "Server Key"
+	sha256Wrap bool   // version 1 only: SHA-256 the HMAC output before comparing
+	want       []byte
+}
+
+// parseMongoDBSCRAM256 parses target, refusing the legacy MONGODB-CR shape,
+// the SCRAM-SHA-1 shape (version 0), and John's "$scram$" spelling (which
+// verifyMongoDB's own johnMongoDBSCRAM rewrite always maps to version 0,
+// so it can never be SHA-256-eligible) — all three fall back to the scalar
+// path, which already handles them.
+func parseMongoDBSCRAM256(targetHash string) (mongoDBSCRAM256Record, error) {
+	if !strings.HasPrefix(targetHash, "$mongodb-scram$") {
+		return mongoDBSCRAM256Record{}, errors.New("not a MongoDB SCRAM record")
+	}
+	body := targetHash[len("$mongodb-scram$"):]
+	sep, hashcatDialect := "$", false
+	if strings.HasPrefix(body, "*") {
+		body, sep, hashcatDialect = body[1:], "*", true
+	}
+	f := strings.Split(body, sep)
+	if len(f) != 5 {
+		return mongoDBSCRAM256Record{}, errors.New("invalid MongoDB hash (need ver$user$iter$salt$key, or hashcat's *-separated form)")
+	}
+	version, err := strconv.Atoi(f[0])
+	if err != nil || version < 0 || version > 2 {
+		return mongoDBSCRAM256Record{}, errors.New("unsupported MongoDB SCRAM record version")
+	}
+	iter, err := strconv.Atoi(f[2])
+	if err != nil || iter < 1 || iter > maxKDFIterations || (version > 0 && iter < 4096) {
+		return mongoDBSCRAM256Record{}, errors.New("invalid MongoDB iteration count")
+	}
+	salt, err := base64.StdEncoding.DecodeString(f[3])
+	if err != nil || len(salt) == 0 || len(salt) > maxKDFFieldSize {
+		return mongoDBSCRAM256Record{}, errors.New("invalid MongoDB salt")
+	}
+	want, err := base64.StdEncoding.DecodeString(f[4])
+	wantLen := 20
+	if version > 0 {
+		wantLen = 32
+	}
+	if err != nil || len(want) != wantLen {
+		return mongoDBSCRAM256Record{}, errors.New("invalid MongoDB stored key")
+	}
+
+	// See verifyMongoDB's own comment: hashcat's '*' spelling always means
+	// the SHA-256 ServerKey once version 0 (SHA-1) is excluded.
+	if hashcatDialect {
+		if version == 0 {
+			return mongoDBSCRAM256Record{}, errors.New("not a SCRAM-SHA-256 MongoDB record")
+		}
+		version = 2
+	}
+	if version == 0 {
+		return mongoDBSCRAM256Record{}, errors.New("not a SCRAM-SHA-256 MongoDB record")
+	}
+
+	label := "Client Key"
+	sha256Wrap := true
+	if version == 2 {
+		label = "Server Key"
+		sha256Wrap = false
+	}
+	return mongoDBSCRAM256Record{salt: salt, iter: iter, label: label, sha256Wrap: sha256Wrap, want: want}, nil
+}
+
+// mongoDBSCRAM256Matches is the shared "does this salted password reach
+// the stored key" check for the SCRAM-SHA-256 shapes, used only by the
+// lane hasher (verifyMongoDB inlines the equivalent steps directly).
+func mongoDBSCRAM256Matches(r *mongoDBSCRAM256Record, salted []byte) bool {
+	key := hmac.New(sha256.New, salted)
+	key.Write([]byte(r.label))
+	result := key.Sum(nil)
+	if r.sha256Wrap {
+		digest := sha256.Sum256(result)
+		result = digest[:]
+	}
+	return bytesEqualCT(result, r.want)
+}
+
 func verifyMongoDB(targetHash, candidate string) (bool, error) {
 	// MONGODB-CR, the credential MongoDB used before SCRAM: one MD5 over the
 	// username, a fixed separator and the password.
