@@ -1,16 +1,16 @@
 #!/usr/bin/env node
-const path = require('path');
-const fs = require('fs');
 const { spawn } = require('child_process');
+const { ensureBinary } = require('../scripts/install');
 
-const args = process.argv.slice(2);
-const binName = process.platform === 'win32' ? 'hashsmith.exe' : 'hashsmith';
-const localBinary = path.join(__dirname, '..', '.npm-bin', binName);
-
-if (!fs.existsSync(localBinary)) {
-  console.error('hashsmith binary was not found. Reinstall package to rebuild it.');
-  process.exit(2);
-}
-
-const child = spawn(localBinary, args, { stdio: 'inherit' });
-child.on('exit', (code) => process.exit(code ?? 1));
+// The binary is fetched lazily when it is missing, so `npm install
+// --ignore-scripts` — which skips postinstall entirely and used to leave the
+// command permanently broken — now just moves the work to first run.
+ensureBinary()
+  .then((binary) => {
+    const child = spawn(binary, process.argv.slice(2), { stdio: 'inherit' });
+    child.on('exit', (code) => process.exit(code ?? 1));
+  })
+  .catch((err) => {
+    console.error(`hashsmith: ${err.message}`);
+    process.exit(2);
+  });

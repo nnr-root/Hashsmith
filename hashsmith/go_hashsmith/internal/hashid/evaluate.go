@@ -1,5 +1,7 @@
 package hashid
 
+import "sort"
+
 // Evaluate runs every prototype in table order and applies the suppression
 // rule. The returned slice is in table order and includes suppressed matches,
 // marked as such, so identify can show a user what was ruled out.
@@ -91,9 +93,31 @@ func evaluateUntilExclusive(table []Prototype, in Input) []Match {
 
 // DetectTypes returns the canonical -t names crack should try, in order. It is
 // exactly the unsuppressed matches' Types, de-duplicated.
-func DetectTypes(table []Prototype, in Input) []string {
+// Ranked is one detected type together with the strength of the evidence
+// behind it, which is what an attack order has to be built from.
+type Ranked struct {
+	Type       string
+	Tier       Tier
+	Prevalence uint8
+}
+
+// Rare reports a type this engine offers only because nothing rules it out:
+// a shape match on a digest width, for an algorithm too scarce to be a real
+// guess. These are worth trying — they are the whole reason an obscure hash
+// is crackable at all — but only after everything likelier has failed.
+func (r Ranked) Rare() bool { return r.Tier == TierShape && r.Prevalence < extinctPrevalence }
+
+// DetectRanked returns the candidate types in the order they should be
+// attacked: strongest evidence first, and within one tier the commonest
+// algorithm first.
+//
+// Table order decides nothing here, which matters because the table is
+// grouped by family for a reader's benefit. A 32-character hex string matches
+// MD5, MD4, MD2, NTLM, LM and a dozen scarcer digests; whichever order those
+// happen to sit in, MD5 and NTLM are what to try first and MD2 is not.
+func DetectRanked(table []Prototype, in Input) []Ranked {
 	matches := evaluateUntilExclusive(table, in)
-	var out []string
+	var out []Ranked
 	seen := make(map[string]struct{}, len(matches))
 	for _, m := range matches {
 		for _, t := range m.Types() {
@@ -101,8 +125,27 @@ func DetectTypes(table []Prototype, in Input) []string {
 				continue
 			}
 			seen[t] = struct{}{}
-			out = append(out, t)
+			out = append(out, Ranked{Type: t, Tier: m.Proto.Tier, Prevalence: m.Proto.Prevalence})
 		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Tier != out[j].Tier {
+			return out[i].Tier < out[j].Tier
+		}
+		return out[i].Prevalence > out[j].Prevalence
+	})
+	return out
+}
+
+// DetectTypes returns just the names, in the same order.
+func DetectTypes(table []Prototype, in Input) []string {
+	ranked := DetectRanked(table, in)
+	if len(ranked) == 0 {
+		return nil
+	}
+	out := make([]string, len(ranked))
+	for i, r := range ranked {
+		out[i] = r.Type
 	}
 	return out
 }

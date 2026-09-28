@@ -21,6 +21,21 @@ jobs:
         run: cd hashsmith/go_hashsmith && CGO_ENABLED=0 go build ./...
       - name: Vet
         run: cd hashsmith/go_hashsmith && go vet ./...
+      # gofmt drift is invisible until someone runs the tool, and by then it
+      # sits in files the diff has nothing else to do with, so a real change
+      # arrives mixed with reformatting. Six files had drifted before this
+      # gate existed. `gofmt -l` prints the offenders and nothing else, so the
+      # failure names exactly which files to run `gofmt -w` over.
+      - name: Format
+        run: |
+          cd hashsmith/go_hashsmith
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean; run: gofmt -w $unformatted"
+            echo "$unformatted"
+            gofmt -d $unformatted
+            exit 1
+          fi
       # HASHSMITH_REQUIRE_AVX2 makes this job the declared gate for the AVX2
       # assembly cores (md5avx2_amd64.s, md4avx2_amd64.s). The cores are
       # selected by BUILD TAG, so an amd64 build always links them and the
@@ -36,6 +51,64 @@ jobs:
         env:
           HASHSMITH_REQUIRE_AVX2: "1"
         run: cd hashsmith/go_hashsmith && go test -timeout 5m ./...
+
+      # Surfaces the hashcat conformance numbers in the log even when the
+      # ratchet passes, so coverage is a figure you can watch rather than a
+      # silent assertion. The test itself already ran above as part of ./... —
+      # this re-runs only that one test, with -v, purely for the log line.
+      #
+      # It drives the real binary against hashcat's own published example
+      # records. That is the boundary `selftest` cannot see: the 502-vector
+      # self-test asserts at the library layer, and on 2026-09-20 it reported
+      # 356/356 green while `crack -t descrypt` rejected hashcat's canonical
+      # descrypt record. Coverage claims rest on THIS number, not that one.
+      - name: Hashcat conformance (coverage ratchet)
+        run: |
+          cd hashsmith/go_hashsmith
+          go test -timeout 5m -run TestHashcatConformance -v ./internal/smith \
+            | grep -E 'conformance over|CRACKED|REJECTED|NO-SUCH-MODE|NOT-FOUND|WRONG-PLAIN|--- (PASS|FAIL)'
+
+  # The bcrypt speedup ratchet measures a wall-clock RATIO, and that ratio is
+  # only meaningful on a machine that gave the measurement a clean window. It
+  # therefore declines to render a verdict when its own samples show it did not
+  # get one — see internal/bcryptlane/speed_test.go. A guard that can skip is a
+  # guard that can go silently unmeasured forever, so this job exists to make
+  # the measurement actually happen: HASHSMITH_RATCHET_REQUIRED=1 turns every
+  # skip in that test into a failure, and the package is run on its own so no
+  # sibling test binary is competing for cache.
+  #
+  # The retry is because a hosted runner is a shared VM whose neighbours are
+  # not ours to quiet. Three independent attempts, each needing its own clean
+  # window, is forgiving of a noisy minute without ever letting the ratchet
+  # pass unmeasured.
+  #
+  # If this turns out to be flaky on hosted runners anyway, the fix is to move
+  # this job to the nightly `schedule` lane. It is NOT to loosen
+  # quietSpreadCeiling, and it is certainly not to lower bcryptSpeedupFloor:
+  # both of those trade a red CI light for a ratchet that no longer ratchets.
+  bcrypt-ratchet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
+      - name: bcrypt speedup ratchet (must be measured, not skipped)
+        env:
+          HASHSMITH_RATCHET_REQUIRED: "1"
+        run: |
+          cd hashsmith/go_hashsmith
+          for attempt in 1 2 3; do
+            echo "=== attempt $attempt ==="
+            if go test -count=1 -timeout 10m -v \
+                 -run TestSpeedupOverXCrypto ./internal/bcryptlane; then
+              exit 0
+            fi
+            echo "attempt $attempt did not produce a measurement"
+          done
+          echo "no attempt could measure the ratchet on a quiet enough window"
+          exit 1
 
   test-arm64:
     # ubuntu-24.04-arm is GitHub's hosted arm64 runner. This is the only job
@@ -60,6 +133,35 @@ jobs:
         run: cd hashsmith/go_hashsmith && go vet ./...
       - name: Test (fast vectors)
         run: cd hashsmith/go_hashsmith && go test -timeout 5m ./...
+
+  # Compatibility with John the Ripper is claimed in the rule engine, and the
+  # only check that does not rest on somebody having read John's documentation
+  # correctly is running John. Its rule commands are compared candidate stream
+  # against candidate stream, and its shipped john.conf is compiled to measure
+  # how much of it Hashsmith can read.
+  #
+  # The tests skip themselves when john is absent or is not a jumbo build, so a
+  # runner whose package differs reports a skip rather than a false failure —
+  # and the step below prints the build info either way, so a silent skip is
+  # visible in the log rather than looking like a pass.
+  john-differential:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
+      - name: Install John the Ripper
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y john
+          john --list=build-info 2>&1 | head -5 || true
+          ls /usr/share/john/john.conf || true
+      - name: Compare against john
+        run: |
+          cd hashsmith/go_hashsmith
+          go test -v -run 'TestJohnRuleCommandsMatchJohnItself|TestJohnCorpusCoverageDoesNotRegress' ./internal/smith
 
   race:
     runs-on: ubuntu-latest
@@ -88,13 +190,97 @@ jobs:
       # a lane where they cannot be meaningful is the correct trade, applied
       # consistently. Races in this file's code are still covered by the
       # other tests in this lane.
+      #
+      # The two ETA tests are excluded for the same reason, and the evidence
+      # is on record: this lane failed nightly for weeks on
+      # TestBatchFeasibilityETAThroughRunCrack at 6.4x-7.8x against a 4x
+      # tolerance, every attempt, always in the PESSIMISTIC direction. Both
+      # tests compare a prediction extrapolated from a short probe against a
+      # long real run, and race instrumentation does not weigh those two the
+      # same: the probe is cold and instrumented, the run warms up and
+      # amortises. The distortion is systematic rather than noisy, which is
+      # why retries inside the tests never rescued it. They do their real job
+      # in the `test` and `test-arm64` lanes, where the prediction and the run
+      # are measured on the same terms.
       - name: Test (race detector)
         env:
           HASHSMITH_REQUIRE_AVX2: "1"   # amd64 runner: see the `test` job's note
         run: |
           cd hashsmith/go_hashsmith
           go test -race -timeout 20m \
-            -skip 'TestBenchTypeRespectsBudgetForSlowKDF|TestFastVectorsStayWithinBudget|TestSpeedupOverXCrypto' ./...
+            -skip 'TestBenchTypeRespectsBudgetForSlowKDF|TestFastVectorsStayWithinBudget|TestSpeedupOverXCrypto|TestBatchFeasibilityETAThroughRunCrack|TestFeasibilityETAThroughRunCrack' ./...
+
+  # An sdist or wheel that omits a file the Go build needs is not detectably
+  # broken until a user installs it: the tree looks complete, and `go build`
+  # only fails at first run on their machine. It happened — both artifacts
+  # shipped without the hand-written Plan 9 assembly that the NEON and AVX2
+  # cores are implemented in, so `pip install hashsmith-cli` produced
+  # "missing function body" on every arm64 and amd64 host.
+  #
+  # This job builds both artifacts, unpacks each, and compiles the Go CLI from
+  # exactly the files that shipped — the only check that can catch it.
+  # 231 verify* functions across 70 files, and every one parses data an
+  # attacker supplied — a hash file is something handed to you. None had any
+  # fuzz coverage. The seed corpus runs as an ordinary test on every push; this
+  # job spends real time mutating it.
+  #
+  # The contract each target asserts is deliberately weak — NEVER PANIC —
+  # because that is the one contract that holds for every parser at once, which
+  # is what lets a single target cover all of them. It already found a slice
+  # bounds panic reachable from a three-character argument.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
+      - name: Fuzz the parsers
+        run: |
+          cd hashsmith/go_hashsmith
+          for target in FuzzVerifyCandidate FuzzDetectHashTypes FuzzDecodeText \
+                        FuzzMagicDecode FuzzCompileRuleLine FuzzCollectInputs; do
+            echo "=== $target ==="
+            go test ./internal/smith -run '^$' -fuzz "^$target\$" -fuzztime 60s
+          done
+      - name: Upload any crashers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashers
+          path: hashsmith/go_hashsmith/internal/smith/testdata/fuzz/
+          if-no-files-found: ignore
+
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: hashsmith/go_hashsmith/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --quiet build
+          python -m build --outdir dist .
+      - name: The WHEEL must contain a buildable Go tree
+        run: |
+          rm -rf /tmp/wheel && mkdir -p /tmp/wheel
+          python -m zipfile -e dist/*.whl /tmp/wheel
+          cd /tmp/wheel/hashsmith/go_hashsmith
+          CGO_ENABLED=0 go build -o /tmp/hs-wheel ./cmd/hashsmith
+          /tmp/hs-wheel --version
+      - name: The SDIST must contain a buildable Go tree
+        run: |
+          rm -rf /tmp/sdist && mkdir -p /tmp/sdist
+          tar xzf dist/*.tar.gz -C /tmp/sdist
+          cd /tmp/sdist/*/hashsmith/go_hashsmith
+          CGO_ENABLED=0 go build -o /tmp/hs-sdist ./cmd/hashsmith
+          /tmp/hs-sdist --version
 
   cross-compile:
     runs-on: ubuntu-latest
@@ -190,13 +376,13 @@ jobs:
         run: |
           echo "arch: ${{ matrix.arch }}"
           grep -m1 -E '^(model name|Model)' /proc/cpuinfo || true
-          grep -o -m1 -E '\b(avx512[a-z]*|avx2|avx|asimd|neon)\b' /proc/cpuinfo | sort -u | tr '\n' ' ' || true
+          grep -o -m1 -E '\b(avx512[a-z]*|avx2|avx|asimd|neon|sha_ni)\b' /proc/cpuinfo | sort -u | tr '\n' ' ' || true
           echo
       - name: Vector core benchmarks (best-of-5, same invocation)
         run: |
           cd hashsmith/go_hashsmith
           go test -run '^$' -bench 'BenchmarkMD5AVX2Core|BenchmarkMD5NeonCore|BenchmarkMD5AVX2Group|BenchmarkMD5Group|BenchmarkMD5Scalar|BenchmarkMD4AVX2Group|BenchmarkMD4Group|BenchmarkMD4Scalar' \
-            -benchtime 2s -count 5 -cpu 1 ./cmd/hashsmith | tee /tmp/bench.out
+            -benchtime 2s -count 5 -cpu 1 ./internal/smith | tee /tmp/bench.out
       - name: End-to-end crack rate (fast path vs forced-scalar, same binary)
         run: |
           cd hashsmith/go_hashsmith
@@ -236,6 +422,66 @@ jobs:
             vals=$(grep "^$n" /tmp/bench.out | grep -oE '[0-9.]+ MH/s' | sort -n | tr '\n' ' ')
             [ -n "$vals" ] && echo "$n: $vals"
           done
+
+      # The PBKDF2 AVX2 multi-buffer core (docs/superpowers/specs/
+      # 2026-09-24-pbkdf2-avx2-multibuffer-design.md) has no ARM64
+      # equivalent by design — hardware SHA extensions already win there
+      # (see that design's §1) — so this step runs on the amd64 leg only.
+      # It is also the FIRST trustworthy measurement of that core's actual
+      # value proposition: every number produced anywhere else in that
+      # project's own development (Docker's amd64 QEMU emulation on an
+      # Apple Silicon machine, explicitly called out above as biased
+      # AGAINST SIMD) is correctness-only, never performance. This step
+      # exists to finally answer the question that design's own §7 left
+      # open.
+      #
+      # Two runs, same binary, same machine: default (whatever SHA
+      # Extensions this specific runner's silicon actually has — the "as
+      # shipped" number) and GODEBUG=cpu.sha=off (forces Go's stdlib
+      # crypto/sha1/256/512 onto their generic, non-hardware-accelerated
+      # path regardless of the runner's real silicon — internal/cpu's own
+      # `{Name: "sha", Feature: &X86.HasSHA}` GODEBUG registration,
+      # confirmed against Go 1.26.3's source). The second run reproduces
+      # this design's actual target hardware class (AVX2 present, SHA-NI
+      # absent) on ANY real x86-64 machine; the gap between the two runs is
+      # the size of SHA-NI's own advantage on whichever runner this happens
+      # to be.
+      - name: PBKDF2 AVX2 multi-buffer core (real hardware, not emulated)
+        if: matrix.arch == 'amd64'
+        run: |
+          cd hashsmith/go_hashsmith
+          BENCH='BenchmarkPBKDF2Sha256StdlibSequential|BenchmarkPBKDF2Sha256LaneHasherAVX2|BenchmarkPBKDF2Sha1StdlibSequential|BenchmarkPBKDF2Sha1LaneHasherAVX2|BenchmarkPBKDF2Sha512StdlibSequential|BenchmarkPBKDF2Sha512LaneHasherAVX2'
+          echo "=== default (whatever SHA Extensions this runner's silicon has) ==="
+          go test -run '^$' -bench "$BENCH" -benchtime 2s -count 3 -cpu 1 ./internal/smith | tee /tmp/pbkdf2-default.out
+          echo
+          echo "=== GODEBUG=cpu.sha=off (this design's actual target: AVX2 present, SHA-NI absent) ==="
+          GODEBUG=cpu.sha=off go test -run '^$' -bench "$BENCH" -benchtime 2s -count 3 -cpu 1 ./internal/smith | tee /tmp/pbkdf2-nosha.out
+          echo
+          echo "=================== SUMMARY: candidates/s, sorted, best last ==================="
+          for n in BenchmarkPBKDF2Sha256StdlibSequential BenchmarkPBKDF2Sha256LaneHasherAVX2 BenchmarkPBKDF2Sha1StdlibSequential BenchmarkPBKDF2Sha1LaneHasherAVX2 BenchmarkPBKDF2Sha512StdlibSequential BenchmarkPBKDF2Sha512LaneHasherAVX2; do
+            d=$(grep "^$n" /tmp/pbkdf2-default.out | grep -oE '[0-9.]+ candidates/s' | sort -n | tr '\n' ' ')
+            s=$(grep "^$n" /tmp/pbkdf2-nosha.out | grep -oE '[0-9.]+ candidates/s' | sort -n | tr '\n' ' ')
+            echo "$n"
+            [ -n "$d" ] && echo "    default:        $d"
+            [ -n "$s" ] && echo "    cpu.sha=off:    $s"
+          done
+
+      # Diagnostic follow-up to the step above: the first real-hardware run
+      # of this core showed SHA-256 only tying stdlib's generic path and
+      # SHA-1/SHA-512 losing to it outright, contrary to every assumption
+      # the design was built on. This isolates WHERE an iteration's time
+      # actually goes: N scalar calls to the schedule-expansion function
+      # alone (one per lane, matching what the Go-side, unbatched
+      # expansion the design kept out of assembly costs today) against the
+      # batched AVX2 compression call alone (schedules already built,
+      # excluded from the timing). No GODEBUG needed — neither side calls
+      # stdlib.
+      - name: PBKDF2 AVX2 diagnostic (schedule expansion vs compression, isolated)
+        if: matrix.arch == 'amd64'
+        run: |
+          cd hashsmith/go_hashsmith
+          go test -run '^$' -bench 'BenchmarkSHA256ScheduleExpansionScalarX8|BenchmarkSHA256CompressAVX2GroupOnly|BenchmarkSHA1ScheduleExpansionScalarX16|BenchmarkSHA1CompressAVX2GroupOnly|BenchmarkSHA512ScheduleExpansionScalarX4|BenchmarkSHA512CompressAVX2GroupOnly' \
+            -benchtime 2s -count 3 -cpu 1 ./internal/smith
 
   slow-vectors:
     if: github.event_name == 'schedule'

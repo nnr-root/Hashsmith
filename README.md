@@ -697,6 +697,40 @@ care whether a salt is in it — so salted md5 went from 34% of unsalted to 98%.
 A salt that would push a candidate past the one-block limit still declines to
 the batch path rather than digesting a truncated message.
 
+**NTLM's scalar verifier used to cost 49% more than MD4's for reasons that had
+nothing to do with hashing.** This is a separate finding from the table above:
+it is about the one-candidate-at-a-time verifier `hashsmith benchmark`, the
+feasibility guard's cost estimate, and any candidate the SIMD dictionary path
+declines (non-ASCII, oversized) all fall back to — the bulk SIMD dictionary
+path itself (both share the same MD4 core either way) was never affected,
+since its own fill loop does the UTF-16LE byte-doubling directly into the
+transposed layout and never goes through this. `utf16le()`, the function
+every UTF-16LE construction in Hashsmith funnels through — NTLM, NetNTLM,
+MSCash, Office, BitLocker, PeopleSoft, and the John/Hashcat `$utf16le$`
+compat families — allocated three times per call (a `[]rune` conversion, a
+`utf16.Encode` output, and its own returned buffer) even for a plain ASCII
+password, where every UTF-16 code unit is trivially `(byte, 0x00)`. Measured
+on an Apple M2 (`BenchmarkFastVerifierMD4`/`NTLM`, one candidate at a time,
+`go test -bench`, the low-noise way to measure this — see the caveat on CLI
+timing two paragraphs up):
+
+| | time/op | allocs/op |
+|---|---|---|
+| MD4 | 274ns | 1 |
+| NTLM, before | 408ns (+49%) | 3 |
+| NTLM, after | 313ns (+13%), then 391ns (parity) | 2, then 1 |
+
+An ASCII fast path in `utf16le` (one allocation instead of three) took the
+gap from 49% to 13%; a second pass added `utf16leInto`/`utf16leIntoBytes`,
+letting NTLM's two per-candidate hasher closures write the re-encoding into a
+stack buffer instead of calling `utf16le` at all for any candidate up to 128
+ASCII characters. NTLM's allocation profile is now identical to MD4's — one
+allocation, for `md4.New()`, which both pay equally — and the remaining
+timing gap is noise, not algorithm. Every one of the other UTF-16LE formats
+listed above gets the first fix automatically, since they all still call
+`utf16le` directly; only NTLM's two hottest call sites were worth the second,
+buffer-passing pass.
+
 ### The vector cores, both architectures
 
 CI runs the same measurement on every push — identical keyspace, wall clock,
@@ -739,6 +773,42 @@ version, candidate count, every individual run, and SHA-256 fingerprints for
 the wordlist and available binaries. A Metal/OpenCL build can add `--gpu` to
 exercise Hashsmith's GPU dictionary path; formats without a dictionary kernel
 fall back to Hashsmith's optimized CPU verifier and say so explicitly.
+
+**Startup cost is measured, not hidden.** At small `--candidates` counts a
+GPU tool's one-time device init and kernel compile can be most of its wall
+time — on this machine Hashcat pays a fixed ~1.8s per invocation regardless
+of candidate count, so a 200,000-candidate dictionary run mostly times that
+compile, not hashing speed. Rather than publish the raw ratio that produces
+(Hashsmith looked ~90x faster than Hashcat's own `-b` throughput at that
+size, which is not a real result), `--compare` measures each tool's own
+startup cost separately — by timing the identical command against a
+three-candidate wordlist that cannot contain the target — and reports it
+alongside the raw number:
+
+```
+  md5       hashsmith    0.028s (7.14 MH/s)*  john      0.404s (494.94 kH/s)*  hashcat   1.807s (110.67 kH/s)*
+    * this run's time is mostly one-time startup (device init / kernel compile), not
+      hashing speed — the rate above is not a fair speed comparison at this --candidates
+      size; see throughput_candidates_per_second in --json, or use a larger run.
+        hashsmith startup ~0.015s of 0.028s -> adjusted 15.45 MH/s
+        john      startup ~0.199s of 0.404s -> adjusted 974.12 kH/s
+        hashcat   startup ~1.779s of 1.807s -> not reliably measurable at this scale; use hashcat's native benchmark
+```
+
+When overhead is a large majority of the run, `median - overhead` is a
+difference of two close, individually noisy numbers, and no adjusted rate is
+printed for it — an earlier version of this subtraction floored the
+denominator instead and produced a precise-looking "5.5 MH/s" for Hashcat
+against its own true native GPU throughput (`hashcat -b`) of ~1,845 MH/s on
+the same machine, wrong by roughly 335x. A number that specific and that
+wrong is worse than none, so past that point `--compare` says the rate
+can't be estimated here and points at the tool's native benchmark instead
+of guessing. **This harness still cannot measure Hashcat's or a GPU's true
+peak throughput** even when a number is reported — every tool is capped by
+disk I/O reading the same wordlist file, and no `--candidates` size
+practical for a file-based dictionary run comes close to amortizing a
+modern GPU's real speed. For that, see the mask-attack table above, or run
+`hashcat -b` / `john --test` directly.
 
 ## Feasibility guard
 
@@ -1004,6 +1074,55 @@ hashsmith sessions clear           # delete all
 
 A finished run (found or keyspace exhausted) removes its own session file.
 
+## Use as a Go library
+
+Hashsmith is importable. Everything it does to a hash, a record or an encoded
+string is available to another Go program, so a scanner, a test harness or an
+incident-response script does not have to shell out and parse terminal output.
+
+```go
+import hashsmith "hashsmith-go"
+
+// Identify a record, then check a password against it.
+types := hashsmith.Identify(record)                       // ["bcrypt"]
+ok, err := hashsmith.Verify("hunter2", record, hashsmith.WithType("bcrypt"))
+
+// Produce a hash. bcrypt takes a work factor, not a salt: it draws its own.
+h, err := hashsmith.Hash("hunter2", hashsmith.WithType("bcrypt"), hashsmith.WithCost(12))
+
+// Run the verifier in parallel over candidates you supply. The FIRST
+// candidate in your order wins, not the first worker to finish.
+pw, found, err := hashsmith.Crack(record, wordlist, hashsmith.WithType("bcrypt"))
+
+// Any of the eighty codecs, in either direction.
+enc, err := hashsmith.Encode(plain, hashsmith.WithType("zstd"))
+dec, err := hashsmith.Decode(enc, hashsmith.WithType("zstd"), hashsmith.WithLimit(1<<20))
+
+// Or let it find the chain of them.
+for _, c := range hashsmith.Magic(payload, 3) {
+    fmt.Println(c.Codecs, c.Score, c.Value)   // ["hex" "base64"] 0.97 "..."
+}
+
+// Read the records out of a container.
+records, extractor, err := hashsmith.Extract("secrets.kdbx")
+```
+
+**Set `WithLimit` on anything untrusted.** A compressed stream is an
+instruction to allocate: a few hundred bytes of zstd will ask for 64 MiB, which
+is the default ceiling. Choose the one you are actually willing to hold.
+
+**What is deliberately not in the library:** sessions, the potfile, rule
+application, mask enumeration, progress reporting and GPU dispatch. Those own
+the process — they write to the terminal, they read and write files under the
+user's home directory, they install signal handlers — and a library has no
+business doing that to its caller. `Crack` is the verifier over candidates you
+supply, which is the part that belongs in one. For the rest, run the command.
+
+**Stability.** The implementation lives in `internal/smith` and is free to
+change. `hashsmith.go` is the promise; anything not named there is not part of
+it. The import path above is the module's current name — if you are vendoring
+this, rename the module in `go.mod` to the path you fetch it from.
+
 ## Commands
 
 - `encode`
@@ -1159,7 +1278,7 @@ hashsmith crack -w rockyou.txt '<any hash>'     # or just let detection decide
 **What the recognition rate actually means.** Run against Hashsmith's own
 502-vector self-test corpus, `identify` resolves 272/502 = 54.2% of vectors to
 a `certain` or `likely` candidate that names the vector's own type
-(`go test ./cmd/hashsmith -run TestRecognitionAccuracy -v`). That is not the
+(`go test ./internal/smith -run TestRecognitionAccuracy -v`). That is not the
 whole story in either direction. Most of the remaining 209 formats are not
 missed table entries — they are HMAC variants, same-length raw digests, and
 composite MD5/SHA constructions (`md5-md5`, `sha256-sha256pass-salt`, and

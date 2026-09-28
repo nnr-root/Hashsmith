@@ -11,6 +11,18 @@ _GO_BIN_DIR = Path.home() / ".hashsmith-go"      # compiled binary stored in use
 _GO_BIN = _GO_BIN_DIR / ("hashsmith.exe" if os.name == "nt" else "hashsmith")
 
 
+def _package_version() -> str:
+    """The installed distribution's version, or "dev" outside an install."""
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+    except ImportError:  # pragma: no cover - Python < 3.8
+        return "dev"
+    try:
+        return version("hashsmith-cli")
+    except PackageNotFoundError:
+        return "dev"
+
+
 def _go_sources_mtime() -> float:
     latest = 0.0
     for path in _GO_ROOT.rglob("*.go"):
@@ -33,8 +45,14 @@ def ensure_go_binary() -> Path:
         _GO_BIN_DIR.mkdir(parents=True, exist_ok=True)
         try:
             env = {**os.environ, "GOWORK": "off"}
+            # Stamp the distribution's own version into the binary, so a
+            # pip-installed hashsmith can answer --version with something
+            # better than "dev". Without this the built binary has no way to
+            # know which release it came from, because it is compiled on the
+            # user's machine from an sdist that carries no VCS metadata.
+            ldflags = f"-X main.version={_package_version()}"
             subprocess.run(
-                ["go", "build", "-o", str(_GO_BIN), "./cmd/hashsmith"],
+                ["go", "build", "-ldflags", ldflags, "-o", str(_GO_BIN), "./cmd/hashsmith"],
                 cwd=str(_GO_ROOT),
                 env=env,
                 check=True,

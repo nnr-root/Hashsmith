@@ -1,0 +1,607 @@
+# John the Ripper format-test conformance, one line per format.
+# Regenerate with `go test -run TestJohnFormatConformance -args -update-john-baseline`.
+descrypt	CRACKED
+bsdicrypt	CRACKED
+md5crypt $1$	CRACKED
+md5crypt $apr1$	CRACKED
+md5crypt	CRACKED
+md5crypt-long $1$	CRACKED
+md5crypt-long $apr1$	CRACKED
+md5crypt-long	CRACKED
+bcrypt $2a$	CRACKED
+bcrypt $2x$	CRACKED
+bcrypt $2b$	CRACKED
+scrypt $7$	CRACKED
+scrypt $9$	CRACKED
+scrypt $scryptkdf.pm$	CRACKED
+LM $lm$	CRACKED
+LM	CRACKED
+AFS $k4$	CRACKED
+tripcode	CRACKED
+AndroidBackup $ab$	CRACKED
+adxcrypt $adxcrypt$	CRACKED
+agilekeychain $agilekeychain$	CRACKED
+aix-ssha1	CRACKED
+aix-ssha256	CRACKED
+aix-ssha512	CRACKED
+andOTP $andotp$	CRACKED
+ansible $ansible$	CRACKED
+argon2 $argon2d$	CRACKED
+argon2 $argon2i$	CRACKED
+as400-des $as400des$	CRACKED
+as400-ssha1 $as400ssha1$	CRACKED
+as400-ssha1 $dynamic_1590$	CRACKED
+asa-md5 $dynamic_20$	CRACKED
+AxCrypt $axcrypt$	CRACKED
+AzureAD	CRACKED
+BestCrypt $bestcrypt$	CRACKED
+bfegg	CRACKED
+Bitcoin $bitcoin$	CRACKED
+BitLocker $bitlocker$	CRACKED
+bitshares $bitshares$	CRACKED
+Bitwarden $bitwarden$	CRACKED
+BKS $bks$	CRACKED
+Blackberry-ES10 $bbes10$	CRACKED
+WoWSRP	CRACKED
+WoWSRP $wowsrp$	CRACKED
+Blockchain $blockchain$	CRACKED
+chap $chap$	CRACKED
+Clipperz $clipperz$	CRACKED
+cloudkeychain $cloudkeychain$	CRACKED
+dynamic=md5($p)	CRACKED
+cq $cq$	CRACKED
+CRC32 $crc32$	CRACKED
+CRC32 $crc32c$	CRACKED
+sha1crypt $sha1$	CRACKED
+sha256crypt $5$	CRACKED
+sha512crypt $6$	CRACKED
+Citrix_NS10	CRACKED
+dahua $dahua$	CRACKED
+dashlane $dashlane$	CRACKED
+diskcryptor $diskcryptor$	CRACKED
+Django $django$	CRACKED
+django-scrypt	CRACKED
+dmd5 $digest-md5$	CRACKED
+dmg $dmg$	CRACKED
+dominosec	CRACKED
+dominosec8	CRACKED
+DPAPImk $dpapimk$	CRACKED
+dragonfly3-32 $3$	CRACKED
+dragonfly3-64 $3$	CRACKED
+dragonfly4-32 $4$	CRACKED
+dragonfly4-64 $4$	CRACKED
+Drupal7 $s$	CRACKED
+eCryptfs $ecryptfs$	CRACKED
+eigrp $eigrp$	CRACKED
+electrum $electrum$	CRACKED
+EncFS $encfs$	CRACKED
+enpass $enpass$	CRACKED
+EPI	CRACKED
+EPiServer $episerver$	CRACKED
+ethereum $ethereum$	CRACKED
+fde $fde$	CRACKED
+Fortigate256	CRACKED
+Fortigate	CRACKED
+FormSpring	CRACKED
+FormSpring $dynamic_61$	CRACKED
+FVDE $fvde$	CRACKED
+geli $geli$	CRACKED
+gost	CRACKED
+gost $gost$	CRACKED
+gost $gost-cp$	CRACKED
+gpg $gpg$	CRACKED
+HAVAL-128-4	CRACKED
+HAVAL-128-4 $haval$	CRACKED
+HAVAL-256-3	CRACKED
+HAVAL-256-3 $haval$	CRACKED
+hdaa $response$	CRACKED
+hMailServer	CRACKED
+hsrp $hsrp$	CRACKED
+IKE $ike$	CRACKED
+ipb2 $ipb2$	CRACKED
+itunes-backup $itunes_backup$	CRACKED
+iwork $iwork$	CRACKED
+KeePass $keepass$	CRACKED
+keychain $keychain$	CRACKED
+keyring $keyring$	CRACKED
+keystore $keystore$	CRACKED
+known_hosts $known_hosts$	CRACKED
+krb4 $af$	CRACKED
+krb5 $krb5$	CRACKED
+krb5asrep	CRACKED
+krb5asrep $krb5asrep$	CRACKED
+krb5pa-sha1 $krb5pa$	CRACKED
+krb5tgs $krb5tgs$	CRACKED
+krb5-17 $krb17$	CRACKED
+krb5-18	CRACKED
+krb5-18 $krb18$	CRACKED
+krb5-3 $krb3$	CRACKED
+kwallet $kwallet$	CRACKED
+lp $lp$	CRACKED
+lpcli $lpcli$	CRACKED
+leet	CRACKED
+lotus5	CRACKED
+lotus85	CRACKED
+LUKS $luks$	CRACKED
+MD2 $md2$	CRACKED
+MD2	CRACKED
+mdc2 $mdc2$	CRACKED
+mdc2	CRACKED
+MediaWiki $b$	CRACKED
+MediaWiki $dynamic_9$	CRACKED
+monero $monero$	CRACKED
+money $money$	CRACKED
+MongoDB $mongodb$	CRACKED
+scram $scram$	CRACKED
+Mozilla $mozilla$	CRACKED
+mscash	CRACKED
+mscash2	CRACKED
+mscash2 $dcc2$	CRACKED
+MSCHAPv2 $mschapv2$	CRACKED
+MSCHAPv2	CRACKED
+mschapv2-naive	CRACKED
+mschapv2-naive $mschapv2$	CRACKED
+krb5pa-md5 $krb5pa$	CRACKED
+krb5pa-md5 $mskrb5$	CRACKED
+mssql	CRACKED
+mssql05	CRACKED
+mssql12	CRACKED
+multibit $multibit$	CRACKED
+mysqlna $mysqlna$	CRACKED
+mysql-sha1	CRACKED
+mysql	CRACKED
+net-ah $net-ah$	CRACKED
+nethalflm	CRACKED
+nethalflm $nethalflm$	CRACKED
+netlm	CRACKED
+netlm $netlm$	CRACKED
+netlmv2	CRACKED
+netlmv2 $netlmv2$	CRACKED
+net-md5	CRACKED
+net-md5 $netmd5$	CRACKED
+netntlmv2	CRACKED
+netntlmv2 $netntlmv2$	CRACKED
+netntlm $netntlm$	CRACKED
+netntlm	CRACKED
+netntlm-naive	CRACKED
+netntlm-naive $netntlm$	CRACKED
+net-sha1 $netsha1$	CRACKED
+nk $nk$	CRACKED
+notes $asn$	CRACKED
+md5ns	CRACKED
+nsec3 $nsec3$	CRACKED
+NT	CRACKED
+NT $nt$	CRACKED
+o10glogon $o10glogon$	CRACKED
+o3logon $o3logon$	CRACKED
+o5logon $o5logon$	CRACKED
+ODF $odf$	CRACKED
+ODF $sxc$	CRACKED
+Office $office$	CRACKED
+oldoffice $oldoffice$	CRACKED
+oldoffice	CRACKED
+OpenBSD-SoftRAID $openbsd-softraid$	CRACKED
+openssl-enc $openssl$	CRACKED
+oracle	CRACKED
+oracle11	CRACKED
+Oracle12C $oracle12c$	CRACKED
+osc $osc$	CRACKED
+osc $dynamic_4$	CRACKED
+ospf $ospf$	CRACKED
+Padlock $padlock$	CRACKED
+Palshop $palshop$	CRACKED
+Palshop	CRACKED
+Panama	CRACKED
+Panama $panama$	CRACKED
+PBKDF2-HMAC-MD4 $pbkdf2-hmac-md4$	CRACKED
+PBKDF2-HMAC-MD5 $pbkdf2-hmac-md5$	CRACKED
+PBKDF2-HMAC-SHA1 $pbkdf2-hmac-sha1$	CRACKED
+PBKDF2-HMAC-SHA1	CRACKED
+PBKDF2-HMAC-SHA1 $p5k2$	CRACKED
+PBKDF2-HMAC-SHA256 $pbkdf2-sha256$	CRACKED
+PBKDF2-HMAC-SHA256 $8$	CRACKED
+PBKDF2-HMAC-SHA512 $pbkdf2-hmac-sha512$	CRACKED
+PBKDF2-HMAC-SHA512	CRACKED
+PBKDF2-HMAC-SHA512 $ml$	CRACKED
+PDF $pdf$	CRACKED
+PEM $pem$	CRACKED
+pfx $pfxng$	CRACKED
+pgpdisk $pgpdisk$	CRACKED
+pgpsda $pgpsda$	CRACKED
+pgpwde $pgpwde$	CRACKED
+phpass $p$	CRACKED
+phpass $h$	CRACKED
+PHPS $phps$	CRACKED
+PHPS $dynamic_6$	CRACKED
+PHPS2 $phps$	CRACKED
+pix-md5	CRACKED
+pix-md5 $dynamic_19$	CRACKED
+PKZIP $pkzip$	CRACKED
+PKZIP $pkzip2$	CRACKED
+po	CRACKED
+postgres $postgres$	CRACKED
+postgres $postgre$	CRACKED
+PST $pst$	CRACKED
+PuTTY $putty$	CRACKED
+pwsafe $pwsafe$	CRACKED
+qnx	CRACKED
+RACF $racf$	CRACKED
+RACF-KDFAES $racf$	CRACKED
+radius $radius$	CRACKED
+RAdmin $radmin2$	CRACKED
+RAKP $rakp$	CRACKED
+rar $rar3$	CRACKED
+RAR5 $rar5$	CRACKED
+Raw-SHA512	CRACKED
+Raw-SHA512 $sha512$	CRACKED
+Raw-Blake2	CRACKED
+Raw-Blake2 $blake2$	CRACKED
+Raw-Keccak	CRACKED
+Raw-Keccak $keccak$	CRACKED
+Raw-Keccak-256	CRACKED
+Raw-Keccak-256 $keccak256$	CRACKED
+Raw-MD4	CRACKED
+Raw-MD4 $md4$	CRACKED
+Raw-MD5	CRACKED
+Raw-MD5 $dynamic_0$	CRACKED
+Raw-MD5u	CRACKED
+Raw-MD5u $dynamic_29$	CRACKED
+Raw-SHA1	CRACKED
+Raw-SHA1 $dynamic_26$	CRACKED
+Raw-SHA1-AxCrypt	CRACKED
+Raw-SHA1-Linkedin	CRACKED
+Raw-SHA1-Linkedin $dynamic_26$	CRACKED
+Raw-SHA224	CRACKED
+Raw-SHA224 $sha224$	CRACKED
+Raw-SHA256	CRACKED
+Raw-SHA256 $sha256$	CRACKED
+Raw-SHA256 $cisco4$	CRACKED
+Raw-SHA3	CRACKED
+Raw-SHA384	CRACKED
+Raw-SHA384 $sha384$	CRACKED
+ripemd-128	CRACKED
+ripemd-128 $ripemd$	CRACKED
+ripemd-160	CRACKED
+ripemd-160 $ripemd$	CRACKED
+rsvp $rsvp$	CRACKED
+Siemens-S7 $siemens-s7$	CRACKED
+Salted-SHA1	CRACKED
+SSHA512	CRACKED
+sapb	CRACKED
+sapg	CRACKED
+saph	CRACKED
+sappse $pse$	CRACKED
+securezip $zip3$	CRACKED
+7z $7z$	CRACKED
+Signal $signal$	CRACKED
+SIP $sip$	CRACKED
+skein-256	CRACKED
+skein-256 $skein$	CRACKED
+skein-512 $skein$	CRACKED
+skey	CRACKED
+SL3 $sl3$	CRACKED
+SL3	CRACKED
+Snefru-128	CRACKED
+Snefru-128 $snefru$	CRACKED
+Snefru-256 $snefru$	CRACKED
+Snefru-256	CRACKED
+LastPass $lastpass$	CRACKED
+SNMP $snmpv3$	CRACKED
+solarwinds $solarwinds$	CRACKED
+SSH $sshng$	CRACKED
+sspr $sspr$	CRACKED
+STRIP $strip$	CRACKED
+SunMD5 $md5$	CRACKED
+SybaseASE	CRACKED
+Sybase-PROP	CRACKED
+tacacs-plus $tacacs-plus$	CRACKED
+tcp-md5 $tcpmd5$	CRACKED
+telegram $telegram$	CRACKED
+tezos $tezos$	CRACKED
+Tiger	CRACKED
+Tiger $tiger$	CRACKED
+tc_aes_xts	CRACKED
+tc_ripemd160	CRACKED
+tc_ripemd160boot	CRACKED
+tc_sha512	CRACKED
+tc_whirlpool	CRACKED
+vdi $vdi$	CRACKED
+OpenVMS $v$	CRACKED
+vmx $vmx$	CRACKED
+VNC $vnc$	CRACKED
+vtp $vtp$	CRACKED
+wbb3 $wbb3$	CRACKED
+whirlpool	CRACKED
+whirlpool $whirlpool$	CRACKED
+whirlpool0	CRACKED
+whirlpool0 $whirlpool$	CRACKED
+whirlpool1	CRACKED
+whirlpool1 $whirlpool$	CRACKED
+wpapsk $wpapsk$	CRACKED
+wpapsk	CRACKED
+wpapsk-pmk $wpapsk$	CRACKED
+wpapsk-pmk	CRACKED
+xmpp-scram $xmpp-scram$	CRACKED
+xsha	CRACKED
+xsha512	CRACKED
+xsha512 $lion$	CRACKED
+ZIP $zip2$	CRACKED
+ZipMonster $zipmonster$	CRACKED
+ZipMonster	NOT-FOUND
+plaintext $0$	CRACKED
+has-160	CRACKED
+HMAC-MD5	CRACKED
+HMAC-MD5 $cram_md5$	CRACKED
+HMAC-SHA1	CRACKED
+HMAC-SHA224	CRACKED
+HMAC-SHA256	CRACKED
+HMAC-SHA384	CRACKED
+HMAC-SHA512	CRACKED
+sha1crypt-opencl $sha1$	CRACKED
+KeePass-opencl $keepass$	CRACKED
+oldoffice-opencl $oldoffice$	CRACKED
+oldoffice-opencl	CRACKED
+PBKDF2-HMAC-MD4-opencl $pbkdf2-hmac-md4$	CRACKED
+PBKDF2-HMAC-MD5-opencl $pbkdf2-hmac-md5$	CRACKED
+PBKDF2-HMAC-SHA1-opencl $pbkdf2-hmac-sha1$	CRACKED
+PBKDF2-HMAC-SHA1-opencl	CRACKED
+PBKDF2-HMAC-SHA1-opencl $p5k2$	CRACKED
+rar-opencl $rar3$	CRACKED
+RAR5-opencl $rar5$	CRACKED
+TrueCrypt-opencl	CRACKED
+lotus5-opencl	CRACKED
+AndroidBackup-opencl $ab$	CRACKED
+agilekeychain-opencl $agilekeychain$	CRACKED
+ansible-opencl $ansible$	CRACKED
+axcrypt-opencl $axcrypt$	CRACKED
+axcrypt2-opencl $axcrypt$	CRACKED
+bcrypt-opencl $2a$	CRACKED
+bcrypt-opencl $2x$	CRACKED
+bcrypt-opencl $2b$	CRACKED
+BitLocker-opencl $bitlocker$	CRACKED
+bitwarden-opencl $bitwarden$	CRACKED
+blockchain-opencl $blockchain$	CRACKED
+cloudkeychain-opencl $cloudkeychain$	CRACKED
+md5crypt-opencl $1$	CRACKED
+md5crypt-opencl $apr1$	CRACKED
+sha256crypt-opencl $5$	CRACKED
+sha512crypt-opencl $6$	CRACKED
+dashlane-opencl $dashlane$	CRACKED
+descrypt-opencl	CRACKED
+diskcryptor-opencl $diskcryptor$	CRACKED
+diskcryptor-aes-opencl $diskcryptor$	CRACKED
+dmg-opencl $dmg$	CRACKED
+electrum-modern-opencl $electrum$	CRACKED
+EncFS-opencl $encfs$	CRACKED
+enpass-opencl $enpass$	CRACKED
+ethereum-opencl $ethereum$	CRACKED
+ethereum-presale-opencl $ethereum$	CRACKED
+FVDE-opencl $fvde$	CRACKED
+geli-opencl $geli$	CRACKED
+gpg-opencl $gpg$	CRACKED
+iwork-opencl $iwork$	CRACKED
+keychain-opencl $keychain$	CRACKED
+keyring-opencl $keyring$	CRACKED
+keystore-opencl $keystore$	CRACKED
+krb5pa-md5-opencl $krb5pa$	CRACKED
+krb5pa-md5-opencl $mskrb5$	CRACKED
+krb5pa-sha1-opencl $krb5pa$	CRACKED
+krb5asrep-aes-opencl $krb5asrep$	CRACKED
+lp-opencl $lp$	CRACKED
+lpcli-opencl $lpcli$	CRACKED
+LM-opencl $lm$	CRACKED
+LM-opencl	CRACKED
+mscash-opencl	CRACKED
+mscash2-opencl	CRACKED
+mscash2-opencl $dcc2$	CRACKED
+mysql-sha1-opencl	CRACKED
+notes-opencl $asn$	CRACKED
+NT-opencl	CRACKED
+NT-opencl $nt$	CRACKED
+ntlmv2-opencl	CRACKED
+ntlmv2-opencl $netntlmv2$	CRACKED
+o5logon-opencl $o5logon$	CRACKED
+ODF-opencl $odf$	CRACKED
+ODF-opencl $sxc$	CRACKED
+office-opencl $office$	CRACKED
+OpenBSD-SoftRAID-opencl $openbsd-softraid$	CRACKED
+PBKDF2-HMAC-SHA256-opencl $pbkdf2-sha256$	CRACKED
+PBKDF2-HMAC-SHA256-opencl $8$	CRACKED
+PBKDF2-HMAC-SHA512-opencl $pbkdf2-hmac-sha512$	CRACKED
+PBKDF2-HMAC-SHA512-opencl	CRACKED
+PBKDF2-HMAC-SHA512-opencl $ml$	CRACKED
+pem-opencl $pem$	CRACKED
+pfx-opencl $pfxng$	CRACKED
+pgpdisk-opencl $pgpdisk$	CRACKED
+pgpsda-opencl $pgpsda$	CRACKED
+pgpwde-opencl $pgpwde$	CRACKED
+PHPass-opencl $p$	CRACKED
+PHPass-opencl $h$	CRACKED
+pwsafe-opencl $pwsafe$	CRACKED
+RAKP-opencl $rakp$	CRACKED
+raw-MD4-opencl	CRACKED
+raw-MD4-opencl $md4$	CRACKED
+raw-MD5-opencl	CRACKED
+raw-MD5-opencl $dynamic_0$	CRACKED
+raw-SHA1-opencl	CRACKED
+raw-SHA1-opencl $dynamic_26$	CRACKED
+raw-SHA256-opencl	CRACKED
+raw-SHA256-opencl $sha256$	CRACKED
+raw-SHA256-opencl $cisco4$	CRACKED
+raw-SHA512-free-opencl	CRACKED
+raw-SHA512-free-opencl $sha512$	CRACKED
+raw-SHA512-opencl	CRACKED
+raw-SHA512-opencl $sha512$	CRACKED
+salted-SHA1-opencl	CRACKED
+sappse-opencl $pse$	CRACKED
+7z-opencl $7z$	CRACKED
+SL3-opencl $sl3$	CRACKED
+SL3-opencl	CRACKED
+solarwinds-opencl $solarwinds$	CRACKED
+ssh-opencl $sshng$	CRACKED
+sspr-opencl $sspr$	CRACKED
+strip-opencl $strip$	CRACKED
+telegram-opencl $telegram$	CRACKED
+tezos-opencl $tezos$	CRACKED
+vmx-opencl $vmx$	CRACKED
+wpapsk-opencl $wpapsk$	CRACKED
+wpapsk-opencl	CRACKED
+wpapsk-pmk-opencl $wpapsk$	CRACKED
+wpapsk-pmk-opencl	CRACKED
+XSHA512-free-opencl	CRACKED
+XSHA512-free-opencl $lion$	CRACKED
+XSHA512-opencl	CRACKED
+XSHA512-opencl $lion$	CRACKED
+ZIP-opencl $zip2$	CRACKED
+dynamic_0 $dynamic_0$	CRACKED
+dynamic_1 $dynamic_1$	CRACKED
+dynamic_2 $dynamic_2$	CRACKED
+dynamic_3 $dynamic_3$	CRACKED
+dynamic_4 $dynamic_4$	CRACKED
+dynamic_5 $dynamic_5$	CRACKED
+dynamic_6 $dynamic_6$	CRACKED
+dynamic_8 $dynamic_8$	CRACKED
+dynamic_9 $dynamic_9$	CRACKED
+dynamic_10 $dynamic_10$	CRACKED
+dynamic_11 $dynamic_11$	CRACKED
+dynamic_12 $dynamic_12$	CRACKED
+dynamic_13 $dynamic_13$	CRACKED
+dynamic_14 $dynamic_14$	CRACKED
+dynamic_15 $dynamic_15$	CRACKED
+dynamic_15	CRACKED
+dynamic_16 $dynamic_16$	CRACKED
+dynamic_18 $dynamic_18$	CRACKED
+dynamic_19 $dynamic_19$	CRACKED
+dynamic_20 $dynamic_20$	CRACKED
+dynamic_22 $dynamic_22$	CRACKED
+dynamic_23 $dynamic_23$	CRACKED
+dynamic_24 $dynamic_24$	CRACKED
+dynamic_25 $dynamic_25$	CRACKED
+dynamic_26 $dynamic_26$	CRACKED
+dynamic_29 $dynamic_29$	CRACKED
+dynamic_30 $dynamic_30$	CRACKED
+dynamic_31 $dynamic_31$	CRACKED
+dynamic_32 $dynamic_32$	CRACKED
+dynamic_33 $dynamic_33$	CRACKED
+dynamic_34 $dynamic_34$	CRACKED
+dynamic_35 $dynamic_35$	CRACKED
+dynamic_35	CRACKED
+dynamic_36 $dynamic_36$	CRACKED
+dynamic_36	CRACKED
+dynamic_37 $dynamic_37$	CRACKED
+dynamic_37	CRACKED
+dynamic_38 $dynamic_38$	CRACKED
+dynamic_39 $dynamic_39$	CRACKED
+dynamic_40 $dynamic_40$	CRACKED
+dynamic_50 $dynamic_50$	CRACKED
+dynamic_60 $dynamic_60$	CRACKED
+dynamic_61 $dynamic_61$	CRACKED
+dynamic_70 $dynamic_70$	CRACKED
+dynamic_80 $dynamic_80$	CRACKED
+dynamic_90 $dynamic_90$	CRACKED
+dynamic_100 $dynamic_100$	CRACKED
+dynamic_110 $dynamic_110$	CRACKED
+dynamic_120 $dynamic_120$	CRACKED
+dynamic_130 $dynamic_130$	CRACKED
+dynamic_140 $dynamic_140$	CRACKED
+dynamic_150 $dynamic_150$	CRACKED
+dynamic_160 $dynamic_160$	CRACKED
+dynamic_170 $dynamic_170$	CRACKED
+dynamic_180 $dynamic_180$	CRACKED
+dynamic_190 $dynamic_190$	CRACKED
+dynamic_200 $dynamic_200$	CRACKED
+dynamic_210 $dynamic_210$	CRACKED
+dynamic_220 $dynamic_220$	CRACKED
+dynamic_230 $dynamic_230$	CRACKED
+dynamic_240 $dynamic_240$	CRACKED
+dynamic_250 $dynamic_250$	CRACKED
+dynamic_260 $dynamic_260$	CRACKED
+dynamic_270 $dynamic_270$	CRACKED
+dynamic_280 $dynamic_280$	CRACKED
+dynamic_290 $dynamic_290$	CRACKED
+dynamic_300 $dynamic_300$	CRACKED
+dynamic_310 $dynamic_310$	CRACKED
+dynamic_320 $dynamic_320$	CRACKED
+dynamic_330 $dynamic_330$	CRACKED
+dynamic_340 $dynamic_340$	CRACKED
+dynamic_350 $dynamic_350$	CRACKED
+dynamic_360 $dynamic_360$	CRACKED
+dynamic_370 $dynamic_370$	CRACKED
+dynamic_380 $dynamic_380$	CRACKED
+dynamic_390 $dynamic_390$	CRACKED
+dynamic_400 $dynamic_400$	CRACKED
+dynamic_410 $dynamic_410$	CRACKED
+dynamic_420 $dynamic_420$	CRACKED
+dynamic_1001 $dynamic_1001$	CRACKED
+dynamic_1002 $dynamic_1002$	CRACKED
+dynamic_1003 $dynamic_1003$	CRACKED
+dynamic_1004 $dynamic_1004$	CRACKED
+dynamic_1005 $dynamic_1005$	CRACKED
+dynamic_1006 $dynamic_1006$	CRACKED
+dynamic_1007 $dynamic_1007$	CRACKED
+dynamic_1008 $dynamic_1008$	CRACKED
+dynamic_1009 $dynamic_1009$	CRACKED
+dynamic_1010 $dynamic_1010$	CRACKED
+dynamic_1011 $dynamic_1011$	CRACKED
+dynamic_1012 $dynamic_1012$	CRACKED
+dynamic_1013 $dynamic_1013$	CRACKED
+dynamic_1014 $dynamic_1014$	CRACKED
+dynamic_1015	CRACKED
+dynamic_1015 $dynamic_1015$	CRACKED
+dynamic_1016 $dynamic_1016$	CRACKED
+dynamic_1017 $dynamic_1017$	CRACKED
+dynamic_1018 $dynamic_1018$	CRACKED
+dynamic_1019 $dynamic_1019$	CRACKED
+dynamic_1020 $dynamic_1020$	CRACKED
+dynamic_1021 $dynamic_1021$	CRACKED
+dynamic_1022 $dynamic_1022$	CRACKED
+dynamic_1023 $dynamic_1023$	CRACKED
+dynamic_1024 $dynamic_1024$	CRACKED
+dynamic_1025 $dynamic_1025$	CRACKED
+dynamic_1026 $dynamic_1026$	CRACKED
+dynamic_1027 $dynamic_1027$	CRACKED
+dynamic_1028 $dynamic_1028$	CRACKED
+dynamic_1029 $dynamic_1029$	CRACKED
+dynamic_1030 $dynamic_1030$	CRACKED
+dynamic_1031 $dynamic_1031$	CRACKED
+dynamic_1032 $dynamic_1032$	CRACKED
+dynamic_1034	CRACKED
+dynamic_1300 $dynamic_1300$	CRACKED
+dynamic_1350 $dynamic_1350$	CRACKED
+dynamic_1400 $dynamic_1400$	CRACKED
+dynamic_1401	CRACKED
+dynamic_1401 $dynamic_1401$	CRACKED
+dynamic_1501 $dynamic_1501$	CRACKED
+dynamic_1502 $dynamic_1502$	CRACKED
+dynamic_1503 $dynamic_1503$	CRACKED
+dynamic_1504 $dynamic_1504$	CRACKED
+dynamic_1505 $dynamic_1505$	CRACKED
+dynamic_1506	CRACKED
+dynamic_1507 $dynamic_1507$	CRACKED
+dynamic_1518 $dynamic_1518$	CRACKED
+dynamic_1528 $dynamic_1528$	CRACKED
+dynamic_1529 $dynamic_1529$	CRACKED
+dynamic_1550 $dynamic_1550$	CRACKED
+dynamic_1551 $dynamic_1551$	CRACKED
+dynamic_1552 $dynamic_1552$	CRACKED
+dynamic_1560 $dynamic_1560$	CRACKED
+dynamic_1588 $dynamic_1588$	CRACKED
+dynamic_1590 $dynamic_1590$	CRACKED
+dynamic_1592 $dynamic_1592$	CRACKED
+dynamic_1600 $dynamic_1600$	CRACKED
+dynamic_1602	CRACKED
+dynamic_1608 $dynamic_1608$	CRACKED
+dynamic_2000 $dynamic_2000$	CRACKED
+dynamic_2001 $dynamic_2001$	CRACKED
+dynamic_2002 $dynamic_2002$	CRACKED
+dynamic_2003 $dynamic_2003$	CRACKED
+dynamic_2004 $dynamic_2004$	CRACKED
+dynamic_2005 $dynamic_2005$	CRACKED
+dynamic_2006 $dynamic_2006$	CRACKED
+dynamic_2008 $dynamic_2008$	CRACKED
+dynamic_2009 $dynamic_2009$	CRACKED
+dynamic_2010 $dynamic_2010$	CRACKED
+dynamic_2011 $dynamic_2011$	CRACKED
+dynamic_2014 $dynamic_2014$	CRACKED
+dummy $dummy$	CRACKED
+crypt	CRACKED

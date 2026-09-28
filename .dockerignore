@@ -1,0 +1,11 @@
+.git
+.venv
+.claude
+.superpowers
+dist
+build
+graphify-out
+node_modules
+*.egg-info
+# The 3.4 MB hashcat conformance corpus is test-only.
+hashsmith/go_hashsmith/cmd/hashsmith/testdata
