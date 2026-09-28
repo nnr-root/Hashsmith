@@ -109,7 +109,7 @@ const identifySchemaVersion = "hashsmith.identify/1"
 // every unknown format as MD5. John is *string for the identical reason:
 // "" is not a real John label, but a plain string cannot say so. Measured
 // coverage (same crackable-format count `identify --coverage` reports) is
-// 450/623 formats with a mode and 177/623 with a label, so an absent value
+// 450/623 formats with a mode and 193/623 with a label, so an absent value
 // is the normal case here, not a rare edge — re-check with `identify
 // --coverage` before trusting these numbers again; they drift as the
 // registry and hash_john_labels.go grow.
