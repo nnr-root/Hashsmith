@@ -55,12 +55,20 @@ func runIdentify(args []string) error {
 	asJSON := fs.Bool("json", false, "emit machine-readable JSON (schema hashsmith.identify/1)")
 	explain := fs.Bool("explain", false, "decode the leading candidate's internal fields (Kerberos etype, JWT alg, PEM key type, ...)")
 	coverage := fs.Bool("coverage", false, "report container-sniffer and John-label coverage, then exit")
+	hint := fs.String("hint", "", "comma-separated provenance hints to bias ranking (shadow, windows, mysql, wpa, ...) — reorders within a confidence band, never promotes one; see --hint-tags")
+	hintTagsFlag := fs.Bool("hint-tags", false, "list every known --hint tag and the types it favors, then exit")
 	summary := fs.Bool("summary", false, "batch mode: scan a dump and print a per-type summary instead of a per-line report")
 	splitDir := fs.String("split-by-type", "", "batch mode: write one file per detected type into this directory, named for its -t type")
 	unmatchedFile := fs.String("unmatched", "", "batch mode: write unidentified lines, one per line, to this file")
 	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
+
+	if *hintTagsFlag {
+		printHintTags()
+		return nil
+	}
+	hints := parseHintFlag(*hint)
 
 	if *coverage {
 		withSniff, totalExtractors := sniffCoverage()
@@ -130,7 +138,7 @@ func runIdentify(args []string) error {
 	}
 
 	if *asJSON {
-		return runIdentifyJSON(inputs, *outFile, *copyRes)
+		return runIdentifyJSON(inputs, hints, *outFile, *copyRes)
 	}
 
 	// Identify every input; when more than one is given (a multi-line file)
@@ -139,6 +147,7 @@ func runIdentify(args []string) error {
 	// likely candidate — identifyExitError(1) is returned when it does not,
 	// so `identify` can participate in a shell chain the way `crack` does.
 	var sb strings.Builder
+	var hintWarnings []string
 	confident := true
 	for i, in := range inputs {
 		if len(inputs) > 1 {
@@ -148,6 +157,8 @@ func runIdentify(args []string) error {
 			fmt.Fprintf(&sb, "── %s\n", in)
 		}
 		cs := identifyCandidates(in)
+		cs, warns := hintReorder(cs, hints)
+		hintWarnings = append(hintWarnings, warns...)
 		trimmed := strings.TrimSpace(in)
 		sb.WriteString(renderIdentifyHuman(trimmed, cs))
 		if *explain {
@@ -183,6 +194,7 @@ func runIdentify(args []string) error {
 		}
 	}
 	result := strings.TrimRight(sb.String(), "\n")
+	printHintWarnings(hintWarnings)
 
 	if *outFile == "" && !*copyRes {
 		color.New(themeAttr).Fprintln(os.Stdout, result)
@@ -200,11 +212,14 @@ func runIdentify(args []string) error {
 // output stays valid JSON for a script to parse. It shares identifyExitError
 // with the human path so `identify --json` and `identify` give a caller the
 // same 0/1 contract regardless of which rendering it asked for.
-func runIdentifyJSON(inputs []string, outFile string, copyRes bool) error {
+func runIdentifyJSON(inputs []string, hints []string, outFile string, copyRes bool) error {
 	var sb strings.Builder
+	var hintWarnings []string
 	confident := true
 	for i, in := range inputs {
 		cs := identifyCandidates(in)
+		cs, warns := hintReorder(cs, hints)
+		hintWarnings = append(hintWarnings, warns...)
 		rep := buildIdentifyReport(strings.TrimSpace(in), cs)
 		blob, err := json.MarshalIndent(rep, "", "  ")
 		if err != nil {
@@ -220,6 +235,7 @@ func runIdentifyJSON(inputs []string, outFile string, copyRes bool) error {
 		}
 	}
 	result := strings.TrimRight(sb.String(), "\n")
+	printHintWarnings(hintWarnings)
 
 	if outFile == "" && !copyRes {
 		fmt.Fprintln(os.Stdout, result)

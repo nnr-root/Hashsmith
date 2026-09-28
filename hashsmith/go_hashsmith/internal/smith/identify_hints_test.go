@@ -1,0 +1,142 @@
+package smith
+
+import (
+	"reflect"
+	"testing"
+
+	"hashsmith-go/internal/hashid"
+)
+
+// TestHintTagsNameRealFormats mirrors TestJohnLabelSeedNamesRealFormats: it
+// proves every type hintTags names actually exists in universalHashRegistry.
+// It says nothing about whether a mapping is complete or correct — that is a
+// claim about the world, not about this registry, and has to be checked by
+// hand the way hash_john_labels.go's own header asks for its labels.
+func TestHintTagsNameRealFormats(t *testing.T) {
+	for tag, types := range hintTags {
+		for _, typ := range types {
+			if _, ok := universalHashRegistry.formats[typ]; !ok {
+				t.Errorf("hintTags[%q] names unknown format %q", tag, typ)
+			}
+		}
+	}
+}
+
+func TestParseHintFlag(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{"  ", nil},
+		{"windows", []string{"windows"}},
+		{"Windows, MySQL , windows", []string{"windows", "mysql"}},
+	}
+	for _, c := range cases {
+		got := parseHintFlag(c.in)
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("parseHintFlag(%q) = %#v, want %#v", c.in, got, c.want)
+		}
+	}
+}
+
+// TestHintReorderNeverPromotesConfidence is the core guarantee: a hint is
+// user-supplied provenance, not structural evidence, so it may reorder
+// candidates within a confidence band but must never move one from a weaker
+// band to a stronger one (that would assert proof the detection engine did
+// not produce).
+func TestHintReorderNeverPromotesConfidence(t *testing.T) {
+	cs := []hashid.Candidate{
+		{Type: "md5", Confidence: hashid.Likely},
+		{Type: "ntlm", Confidence: hashid.Likely},
+		{Type: "md4", Confidence: hashid.Possible},
+		{Type: "lm", Confidence: hashid.Unlikely},
+	}
+	before := map[hashid.Confidence]int{}
+	for _, c := range cs {
+		before[c.Confidence]++
+	}
+
+	out, _ := hintReorder(cs, []string{"windows"})
+
+	after := map[hashid.Confidence]int{}
+	for _, c := range out {
+		after[c.Confidence]++
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("hint changed the confidence-band population: before %v, after %v", before, after)
+	}
+
+	// "windows" -> ntlm, lm. Within the Likely band, ntlm (hint-matched)
+	// must now lead md5 (not hint-matched); lm cannot move out of Unlikely
+	// to sit ahead of md5/ntlm even though it is also hint-matched.
+	if out[0].Type != "ntlm" {
+		t.Errorf("expected ntlm first within the Likely band, got %q", out[0].Type)
+	}
+	if out[len(out)-1].Type != "lm" {
+		t.Errorf("expected lm to stay in its own (Unlikely) band, got it at %v", out)
+	}
+}
+
+func TestHintReorderNoHintsIsNoOp(t *testing.T) {
+	cs := []hashid.Candidate{
+		{Type: "md5", Confidence: hashid.Likely},
+		{Type: "ntlm", Confidence: hashid.Likely},
+	}
+	out, warns := hintReorder(cs, nil)
+	if !reflect.DeepEqual(out, cs) {
+		t.Errorf("nil hints reordered candidates: %v", out)
+	}
+	if warns != nil {
+		t.Errorf("nil hints produced warnings: %v", warns)
+	}
+}
+
+func TestHintReorderUnknownTagWarns(t *testing.T) {
+	cs := []hashid.Candidate{{Type: "md5", Confidence: hashid.Likely}}
+	_, warns := hintReorder(cs, []string{"not-a-real-tag"})
+	if len(warns) != 1 {
+		t.Fatalf("expected one warning for an unknown tag, got %v", warns)
+	}
+}
+
+func TestHintReorderNoMatchWarns(t *testing.T) {
+	cs := []hashid.Candidate{{Type: "md5", Confidence: hashid.Likely}}
+	// "wpa" only ever matches wpa/wpa-pmk/wpa-hccapx-pmk, none of which is md5.
+	_, warns := hintReorder(cs, []string{"wpa"})
+	if len(warns) != 1 {
+		t.Fatalf("expected one warning for a hint matching no candidate, got %v", warns)
+	}
+}
+
+// TestHintReorderIntegration exercises the real detection engine end to end:
+// a bare 32-char hex string is genuinely ambiguous between MD5 and NTLM, and
+// --hint windows must move NTLM to the front without changing its confidence
+// word.
+func TestHintReorderIntegration(t *testing.T) {
+	cs := identifyCandidates("5f4dcc3b5aa765d61d8327deb882cf99")
+	unhinted, _ := hintReorder(cs, nil)
+	if unhinted[0].Type != "md5" {
+		t.Fatalf("test assumption broken: expected md5 to lead unhinted, got %q", unhinted[0].Type)
+	}
+
+	hinted, warns := hintReorder(cs, []string{"windows"})
+	if len(warns) != 0 {
+		t.Fatalf("unexpected warnings: %v", warns)
+	}
+	if hinted[0].Type != "ntlm" {
+		t.Fatalf("expected ntlm to lead after --hint windows, got %q", hinted[0].Type)
+	}
+	if hinted[0].Confidence != unhintedConfidenceFor(unhinted, "ntlm") {
+		t.Fatalf("--hint windows changed ntlm's confidence")
+	}
+}
+
+func unhintedConfidenceFor(cs []hashid.Candidate, typ string) hashid.Confidence {
+	for _, c := range cs {
+		if c.Type == typ {
+			return c.Confidence
+		}
+	}
+	return hashid.Unlikely
+}
