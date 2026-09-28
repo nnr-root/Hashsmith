@@ -44,6 +44,7 @@ var hintTags = map[string][]string{
 
 	"cisco":   {"cisco-pix", "cisco-asa", "cisco4", "cisco-ise"},
 	"juniper": {"juniper", "juniper-ive"},
+	"aruba":   {"arubaos"},
 
 	"wifi": {"wpa", "wpa-pmk", "wpa-hccapx-pmk"},
 	"wpa":  {"wpa", "wpa-pmk", "wpa-hccapx-pmk"},
@@ -65,7 +66,46 @@ var hintTags = map[string][]string{
 	"office":  {"office"},
 	"pdf":     {"pdf"},
 
-	"disk": {"luks", "truecrypt", "veracrypt", "dmg"},
+	"disk":        {"luks", "truecrypt", "veracrypt", "dmg", "bitlocker", "ecryptfs"},
+	"bitlocker":   {"bitlocker"},
+	"diskcryptor": {"diskcryptor-xts512", "diskcryptor-xts1024", "diskcryptor-xts1536"},
+	"ecryptfs":    {"ecryptfs"},
+
+	"ike":   {"ike"},
+	"ipsec": {"ike"},
+	"vpn":   {"ike"},
+
+	"snmp":    {"snmpv3"},
+	"tacacs":  {"tacacs-plus"},
+	"radius":  {"radius"},
+	"routing": {"hsrp", "vtp", "eigrp", "ospf"},
+
+	"aix":       {"aix"},
+	"as400":     {"as400-ssha1", "as400-des"},
+	"ibmi":      {"as400-ssha1", "as400-des"},
+	"mainframe": {"racf", "racf-kdfaes"},
+	"zos":       {"racf", "racf-kdfaes"},
+
+	"sap": {
+		"sap-b", "sap-fg", "sap-b-rfc-read-table", "sap-fg-rfc-read-table",
+		"sap-issha512", "sap-issha1", "sap-issha256", "sap-issha384", "sappse",
+	},
+
+	"keychain": {
+		"keepass", "keepass-keyfile", "bitwarden", "1password", "1password-cloud",
+		"1password8", "lastpass", "lastpass-lp", "lastpass-cli", "dashlane", "pwsafe",
+	},
+
+	"ssh":      {"ssh"},
+	"telegram": {"telegram-passcode", "telegram-desktop"},
+	"signal":   {"signal"},
+	"chap":     {"chap"},
+	"iscsi":    {"chap"},
+
+	"peoplesoft": {"peoplesoft", "peoplesoft-token"},
+	"fortigate":  {"fortigate", "fortigate256"},
+	"fortinet":   {"fortigate", "fortigate256"},
+	"redmine":    {"redmine"},
 }
 
 // parseHintFlag splits --hint's comma-separated value into lower-cased,
