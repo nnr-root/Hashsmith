@@ -1247,19 +1247,19 @@ self-contained binary that tries to make the common path short.
 
 | | Hashsmith | Hashcat | John the Ripper (jumbo) |
 |---|---|---|---|
-| Universal hash/code formats | 457 | 450+ native hash types | hundreds of native formats |
+| Universal hash/code formats | 623 | 450+ native hash types | hundreds of native formats |
 | Hash-type auto-detection | yes, by default — `identify` and `crack` run on one shared detection engine, so every candidate carries a Hashcat `-m` mode and a John label, not just a yes/no guess | yes in Hashcat 7.x; `--identify` lists possibilities | yes for recognizable ciphertexts; first matching format wins |
 | Machine-readable identify output | `--json`, versioned schema (`hashsmith.identify/1`) | `--identify` prints text, not JSON | text only |
 | Container-file identification | file bytes alone route to the matching `*2smith` extractor for 40 of Hashsmith's 89 extractors; the rest must still be named explicitly (`hashsmith identify --coverage`) | no built-in file-type sniffing; separate hashcat-utils scripts convert known formats | `*2john` scripts convert known container formats; no auto-identification step |
 | Provenance-aware disambiguation | `--hint` (e.g. `shadow`, `windows`, `mysql`, `wpa`) re-ranks within a confidence band using context the user already has; never fabricates certainty | not applicable | not applicable |
 | Record-internal decoding | `--explain` decodes the leading candidate's own fields (JWT `alg`, Kerberos `etype`, PEM key type, ...) | not applicable | not applicable |
-| Accepted type vocabulary | 1,163 names/codes resolving into those same 457 formats, including 503 numeric Hashcat aliases | native numeric modes | native format labels |
+| Accepted type vocabulary | 1,163 names/codes resolving into those same 623 formats, including 503 numeric Hashcat aliases | native numeric modes | native format labels |
 | Attack modes | dict, brute, mask, markov, hybrid, combinator, PRINCE | straight, combinator, mask, hybrid, association | wordlist, incremental, mask, external |
 | Rule engine | full hashcat operator set; **100% candidate-for-candidate parity** with hashcat across all 28 of its stock rule files (2,878,178 candidates, `scripts/rules-oracle.sh`) | full, on-GPU, the de-facto standard | full, plus C-like external mode |
 | GPU | experimental, opt-in Metal/OpenCL; MD5 dictionary/rules plus MD5, MD4, NTLM, SHA-1, SHA-256 brute/mask/multi-target | mature CUDA / HIP / OpenCL / Metal across nearly every mode | OpenCL for a subset |
-| File → hash extractors | **47**, native and built into one registry/binary | dedicated converters in the official `tools/` tree | a much broader `run/*2john` script collection plus compiled converters |
+| File → hash extractors | **89**, native and built into one registry/binary | dedicated converters in the official `tools/` tree | a much broader `run/*2john` script collection plus compiled converters |
 | Install | one static binary, no runtime deps | binary + GPU runtime | build or distro package + Perl/Python for extractors |
-| Built-in known-answer self-test | `hashsmith selftest`, 502 vectors over all 457 formats, provenance-labelled | internal, on startup | `john --test` |
+| Built-in known-answer self-test | `hashsmith selftest`, 701 vectors over all 623 formats, provenance-labelled | internal, on startup | `john --test` |
 | Distributed cracking | native `--keyspace`/`--skip`/`--limit` (Hashcat-compatible semantics) | via third-party overlays | via MPI |
 
 **Where Hashsmith is the better tool.** You get one binary with no runtime
@@ -1278,23 +1278,24 @@ hashsmith crack -w rockyou.txt '<any hash>'     # or just let detection decide
 ```
 
 **What the recognition rate actually means.** Run against Hashsmith's own
-502-vector self-test corpus, `identify` resolves 272/502 = 54.2% of vectors to
+701-vector self-test corpus, `identify` resolves 444/701 = 63.3% of vectors to
 a `certain` or `likely` candidate that names the vector's own type
 (`go test ./internal/smith -run TestRecognitionAccuracy -v`). That is not the
-whole story in either direction. Most of the remaining 209 formats are not
+whole story in either direction. Most of the remaining 257 formats are not
 missed table entries — they are HMAC variants, same-length raw digests, and
 composite MD5/SHA constructions (`md5-md5`, `sha256-sha256pass-salt`, and
 similar) that are genuinely indistinguishable from one or more sibling
 formats by shape alone: a bare 32-hex string really is consistent with MD5,
 MD4, MD2, NTLM and LM at once, and reporting all of them as `possible` rather
 than picking one is the confidence model working as designed, not failing.
-At the same time, 54.2% is not a number to round up: the John-label table
-that makes `identify`'s printed command runnable covers 193 of 623 crackable
+At the same time, 63.3% is not a number to round up: the John-label table
+that makes `identify`'s printed command runnable covers 195 of 623 crackable
 formats (`hashsmith identify --coverage`), and container-file sniffing
 recognizes 40 of Hashsmith's 89 extractors by file bytes alone — both real,
 measured gaps, not rounding error. See
 `docs/superpowers/notes/2026-09-05-recognition-baseline.md` for the full
-list of what is and isn't recognized and why.
+list of what is and isn't recognized and why (note: that file predates the
+701-vector corpus and still describes the 502-vector one).
 
 **Verifying your own build.** `hashsmith selftest` runs the known-answer vectors
 compiled into the binary, which answers a question a version number cannot: is
@@ -1303,9 +1304,9 @@ miscompilation, a bad optimisation or a corrupted download shows up here and
 nowhere else.
 
 ```bash
-hashsmith selftest              # 356 fast vectors
+hashsmith selftest              # 547 fast vectors
 hashsmith selftest -slow        # include the high-iteration KDFs
-hashsmith selftest -gaps        # list the types that have no vector yet
+hashsmith selftest -gaps        # list the types that have no vector yet (currently none)
 ```
 
 Each vector records where its expected value came from, because that changes
@@ -1314,10 +1315,10 @@ reference suite), `cross-checked` (computed independently with Python or
 OpenSSL) and `regression` (produced by Hashsmith itself, which catches drift but
 cannot prove the implementation was right to begin with). The summary reports
 the three separately rather than flattening them into one reassuring number, and
-tells you honestly how many universal formats have no vector at all. All 457
-crackable formats now carry one — `hashsmith selftest` runs 356 of them by
-default (256 published, 95 cross-checked, 5 regression) and skips the
-remaining 146 high-iteration KDF vectors unless `-slow` is given, 502 in
+tells you honestly how many universal formats have no vector at all. All 623
+crackable formats now carry one — `hashsmith selftest` runs 547 of them by
+default (338 published, 188 cross-checked, 21 regression) and skips the
+remaining 154 high-iteration KDF vectors unless `-slow` is given, 701 in
 total.
 
 **Where they are the better tool.** For a large wordlist against a fast hash on
