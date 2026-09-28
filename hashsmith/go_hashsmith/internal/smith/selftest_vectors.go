@@ -440,8 +440,49 @@ func baseSelfTestVectorSeed() []selfTestVector {
 		{"digest-md5", "secret", "", "$DIGEST-MD5$chris$elwood.innosoft.com$OA6MG9tEQGm2hh$imap/elwood.innosoft.com$OA6MHXh6VqTrRk$00000001$auth$d388dad90d4bbd760a152321f2143af7", srcCrosschecked},
 		{"haval128-4", "abc", "", "$haval$6f2132867c9648419adcd5013e532fa2", srcCrosschecked},
 		{"haval256-3", "HAVAL", "", "$haval$91850C6487C9829E791FC5B58E98E372F3063256BB7D313A93F1F83B426AEDCC", srcCrosschecked},
+		// haval256-5 on the empty string matches Wikipedia's published HAVAL
+		// example vector exactly (cross-checked 2026-09; see the HAVAL
+		// article's own worked example), which is also strong evidence the
+		// other 12 pass-count/width combinations below — the same
+		// implementation, only parameterised differently — are correct.
+		// They remain srcRegression rather than srcCrosschecked because each
+		// one's own specific (width, passes) output was not independently
+		// confirmed, only computed from this codebase and checked to still
+		// match on a second run.
+		{"haval256-5", "", "", "$haval$be417bb4dd5cfb76c7126f4f8eeb1553a449039307b1a3cd451dbfdc0fbbe330", srcCrosschecked},
+		{"haval128-3", "", "", "$haval$c68f39913f901f3ddf44c707357a7d70", srcRegression},
+		{"haval128-5", "", "", "$haval$184b8482a0c050dca54b59c7f05bf5dd", srcRegression},
+		{"haval160-3", "", "", "$haval$d353c3ae22a25401d257643836d7231a9a95f953", srcRegression},
+		{"haval160-4", "", "", "$haval$1d33aae1be4146dbaaca0b6e70d7a11f10801525", srcRegression},
+		{"haval160-5", "", "", "$haval$255158cfc1eed1a7be7c55ddd64d9790415b933b", srcRegression},
+		{"haval192-3", "", "", "$haval$e9c48d7903eaf2a91c5b350151efcb175c0fc82de2289a4e", srcRegression},
+		{"haval192-4", "", "", "$haval$4a8372945afa55c7dead800311272523ca19d42ea47b72da", srcRegression},
+		{"haval192-5", "", "", "$haval$4839d0626f95935e17ee2fc4509387bbe2cc46cb382ffe85", srcRegression},
+		{"haval224-3", "", "", "$haval$c5aae9d47bffcaaf84a8c6e7ccacd60a0dd1932be7b1a192b9214b6d", srcRegression},
+		{"haval224-4", "", "", "$haval$3e56243275b3b81561750550e36fcd676ad2f5dd9e15f2e89e6ed78e", srcRegression},
+		{"haval224-5", "", "", "$haval$4a0513c032754f5582a758d35917ac9adf3854219b39e3ac77d1837e", srcRegression},
+		{"haval256-4", "", "", "$haval$c92b2e23091e80e375dadce26982482d197b1a2521be82da819f8ca2c579b99b", srcRegression},
 		{"skein256", "abc", "", "$skein$0977b339c3c85927071805584d5460d8f20da8389bbe97c59b1cfac291fe9527", srcCrosschecked},
 		{"skein512", "abc", "", "$skein$8f5dd9ec798152668e35129496b029a960c9a9b88662f7f9482f110b31f9f93893ecfb25c009baad9e46737197d5630379816a886aa05526d3a70df272d96e75", srcCrosschecked},
+		// skein256/skein512 above, on the empty string, also match
+		// Wikipedia's published Skein-512-256/512 examples exactly
+		// (cross-checked 2026-09) — the same evidence-by-shared-core
+		// reasoning as HAVAL above applies to these two truncated-output
+		// siblings, still srcRegression because 224/384 specifically were
+		// not independently confirmed.
+		{"skein224", "", "", "$skein$1541ae9fc3ebe24eb758ccb1fd60c2c31a9ebfe65b220086e7819e25", srcRegression},
+		{"skein384", "", "", "$skein$dd5aaf4589dc227bd1eb7bc68771f5baeaa3586ef6c7680167a023ec8ce26980f06c4082c488b4ac9ef313f8cbe70808", srcRegression},
+		// SHA-1 with the LinkedIn 2012 dump's leading five hex digits
+		// zeroed, verified only on chars [5:] — see verifySHA1LinkedIn. The
+		// underlying SHA-1 was computed independently with Python's hashlib.
+		{"sha1-linkedin", "hashsmith", "", "00000764e0900b8a1a08541ea6aeca505d6cd3f0", srcCrosschecked},
+		// John's dummy format: the record is just the candidate's own hex,
+		// so this is definitional rather than a claim about an external
+		// source — srcRegression would overstate it, but "published" is also
+		// wrong since there is no spec to publish. It is included anyway so
+		// `identify --coverage`-style counts are not silently short one
+		// format that genuinely can carry a vector.
+		{"dummy", "hashsmith", "", "$dummy$68617368736d697468", srcRegression},
 		{"enpass", "openwall", "", "$enpass$0$24000$700dfb6d83ae3b4b87935ed8246123363656de4273979a1365197a632c6b1ce68ca801d0bb50d93c9a0509fbb061bba2ad579ed0d48ee781508c853b9bd042d3275cc92781770a211ecd08a254db873e50664a14b394d63e3e443a82d69c7df84c592a60b5b620e241c9675f097f931093f6ebf67f56e5db0d82eb61ff9da3636bf7c79598e6ee1f34b7abd2b1e5e3ae9e9a219de50d9c079fb7fb21910139468619c6ac562a4157c0e8e85df08b54aff33ec2005e2214549ba04d794882051e8e245f63f822d469c6588ccd38c02154f21cdfd06acd5ed1b97cbe7e23648ce70c471560222cd8927b0567cd0a3c317b7a8add994dc8fcda89ae4afc33c1260192e3c8c3ca9d50347a91a82025c1cb127aede8334286cc26f86591d34483b90d86d1e1372f74d1b7eee5aa233ed9199a3de01e7d16b092b4c902a602a16edcf03005596abc5c24f249dbb48236dc27738e93949c383734f6e39bf199fcd3fd22ab9268d1678d7259f94ab2c012e924ff2d26772ebf2cccc0ffe795264cd7a035f52f258b5ce78b7f1353c120f1aa30cbe943832fa70d3762222365109521c1a70a7ace321ddda173fb731c1d6f65c8e4af8f7b62660bc70a2c9ece21f8cddbe65d047f92aa6ca55a90864cb12c757030a7755ec4601a6f28dc2e728ee3f84fc1d39c261c845335a9d19e3356192b257186ff606756e58df67c11d2886870c90b69f5b51630f72d79f51884528214e9987865debb6b23ce8deecfb67cd43450a73675b53fcd20b6ae1da13f69dd349045d0b9b7dded042020ad081143231c79778d01f91c6e6df823885860ea781dd07867222b438599d02a815a4c18409c5e97a3d8e870ce1401bce7c556f05ac77af2659ef9b13d0d4df32a54674ef451cc2ffef50d4ca31efe19644db389ae9f0ce97686e5e53f1d82b98136258708911641b3a251eea41e6433534eb2810df49e040901367ee42b12cf7f853bab46f5360da2429989d232c9f6897e44221a2a5e946563db10423cfb073b6abf1e977f746e1d9c0fb929bb0e2c9dd50c11c76e0219a0004aa747de0db075305d4582293727f16f215403a9ca3d99af1750343101162954daebd58358b21276346519b2c05942223ad8314073900169b222b0e24f79c76dc61b4701edba670bc07bd4fa3c5a2179c69560f23ed925594f3ca230ed780904e82c7f8f6ee737c059d1af79eef0c1f8e6a0fdace62e87d88ad3b345afb96ea7b26eb0426585ea064933c8b8ec9264d910dc1573363dbec0755de36221eb368c5b2703c254a4d3d29d1b247c46200f743fe5f04f4b8fec2f143ba1276cc4b2bd7802bfe6fa63a49eb7a77f3443db74e0c889441fc2154d85bdbc0bbdc80eca3852ff8c7d7738ff9ba9eaa18174f4f65c526940289717bb87d05fd4eeef1272065b4bfa4d6f31a1b23c50e1355988", srcCrosschecked},
 		{"putty", "password", "", "$putty$1*16*1*0*10c434c33cf160352b7a5b3a1ecd8434f1066cac*432*000000077373682d647373000000806bb7ed4d03163f5be550dba68e0f1af7dae4b49f736ab452552a1163210c1366fd1f65a31bb526b1d3028a31d30b3315c19dc02417db99336f00b1f9565431d02fc59cd756ab6fe506b959df3799e4a70fcbe54ad9ef34d338014add8ac1f57f2a6dce8403c93709cb23d3c379f5de4f9fc45a73b3f9a43e6c1cc220bd38274b0000001500b4bf70cda203027a13135d43e459872eed384a3d0000008049a7d8e8d1db1630f9a9f6b1bf275d01e4287a4c2f038707d8c07ab664dbd264f6b4676de93c1f003bb57146a82314ab6c426628498209fa33c68a881abfd90dc1e978d430c9ace78d6c9895938494e91e3ca50132c9bde8fae4381e6fe59d03a9feee39b10cb2fea4e4d5f5ef10e523d34925f105eff665db2ac35e6cf0a1ac000000800def6e4f7ed4af0f1f8ed9524595d3fecd0a191ea9a6402d4235ee59ff2000011e36b5936280a3b5dc0b8d8ea7747e04ad92e46be8cb374d931c1e78bbdafea4ac16aba2e4b3cbd0779d28a609e848fb54332a169f24fac5e4c736c3dae4f95afe0aacaffb2d4829956fbd17d514614a45f8eefdd0d7d4982d101d72002f05fd*32*b38180c482949f3b4f44a20fd599c2cb411c671b4b120663bef9a61b360e442a*ssh-dss*aes256-cbc*dsa-key-20120721", srcCrosschecked},
 		{"openssl-enc", "password", "", "$openssl$1$0$8$a1a5e529c8d92da5$8de763bf61377d365243993137ad9729$1$0", srcCrosschecked},

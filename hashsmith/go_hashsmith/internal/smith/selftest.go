@@ -73,9 +73,13 @@ func slowSelfTestTypeSeed() map[string]bool {
 		// candidate, which is the memory cost rather than the time cost that
 		// keeps it out of the fast pass.
 		"bestcrypt-v4": true,
-		// LUKS2 headers ask for Argon2 at a gibibyte; see memory_budget.go.
-		"luks2": true,
-		"aix":   true, "grub2": true, "passlib-pbkdf2": true, "werkzeug": true,
+		// LUKS2 headers ask for Argon2 at a gibibyte in real use (see
+		// memory_budget.go), but the self-test vector (selftest_vectors_luks_
+		// oldoffice.go) deliberately uses the package's minimum cost
+		// (m=8,t=1,p=1) — the same "exercise the pipeline, not a realistic
+		// header" choice the LUKS1 fixtures above already make — so it is
+		// NOT in this slow list; it runs in the fast pass.
+		"aix": true, "grub2": true, "passlib-pbkdf2": true, "werkzeug": true,
 		"krb5pa": true, "krb5tgs": true, "veracrypt": true, "truecrypt": true,
 		"truecrypt-ripemd160": true, "truecrypt-sha512": true, "truecrypt-whirlpool": true,
 		"veracrypt-ripemd160": true, "veracrypt-sha512": true, "veracrypt-whirlpool": true,

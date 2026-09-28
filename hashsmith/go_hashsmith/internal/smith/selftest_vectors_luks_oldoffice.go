@@ -17,6 +17,18 @@ func luksOldOfficeSelfTestVectorSeed() []selfTestVector {
 		selfTestVector{"luks-sha512-serpent", "hashcat", "", "$luks$1$sha512$serpent$xts-plain64$32$218d9c720469ae0c3b6a6448fbba2ef1ff6c7056$68617368736d6974682d6c756b732d6d6b65792d73616c742d33326279746573$2$2$68617368736d6974682d6c756b732d736c6f742d73616c742d33326279746573$1$9f18607e459fe3f184e05f3d574e50704e055d60bd078ae7f9bd889cd9abcaa5", srcRegression},
 		selfTestVector{"luks-sha512-twofish", "hashcat", "", "$luks$1$sha512$twofish$xts-plain64$32$218d9c720469ae0c3b6a6448fbba2ef1ff6c7056$68617368736d6974682d6c756b732d6d6b65792d73616c742d33326279746573$2$2$68617368736d6974682d6c756b732d736c6f742d73616c742d33326279746573$1$082773c6ed069040c1ecb5a04ea8dec2e8549b136f821f38776d51587b5a9232", srcRegression},
 
+		// LUKS v2. Same compact-fixture reasoning as the v1 matrix above: a
+		// real LUKS2 header's Argon2id keyslot is deliberately expensive
+		// (hashcat's own published mode-34100 example asks for 1 GiB), which
+		// makes it both too large to inline (~500 KB) and too slow for a
+		// vector that should run in the fast pass. This uses the minimum
+		// argon2id cost the package accepts (m=8 KiB, t=1, p=1) and 4 AF
+		// stripes instead of the thousands a real header carries — it
+		// exercises the exact same argon2id -> AF-merge -> XTS-decrypt ->
+		// zero-payload-check pipeline verifyLUKS2 runs for every candidate,
+		// just over a keyslot nobody would actually ship.
+		selfTestVector{"luks2", "hashsmith", "", "$luks$2$argon2id$sha256$aes$xts-plain64$256$m=8,t=1,p=1$6c756b733274657374736c6f7473616c$67116fb629ea27887b54002e571c3af3bbdcbbc67c0906b23ffa0a9da4c7aface63879cbc03178fa9b74492aa9a45718289239e461d162edeaf9d63cc761e5097a6e75d6ae506cc43d84ef710c76e4f0532382572bc1cd7c0d6377b9b68ffab328eabd2d9de9e34e14be7e09737ec34e3ea495473ba1c2ab21317404a3ab30cc$f8d56bdb19551639d1ffdace7af229c513238f39d4f20ba3fb2c1006d92a275d517d21ad34ab785bb5637393655340b741aa66be3bfc1d3221758d5ca2b2fc4c01990ada03685652bfd2c4a5640399c4e1b8b8222706faf54706f3e4c2bf25bd5044e8fe4f3282fd28601e442d6791e14c36b63c4c7eb74b8ad70cee865c22dad5742267039b32c029d62578cfbb22e014c0255330bf6f0a1db745b3dc75570f9771b0d5001fcb3dbc031f753df486dda8c1e76cb06c5d12682dbf875a03656f082d9b859c1c51fd574527d6314df57c92c343ede8514a61f3bf2aa5e047803e0e25eee3c59f260bce5c3e4268074adb231b17cde52b1a262f25831e20705ddf81bd20703e283197fde4798b4d61d0f8d885e1dca76a47bc586333fca768add999caae7d2d8517765ae84da76b07d93aabd908c98ef6546f3a6f81247e1eaa7c9651c2d636db137583ba2ae684756ef477278a358a34f6ee0dfd67418221d7a25a3401d302ce7f702946f68f6f2892a079b58279e1eff4957f9c425a3afbee3eed0c1bca28a925c7742676f237c14aba133edca365fcefa4a6b4cb0ce19858905fcb8bd928b9c2bca365a4abac3d351f1abab860fa6f5c689239a386b02207cc9432fc80316e8075b789eedbbea7ebb3612d7259c9432de5b66fa5bdf6f8fbcdb816a9d53c2f3a4cacbb4218d9564d1c61a3e75be8c6c37fa531c1f50dbced22", srcRegression},
+
 		// Hashcat's published self-test records (password "hashcat").
 		selfTestVector{"office-old", "hashcat", "", "$oldoffice$0*55045061647456688860411218030058*e7e24d163fbd743992d4b8892bf3f2f7*493410dbc832557d3fe1870ace8397e2", srcPublished},
 		selfTestVector{"office-old-md5", "hashcat", "", "$oldoffice$0*55045061647456688860411218030058*e7e24d163fbd743992d4b8892bf3f2f7*493410dbc832557d3fe1870ace8397e2", srcPublished},
