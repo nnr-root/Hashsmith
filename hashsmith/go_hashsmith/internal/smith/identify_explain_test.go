@@ -168,6 +168,56 @@ func TestExplainMalformedRecordsDoNotPanicOrFabricate(t *testing.T) {
 	}
 }
 
+// TestExplainWPAPMKID reuses TestWPAVectors' own authoritative PMKID line
+// (802.11i PBKDF2 test vector, ESSID "IEEE") so explainWPA is checked
+// against the same record crack_wpa_test.go already proves verifies.
+func TestExplainWPAPMKID(t *testing.T) {
+	line := "WPA*01*6d3c40446a165cfeb121c82f18bf97d8*001122334455*8899aabbccdd*49454545"
+	fs := explainRecord(line, hashid.Candidate{Type: "wpa"})
+	if got := fieldValue(fs, "capture"); got != "PMKID" {
+		t.Errorf("capture = %q, want PMKID", got)
+	}
+	if got := fieldValue(fs, "ssid"); got != "IEEE" {
+		t.Errorf("ssid = %q, want IEEE (49454545 hex decodes to ASCII)", got)
+	}
+	if got := fieldValue(fs, "ap mac"); got != "00:11:22:33:44:55" {
+		t.Errorf("ap mac = %q, want 00:11:22:33:44:55", got)
+	}
+	if got := fieldValue(fs, "sta mac"); got != "88:99:aa:bb:cc:dd" {
+		t.Errorf("sta mac = %q, want 88:99:aa:bb:cc:dd", got)
+	}
+	if fieldValue(fs, "key descriptor") != "" {
+		t.Error("a PMKID record has no key-descriptor version; explainWPA must not invent one")
+	}
+}
+
+// TestExplainWPAEAPOL is the same idea for the key-descriptor-v2 EAPOL
+// vector TestWPAVectors already proves verifies with the passphrase
+// "password".
+func TestExplainWPAEAPOL(t *testing.T) {
+	eapol := "02030075fe008a00000000000000000000bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+	line := "WPA*02*31a3e55864c82260c49cffd6a890e99e*001122334455*8899aabbccdd*49454545*" +
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa*" + eapol + "*02"
+	fs := explainRecord(line, hashid.Candidate{Type: "wpa"})
+	if got := fieldValue(fs, "capture"); got != "EAPOL 4-way handshake (MIC)" {
+		t.Errorf("capture = %q, want the EAPOL label", got)
+	}
+	if got := fieldValue(fs, "ssid"); got != "IEEE" {
+		t.Errorf("ssid = %q, want IEEE", got)
+	}
+	if got := fieldValue(fs, "key descriptor"); got != "HMAC-SHA1" {
+		t.Errorf("key descriptor = %q, want HMAC-SHA1 (key-descriptor version 2)", got)
+	}
+}
+
+func TestExplainWPAMalformedRecordDoesNotPanic(t *testing.T) {
+	for _, bad := range []string{"WPA*", "WPA*01*notenoughfields", "WPA*03*x*y*z*w"} {
+		if fs := explainRecord(bad, hashid.Candidate{Type: "wpa"}); fs != nil {
+			t.Errorf("explainRecord(%q) = %v, want nil for an unparseable WPA record", bad, fs)
+		}
+	}
+}
+
 // TestExplainOffLeavesDefaultIdentifyOutputUnchanged drives the real
 // runIdentify entry point, not just explainRecord, so a future change to the
 // blank-line handling around the --explain block in runIdentify cannot leak

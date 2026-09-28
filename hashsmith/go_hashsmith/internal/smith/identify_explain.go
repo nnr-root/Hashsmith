@@ -2,6 +2,7 @@ package smith
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -35,6 +36,8 @@ func explainRecord(input string, c hashid.Candidate) []explainField {
 		return explainJWT(input)
 	case strings.HasPrefix(input, "-----BEGIN "):
 		return explainPEM(input)
+	case strings.HasPrefix(input, "WPA*") || c.Type == "wpa":
+		return explainWPA(input)
 	}
 	return nil
 }
@@ -196,6 +199,60 @@ func explainPEM(pem string) []explainField {
 		out = append(out, explainField{"encrypted", "no", "no passphrase to recover"})
 	}
 	return out
+}
+
+// wpaKeyDescriptors names the EAPOL-Key MIC algorithm keyVer selects — see
+// crack_wpa.go's own doc comment for why it varies (HMAC-MD5/HMAC-SHA1/
+// AES-CMAC depending on key-descriptor version).
+var wpaKeyDescriptors = map[int]string{1: "HMAC-MD5", 2: "HMAC-SHA1", 3: "AES-CMAC"}
+
+// explainWPA decodes a WPA/WPA2 record's ESSID and MAC addresses — reusing
+// parseWPAHash, the same parser crack_wpa.go itself uses, rather than a
+// second hand-rolled one — so a hash pasted in for identification shows
+// which network it belongs to without the user manually splitting the
+// record on '*'.
+func explainWPA(target string) []explainField {
+	w, err := parseWPAHash(target)
+	if err != nil {
+		return nil
+	}
+	kind := "EAPOL 4-way handshake (MIC)"
+	if w.isPMKID {
+		kind = "PMKID"
+	}
+	out := []explainField{
+		{"capture", kind, ""},
+		{"ssid", formatESSID(w.essid), ""},
+		{"ap mac", formatMACColons(w.apMAC), ""},
+		{"sta mac", formatMACColons(w.staMAC), ""},
+	}
+	if !w.isPMKID {
+		out = append(out, explainField{"key descriptor", wpaKeyDescriptors[w.keyVer], ""})
+	}
+	return out
+}
+
+// formatMACColons renders a 6-byte MAC as the conventional colon-separated
+// hex a user would recognize from airodump-ng/Wireshark output.
+func formatMACColons(b []byte) string {
+	parts := make([]string, len(b))
+	for i, x := range b {
+		parts[i] = fmt.Sprintf("%02x", x)
+	}
+	return strings.Join(parts, ":")
+}
+
+// formatESSID prints the SSID as text when it is printable ASCII (the
+// overwhelmingly common case) and falls back to hex for a raw byte
+// sequence, rather than emitting control characters into a terminal.
+func formatESSID(b []byte) string {
+	if len(b) == 0 {
+		return "(empty)"
+	}
+	if allPrintable(b) {
+		return string(b)
+	}
+	return hex.EncodeToString(b) + " (not printable ASCII)"
 }
 
 // renderExplain formats decoded fields for the terminal: four-space indent,
