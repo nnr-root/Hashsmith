@@ -100,6 +100,15 @@ func TestExtractOpenSSLEncRoundTrip(t *testing.T) {
 		{"aes-256-cbc/md5", []string{"enc", "-aes-256-cbc", "-md", "md5"}},
 		{"aes-128-cbc/sha256", []string{"enc", "-aes-128-cbc", "-md", "sha256"}},
 		{"aes-256-cbc/sha1 base64", []string{"enc", "-aes-256-cbc", "-md", "sha1", "-a"}},
+		// -pbkdf2 (OpenSSL's own recommended KDF, and the default it nudges
+		// users toward with a "deprecated key derivation used" warning when
+		// omitted) was a real gap found by running actual -pbkdf2 output
+		// through this package: sniffing and extraction both succeeded, but
+		// verifyOpenSSLEnc only ever tried EVP_BytesToKey, so nothing ever
+		// verified. Fixed by trying both KDFs per candidate; this case is
+		// the regression guard.
+		{"aes-256-cbc/pbkdf2 default digest", []string{"enc", "-aes-256-cbc", "-pbkdf2"}},
+		{"aes-128-cbc/pbkdf2 sha1", []string{"enc", "-aes-128-cbc", "-pbkdf2", "-md", "sha1"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			out := filepath.Join(dir, strings.NewReplacer("/", "_", " ", "_").Replace(c.name)+".enc")

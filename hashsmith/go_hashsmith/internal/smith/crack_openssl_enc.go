@@ -29,9 +29,16 @@ package smith
 // rejected.
 //
 // `openssl enc` derives the key and IV from the password and an eight-byte
-// salt with EVP_BytesToKey — one pass of a digest by default, no iteration
-// count at all — and then encrypts with no authentication of any kind. There
-// is nothing in the file that says whether a password was right.
+// salt one of two ways — EVP_BytesToKey (one pass of a digest, no iteration
+// count, the historical default) or PBKDF2 at 10000 iterations (what
+// -pbkdf2 selects, and what OpenSSL 1.1.0+ has nudged users toward ever
+// since with a "deprecated key derivation used" warning when it's
+// omitted) — and produces a byte-identical "Salted__" container either
+// way, with nothing in the file saying which KDF made it. verifyOpenSSLEnc
+// tries both rather than guessing (found missing, then fixed, by running
+// real `openssl enc -pbkdf2` output through this package, 2026-09) — and
+// then encrypts with no authentication of any kind, so there is nothing in
+// the file that says whether a password was right either.
 //
 // So the check is circumstantial, and this is the one format here where that
 // is worth stating plainly. The last block of a CBC file ends in PKCS#7
@@ -45,18 +52,11 @@ package smith
 // file whose first bytes are binary will not be recovered from a record this
 // short. Reporting a wrong password instead would be worse.
 //
-// Known gap, found by running a real `openssl enc -pbkdf2` output through
-// this package (2026-09): this only implements EVP_BytesToKey, which is what
-// `openssl enc` uses by default. A file made with -pbkdf2 (which OpenSSL
-// itself now nudges users toward with a "deprecated key derivation used"
-// warning when it is omitted) derives its key differently and produces a
-// byte-identical "Salted__" container — sniffContainer and
-// extractOpenSSLEnc both still recognize and extract it, but no candidate
-// this package tries will ever verify against it. This is also John's own
-// openssl2john record spelling (see the format comment above), and
-// John/hashcat do not appear to have a PBKDF2 variant of this mode either,
-// so adding one here would mean inventing a field neither tool reads rather
-// than closing an ecosystem gap.
+// Trying two KDFs per candidate doubles the cost of every attempt, which
+// matters more here than for most formats given how weak the per-attempt
+// check already is — but the record format itself (John's own openssl2john
+// spelling) is unchanged: this is a verify-side change, not a new field, so
+// a record already extracted or shared before this fix still works.
 
 import (
 	"crypto/aes"
@@ -69,6 +69,8 @@ import (
 	"hash"
 	"strconv"
 	"strings"
+
+	"golang.org/x/crypto/pbkdf2"
 )
 
 const opensslEncPrefix = "$openssl$"
@@ -186,55 +188,88 @@ func printableForOpenSSL(b []byte) bool {
 	return true
 }
 
-// verifyOpenSSLEnc checks a password against an `openssl enc` sample.
+// opensslPBKDF2Iterations is OpenSSL's own `-pbkdf2` default iteration
+// count, confirmed directly against a real `openssl enc -help` (OpenSSL
+// 3.6.3, 2026-09) rather than assumed — `-iter` overrides it, but that
+// override is not recoverable from the "Salted__" container either, so only
+// the default is tried.
+const opensslPBKDF2Iterations = 10000
+
+// verifyOpenSSLEnc checks a password against an `openssl enc` sample, trying
+// both key-derivation schemes OpenSSL itself can produce for the same
+// "Salted__" container: EVP_BytesToKey (the historical default) and PBKDF2
+// (what `-pbkdf2` selects, and what OpenSSL 1.1.0+ nudges every user toward
+// with a "deprecated key derivation used" warning when it is omitted).
+// Nothing in the container says which one made it, so both have to be tried
+// rather than guessed at — this was a real, found-by-testing-real-openssl-
+// output gap (2026-09) before this function tried more than the legacy one.
+//
+// r.newHash already gives the extractor's own guess at the EVP_BytesToKey
+// digest (the record's digest field enumerates md5/sha1/sha256, see
+// parseOpenSSLEnc); reusing it for the PBKDF2 attempt too means the record
+// that happens to carry sha256 also covers PBKDF2's own confirmed default
+// digest, without a second digest dimension to guess across.
 func verifyOpenSSLEnc(target, candidate string) (bool, error) {
 	r, err := parseOpenSSLEnc(target)
 	if err != nil {
 		return false, err
 	}
-	key, iv := evpBytesToKey(r.newHash, []byte(candidate), r.salt, 1, r.keyLen, aes.BlockSize)
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return false, err
-	}
+	legacyKey, legacyIV := evpBytesToKey(r.newHash, []byte(candidate), r.salt, 1, r.keyLen, aes.BlockSize)
+	pbkdf2Out := pbkdf2.Key([]byte(candidate), r.salt, opensslPBKDF2Iterations, r.keyLen+aes.BlockSize, r.newHash)
+	pbkdf2Key, pbkdf2IV := pbkdf2Out[:r.keyLen], pbkdf2Out[r.keyLen:]
 
-	// Decrypt the FINAL block only, under whichever IV chains into it: the
-	// derived one for a one-block file, the preceding ciphertext block
-	// otherwise.
-	last := r.sample
-	chain := iv
-	if !r.inlined {
-		chain, last = r.sample[:aes.BlockSize], r.sample[aes.BlockSize:]
-	}
-	plain := make([]byte, aes.BlockSize)
-	cipher.NewCBCDecrypter(block, chain).CryptBlocks(plain, last)
-
-	n := int(plain[len(plain)-1])
-	if n < 1 || n > aes.BlockSize || n > len(plain) {
-		return false, nil
-	}
-	for _, c := range plain[len(plain)-n:] {
-		if int(c) != n {
-			return false, nil
+	for _, kdf := range [][2][]byte{{legacyKey, legacyIV}, {pbkdf2Key, pbkdf2IV}} {
+		key, iv := kdf[0], kdf[1]
+		block, err := aes.NewCipher(key)
+		if err != nil {
+			return false, err
 		}
-	}
-	// Padding alone is one chance in 256. See the note at the top of this
-	// file for why that is not enough on its own.
-	if !printableForOpenSSL(plain[:len(plain)-n]) {
-		return false, nil
-	}
 
-	// When the record carries the head of the file, decrypt that too. It is
-	// plaintext with no padding in it, so many more bytes have to come out
-	// printable, and the one-in-256 padding coincidence stops mattering.
-	if len(r.head) > 0 {
-		headPlain := make([]byte, len(r.head))
-		cipher.NewCBCDecrypter(block, iv).CryptBlocks(headPlain, r.head)
-		if !printableForOpenSSL(headPlain) {
-			return false, nil
+		// Decrypt the FINAL block only, under whichever IV chains into it:
+		// the derived one for a one-block file, the preceding ciphertext
+		// block otherwise.
+		last := r.sample
+		chain := iv
+		if !r.inlined {
+			chain, last = r.sample[:aes.BlockSize], r.sample[aes.BlockSize:]
 		}
+		plain := make([]byte, aes.BlockSize)
+		cipher.NewCBCDecrypter(block, chain).CryptBlocks(plain, last)
+
+		n := int(plain[len(plain)-1])
+		if n < 1 || n > aes.BlockSize || n > len(plain) {
+			continue
+		}
+		bad := false
+		for _, c := range plain[len(plain)-n:] {
+			if int(c) != n {
+				bad = true
+				break
+			}
+		}
+		if bad {
+			continue
+		}
+		// Padding alone is one chance in 256. See the note at the top of
+		// this file for why that is not enough on its own.
+		if !printableForOpenSSL(plain[:len(plain)-n]) {
+			continue
+		}
+
+		// When the record carries the head of the file, decrypt that too.
+		// It is plaintext with no padding in it, so many more bytes have to
+		// come out printable, and the one-in-256 padding coincidence stops
+		// mattering.
+		if len(r.head) > 0 {
+			headPlain := make([]byte, len(r.head))
+			cipher.NewCBCDecrypter(block, iv).CryptBlocks(headPlain, r.head)
+			if !printableForOpenSSL(headPlain) {
+				continue
+			}
+		}
+		return true, nil
 	}
-	return true, nil
+	return false, nil
 }
 
 func isOpenSSLEnc(target string) bool {
