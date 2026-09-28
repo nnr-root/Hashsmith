@@ -238,6 +238,17 @@ func installSniffers() {
 	set("vncpcap2smith", sniffCapture)
 	set("mozilla2smith", sniffMozillaKey3)
 	set("encfs2smith", sniffEncFSConfig)
+
+	setDeep := func(name string, fn func(path string) (hashid.Evidence, hashid.Confidence, bool)) {
+		d, ok := findExtractor(name)
+		if !ok {
+			panic("deep sniffer for unknown extractor " + name)
+		}
+		d.deepSniff = fn
+	}
+	setDeep("geli2smith", sniffGELIDeep)
+	setDeep("pgpsda2smith", sniffPGPSDADeep)
+	setDeep("pgpwde2smith", sniffPGPWDEDeep)
 }
 
 func init() { installSniffers() }
@@ -267,6 +278,21 @@ func sniffContainer(path string) (*extractorDefinition, hashid.Evidence, hashid.
 			return d, ev, conf, true
 		}
 	}
+
+	// No head-based sniff matched. Only now do the deep sniffers get a turn
+	// — each does its own I/O (a tail read, a wider head read, ...) rather
+	// than sharing the cheap 4 KiB `head` above, so this branch is the one
+	// place identifying a container can cost more than one small read, and
+	// it is paid only when the fast path already came up empty.
+	for i := range universalExtractorRegistry {
+		d := &universalExtractorRegistry[i]
+		if d.deepSniff == nil {
+			continue
+		}
+		if ev, conf, ok := d.deepSniff(path); ok {
+			return d, ev, conf, true
+		}
+	}
 	return nil, "", 0, false
 }
 
@@ -292,7 +318,7 @@ func renderContainerIdentification(path string, d *extractorDefinition, ev hashi
 func sniffCoverage() (withSniff, total int) {
 	total = len(universalExtractorRegistry)
 	for i := range universalExtractorRegistry {
-		if universalExtractorRegistry[i].sniff != nil {
+		if universalExtractorRegistry[i].sniff != nil || universalExtractorRegistry[i].deepSniff != nil {
 			withSniff++
 		}
 	}

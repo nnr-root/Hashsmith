@@ -26,6 +26,17 @@ type extractorDefinition struct {
 	// header with no confirmed encryption stream) must report something lower
 	// rather than claim proof it doesn't have — see sniff.go.
 	sniff func(head []byte) (hashid.Evidence, hashid.Confidence, bool)
+
+	// deepSniff is sniff's escape hatch for a format whose signature is not
+	// in the leading sniffHeadBytes: GELI's magic sits in the last sector of
+	// the provider, PGP SDA's trailer sits near the end of the host
+	// executable it is bolted onto, PGP WDE's user records can be anywhere
+	// in the first megabyte of a disk image. Each does its own bounded I/O
+	// (it gets the file path, not a byte slice) and is only ever tried after
+	// every sniff in the registry has already failed to match — see
+	// sniffContainer — so the common case (a format sniff already covers)
+	// never pays for it.
+	deepSniff func(path string) (hashid.Evidence, hashid.Confidence, bool)
 }
 
 var universalExtractorRegistry = []extractorDefinition{
