@@ -354,6 +354,21 @@ func levenshtein(a, b string) int {
 	return prev[len(b)]
 }
 
+// unknownHintTagWarning builds the message for a --hint value that isn't a
+// hintTags key, with a "did you mean" suggestion when one is confident
+// enough — shared by hintReorder's per-input check and runIdentifyBatch's
+// one-time check (batch mode processes a whole dump per hint list, so
+// hintReorder's OTHER warning, "no candidate matches", is not repeated
+// there: a hint matching only part of a large mixed dump is normal, not
+// something worth flagging per line).
+func unknownHintTagWarning(h string) string {
+	msg := "unknown --hint tag \"" + h + "\""
+	if suggestion, ok := closestHintTag(h); ok {
+		msg += " (did you mean \"" + suggestion + "\"?)"
+	}
+	return msg
+}
+
 // hintReorder stable-reorders cs so that candidates matching any of the given
 // hint tags come before the ones that don't, WITHIN each existing confidence
 // band — a hint never moves a candidate from one Confidence value to
@@ -372,11 +387,7 @@ func hintReorder(cs []hashid.Candidate, hints []string) ([]hashid.Candidate, []s
 	for _, h := range hints {
 		types, ok := hintTags[h]
 		if !ok {
-			msg := "unknown --hint tag \"" + h + "\""
-			if suggestion, ok := closestHintTag(h); ok {
-				msg += " (did you mean \"" + suggestion + "\"?)"
-			}
-			warnings = append(warnings, msg)
+			warnings = append(warnings, unknownHintTagWarning(h))
 			continue
 		}
 		matched := false

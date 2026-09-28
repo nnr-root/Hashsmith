@@ -99,7 +99,7 @@ func runIdentify(args []string) error {
 	// what makes a summary meaningful — so it runs before the container
 	// sniff and the ordinary per-line path below, neither of which apply here.
 	if *summary {
-		return runIdentifyBatch(*filePath, *text, fs.Args(), *splitDir, *unmatchedFile, *outFile, *copyRes, *asJSON)
+		return runIdentifyBatch(*filePath, *text, fs.Args(), *splitDir, *unmatchedFile, *outFile, *copyRes, *asJSON, hints, !*noAutoHint)
 	}
 
 	// A readable file that a sniffer recognizes is a container, not a hash

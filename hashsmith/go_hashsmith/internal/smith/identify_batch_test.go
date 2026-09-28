@@ -15,7 +15,7 @@ root:$6$52450745$k5ka2p8bFuSmoVT1tzOyyuaREkkKBcCNqoDKzYiJL9RaE8yMnPgh2XzzF0NDrUh
 `
 
 func TestScanBatchCountsAndClassifies(t *testing.T) {
-	s, err := scanBatch(strings.NewReader(sampleDump))
+	s, err := scanBatch(strings.NewReader(sampleDump), nil)
 	if err != nil {
 		t.Fatalf("scanBatch returned an error for a well-formed dump: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestScanBatchCountsAndClassifies(t *testing.T) {
 // The percentages here are counts over lines — measured quantities, unlike the
 // normalized scores the old identify printed.
 func TestBatchSummaryPercentagesAreLineCounts(t *testing.T) {
-	s, err := scanBatch(strings.NewReader(sampleDump))
+	s, err := scanBatch(strings.NewReader(sampleDump), nil)
 	if err != nil {
 		t.Fatalf("scanBatch returned an error for a well-formed dump: %v", err)
 	}
@@ -52,8 +52,37 @@ func TestBatchSummaryPercentagesAreLineCounts(t *testing.T) {
 	}
 }
 
+// TestScanBatchAppliesHints proves --hint reaches batch mode's own
+// per-line classification, not just the single-line path: an NTDS-style
+// dump of bare 32-hex digests defaults to bucketing as md5 (identifyCandidates'
+// own leading candidate), but with the windows hint every line reclassifies
+// as ntlm — the difference between pointing a user at `crack -t md5` (wrong)
+// and `crack -t ntlm` (right) for the exact same dump.
+func TestScanBatchAppliesHints(t *testing.T) {
+	dump := "5f4dcc3b5aa765d61d8327deb882cf99\n5f4dcc3b5aa765d61d8327deb882cf99\n"
+
+	unhinted, err := scanBatch(strings.NewReader(dump), nil)
+	if err != nil {
+		t.Fatalf("scanBatch: %v", err)
+	}
+	if unhinted.ByType["md5"] != 2 {
+		t.Fatalf("test assumption broken: expected md5 to lead unhinted, got %v", unhinted.ByType)
+	}
+
+	hinted, err := scanBatch(strings.NewReader(dump), []string{"windows"})
+	if err != nil {
+		t.Fatalf("scanBatch: %v", err)
+	}
+	if hinted.ByType["ntlm"] != 2 {
+		t.Errorf("with --hint windows, ByType = %v, want ntlm: 2", hinted.ByType)
+	}
+	if hinted.ByType["md5"] != 0 {
+		t.Errorf("with --hint windows, md5 should no longer lead: ByType = %v", hinted.ByType)
+	}
+}
+
 func TestEmptyInputDoesNotDivideByZero(t *testing.T) {
-	s, err := scanBatch(strings.NewReader(""))
+	s, err := scanBatch(strings.NewReader(""), nil)
 	if err != nil {
 		t.Fatalf("scanBatch returned an error for empty input: %v", err)
 	}
@@ -72,7 +101,7 @@ func TestScanBatchSurfacesTruncationError(t *testing.T) {
 	tooLong := strings.Repeat("a", batchLineScanBuffer+1)
 	dump := "5f4dcc3b5aa765d61d8327deb882cf99\n" + tooLong + "\nnever read\n"
 
-	_, err := scanBatch(strings.NewReader(dump))
+	_, err := scanBatch(strings.NewReader(dump), nil)
 	if err == nil {
 		t.Fatal("scanBatch returned no error for a line exceeding the scan buffer, want an error")
 	}

@@ -32,7 +32,7 @@ func BenchmarkScanBatch100k(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_, _ = scanBatch(strings.NewReader(dump))
+		_, _ = scanBatch(strings.NewReader(dump), nil)
 	}
 }
 

@@ -42,7 +42,7 @@ const batchLineScanBuffer = 4 * 1024 * 1024
 // A summary whose denominator can be silently short is worse than no
 // summary, so a truncated scan must be reported rather than rendered as if
 // it were complete.
-func scanBatch(r io.Reader) (batchStats, error) {
+func scanBatch(r io.Reader, hints []string) (batchStats, error) {
 	s := batchStats{
 		ByType:     map[string]int{},
 		Confidence: map[string]string{},
@@ -57,8 +57,9 @@ func scanBatch(r io.Reader) (batchStats, error) {
 		}
 		s.Total++
 
+		candidates, _ := hintReorder(identifyCandidates(line), hints)
 		var best *hashid.Candidate
-		for _, c := range identifyCandidates(line) {
+		for _, c := range candidates {
 			if c.Suppressed {
 				continue
 			}
@@ -137,7 +138,7 @@ func renderBatchSummary(s batchStats) string {
 //
 // The exit code mirrors the per-line path's 0/1 contract (Task 14): 0 when
 // every scanned line was identified, 1 when any line was not.
-func runIdentifyBatch(filePath, text string, positional []string, splitDir, unmatchedFile, outFile string, copyRes, asJSON bool) error {
+func runIdentifyBatch(filePath, text string, positional []string, splitDir, unmatchedFile, outFile string, copyRes, asJSON bool, hints []string, autoHint bool) error {
 	if asJSON {
 		return errors.New("identify --summary --json is not supported: --summary has no JSON rendering (batchStats is not the versioned identifyReport schema); drop --json or drop --summary")
 	}
@@ -146,13 +147,35 @@ func runIdentifyBatch(filePath, text string, positional []string, splitDir, unma
 	if err != nil {
 		return err
 	}
+
+	// Batch mode is always file-backed (resolveBatchFile guarantees it), so
+	// filename-based inference always has something to read, unlike the
+	// per-line path where the input may be a literal hash with no file at
+	// all. A hint that matches no line in a large, mixed dump is normal, not
+	// a warning-worthy condition the way it is for a single hash — so unlike
+	// hintReorder's per-call warnings, only an UNKNOWN tag is surfaced here,
+	// once, rather than re-derived per line.
+	if autoHint {
+		if auto := inferHintsFromFilename(path); len(auto) > 0 {
+			printAutoHintInfo(auto, path)
+			hints = unique(append(hints, auto...))
+		}
+	}
+	var unknown []string
+	for _, h := range hints {
+		if _, ok := hintTags[h]; !ok {
+			unknown = append(unknown, unknownHintTagWarning(h))
+		}
+	}
+	printHintWarnings(unknown)
+
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	stats, err := scanBatch(f)
+	stats, err := scanBatch(f, hints)
 	if err != nil {
 		return err
 	}
