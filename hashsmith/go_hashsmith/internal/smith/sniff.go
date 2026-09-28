@@ -213,7 +213,7 @@ func installSniffers() {
 	set("pdf2smith", magicSniff([]byte("%PDF-"), "PDF header", hashid.Certain))
 	set("pfx2smith", sniffPKCS12)
 	set("gpg2smith", magicSniff([]byte("-----BEGIN PGP"), "ASCII-armoured OpenPGP block", hashid.Certain))
-	set("ssh2smith", magicSniff([]byte("-----BEGIN OPENSSH PRIVATE KEY"), "OpenSSH private key", hashid.Certain))
+	set("ssh2smith", sniffSSHKey)
 	set("luks2smith", magicSniff([]byte("LUKS\xBA\xBE"), "LUKS1 header", hashid.Certain))
 	set("pwsafe2smith", magicSniff([]byte("PWS3"), "Password Safe v3 header tag; a bare 4-byte format "+
 		"tag with no secondary structural check beyond the signature itself", hashid.Likely))
@@ -238,6 +238,11 @@ func installSniffers() {
 	set("vncpcap2smith", sniffCapture)
 	set("mozilla2smith", sniffMozillaKey3)
 	set("encfs2smith", sniffEncFSConfig)
+	set("keychain2smith", sniffMacOSKeychain)
+	set("vmx2smith", sniffVMXKeySafe)
+	set("dashlane2smith", sniffDashlaneArchive)
+	set("padlock2smith", sniffPadlockJSON)
+	set("bks2smith", sniffBKSStore)
 
 	setDeep := func(name string, fn func(path string) (hashid.Evidence, hashid.Confidence, bool)) {
 		d, ok := findExtractor(name)
@@ -456,6 +461,104 @@ func sniffEncFSConfig(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
 		return "", 0, false
 	}
 	return "XML with EncFS's <kdfIterations> and <encodedKeyData> elements", hashid.Likely, true
+}
+
+// sniffSSHKey matches every PEM marker extractSSHKey itself branches on —
+// modern OpenSSH, PKCS#8 (extractPKCS8Key), and legacy OpenSSL PEM
+// (extractLegacyPEMKey, "Proc-Type:" + "ENCRYPTED") — so a file that
+// ssh2smith can actually read is the only thing this ever routes to it.
+// pem2smith reads the same PKCS#8 marker but is deliberately NOT sniffed on
+// it: its own doc comment says a key a current OpenSSL writes "cannot be
+// expressed as $PEM$ AT ALL" and that its refusal "points at ssh2smith" —
+// so routing that marker to ssh2smith, not pem2smith, is the extractor
+// that's actually documented to work.
+func sniffSSHKey(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	switch {
+	case bytes.Contains(head, []byte("BEGIN OPENSSH PRIVATE KEY")):
+		return "OpenSSH private key", hashid.Certain, true
+	case bytes.Contains(head, []byte("BEGIN ENCRYPTED PRIVATE KEY")):
+		return "PKCS#8 encrypted private key", hashid.Certain, true
+	case bytes.Contains(head, []byte("Proc-Type:")) && bytes.Contains(head, []byte("ENCRYPTED")):
+		return "legacy OpenSSL PEM key with an encrypted Proc-Type header", hashid.Certain, true
+	default:
+		return "", 0, false
+	}
+}
+
+// macOSKeychainMagic is the classic-keychain blob signature
+// extractKeychainRecords itself searches for (0xfade0711), Apple's own
+// constant for this format.
+var macOSKeychainMagic = []byte{0xfa, 0xde, 0x07, 0x11}
+
+func sniffMacOSKeychain(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if !bytes.Contains(head, macOSKeychainMagic) {
+		return "", 0, false
+	}
+	return "legacy macOS Keychain blob signature 0xFADE0711", hashid.Certain, true
+}
+
+// sniffVMXKeySafe looks for the literal fields vmxKeySafePattern itself
+// requires inside a VMware .vmx text config: "pass2key=" naming PBKDF2-
+// HMAC-SHA-1 next to "cipher=AES-256". It is Likely, not Certain, because
+// this checks for the marker text, not the full regex (rounds/salt/
+// ciphertext all present and well-formed) extractVMXRecords itself runs.
+func sniffVMXKeySafe(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if !bytes.Contains(head, []byte("pass2key=PBKDF2-HMAC-SHA-1")) || !bytes.Contains(head, []byte("cipher=AES-256")) {
+		return "", 0, false
+	}
+	return "VMware encryption.keySafe fields (pass2key=PBKDF2-HMAC-SHA-1, cipher=AES-256)", hashid.Likely, true
+}
+
+// sniffDashlaneArchive matches only the exported "secure archive" shape of a
+// Dashlane vault (the "Data BEGIN" marker line extractDashlaneRecords itself
+// looks for). The other shape it reads, a raw .aes file, is pure AES output
+// with no header at all — extractDashlaneRecords' own doc says as much for
+// andOTP, and the same is true here — so that shape stays unsniffed rather
+// than guessed at.
+func sniffDashlaneArchive(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if !bytes.Contains(head, []byte("Data BEGIN")) {
+		return "", 0, false
+	}
+	return "Dashlane exported secure archive (\"Data BEGIN\" marker)", hashid.Likely, true
+}
+
+// sniffPadlockJSON looks for SJCL's own field names — "adata" is not a
+// generic JSON key, and extractPadlockRecords requires it alongside "ct"
+// and "iv" — so their joint presence is Padlock's container, not a parse of
+// the JSON itself, which is why this is Likely rather than Certain.
+func sniffPadlockJSON(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if !bytes.Contains(head, []byte(`"adata"`)) || !bytes.Contains(head, []byte(`"ct"`)) || !bytes.Contains(head, []byte(`"iv"`)) {
+		return "", 0, false
+	}
+	return "Padlock/SJCL JSON container fields (\"adata\", \"ct\", \"iv\")", hashid.Likely, true
+}
+
+// sniffBKSStore replicates the numeric plausibility checks extractBKSStore
+// and extractUBERStore themselves run before trusting a candidate: a 4-byte
+// big-endian version of 1 or 2, then a length-prefixed salt of 1-256 bytes,
+// then an iteration count of 1 to 2^24. Bouncy Castle's on-disk format has
+// no byte signature at all — no extractor here reports Certain from three
+// numbers alone — but sniffPKCS12 already sets the precedent that a
+// structural match this specific (three independent range checks chained,
+// not just one) earns Likely, the same bar this meets.
+func sniffBKSStore(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	r := &byteReader{b: head}
+	version, err := r.uint32()
+	if err != nil || (version != 1 && version != 2) {
+		return "", 0, false
+	}
+	salt, err := r.blob32()
+	if err != nil || len(salt) == 0 || len(salt) > 256 {
+		return "", 0, false
+	}
+	iterations, err := r.uint32()
+	if err != nil || iterations == 0 || iterations > 1<<24 {
+		return "", 0, false
+	}
+	return hashid.Evidence(fmt.Sprintf(
+		"plausible Bouncy Castle store header: version %d, %d-byte salt, %d iterations "+
+			"(no byte signature exists for this format, so this is numeric plausibility, not a magic match)",
+		version, len(salt), iterations)), hashid.Likely, true
 }
 
 // sniffKirbi matches KRB-CRED's application tag. 0x76 is [APPLICATION 22]
