@@ -1251,7 +1251,7 @@ self-contained binary that tries to make the common path short.
 | Universal hash/code formats | 623 | 450+ native hash types | hundreds of native formats |
 | Hash-type auto-detection | yes, by default — `identify` and `crack` run on one shared detection engine, so every candidate carries a Hashcat `-m` mode and a John label, not just a yes/no guess | yes in Hashcat 7.x; `--identify` lists possibilities | yes for recognizable ciphertexts; first matching format wins |
 | Machine-readable identify output | `--json`, versioned schema (`hashsmith.identify/1`) | `--identify` prints text, not JSON | text only |
-| Container-file identification | file bytes alone route to the matching `*2smith` extractor for 40 of Hashsmith's 89 extractors; the rest must still be named explicitly (`hashsmith identify --coverage`) | no built-in file-type sniffing; separate hashcat-utils scripts convert known formats | `*2john` scripts convert known container formats; no auto-identification step |
+| Container-file identification | file bytes alone route to the matching `*2smith` extractor for 42 of Hashsmith's 89 extractors; the rest must still be named explicitly (`hashsmith identify --coverage`) | no built-in file-type sniffing; separate hashcat-utils scripts convert known formats | `*2john` scripts convert known container formats; no auto-identification step |
 | Provenance-aware disambiguation | `--hint` (e.g. `shadow`, `windows`, `mysql`, `wpa`) re-ranks within a confidence band using context the user already has — and infers it automatically from the input filename (`ntds.dit` -> `windows`, `shadow_dump.txt` -> `shadow`) so the common case needs no flag at all; never fabricates certainty | not applicable | not applicable |
 | Record-internal decoding | `--explain` decodes the leading candidate's own fields (JWT `alg`, Kerberos `etype`, PEM key type, ...) | not applicable | not applicable |
 | Accepted type vocabulary | 1,163 names/codes resolving into those same 623 formats, including 503 numeric Hashcat aliases | native numeric modes | native format labels |
@@ -1292,7 +1292,7 @@ than picking one is the confidence model working as designed, not failing.
 At the same time, 63.3% is not a number to round up: the John-label table
 that makes `identify`'s printed command runnable covers 195 of 623 crackable
 formats (`hashsmith identify --coverage`), and container-file sniffing
-recognizes 40 of Hashsmith's 89 extractors by file bytes alone — both real,
+recognizes 42 of Hashsmith's 89 extractors by file bytes alone — both real,
 measured gaps, not rounding error. See
 `docs/superpowers/notes/2026-09-05-recognition-baseline.md` for the full
 list of what is and isn't recognized and why (note: that file predates the

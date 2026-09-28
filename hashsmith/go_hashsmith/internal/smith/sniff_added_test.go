@@ -72,6 +72,12 @@ func TestSniffersRouteContainersByTheirOwnMagic(t *testing.T) {
 			binary.BigEndian.PutUint32(b[28:32], 10000)
 			return b
 		}(), "bks2smith", hashid.Likely},
+		{"pfsense config", []byte(`<?xml version="1.0"?><pfsense><version>19.1</version><system><user><name>admin</name></user></system></pfsense>`),
+			"sense2smith", hashid.Likely},
+		{"opnsense config", []byte(`<?xml version="1.0"?><opnsense><trigger_initial_wizard/><system><user><name>root</name></user></system></opnsense>`),
+			"sense2smith", hashid.Likely},
+		{"virtualbox vbox", []byte(`<?xml version="1.0"?><VirtualBox xmlns="http://www.virtualbox.org/" version="1.19"><Machine uuid="{x}" name="vm"><Hardware/></Machine></VirtualBox>`),
+			"virtualbox2smith", hashid.Likely},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -123,6 +129,10 @@ func TestSniffersDoNotMatchUnrelatedBytes(t *testing.T) {
 		[]byte("just some plain text, nothing to see here\n"),
 		make([]byte, 512), // all zeroes
 		[]byte("SQLite format 3\x00"),
+		// A generic <Machine> element with no VirtualBox namespace nearby
+		// must not be routed to virtualbox2smith — "Machine" alone is not
+		// VirtualBox-specific.
+		[]byte(`<?xml version="1.0"?><Machine><name>some other schema</name></Machine>`),
 	} {
 		if d, _, ok := sniffFile(t, head); ok {
 			t.Errorf("%q was routed to %s; expected no match", head[:min(len(head), 24)], d.name)

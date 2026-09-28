@@ -243,6 +243,8 @@ func installSniffers() {
 	set("dashlane2smith", sniffDashlaneArchive)
 	set("padlock2smith", sniffPadlockJSON)
 	set("bks2smith", sniffBKSStore)
+	set("sense2smith", sniffPfSenseConfig)
+	set("virtualbox2smith", sniffVirtualBoxConfig)
 
 	setDeep := func(name string, fn func(path string) (hashid.Evidence, hashid.Confidence, bool)) {
 		d, ok := findExtractor(name)
@@ -422,6 +424,45 @@ func sniffFileZillaServer(head []byte) (hashid.Evidence, hashid.Confidence, bool
 		return "", 0, false
 	}
 	return "XML with a <FileZillaServer> root element", hashid.Likely, true
+}
+
+// sniffPfSenseConfig matches pfSense's or OPNsense's config.xml root
+// element. extractPfSenseRecords itself parses with `xml:"system>user"`
+// path tags and never checks the root name, so this is external knowledge,
+// not something read out of the extractor's own code — but it was verified
+// against real config.xml files rather than guessed: pfSense's official
+// pfSense-guide example and OPNsense's own upstream config.xml.sample both
+// confirmed on 2026-09 (root element `<pfsense>` and `<opnsense>`
+// respectively, nothing else plausibly emits either root name).
+func sniffPfSenseConfig(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	switch {
+	case bytes.Contains(head, []byte("<pfsense>")):
+		return "XML with a <pfsense> root element", hashid.Likely, true
+	case bytes.Contains(head, []byte("<opnsense>")):
+		return "XML with an <opnsense> root element", hashid.Likely, true
+	default:
+		return "", 0, false
+	}
+}
+
+// sniffVirtualBoxConfig matches a .vbox settings file's root element and
+// namespace. VirtualBox's own docs say the XML format is intentionally
+// undocumented and unstable, and the namespace URI itself has changed across
+// versions (older files carry xmlns="http://www.innotek.de/VirtualBox-
+// settings" from before Oracle's acquisition, current ones
+// "http://www.virtualbox.org/") — verified against both a real modern
+// VirtualBox.xml and the upstream XSD schema history, 2026-09 — which is why
+// this checks for "virtualbox" appearing case-insensitively in the xmlns
+// rather than one exact URI, and why it stays Likely rather than Certain
+// even by this file's own more permissive XML-root standard.
+func sniffVirtualBoxConfig(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if !bytes.Contains(head, []byte("<Machine")) {
+		return "", 0, false
+	}
+	if !bytes.Contains(bytes.ToLower(head), []byte("virtualbox")) {
+		return "", 0, false
+	}
+	return "XML <Machine> root element in a VirtualBox-namespaced document", hashid.Likely, true
 }
 
 // sniffOpenSSLEnc matches the eight-byte header `openssl enc` writes in front
