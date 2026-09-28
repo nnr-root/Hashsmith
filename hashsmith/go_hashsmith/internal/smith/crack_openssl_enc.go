@@ -44,6 +44,19 @@ package smith
 // hundred million. The cost is real and is the honest trade: an encrypted
 // file whose first bytes are binary will not be recovered from a record this
 // short. Reporting a wrong password instead would be worse.
+//
+// Known gap, found by running a real `openssl enc -pbkdf2` output through
+// this package (2026-09): this only implements EVP_BytesToKey, which is what
+// `openssl enc` uses by default. A file made with -pbkdf2 (which OpenSSL
+// itself now nudges users toward with a "deprecated key derivation used"
+// warning when it is omitted) derives its key differently and produces a
+// byte-identical "Salted__" container — sniffContainer and
+// extractOpenSSLEnc both still recognize and extract it, but no candidate
+// this package tries will ever verify against it. This is also John's own
+// openssl2john record spelling (see the format comment above), and
+// John/hashcat do not appear to have a PBKDF2 variant of this mode either,
+// so adding one here would mean inventing a field neither tool reads rather
+// than closing an ecosystem gap.
 
 import (
 	"crypto/aes"
