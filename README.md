@@ -55,6 +55,7 @@ hashsmith crack -t md5 5f4dcc3b5aa765d61d8327deb882cf99          # built-in comm
 hashsmith crack -t md5 5f4dcc3b5aa765d61d8327deb882cf99 -w custom.txt   # or -w / --wordlist
 hashsmith identify "5f4dcc3b5aa765d61d8327deb882cf99, 8846f7ea…"  # identify several at once
 hashsmith identify --hint windows 5f4dcc3b5aa765d61d8327deb882cf99  # break a shape tie with provenance you already have
+hashsmith identify ntds.dit                                        # same idea, inferred automatically from the filename
 ```
 
 `identify` and `crack` run on the same detection engine, so what `identify`
@@ -1251,7 +1252,7 @@ self-contained binary that tries to make the common path short.
 | Hash-type auto-detection | yes, by default — `identify` and `crack` run on one shared detection engine, so every candidate carries a Hashcat `-m` mode and a John label, not just a yes/no guess | yes in Hashcat 7.x; `--identify` lists possibilities | yes for recognizable ciphertexts; first matching format wins |
 | Machine-readable identify output | `--json`, versioned schema (`hashsmith.identify/1`) | `--identify` prints text, not JSON | text only |
 | Container-file identification | file bytes alone route to the matching `*2smith` extractor for 40 of Hashsmith's 89 extractors; the rest must still be named explicitly (`hashsmith identify --coverage`) | no built-in file-type sniffing; separate hashcat-utils scripts convert known formats | `*2john` scripts convert known container formats; no auto-identification step |
-| Provenance-aware disambiguation | `--hint` (e.g. `shadow`, `windows`, `mysql`, `wpa`) re-ranks within a confidence band using context the user already has; never fabricates certainty | not applicable | not applicable |
+| Provenance-aware disambiguation | `--hint` (e.g. `shadow`, `windows`, `mysql`, `wpa`) re-ranks within a confidence band using context the user already has — and infers it automatically from the input filename (`ntds.dit` -> `windows`, `shadow_dump.txt` -> `shadow`) so the common case needs no flag at all; never fabricates certainty | not applicable | not applicable |
 | Record-internal decoding | `--explain` decodes the leading candidate's own fields (JWT `alg`, Kerberos `etype`, PEM key type, ...) | not applicable | not applicable |
 | Accepted type vocabulary | 1,163 names/codes resolving into those same 623 formats, including 503 numeric Hashcat aliases | native numeric modes | native format labels |
 | Attack modes | dict, brute, mask, markov, hybrid, combinator, PRINCE | straight, combinator, mask, hybrid, association | wordlist, incremental, mask, external |

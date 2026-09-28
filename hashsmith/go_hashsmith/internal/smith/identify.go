@@ -57,6 +57,7 @@ func runIdentify(args []string) error {
 	coverage := fs.Bool("coverage", false, "report container-sniffer and John-label coverage, then exit")
 	hint := fs.String("hint", "", "comma-separated provenance hints to bias ranking (shadow, windows, mysql, wpa, ...) — reorders within a confidence band, never promotes one; see --hint-tags")
 	hintTagsFlag := fs.Bool("hint-tags", false, "list every known --hint tag and the types it favors, then exit")
+	noAutoHint := fs.Bool("no-auto-hint", false, "disable automatic --hint inference from the input's filename (e.g. shadow_dump.txt -> --hint shadow)")
 	summary := fs.Bool("summary", false, "batch mode: scan a dump and print a per-type summary instead of a per-line report")
 	splitDir := fs.String("split-by-type", "", "batch mode: write one file per detected type into this directory, named for its -t type")
 	unmatchedFile := fs.String("unmatched", "", "batch mode: write unidentified lines, one per line, to this file")
@@ -135,6 +136,15 @@ func runIdentify(args []string) error {
 	inputs, err := collectIdentifyInputs(*text, *filePath, fs.Args())
 	if err != nil {
 		return err
+	}
+
+	if !*noAutoHint {
+		if src := candidateFilePathForHints(*filePath, *text, fs.Args()); src != "" {
+			if auto := inferHintsFromFilename(src); len(auto) > 0 {
+				printAutoHintInfo(auto, src)
+				hints = unique(append(hints, auto...))
+			}
+		}
 	}
 
 	if *asJSON {

@@ -3,6 +3,7 @@ package smith
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -108,6 +109,132 @@ var hintTags = map[string][]string{
 	"redmine":    {"redmine"},
 }
 
+// filenameHintPatterns maps a whole filename TOKEN (not a substring — see
+// inferHintsFromFilename) to the hintTags key(s) it implies. Every value here
+// must be a real hintTags key; TestFilenameHintPatternsUseRealTags proves it,
+// the same way TestHintTagsNameRealFormats proves hintTags' own values name
+// real formats.
+//
+// This is automatic --hint inference: a dump named "shadow_backup.txt" or
+// "ntds.dit" carries the same provenance a user would otherwise type by
+// hand, so identify infers it instead of making them type it — see
+// inferHintsFromFilename's doc comment for why token matching, not
+// substring matching, is what keeps this safe.
+var filenameHintPatterns = map[string][]string{
+	"shadow": {"shadow"},
+	"sam":    {"windows"},
+	"ntds":   {"windows"},
+
+	"mysql":      {"mysql"},
+	"postgres":   {"postgres"},
+	"postgresql": {"postgres"},
+	"oracle":     {"oracle"},
+	"mssql":      {"mssql"},
+	"sqlserver":  {"mssql"},
+
+	"cisco":   {"cisco"},
+	"juniper": {"juniper"},
+	"aruba":   {"aruba"},
+	"radius":  {"radius"},
+	"tacacs":  {"tacacs"},
+
+	"kerberos": {"kerberos"},
+	"krb5":     {"kerberos"},
+	"wpa":      {"wpa"},
+	"ike":      {"ike"},
+	"ipsec":    {"ipsec"},
+	"vpn":      {"vpn"},
+	"snmp":     {"snmp"},
+
+	"telegram":  {"telegram"},
+	"signal":    {"signal"},
+	"dashlane":  {"keychain"},
+	"lastpass":  {"keychain"},
+	"bitwarden": {"keychain"},
+	"keepass":   {"keychain"},
+	"kdbx":      {"keychain"},
+	"pwsafe":    {"keychain"},
+
+	"office": {"office"},
+	"pdf":    {"pdf"},
+
+	"bitcoin":  {"wallet"},
+	"ethereum": {"wallet"},
+	"monero":   {"wallet"},
+	"wallet":   {"wallet"},
+
+	"wordpress":  {"wordpress"},
+	"drupal":     {"drupal"},
+	"peoplesoft": {"peoplesoft"},
+	"fortigate":  {"fortigate"},
+	"fortinet":   {"fortinet"},
+	"redmine":    {"redmine"},
+	"sap":        {"sap"},
+	"aix":        {"aix"},
+	"racf":       {"mainframe"},
+
+	"diskcryptor": {"diskcryptor"},
+	"ecryptfs":    {"ecryptfs"},
+	"bitlocker":   {"bitlocker"},
+	"ssh":         {"ssh"},
+	"chap":        {"chap"},
+	"iscsi":       {"iscsi"},
+}
+
+// candidateFilePathForHints picks the same source collectIdentifyInputs
+// would (-f first, then -i or the first positional argument if either names
+// a readable file), purely so inferHintsFromFilename has a basename to work
+// from. It does not need to be — and deliberately is not — wired into
+// collectIdentifyInputs itself: getting the "usual" file right is enough for
+// an inference that only ever reorders, never asserts anything.
+func candidateFilePathForHints(fVal, iVal string, positional []string) string {
+	if strings.TrimSpace(fVal) != "" {
+		return fVal
+	}
+	if strings.TrimSpace(iVal) != "" {
+		if fi, err := os.Stat(iVal); err == nil && !fi.IsDir() {
+			return iVal
+		}
+	}
+	for _, p := range positional {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+// inferHintsFromFilename reads provenance out of a path's basename the same
+// way a user would read it themselves before typing --hint by hand.
+//
+// It matches whole TOKENS (the basename split on every non-alphanumeric
+// byte), never substrings — "example.txt" tokenises to ["example", "txt"],
+// neither of which is "sam", so it does not false-positive on "sam" merely
+// appearing inside a longer word the way a bare substring search would.
+// "ntds.dit" tokenises to ["ntds", "dit"] and matches on "ntds" exactly.
+func inferHintsFromFilename(path string) []string {
+	if path == "" {
+		return nil
+	}
+	base := strings.ToLower(filepath.Base(path))
+	tokens := strings.FieldsFunc(base, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+	})
+
+	var out []string
+	seen := make(map[string]bool)
+	for _, tok := range tokens {
+		for _, tag := range filenameHintPatterns[tok] {
+			if !seen[tag] {
+				seen[tag] = true
+				out = append(out, tag)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // parseHintFlag splits --hint's comma-separated value into lower-cased,
 // trimmed, de-duplicated tags. An empty flag value yields nil, not [""].
 func parseHintFlag(s string) []string {
@@ -132,6 +259,18 @@ func printHintWarnings(warnings []string) {
 	for _, w := range unique(warnings) {
 		fmt.Fprintln(os.Stderr, "identify: "+w)
 	}
+}
+
+// printAutoHintInfo tells the user which --hint tags were inferred from the
+// input's filename and applied automatically — an inferred hint changes the
+// ranking exactly as much as one the user typed, so it must not be silent.
+// --no-auto-hint turns this (and the inference itself) off.
+func printAutoHintInfo(tags []string, path string) {
+	if len(tags) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "identify: inferred --hint %s from filename %q (use --no-auto-hint to disable)\n",
+		strings.Join(tags, ","), filepath.Base(path))
 }
 
 // printHintTags lists every known --hint tag and what it favors, so

@@ -1,6 +1,7 @@
 package smith
 
 import (
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -197,5 +198,67 @@ func TestHintReorderSuggestsTypoInWarning(t *testing.T) {
 	_, warns := hintReorder(cs, []string{"wnidows"})
 	if len(warns) != 1 || !strings.Contains(warns[0], `did you mean "windows"?`) {
 		t.Fatalf("expected a windows suggestion in the warning, got %v", warns)
+	}
+}
+
+// TestFilenameHintPatternsUseRealTags mirrors TestHintTagsNameRealFormats:
+// every value filenameHintPatterns maps to must be a real hintTags key, or
+// an inferred hint would silently do nothing (or worse, warn about itself).
+func TestFilenameHintPatternsUseRealTags(t *testing.T) {
+	for token, tags := range filenameHintPatterns {
+		for _, tag := range tags {
+			if _, ok := hintTags[tag]; !ok {
+				t.Errorf("filenameHintPatterns[%q] names unknown hint tag %q", token, tag)
+			}
+		}
+	}
+}
+
+func TestInferHintsFromFilename(t *testing.T) {
+	cases := []struct {
+		path string
+		want []string
+	}{
+		{"shadow_dump.txt", []string{"shadow"}},
+		{"/etc/shadow", []string{"shadow"}},
+		{"ntds.dit", []string{"windows"}},
+		{"sam.hiv", []string{"windows"}},
+		{"mysql_users.txt", []string{"mysql"}},
+		{"example.txt", nil},        // "sam" must NOT match inside "example"
+		{"samsung_backup.txt", nil}, // same guard, a different real word
+		{"", nil},
+		{"plain-hashes.txt", nil},
+	}
+	for _, c := range cases {
+		got := inferHintsFromFilename(c.path)
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("inferHintsFromFilename(%q) = %v, want %v", c.path, got, c.want)
+		}
+	}
+}
+
+func TestCandidateFilePathForHints(t *testing.T) {
+	dir := t.TempDir()
+	realFile := dir + "/shadow.txt"
+	if err := os.WriteFile(realFile, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// -f wins even if it doesn't exist (matches collectIdentifyInputs'
+	// own precedence — -f is trusted at face value).
+	if got := candidateFilePathForHints("some-f-value", "", nil); got != "some-f-value" {
+		t.Errorf("got %q, want the -f value", got)
+	}
+	// -i is only used when it is actually a readable file, not literal text.
+	if got := candidateFilePathForHints("", "5f4dcc3b5aa765d61d8327deb882cf99", nil); got != "" {
+		t.Errorf("literal -i text should not be treated as a path, got %q", got)
+	}
+	if got := candidateFilePathForHints("", realFile, nil); got != realFile {
+		t.Errorf("got %q, want %q", got, realFile)
+	}
+	// A positional argument that is a real file is used when neither -f nor
+	// -i apply.
+	if got := candidateFilePathForHints("", "", []string{"not-a-file", realFile}); got != realFile {
+		t.Errorf("got %q, want %q", got, realFile)
 	}
 }
