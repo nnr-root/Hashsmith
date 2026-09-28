@@ -150,6 +150,71 @@ func printHintTags() {
 	}
 }
 
+// closestHintTag finds the hintTags key nearest to an unrecognized tag by
+// Levenshtein distance, for a "did you mean" suggestion. Two guards keep a
+// wrong suggestion from being worse than none: a tag shorter than 3 bytes
+// never suggests at all (there is no such thing as a confident typo
+// correction for "q"), and otherwise the distance must be at most a third of
+// the tag's own length, rounded down, with a floor of 1 — loose enough for a
+// real typo ("wnidows" -> "windows", distance 2 of 7) but not loose enough
+// for an unrelated short word to land near an arbitrary tag.
+func closestHintTag(tag string) (string, bool) {
+	if len(tag) < 3 {
+		return "", false
+	}
+	best, bestDist := "", -1
+	for t := range hintTags {
+		d := levenshtein(tag, t)
+		if bestDist == -1 || d < bestDist {
+			best, bestDist = t, d
+		}
+	}
+	threshold := len(tag) / 3
+	if threshold < 1 {
+		threshold = 1
+	}
+	if bestDist < 0 || bestDist > threshold {
+		return "", false
+	}
+	return best, true
+}
+
+// levenshtein is the standard single-row dynamic-programming edit distance,
+// operating on bytes (every hintTags key and every --hint value is
+// lower-cased ASCII, so byte-wise is exact here, not an approximation).
+func levenshtein(a, b string) int {
+	if a == b {
+		return 0
+	}
+	prev := make([]int, len(b)+1)
+	curr := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		curr[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			del := prev[j] + 1
+			ins := curr[j-1] + 1
+			sub := prev[j-1] + cost
+			m := del
+			if ins < m {
+				m = ins
+			}
+			if sub < m {
+				m = sub
+			}
+			curr[j] = m
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(b)]
+}
+
 // hintReorder stable-reorders cs so that candidates matching any of the given
 // hint tags come before the ones that don't, WITHIN each existing confidence
 // band — a hint never moves a candidate from one Confidence value to
@@ -168,7 +233,11 @@ func hintReorder(cs []hashid.Candidate, hints []string) ([]hashid.Candidate, []s
 	for _, h := range hints {
 		types, ok := hintTags[h]
 		if !ok {
-			warnings = append(warnings, "unknown --hint tag \""+h+"\"")
+			msg := "unknown --hint tag \"" + h + "\""
+			if suggestion, ok := closestHintTag(h); ok {
+				msg += " (did you mean \"" + suggestion + "\"?)"
+			}
+			warnings = append(warnings, msg)
 			continue
 		}
 		matched := false

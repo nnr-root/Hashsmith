@@ -2,6 +2,7 @@ package smith
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"hashsmith-go/internal/hashid"
@@ -139,4 +140,62 @@ func unhintedConfidenceFor(cs []hashid.Candidate, typ string) hashid.Confidence 
 		}
 	}
 	return hashid.Unlikely
+}
+
+func TestLevenshtein(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int
+	}{
+		{"windows", "windows", 0},
+		{"windows", "wnidows", 2}, // transposition = 2 single-char edits
+		{"", "abc", 3},
+		{"abc", "", 3},
+		{"mysql", "mysqll", 1},
+		{"kitten", "sitting", 3},
+	}
+	for _, c := range cases {
+		if got := levenshtein(c.a, c.b); got != c.want {
+			t.Errorf("levenshtein(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+func TestClosestHintTagSuggestsPlausibleTypos(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"wnidows", "windows"},
+		{"mysqll", "mysql"},
+		{"shado", "shadow"},
+		{"kerberoz", "kerberos"},
+	}
+	for _, c := range cases {
+		got, ok := closestHintTag(c.in)
+		if !ok || got != c.want {
+			t.Errorf("closestHintTag(%q) = (%q, %v), want (%q, true)", c.in, got, ok, c.want)
+		}
+	}
+}
+
+// TestClosestHintTagRefusesUnrelatedInput is the guard that matters most: a
+// suggestion for a tag that isn't a plausible typo of anything is worse than
+// no suggestion — it tells the user something false about what --hint knows.
+func TestClosestHintTagRefusesUnrelatedInput(t *testing.T) {
+	for _, in := range []string{"xkcd", "q", "zzzzzzzzzz", "banana"} {
+		if got, ok := closestHintTag(in); ok {
+			t.Errorf("closestHintTag(%q) = (%q, true), want no suggestion", in, got)
+		}
+	}
+}
+
+// TestHintReorderSuggestsTypoInWarning is the integration path: the
+// suggestion actually reaches hintReorder's warning text.
+func TestHintReorderSuggestsTypoInWarning(t *testing.T) {
+	cs := []hashid.Candidate{{Type: "md5", Confidence: hashid.Likely}}
+	_, warns := hintReorder(cs, []string{"wnidows"})
+	if len(warns) != 1 || !strings.Contains(warns[0], `did you mean "windows"?`) {
+		t.Fatalf("expected a windows suggestion in the warning, got %v", warns)
+	}
 }
