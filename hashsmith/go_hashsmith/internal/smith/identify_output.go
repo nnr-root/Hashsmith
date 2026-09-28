@@ -108,8 +108,11 @@ const identifySchemaVersion = "hashsmith.identify/1"
 // could not distinguish "mode 0" from "no mode", and a consumer would read
 // every unknown format as MD5. John is *string for the identical reason:
 // "" is not a real John label, but a plain string cannot say so. Measured
-// coverage is 395/457 formats with a mode and 65/457 with a label, so an
-// absent value is the normal case here, not a rare edge.
+// coverage (same crackable-format count `identify --coverage` reports) is
+// 450/623 formats with a mode and 177/623 with a label, so an absent value
+// is the normal case here, not a rare edge — re-check with `identify
+// --coverage` before trusting these numbers again; they drift as the
+// registry and hash_john_labels.go grow.
 //
 // No percentage, score, or confidence number appears anywhere in this type:
 // Confidence carries exactly the four words the ordinal model defines.
