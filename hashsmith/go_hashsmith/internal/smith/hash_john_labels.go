@@ -127,5 +127,22 @@ func johnLabelSeed() map[string]string {
 		"hmailserver": "hmailserver", "signal": "signal",
 		"solarwinds": "solarwinds", "sspr": "sspr",
 		"tacacs-plus": "tacacs-plus", "xmpp-scram": "xmpp-scram",
+
+		// Second propose sweep (same method, same script, re-run after the
+		// batch above landed).
+		"odf": "odf", "pkzip": "pkzip", "ansible": "ansible", "mdc2": "mdc2",
+		"tezos": "tezos", "lastpass": "lastpass",
+		"haval128-4": "haval-128-4", "haval256-3": "haval-256-3",
+		"skein256": "skein-256", "skein512": "skein-512",
+		"enpass": "enpass", "putty": "putty", "openssl-enc": "openssl-enc",
+		"vdi": "vdi", "net-ah": "net-ah", "rsvp": "rsvp", "ospf": "ospf",
+		"azuread": "azuread", "known-hosts": "known_hosts",
+		"zipmonster": "zipmonster", "xsha": "xsha", "xsha512": "xsha512",
+		"netlmv2": "netlmv2", "mschapv2": "mschapv2", "eigrp": "eigrp",
+		"ipb2": "ipb2", "net-md5": "net-md5", "net-sha1": "net-sha1",
+		"osc": "osc", "tcp-md5": "tcp-md5", "wbb3": "wbb3",
+		"ecryptfs": "ecryptfs", "bsdicrypt": "bsdicrypt", "gost": "gost",
+		"fvde": "fvde", "iwork": "iwork", "securezip": "securezip",
+		"racf": "racf", "multibit": "multibit",
 	}
 }
