@@ -157,5 +157,9 @@ func johnLabelSeed() map[string]string {
 		"mozilla-nss": "mozilla", "multibit-hd": "multibit",
 		"multibit-key": "multibit", "oracle-o5logon": "o5logon",
 		"postgres-cram": "postgres", "telegram-desktop": "telegram",
+
+		// Fourth sweep, run after the self-test vector gap closed (every
+		// crackable format now has a vector to test John against).
+		"dummy": "dummy", "sha1-linkedin": "raw-sha1-linkedin",
 	}
 }

@@ -32,6 +32,7 @@ dragonfly3-64	dragonfly3-64
 dragonfly4-32	dragonfly4-32
 dragonfly4-64	dragonfly4-64
 drupal7	Drupal7
+dummy	dummy
 ecryptfs	ecryptfs
 eigrp	eigrp
 electrum	electrum
@@ -124,6 +125,7 @@ sap-fg	sapg
 sappse	sappse
 securezip	securezip
 sha1	raw-sha1
+sha1-linkedin	raw-sha1-linkedin
 sha1crypt	sha1crypt
 sha224	raw-sha224
 sha256	raw-sha256
