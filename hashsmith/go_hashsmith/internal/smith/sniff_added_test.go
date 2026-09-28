@@ -41,6 +41,14 @@ func TestSniffersRouteContainersByTheirOwnMagic(t *testing.T) {
 		{"ansible vault", []byte("$ANSIBLE_VAULT;1.1;AES256\n3236616...\n"), "ansible2smith", hashid.Certain},
 		{"pcapng capture", pad([]byte{0x0a, 0x0d, 0x0d, 0x0a}, 64), "vncpcap2smith", hashid.Likely},
 		{"classic pcap capture", pad([]byte{0xd4, 0xc3, 0xb2, 0xa1}, 64), "vncpcap2smith", hashid.Likely},
+		{"mozilla key3.db", []byte("\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x61\x15\x06\x00" +
+			"junk-before-global-salt-marker global-salt more junk password-check tail"), "mozilla2smith", hashid.Likely},
+		{"encfs config", []byte(`<?xml version="1.0" encoding="UTF-8"?>` +
+			`<boost_serialization><cfg><cipherAlg name="AES"/><keySize>256</keySize>` +
+			`<kdfIterations>163481</kdfIterations><encodedKeySize>44</encodedKeySize>` +
+			`<saltLen>20</saltLen><saltData>c29tZXNhbHQ=</saltData>` +
+			`<encodedKeyData>c29tZWtleWRhdGE=</encodedKeyData></cfg></boost_serialization>`),
+			"encfs2smith", hashid.Likely},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

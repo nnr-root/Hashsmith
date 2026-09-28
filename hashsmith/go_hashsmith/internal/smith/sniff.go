@@ -236,6 +236,8 @@ func installSniffers() {
 		"Ansible Vault envelope header", hashid.Certain))
 	set("bitlocker2smith", sniffBitLocker)
 	set("vncpcap2smith", sniffCapture)
+	set("mozilla2smith", sniffMozillaKey3)
+	set("encfs2smith", sniffEncFSConfig)
 }
 
 func init() { installSniffers() }
@@ -399,6 +401,35 @@ func sniffOpenSSLEnc(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
 		return "", 0, false
 	}
 	return "magic \"Salted__\" followed by an eight-byte salt", hashid.Certain, true
+}
+
+// sniffMozillaKey3 looks for the same two markers extractMozillaRecords
+// itself scans for — "global-salt" and "password-check" — within the bytes
+// sniffContainer actually reads. A real key3.db can be larger than
+// sniffHeadBytes, in which case the markers sit past what this function ever
+// sees and it reports no match rather than a false negative dressed up as
+// one; extractMozillaRecords, which reads the whole file, is unaffected.
+// Both are Berkeley DB text keys with no relation to any other 20-byte
+// blob, so their presence is a real (if not offset-anchored) signature —
+// still Likely, not Certain, because this is a scan of a shape, not a
+// verified parse.
+func sniffMozillaKey3(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if !bytes.Contains(head, []byte("global-salt")) || !bytes.Contains(head, []byte("password-check")) {
+		return "", 0, false
+	}
+	return "Berkeley DB with Mozilla NSS's \"global-salt\" and \"password-check\" keys", hashid.Likely, true
+}
+
+// sniffEncFSConfig matches on two of the element names
+// extractEncFSRecords itself decodes from .encfs6.xml — "kdfIterations" and
+// "encodedKeyData". Neither is a byte-for-byte format signature (this is
+// still XML, like sniffFileZillaServer below), but the pair together names
+// EncFS's own field vocabulary and nothing else's.
+func sniffEncFSConfig(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if !bytes.Contains(head, []byte("<kdfIterations>")) || !bytes.Contains(head, []byte("<encodedKeyData>")) {
+		return "", 0, false
+	}
+	return "XML with EncFS's <kdfIterations> and <encodedKeyData> elements", hashid.Likely, true
 }
 
 // sniffKirbi matches KRB-CRED's application tag. 0x76 is [APPLICATION 22]
