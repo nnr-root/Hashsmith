@@ -200,10 +200,31 @@ func walletsPrototypes() []hashid.Prototype {
 		},
 		// No fixed prefix: only a dot-delimited field count (3) and an exact
 		// length (27) on the third field. TierStructural.
+		//
+		// The leading-'$' exclusion below is load-bearing, not defensive
+		// styling: bcrypt's own base64 alphabet (./A-Za-z0-9) includes '.',
+		// so a $2a$/$2b$/$2y$ record's salt+hash body can coincidentally
+		// contain exactly two dots positioned so the whole string splits
+		// into 3 fields with a 27-char last one — found by fuzzing real
+		// bcrypt.GenerateFromPassword output (2026-09): one collision in 97
+		// tries at cost 4, e.g.
+		// "$2a$04$X6Xng3QYjRkKX.VPkpP4AeFdI.iLUC8MaP7zpJHMAvI31Tsiyubo6".
+		// Because this prototype is Exclusive and walletsPrototypes() runs
+		// before saltedPrototypes() (where bcrypt's own signature check
+		// lives), that false match suppressed bcrypt outright — not a
+		// ranking demotion, a complete disappearance from identify's
+		// output. A genuine Flask session cookie is base64 in every field
+		// (Flask signs with itsdangerous, whose alphabet has no '$'), so
+		// requiring the record NOT start with '$' costs this prototype
+		// nothing while ruling out every '$'-tagged crypt format at once,
+		// not just bcrypt.
 		{
 			Types: []string{"flask-session"}, Display: "Flask session cookie (HMAC-SHA1)",
 			Tier: hashid.TierStructural, Exclusive: true,
 			Match: func(in hashid.Input) (hashid.Evidence, bool) {
+				if strings.HasPrefix(in.Normalized, "$") {
+					return "", false
+				}
 				fields := strings.Split(in.Normalized, ".")
 				if len(fields) == 3 && len(fields[2]) == 27 {
 					return "dot-delimited record with exactly 3 fields, the third exactly 27 chars", true

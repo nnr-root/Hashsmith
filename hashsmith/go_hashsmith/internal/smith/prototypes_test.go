@@ -578,3 +578,32 @@ func TestEmittedTypesAreRegistered(t *testing.T) {
 	}
 	t.Logf("validated %d distinct emitted types across %d corpus inputs", len(seen), len(goldenDetectInputs()))
 }
+
+// TestFlaskSessionDoesNotSuppressBcrypt is a regression test for a real
+// collision found by fuzzing bcrypt.GenerateFromPassword output (2026-09):
+// bcrypt's own base64 alphabet (./A-Za-z0-9) includes '.', so a $2a$/$2b$/
+// $2y$ record's salt+hash body can coincidentally split into exactly 3
+// dot-delimited fields with a 27-char last one — flask-session's own shape
+// check. Because flask-session is Exclusive and runs earlier in the table
+// than bcrypt's own signature check, that false match silently dropped
+// bcrypt from identify's output entirely, not merely demoted it. One in
+// roughly 97 bcrypt hashes hit this in a fuzz run at cost 4.
+func TestFlaskSessionDoesNotSuppressBcrypt(t *testing.T) {
+	collision := "$2a$04$X6Xng3QYjRkKX.VPkpP4AeFdI.iLUC8MaP7zpJHMAvI31Tsiyubo6"
+	types := detectHashTypes(collision)
+	var hasBcrypt, hasFlask bool
+	for _, ty := range types {
+		if ty == "bcrypt" {
+			hasBcrypt = true
+		}
+		if ty == "flask-session" {
+			hasFlask = true
+		}
+	}
+	if !hasBcrypt {
+		t.Errorf("the known collision string is no longer detected as bcrypt: %v", types)
+	}
+	if hasFlask {
+		t.Errorf("the known collision string still (mis)matches flask-session: %v", types)
+	}
+}
