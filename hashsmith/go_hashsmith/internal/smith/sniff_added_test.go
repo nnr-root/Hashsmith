@@ -78,6 +78,13 @@ func TestSniffersRouteContainersByTheirOwnMagic(t *testing.T) {
 			"sense2smith", hashid.Likely},
 		{"virtualbox vbox", []byte(`<?xml version="1.0"?><VirtualBox xmlns="http://www.virtualbox.org/" version="1.19"><Machine uuid="{x}" name="vm"><Hardware/></Machine></VirtualBox>`),
 			"virtualbox2smith", hashid.Likely},
+		{"binary gpg symmetric message, new-format tag", pad([]byte{0xC3, 0x14, 4, 9, 3, 2}, 64),
+			"gpg2smith", hashid.Likely},
+		{"binary gpg symmetric message, old-format tag, 1-octet length", pad([]byte{0x8C, 12, 4, 9, 3, 2}, 64),
+			"gpg2smith", hashid.Likely},
+		{"odf mimetype entry", append([]byte("PK\x03\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x08\x00\x00\x00mimetype"),
+			[]byte("application/vnd.oasis.opendocument.text")...),
+			"libreoffice2smith", hashid.Likely},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -133,6 +140,11 @@ func TestSniffersDoNotMatchUnrelatedBytes(t *testing.T) {
 		// must not be routed to virtualbox2smith — "Machine" alone is not
 		// VirtualBox-specific.
 		[]byte(`<?xml version="1.0"?><Machine><name>some other schema</name></Machine>`),
+		// A high-bit-set first byte decoding to a DIFFERENT OpenPGP tag
+		// (18 = Symmetrically Encrypted Integrity Protected Data, new
+		// format) must not be routed to gpg2smith — only tag 3 (the SKESK
+		// that always opens a gpg -c message) may.
+		{0xD2, 0x14, 1, 2, 3, 4, 5, 6, 7, 8},
 	} {
 		if d, _, ok := sniffFile(t, head); ok {
 			t.Errorf("%q was routed to %s; expected no match", head[:min(len(head), 24)], d.name)

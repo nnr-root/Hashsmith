@@ -212,7 +212,7 @@ func installSniffers() {
 	set("rar2smith", magicSniff([]byte("Rar!\x1A\x07"), "RAR signature (RAR4/RAR5 share this prefix)", hashid.Certain))
 	set("pdf2smith", magicSniff([]byte("%PDF-"), "PDF header", hashid.Certain))
 	set("pfx2smith", sniffPKCS12)
-	set("gpg2smith", magicSniff([]byte("-----BEGIN PGP"), "ASCII-armoured OpenPGP block", hashid.Certain))
+	set("gpg2smith", sniffGPG)
 	set("ssh2smith", sniffSSHKey)
 	set("luks2smith", magicSniff([]byte("LUKS\xBA\xBE"), "LUKS1 header", hashid.Certain))
 	set("pwsafe2smith", magicSniff([]byte("PWS3"), "Password Safe v3 header tag; a bare 4-byte format "+
@@ -245,6 +245,7 @@ func installSniffers() {
 	set("bks2smith", sniffBKSStore)
 	set("sense2smith", sniffPfSenseConfig)
 	set("virtualbox2smith", sniffVirtualBoxConfig)
+	set("libreoffice2smith", sniffODF)
 
 	setDeep := func(name string, fn func(path string) (hashid.Evidence, hashid.Confidence, bool)) {
 		d, ok := findExtractor(name)
@@ -572,6 +573,60 @@ func sniffPadlockJSON(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
 		return "", 0, false
 	}
 	return "Padlock/SJCL JSON container fields (\"adata\", \"ct\", \"iv\")", hashid.Likely, true
+}
+
+// sniffODF matches the OpenDocument Format's own file-typing mechanism:
+// OASIS ODF 1.2 section 17.4 mandates that an ODF zip's FIRST entry be an
+// uncompressed file literally named "mimetype" whose content is
+// "application/vnd.oasis.opendocument.<kind>" — the spec's own words are
+// that this exists so a reader can identify the format without unzipping.
+// zip2smith's own sniff already notes .odt as one of the formats sharing
+// bare "PK\x03\x04" magic; this is the more specific signature that exists
+// for exactly that reason, and libreoffice2smith sits earlier in the
+// registry than zip2smith so it is tried first. Not extended to
+// staroffice2smith: that extractor targets pre-OASIS StarOffice 5.x/6.x
+// files, which predate ODF and this mimetype convention entirely.
+func sniffODF(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if !bytes.HasPrefix(head, []byte("PK")) {
+		return "", 0, false
+	}
+	if !bytes.Contains(head, []byte("mimetype")) ||
+		!bytes.Contains(head, []byte("application/vnd.oasis.opendocument.")) {
+		return "", 0, false
+	}
+	return "ZIP archive whose first entry is ODF's mandated \"mimetype\" file " +
+		"(OASIS ODF 1.2 §17.4)", hashid.Likely, true
+}
+
+// sniffGPG recognizes both shapes extractGPG itself reads: ASCII-armored
+// (the "-----BEGIN PGP" prefix already used) and raw binary. The binary
+// case decodes the very first packet's tag using the exact bit logic
+// readPGPPacket does (ctb&0x80 must be set; new-format tag is ctb&0x3f,
+// old-format is (ctb>>2)&0x0f) and requires it to be 3 — RFC 4880's
+// Symmetric-Key Encrypted Session Key packet, which a `gpg -c` message
+// always opens with. That is only five possible leading bytes (0xC3 new-
+// format, 0x8C-0x8F old-format with any of the four length-type bits) out
+// of 256, checked without needing the rest of the message — which matters
+// because the SEIPD packet that follows is the message body itself and is
+// routinely far larger than sniffHeadBytes.
+func sniffGPG(head []byte) (hashid.Evidence, hashid.Confidence, bool) {
+	if bytes.HasPrefix(head, []byte("-----BEGIN PGP")) {
+		return "ASCII-armoured OpenPGP block", hashid.Certain, true
+	}
+	if len(head) < 1 || head[0]&0x80 == 0 {
+		return "", 0, false
+	}
+	ctb := head[0]
+	var tag int
+	if ctb&0x40 != 0 {
+		tag = int(ctb & 0x3f)
+	} else {
+		tag = int((ctb >> 2) & 0x0f)
+	}
+	if tag != 3 {
+		return "", 0, false
+	}
+	return "binary OpenPGP Symmetric-Key ESK packet (tag 3) opening the message, the shape gpg -c writes", hashid.Likely, true
 }
 
 // sniffBKSStore replicates the numeric plausibility checks extractBKSStore
