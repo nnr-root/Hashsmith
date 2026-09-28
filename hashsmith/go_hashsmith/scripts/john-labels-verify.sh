@@ -237,8 +237,16 @@ propose)
     seen_fmt="$seen_fmt $fmt"
     awk -F'\t' -v f="$fmt" '$1==f {found=1} END{exit !found}' "$tmp/committed.tsv" && continue
     n="$(norm "$fmt")"
-    # candidate John labels: exact normalised match, and the raw-<name> spelling
-    cands="$(awk -F'\t' -v a="$n" -v b="raw$n" '$1==a || $1==b {print $2}' "$tmp/john-index.tsv")"
+    # candidate John labels: exact normalised match, the raw-<name> spelling,
+    # and substring containment in either direction (both sides >=5 chars, so
+    # a short name like "des" doesn't match everything). The wider net only
+    # changes what gets TRIED — a candidate is still only ever printed after
+    # John itself recovers the plaintext under it, so this cannot trust a
+    # label that wasn't actually verified.
+    cands="$(awk -F'\t' -v a="$n" -v b="raw$n" '
+      $1==a || $1==b {print $2; next}
+      length(a)>=5 && length($1)>=5 && (index($1,a)>0 || index(a,$1)>0) {print $2}
+    ' "$tmp/john-index.tsv" | sort -u)"
     [ -n "$cands" ] || continue
     while IFS= read -r cand; do
       [ -n "$cand" ] || continue

@@ -3,7 +3,10 @@ afs	AFS
 andotp	andOTP
 android-backup	androidbackup
 ansible	ansible
+apple-secure-notes	notes
 apr1	md5crypt
+axcrypt1	axcrypt
+axcrypt2-256	axcrypt
 azuread	azuread
 bcrypt	bcrypt
 bcrypt-2x	bcrypt
@@ -16,8 +19,10 @@ bks	BKS
 blockchain	blockchain
 bsdicrypt	bsdicrypt
 cisco-pix	pix-md5
+citrix	citrix_ns10
 clearquest	cq
 clipperz	Clipperz
+dahua-auth-md5	dahua
 dashlane	dashlane
 dcc2	mscash2
 descrypt	descrypt
@@ -30,9 +35,11 @@ drupal7	Drupal7
 ecryptfs	ecryptfs
 eigrp	eigrp
 electrum	electrum
+electrum-ec	electrum
 encfs	encfs
 enpass	enpass
 epi	EPI
+ethereum-presale	ethereum
 fortigate	fortigate
 fortigate256	fortigate256
 fvde	fvde
@@ -44,7 +51,9 @@ haval256-3	haval-256-3
 hmailserver	hmailserver
 hsrp	hsrp
 ipb2	ipb2
+itunes	itunes-backup
 iwork	iwork
+jks-keystore	keystore
 keccak256	raw-keccak-256
 keyring	keyring
 known-hosts	known_hosts
@@ -58,6 +67,7 @@ lastpass-cli	lpcli
 lastpass-lp	lp
 leet	leet
 lotus85	lotus85
+macos-keychain	keychain
 md2	md2
 md4	raw-md4
 md5	raw-md5
@@ -65,8 +75,11 @@ md5crypt	md5crypt
 mdc2	mdc2
 mediawiki	mediawiki
 money	money
+mozilla-nss	mozilla
 mschapv2	mschapv2
 multibit	multibit
+multibit-hd	multibit
+multibit-key	multibit
 mysql323	mysql
 mysql41	mysql-sha1
 net-ah	net-ah
@@ -83,6 +96,7 @@ office	office
 openbsd-softraid	OpenBSD-SoftRAID
 openssl-enc	openssl-enc
 openvms	OpenVMS
+oracle-o5logon	o5logon
 osc	osc
 ospf	ospf
 padlock	Padlock
@@ -94,6 +108,7 @@ pgpsda	pgpsda
 pgpwde	pgpwde
 phpass	phpass
 pkzip	pkzip
+postgres-cram	postgres
 postoffice	po
 pst	PST
 putty	putty
@@ -133,6 +148,7 @@ sybase	sybasease
 sybase-prop	Sybase-PROP
 tacacs-plus	tacacs-plus
 tcp-md5	tcp-md5
+telegram-desktop	telegram
 tezos	tezos
 tiger	Tiger
 tripcode	tripcode

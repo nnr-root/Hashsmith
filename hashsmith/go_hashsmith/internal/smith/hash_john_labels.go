@@ -144,5 +144,18 @@ func johnLabelSeed() map[string]string {
 		"ecryptfs": "ecryptfs", "bsdicrypt": "bsdicrypt", "gost": "gost",
 		"fvde": "fvde", "iwork": "iwork", "securezip": "securezip",
 		"racf": "racf", "multibit": "multibit",
+
+		// Third propose sweep, widened to also try substring-containment
+		// candidates (not just an exact or "raw-" name match) — still only
+		// ever accepted after John itself recovers the plaintext, so the
+		// wider net changes what gets TRIED, not what gets TRUSTED.
+		"apple-secure-notes": "notes", "axcrypt1": "axcrypt",
+		"axcrypt2-256": "axcrypt", "citrix": "citrix_ns10",
+		"dahua-auth-md5": "dahua", "electrum-ec": "electrum",
+		"ethereum-presale": "ethereum", "itunes": "itunes-backup",
+		"jks-keystore": "keystore", "macos-keychain": "keychain",
+		"mozilla-nss": "mozilla", "multibit-hd": "multibit",
+		"multibit-key": "multibit", "oracle-o5logon": "o5logon",
+		"postgres-cram": "postgres", "telegram-desktop": "telegram",
 	}
 }
