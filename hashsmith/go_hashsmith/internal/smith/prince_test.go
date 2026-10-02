@@ -680,7 +680,7 @@ func TestPrinceCracksMultiWordPasswordDictCannot(t *testing.T) {
 	path := writeElemFile(t, elems)
 	target := princeMD5Hex("loveyou123")
 
-	cc, err := newCrackCtx("", true, "", false, "", false, 0, 0, "", 0)
+	cc, err := newCrackCtx("", true, "", false, "", false, 0, 0, "", 0, "native")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -696,7 +696,7 @@ func TestPrinceCracksMultiWordPasswordDictCannot(t *testing.T) {
 	}
 
 	// The same list under a plain dict attack must NOT find it.
-	cc2, err := newCrackCtx("", true, "", false, "", false, 0, 0, "", 0)
+	cc2, err := newCrackCtx("", true, "", false, "", false, 0, 0, "", 0, "native")
 	if err != nil {
 		t.Fatal(err)
 	}

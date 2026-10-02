@@ -384,13 +384,14 @@ func (cc *crackCtx) resultLine(hashKey, hashField, password string) (string, boo
 
 // newCrackCtx loads the potfile (unless disabled) and any saved session. A nil
 // return is never produced — a disabled potfile simply yields a nil p.pot.
-func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool, wordlist2 string, useGPU bool, skip, limit int64, hcstat2 string, markovThreshold int) (*crackCtx, error) {
+func newCrackCtx(potPath string, noPot bool, sessName string, showOnly bool, wordlist2 string, useGPU bool, skip, limit int64, hcstat2 string, markovThreshold int, potFormat string) (*crackCtx, error) {
 	cc := &crackCtx{sessName: sessName, showOnly: showOnly, wordlist2: wordlist2, useGPU: useGPU, skip: skip, limit: limit, hcstat2: hcstat2, markovThreshold: markovThreshold}
 	if !noPot {
 		p, err := loadPotfile(potPath)
 		if err != nil {
 			return nil, err
 		}
+		p.writeFormat = potFormat
 		cc.pot = p
 		// Snapshot every plaintext already on record BEFORE this run cracks
 		// anything of its own — --loopback's potfile-sourced seed (see
@@ -615,6 +616,7 @@ func runCrack(args []string) error {
 	maskFirst := fs.Bool("mask-first", false, "hybrid mode: place the mask before the word (mask+word)")
 	potPath := fs.String("pot", "", "potfile path (default ~/.hashsmith/hashsmith.pot)")
 	noPot := fs.Bool("no-pot", false, "disable the potfile (do not read or record cracked hashes)")
+	potFormat := fs.String("potfile-format", "native", "format for NEW potfile entries this run writes: native (Hashsmith's own TAB format) or hashcat (hash:plaintext, with $HEX[] escaping); reading always accepts both regardless of this flag")
 	showOnly := fs.Bool("show", false, "print already-cracked hashes from the potfile; do not attack")
 	sessName := fs.String("session", "", "named resumable session (brute/mask/markov/hybrid/combinator/prince)")
 	restore := fs.String("restore", "", "alias for --session: resume a saved session by name")
@@ -651,6 +653,9 @@ func runCrack(args []string) error {
 	}
 	if err := checkBruteCharset(*mode, *charset); err != nil {
 		return err
+	}
+	if *potFormat != "native" && *potFormat != "hashcat" {
+		return fmt.Errorf("--potfile-format must be \"native\" or \"hashcat\", got %q", *potFormat)
 	}
 	if *skip < 0 {
 		return fmt.Errorf("--skip must not be negative (got %d)", *skip)
@@ -794,7 +799,7 @@ func runCrack(args []string) error {
 	if sn == "" {
 		sn = *restore
 	}
-	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2, *useGPU, *skip, *limit, *hcstat2Flag, *markovThreshold)
+	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2, *useGPU, *skip, *limit, *hcstat2Flag, *markovThreshold, *potFormat)
 	if err != nil {
 		return err
 	}
@@ -1855,7 +1860,7 @@ func showPotEntry(cc *crackCtx, origKey, target, explicitType, salt, saltMode, o
 func crackReport(targetHash, typ, mode, wordlist, charset string,
 	minLen, maxLen, workers int,
 	salt, saltMode, outFile string, copyResult bool, useRules bool) error {
-	cc, _ := newCrackCtx("", false, "", false, "", false, 0, 0, "", 0)
+	cc, _ := newCrackCtx("", false, "", false, "", false, 0, 0, "", 0, "native")
 	var engine *ruleEngine
 	if useRules {
 		engine = builtinRuleEngine()

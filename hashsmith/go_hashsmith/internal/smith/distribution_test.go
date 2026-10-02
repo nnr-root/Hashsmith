@@ -109,7 +109,7 @@ func TestSessionSavedWhenLimitBoundedSliceExhausts(t *testing.T) {
 	}
 
 	const sessName = "distsess-limit-test"
-	cc, err := newCrackCtx("", true, sessName, false, "", false, 0, targetIdx, "", 0) // --limit targetIdx, slice = [0, targetIdx)
+	cc, err := newCrackCtx("", true, sessName, false, "", false, 0, targetIdx, "", 0, "native") // --limit targetIdx, slice = [0, targetIdx)
 	if err != nil {
 		t.Fatalf("newCrackCtx: %v", err)
 	}

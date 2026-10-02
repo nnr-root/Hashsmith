@@ -2,6 +2,7 @@ package smith
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"runtime"
@@ -54,6 +55,7 @@ func runAuto(args []string) error {
 	maskFirst := fs.Bool("mask-first", false, "hybrid mode: place the mask before the word (mask+word)")
 	potPath := fs.String("pot", "", "potfile path (default ~/.hashsmith/hashsmith.pot)")
 	noPot := fs.Bool("no-pot", false, "disable the potfile")
+	potFormat := fs.String("potfile-format", "native", "format for NEW potfile entries this run writes: native (Hashsmith's own TAB format) or hashcat (hash:plaintext, with $HEX[] escaping); reading always accepts both regardless of this flag")
 	showOnly := fs.Bool("show", false, "print already-cracked hashes from the potfile; do not attack")
 	sessName := fs.String("session", "", "named resumable session (brute/mask/markov/hybrid/combinator/prince)")
 	restore := fs.String("restore", "", "alias for --session")
@@ -72,6 +74,9 @@ func runAuto(args []string) error {
 	}
 	if err := checkBruteCharset(*mode, *charset); err != nil {
 		return err
+	}
+	if *potFormat != "native" && *potFormat != "hashcat" {
+		return fmt.Errorf("--potfile-format must be \"native\" or \"hashcat\", got %q", *potFormat)
 	}
 
 	targets, err := gatherInputsOpts(fs.Args(), withLiteral(withSplit(targetInputOpts(), *splitSep), *literalIn))
@@ -106,7 +111,7 @@ func runAuto(args []string) error {
 	if wl2 == "" {
 		wl2 = *w2
 	}
-	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2, *useGPU, 0, 0, "", 0)
+	cc, err := newCrackCtx(*potPath, *noPot, sn, *showOnly, wl2, *useGPU, 0, 0, "", 0, *potFormat)
 	if err != nil {
 		return err
 	}
