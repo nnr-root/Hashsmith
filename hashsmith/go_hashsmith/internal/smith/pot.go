@@ -32,10 +32,37 @@ func decodeHashcatHexPlain(s string) string {
 	return s
 }
 
+// needsHashcatHexEncode reports whether plain must be $HEX[]-escaped to
+// round-trip through hashcat's colon-delimited potfile format — true for
+// any byte that would otherwise break the line's field boundaries. Measured
+// directly against the real hashcat 7.1.2 binary (2026-10-02): a colon or
+// any control byte (<0x20) triggers it; unicode and spaces do not.
+func needsHashcatHexEncode(plain string) bool {
+	for i := 0; i < len(plain); i++ {
+		if c := plain[i]; c == ':' || c < 0x20 {
+			return true
+		}
+	}
+	return false
+}
+
+func encodeHashcatHexPlain(plain string) string {
+	if !needsHashcatHexEncode(plain) {
+		return plain
+	}
+	return "$HEX[" + hex.EncodeToString([]byte(plain)) + "]"
+}
+
 type potfile struct {
 	path string
 	mu   sync.Mutex
 	seen map[string]string // targetHash -> plaintext
+	// writeFormat controls how add() appends NEW entries to disk: "" (the
+	// zero value) or "native" writes Hashsmith's own TAB format; "hashcat"
+	// writes hashcat's colon format with $HEX[] escaping. Reading (see
+	// loadPotfile) always accepts both regardless of this field — it only
+	// ever affects what this run writes next.
+	writeFormat string
 }
 
 // hashsmithDir is the per-user state directory (~/.hashsmith), holding the
@@ -200,7 +227,11 @@ func (p *potfile) add(hash, plain string) {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "%s\t%s\n", hash, plain)
+	if p.writeFormat == "hashcat" {
+		fmt.Fprintf(f, "%s:%s\n", hash, encodeHashcatHexPlain(plain))
+	} else {
+		fmt.Fprintf(f, "%s\t%s\n", hash, plain)
+	}
 }
 
 // potStaleMessage explains a potfile entry that does not belong to this

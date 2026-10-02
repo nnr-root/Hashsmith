@@ -74,3 +74,35 @@ func TestLoadPotfileHashcatFormat(t *testing.T) {
 		t.Errorf("salt-folded key: got %q ok=%v", got, ok)
 	}
 }
+
+func TestPotfileAddHashcatFormat(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "out.pot")
+	p, err := loadPotfile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.writeFormat = "hashcat"
+	p.add("5d41402abc4b2a76b9719d911017c592", "hello")   // plain — no escaping
+	p.add("7421742cb38488304149bb5332975204", "ab:cd")   // colon — must hex-escape
+	p.add("deadbeefdeadbeefdeadbeefdeadbeef", "café")    // unicode — not escaped, matches real hashcat
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "5d41402abc4b2a76b9719d911017c592:hello\n" +
+		"7421742cb38488304149bb5332975204:$HEX[61623a6364]\n" +
+		"deadbeefdeadbeefdeadbeefdeadbeef:café\n"
+	if string(raw) != want {
+		t.Fatalf("got:\n%q\nwant:\n%q", raw, want)
+	}
+
+	// Round-trips back through loadPotfile (Task 1's colon-format reader).
+	reloaded, err := loadPotfile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := reloaded.lookup("7421742cb38488304149bb5332975204"); !ok || got != "ab:cd" {
+		t.Fatalf("round-trip: got %q ok=%v", got, ok)
+	}
+}
