@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# Regenerate and verify the hashcat rule-compatibility corpus.
+# Verify the hashcat rule-compatibility corpus end-to-end.
 #
-#   scripts/rules-oracle.sh verify   # (default) compare Hashsmith against a
-#                                    # local hashcat over its stock rule files
-#   scripts/rules-oracle.sh sweep    # print per-file candidate coverage
+#   scripts/rules-oracle.sh   # compare Hashsmith against a local hashcat
+#                             # over every one of its stock rule files
+#
+# (The header here used to advertise separate "verify"/"sweep" subcommands;
+# the script never actually branched on $1 — it always ran this one sweep.
+# Comment corrected 2026-10-02 to match what the script does, not what an
+# earlier draft meant it to do.)
 #
 # The committed vectors in internal/smith/rules_hashcat_compat_test.go let CI
-# run without hashcat installed. This script is the other half: it checks those
-# vectors still describe the real hashcat, and measures end-to-end coverage
-# over every stock rule file — the number that actually matters to a user
-# pasting `-r best64.rule` from a writeup.
+# run without hashcat installed. This script is the other half: it measures
+# end-to-end candidate-for-candidate coverage over every stock rule file —
+# the number that actually matters to a user pasting `-r best64.rule` from a
+# writeup. Re-run after any change to the rule engine or operator table.
 set -euo pipefail
 export LC_ALL=C
 
