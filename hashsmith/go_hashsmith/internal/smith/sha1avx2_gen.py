@@ -44,24 +44,53 @@ YMM/chain, so N*8 <= 16 permits **N=2**, with zero registers to spare
 which is why K and W stay memory-operand-only (as MD5's already are) and
 nothing is cached in a register across steps.
 
-=== State update: renames plus two written-into-freed-register writes ===
+=== State update: a ROTATING scratch pool, not a copy ===
+(revised 2026-10-02 — see docs/superpowers/notes/2026-10-02-wp2-2-sha1-avx2-feasibility-spike.md
+for the measurement that prompted re-deriving this)
 
 Unlike MD5's pure rotation-of-labels, SHA-1's b->c transition is a REAL
-computation (ROTL30), not a free rename — see new_c above. Tracing which
-physical registers are free by the time they are needed:
-  - old_b is read for f(b,c,d) and for ROTL30(b) — both done well before
-    the round ends — so old_b's register is free and takes new_a's value
-    (Ta's final sum is written there via a plain register-to-register
-    VMOVDQU, the one copy this generator needs per round — MD5 and
-    SHA-256 both avoid this entirely via pure relabeling, but SHA-1's
-    extra computed value (new_c) makes one copy unavoidable here).
-  - old_e is read once (the "+e" add) and then never again — its register
-    is free and takes new_c's value (Tf's final ROTL30(b) result), via a
-    second VMOVDQU.
-  - old_a, old_c, old_d are each read exactly once (for ROTL5(a), for
-    f(b,c,d)'s c operand, for f(b,c,d)/new_e's d operand respectively) and
-    never written — they become new_b, new_d, new_e purely by relabeling,
-    same principle as md5avx2_gen.py's chain_block reordering.
+computation (ROTL30), not a free rename — see new_c above. An earlier
+version of this generator kept Ta/Tb/Tf as three FIXED physical registers
+every round, distinct from the 5 state registers, and consolidated each
+round's two computed values (new_a, new_c) into the freed-up old b/e
+registers via two `VMOVDQU` copies — reasoning that MD5/SHA-256 avoid any
+copy via pure relabeling, so SHA-1's extra computed value made "one copy"
+feel unavoidable. That reasoning mixed up two different things: needing a
+register to HOLD the new value (true) and needing to COPY it into a
+specific, pre-chosen register (not true).
+
+This generator is a Python script fully unrolling 80 static rounds — there
+is no runtime reason the physical register playing "the b register" must
+be the same one every round. Tracing liveness precisely: by the time Ta
+finishes accumulating new_a's final sum, old_b's physical register is
+NOT yet free (ROTL30(b), later in the same round, still needs to read it)
+— so the copy felt forced if you insist on consolidating into old b's slot.
+But nothing requires that consolidation. Once old_b and old_e are read for
+the last time this round, their registers simply BECOME the next round's
+free scratch pool, and Ta/Tf (which already hold new_a/new_c by
+construction, as a side effect of the arithmetic that built them) just
+BECOME the next round's "a" and "c" state registers — a relabel, exactly
+like MD5/SHA-256's, just one round later than the other three:
+  - old_a, old_c, old_d are each read exactly once (ROTL5(a)'s input,
+    f(b,c,d)'s c operand, f(b,c,d)/new_e's d operand) and never written —
+    they become new_b, new_d, new_e purely by relabeling, unchanged from
+    before.
+  - new_a's home is whichever register was handed to this round as a
+    free scratch slot and used to build Ta — it simply continues to BE
+    new_a's register for the next round, no VMOVDQU.
+  - new_c's home is the free slot used to build Tf — same thing.
+  - old_b and old_e's registers, no longer referenced by anything, become
+    two of the next round's three free slots (joining Tb, which was
+    always transient). The free pool rotates: {Ta,Tb,Tf} this round ->
+    {old_b, old_e, Tb} next round -> ... — never the same three physical
+    registers twice in a row, but always exactly 3, so the total budget
+    (5 state + 3 free = 8/chain) is unchanged and N=2 still fits 16 YMM
+    exactly.
+
+Net effect: 2 fewer instructions per round (no `VMOVDQU` pair), 80 rounds,
+2 chains per N=2 call — 320 fewer instructions per 16-lane compression,
+for the identical arithmetic result (the differential tests below are
+what actually proves that, not this derivation).
 
 Regenerate with: `python3 sha1avx2_gen.py` from this directory. Do not
 hand-edit sha1avx2_amd64.s — edit this file and regenerate instead.
@@ -82,15 +111,19 @@ def round_kind(step):
     return 'parity'
 
 
-def round_block(step, regs, scratch, msg_reg, kvec_reg):
-    """regs is [a,b,c,d,e]. scratch is [Ta, Tf, Tb]. Returns (lines,
-    new_regs): new_regs is the [a,b,c,d,e] register-role list for the NEXT
-    round, per the module docstring's liveness trace (new_a written into
-    old b's register, new_c written into old e's register, the other three
-    are pure relabels of a, c, d).
+def round_block(step, regs, free, msg_reg, kvec_reg):
+    """regs is [a,b,c,d,e]. free is this round's 3 available scratch
+    registers (their physical identity rotates round to round — see the
+    module docstring). Returns (lines, new_regs, new_free): new_regs is
+    the [a,b,c,d,e] register-role list for the NEXT round (new_a/new_c
+    land in two of THIS round's free registers, used as accumulators
+    directly — no copy; new_b/new_d/new_e are pure relabels of old
+    a/c/d). new_free is the NEXT round's 3 free registers: old b, old e
+    (no longer referenced once this round's last read of each completes),
+    plus Tb (always transient).
     """
     a, b, c, d, e = regs
-    Ta, Tf, Tb = scratch
+    Ta, Tb, Tf = free
     woff = step * LANES * 4
     koff = step * LANES * 4
     kind = round_kind(step)
@@ -124,16 +157,16 @@ def round_block(step, regs, scratch, msg_reg, kvec_reg):
     lines.append('\tVPSRLD $2, %s, %s' % (b, Tf))
     lines.append('\tVPSLLD $30, %s, %s' % (b, Tb))
     lines.append('\tVPOR %s, %s, %s' % (Tb, Tf, Tf))
-
-    # Commit the two computed values into the registers that are free by
-    # now: new_a into old b's slot, new_c into old e's slot.
-    lines.append('\tVMOVDQU %s, %s' % (Ta, b))
-    lines.append('\tVMOVDQU %s, %s' % (Tf, e))
     lines.append('')
 
-    new_regs = [b, a, e, c, d]  # new_a=b's reg, new_b=old a (relabel),
-    # new_c=e's reg, new_d=old c (relabel), new_e=old d (relabel)
-    return lines, new_regs
+    # No copy: Ta and Tf already hold new_a/new_c by construction and simply
+    # BECOME the next round's a/c registers. old b and old e are read for
+    # the last time above (f(b,c,d) / ROTL30(b), and the "+e" add,
+    # respectively) and now join Tb as the next round's free pool.
+    new_regs = [Ta, a, Tf, c, d]  # new_a=Ta, new_b=old a (relabel),
+    # new_c=Tf, new_d=old c (relabel), new_e=old d (relabel)
+    new_free = [b, e, Tb]
+    return lines, new_regs, new_free
 
 
 HEADER = '''// Code generated by sha1avx2_gen.py. DO NOT EDIT BY HAND — edit
@@ -168,12 +201,15 @@ def generate(n, funcname, outpath):
     assert 3 * n + 1 <= len(GPR_POOL), 'too many chains for available GPRs'
 
     ymm_pool = list(range(16))
-    chains = []  # per chain: [state[5], scratch[3]]
+    chains = []  # per chain: [state[5], free[3]] — free's physical
+    # identity rotates every round (see module docstring); only its
+    # starting assignment is arbitrary (any 3 of the chain's 8 registers
+    # not used as the initial state will do).
     for c in range(n):
         base = ymm_pool[c * 8:(c + 1) * 8]
         state = ['Y%d' % r for r in base[0:5]]
-        scratch = ['Y%d' % r for r in base[5:8]]
-        chains.append([state, scratch])
+        free = ['Y%d' % r for r in base[5:8]]
+        chains.append([state, free])
 
     out_regs = GPR_POOL[0:n]
     msg_regs = GPR_POOL[n:2 * n]
@@ -193,22 +229,22 @@ def generate(n, funcname, outpath):
 
     load_state = []
     for c in range(n):
-        state, _scratch = chains[c]
+        state, _free = chains[c]
         for w in range(5):
             load_state.append('\tVMOVDQU %d(%s), %s' % (w * LANES * 4, iv_regs[c], state[w]))
 
     lines = []
     for step in range(80):
         for c in range(n):
-            state, scratch = chains[c]
-            blk, new_regs = round_block(step, state, scratch, msg_regs[c], kvec_reg)
+            state, free = chains[c]
+            blk, new_regs, new_free = round_block(step, state, free, msg_regs[c], kvec_reg)
             lines += blk
-            chains[c][0] = new_regs
+            chains[c] = [new_regs, new_free]
     body = '\n'.join(lines)
 
     footer_lines = []
     for c in range(n):
-        state, _scratch = chains[c]
+        state, _free = chains[c]
         for w in range(5):
             footer_lines.append('\tVPADDD %d(%s), %s, %s' % (w * LANES * 4, iv_regs[c], state[w], state[w]))
         for w in range(5):
