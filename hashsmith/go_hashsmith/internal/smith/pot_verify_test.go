@@ -82,3 +82,17 @@ func TestPotfileHitIsVerifiedAgainstTheSaltAsked(t *testing.T) {
 		t.Fatalf("the other side of the plaintext: status = %v, want potStale", status)
 	}
 }
+
+// Simulates an imported hashcat -m 10 (md5($pass.$salt)) entry, whose
+// potfile key has the salt folded in via hashcat's own colon join —
+// Hashsmith's own -s flag passes salt separately, so the plain target
+// alone won't find it without the fallback this test pins.
+func TestVerifiedPlainSaltFoldedFallback(t *testing.T) {
+	p := &potfile{seen: map[string]string{
+		"8e8327204e54d58ce328098b38200580:abc123": "secretpw",
+	}}
+	plain, status := p.verifiedPlain("8e8327204e54d58ce328098b38200580", "md5", "abc123", "suffix")
+	if status != potVerified || plain != "secretpw" {
+		t.Fatalf("got plain=%q status=%v, want potVerified/secretpw", plain, status)
+	}
+}

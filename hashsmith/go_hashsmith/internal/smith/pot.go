@@ -123,6 +123,13 @@ const (
 
 func (p *potfile) verifiedPlain(target, explicitType, salt, saltMode string) (string, potHitStatus) {
 	plain, found := p.lookup(target)
+	if !found && salt != "" {
+		// hashcat's own salted-mode potfile convention folds the salt into
+		// the key via a colon join (e.g. "hash:salt"); Hashsmith's -s/-S
+		// flags pass salt separately instead, so an imported hashcat entry
+		// for a salted mode is only reachable through this composite key.
+		plain, found = p.lookup(target + ":" + salt)
+	}
 	if !found {
 		return "", potMiss
 	}
