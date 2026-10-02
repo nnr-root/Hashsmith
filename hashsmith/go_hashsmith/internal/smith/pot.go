@@ -7,12 +7,30 @@ package smith
 
 import (
 	"bufio"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 )
+
+// decodeHashcatHexPlain reverses hashcat's own potfile escaping: a plaintext
+// that was written as $HEX[<lowercase hex>] decodes back to its raw bytes.
+// Anything else — including a plaintext that merely LOOKS like $HEX[...]
+// but isn't valid hex inside the brackets — is returned unchanged. This is
+// hashcat's own real, inherited ambiguity (a literal password "$HEX[zz]" is
+// genuinely indistinguishable from an escaped one), reproduced here rather
+// than "fixed", because the goal is reading a real hashcat potfile exactly
+// as hashcat itself would, not inventing a stricter format of our own.
+func decodeHashcatHexPlain(s string) string {
+	if len(s) >= len("$HEX[]") && strings.HasPrefix(s, "$HEX[") && strings.HasSuffix(s, "]") {
+		if b, err := hex.DecodeString(s[5 : len(s)-1]); err == nil {
+			return string(b)
+		}
+	}
+	return s
+}
 
 type potfile struct {
 	path string
@@ -51,7 +69,16 @@ func loadPotfile(path string) (*potfile, error) {
 	for sc.Scan() {
 		line := sc.Text()
 		if i := strings.IndexByte(line, '\t'); i > 0 {
+			// Hashsmith's own native format.
 			p.seen[line[:i]] = line[i+1:]
+			continue
+		}
+		// A hashcat-format line has no TAB: hash[:field...]:plaintext, split
+		// on the LAST colon so a key that itself contains colons (a salted
+		// mode's hash:salt, NetNTLMv2, Kerberos) is preserved whole rather
+		// than mis-split.
+		if i := strings.LastIndexByte(line, ':'); i > 0 {
+			p.seen[line[:i]] = decodeHashcatHexPlain(line[i+1:])
 		}
 	}
 	return p, sc.Err()
