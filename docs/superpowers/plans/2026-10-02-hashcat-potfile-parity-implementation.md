@@ -35,7 +35,7 @@
 - Test: `internal/smith/pot_test.go`
 
 **Interfaces:**
-- Produces: `decodeHashcatHexPlain(s string) string`, `encodeHashcatHexPlain(plain string) string`, `needsHashcatHexEncode(plain string) bool` — Task 2 and Task 3 call these.
+- Produces: `decodeHashcatHexPlain(s string) string` — Task 3's round-trip test calls this indirectly via `loadPotfile`. (The write-side `encodeHashcatHexPlain`/`needsHashcatHexEncode` are Task 3's own deliverable, not this task's — corrected 2026-10-02 after the Task 1 review flagged this line as over-claiming.)
 - Produces: `loadPotfile` now also populates `seen` from colon-format lines (no signature change).
 
 - [ ] **Step 1: Write the failing tests**
