@@ -480,7 +480,7 @@ jobs:
         if: matrix.arch == 'amd64'
         run: |
           cd hashsmith/go_hashsmith
-          go test -run '^$' -bench 'BenchmarkSHA256ScheduleExpansionScalarX8|BenchmarkSHA256CompressAVX2GroupOnly|BenchmarkSHA1ScheduleExpansionScalarX16|BenchmarkSHA1CompressAVX2GroupOnly|BenchmarkSHA512ScheduleExpansionScalarX4|BenchmarkSHA512CompressAVX2GroupOnly' \
+          go test -run '^$' -bench 'BenchmarkSHA256ScheduleExpansionScalarX8|BenchmarkSHA256CompressAVX2GroupOnly|BenchmarkSHA1ScheduleExpansionScalarX16|BenchmarkSHA1CompressAVX2GroupOnly|BenchmarkSHA1CompressAVX2GroupOnlyOld|BenchmarkSHA512ScheduleExpansionScalarX4|BenchmarkSHA512CompressAVX2GroupOnly' \
             -benchtime 2s -count 3 -cpu 1 ./internal/smith
 
   slow-vectors:
