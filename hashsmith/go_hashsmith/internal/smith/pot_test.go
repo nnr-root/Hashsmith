@@ -82,9 +82,9 @@ func TestPotfileAddHashcatFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.writeFormat = "hashcat"
-	p.add("5d41402abc4b2a76b9719d911017c592", "hello")   // plain — no escaping
-	p.add("7421742cb38488304149bb5332975204", "ab:cd")   // colon — must hex-escape
-	p.add("deadbeefdeadbeefdeadbeefdeadbeef", "café")    // unicode — not escaped, matches real hashcat
+	p.add("5d41402abc4b2a76b9719d911017c592", "hello") // plain — no escaping
+	p.add("7421742cb38488304149bb5332975204", "ab:cd") // colon — must hex-escape
+	p.add("deadbeefdeadbeefdeadbeefdeadbeef", "café")  // unicode — not escaped, matches real hashcat
 
 	raw, err := os.ReadFile(path)
 	if err != nil {

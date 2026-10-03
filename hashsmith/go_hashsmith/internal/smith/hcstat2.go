@@ -17,9 +17,9 @@ import (
 // against a real file produced by hashcat-utils' own hcstat2gen.c, not
 // assumed from documentation.
 const (
-	hcstat2CharSize = 256
-	hcstat2PWMax    = 256
-	hcstat2RootCnt  = hcstat2PWMax * hcstat2CharSize
+	hcstat2CharSize  = 256
+	hcstat2PWMax     = 256
+	hcstat2RootCnt   = hcstat2PWMax * hcstat2CharSize
 	hcstat2MarkovCnt = hcstat2PWMax * hcstat2CharSize * hcstat2CharSize
 	// hcstat2FileSize is the exact decompressed size: two 8-byte header
 	// words (magic + zero padding) plus the root and markov tables, each
