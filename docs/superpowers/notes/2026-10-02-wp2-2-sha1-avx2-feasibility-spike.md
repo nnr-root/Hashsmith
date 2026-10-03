@@ -104,13 +104,51 @@ hardware is closer to a safe baseline assumption. Any AVX-512 core would
 need its own runtime CPUID gate and AVX2 fallback, mirroring how SHA-NI
 detection already works here.
 
-## Disposition — not decided here, left for the next session to choose
+## Update 2026-10-03: the copy-elimination idea was tried, measured, and kept
 
-This spike stops at: current numbers reconfirmed, root cause re-derived
-from source (not assumed), and one concrete, differently-shaped idea
-surfaced with its real tradeoff named. No implementation was attempted —
-per the "feasibility spike, not a commitment" instruction this was scoped
-under. The next real decision (continue AVX2 tuning / spike AVX-512 /
-leave SHA-1 at its current documented-open state, same disposition as
-scrypt) is the user's to make, same as every prior AskUserQuestion fork
-point in this project's history.
+The "rotating free-register pool instead of a fixed one" idea above turned
+out to be directly actionable without touching the register budget at all
+— see commit `34c7426`: `sha1avx2_gen.py` revised so `Ta`/`Tf` (which
+already hold `new_a`/`new_c` by construction) simply become the next
+round's `a`/`c` registers instead of being copied into the registers freed
+by old `b`/`e`. Same 8 YMM/chain budget, N=2 still fits 16 YMM, zero new
+registers — just better bookkeeping in a fully-unrolled static generator
+that never needed the copy in the first place.
+
+**Measured properly, not assumed.** Two CI runs immediately after showed
+SHA-1 compression getting RELATIVELY worse against SHA-256/512's own
+numbers on the same run — the opposite of expected — but those two runs
+landed on a different EPYC model (7763) than the original baseline (9V74),
+and SHA-256/512 themselves were measurably slower on 7763 too. Comparing
+across different runs on different physical machines isn't rigorous
+enough to separate a real regression from cross-model noise, so a
+same-job, same-machine, same-input controlled A/B was built: the pre-fix
+core extracted verbatim from git history under a throwaway name
+(`sha1g16AVX2Old`), benchmarked in the exact same CI invocation as the
+post-fix core. Result, AMD EPYC 7763, same run:
+
+```
+BenchmarkSHA1CompressAVX2GroupOnly       (post-fix)  2732-2781 ns/op
+BenchmarkSHA1CompressAVX2GroupOnlyOld    (pre-fix)   2812-2855 ns/op
+```
+
+**The fix is real: ~1.5% faster, consistently, same machine.** Far smaller
+than the 13% instruction-count reduction (2 of ~15 instructions/round)
+might suggest — the most likely explanation is that modern AMD cores
+already handle register-to-register `VMOVDQU` via renaming at
+near-zero added latency, so removing it helps only at the margins (decode/
+retire bandwidth), not execution ports. Kept — it's a real, free,
+zero-risk win with full differential-test coverage — but it does not
+meaningfully close the ~19-20% gap against stdlib on its own. The
+AVX-512 question above remains the real lever, still undecided, still
+the next session's call. (Throwaway A/B scaffolding and the temporary
+CI benchmark-regex addition used to produce the numbers above were
+removed in the same commit sequence, per their own stated purpose.)
+
+## Disposition
+
+The register-rotation micro-optimization above is shipped and kept — real,
+measured, modest. The bigger question (AVX-512 vs. continued AVX2 tuning
+vs. leaving the remaining gap documented-open, same disposition as scrypt)
+is still the next real decision point, same as every prior AskUserQuestion
+fork point in this project's history.
