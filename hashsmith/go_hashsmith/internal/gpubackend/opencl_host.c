@@ -146,7 +146,7 @@ int hs_ocl_md5_batch(void *c, const uint8_t *data, const uint32_t *offsets, int 
 void hs_ocl_free(void *c) {
     hs_ocl *h = (hs_ocl *)c;
     if (!h) return;
-    for (int i = 0; i < 9; i++) if (h->kernels[i]) clReleaseKernel(h->kernels[i]);
+    for (int i = 0; i < 10; i++) if (h->kernels[i]) clReleaseKernel(h->kernels[i]);
     if (h->prog) clReleaseProgram(h->prog);
     if (h->queue) clReleaseCommandQueue(h->queue);
     if (h->ctx) clReleaseContext(h->ctx);
