@@ -142,6 +142,10 @@ func Main() {
 		if err := runWorker(rest); err != nil {
 			fail(err.Error())
 		}
+	case "coordinate":
+		if err := runCoordinate(rest); err != nil {
+			fail(err.Error())
+		}
 	case "magic":
 		if err := runMagic(rest); err != nil {
 			fail(err.Error())
