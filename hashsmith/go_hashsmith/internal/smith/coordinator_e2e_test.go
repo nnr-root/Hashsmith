@@ -1,22 +1,32 @@
 package smith
 
 import (
+	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
 // TestCoordinatorEndToEndFindsAcrossThreeWorkers exercises the whole
 // pipeline: real keyspace computation, real chunk splitting, three real
 // HTTP servers each running real executeCrack calls, a real pull-based
-// race to find the one chunk containing the password.
+// race to find the one chunk containing the password. Concurrency is
+// exercised in chunk-pulling and HTTP dispatch across worker goroutines,
+// not in parallel crack execution (workerMu serializes per-worker execution).
 func TestCoordinatorEndToEndFindsAcrossThreeWorkers(t *testing.T) {
 	const token = "e2e-test-token"
-	var servers []*httptest.Server
+	counts := make([]int64, 3)
 	var urls []string
 	for i := 0; i < 3; i++ {
-		srv := httptest.NewServer(chunkHandler(token))
+		idx := i // avoid loop-variable capture
+		wrapped := func(h http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt64(&counts[idx], 1)
+				h.ServeHTTP(w, r)
+			})
+		}(chunkHandler(token))
+		srv := httptest.NewServer(wrapped)
 		defer srv.Close()
-		servers = append(servers, srv)
 		urls = append(urls, srv.URL)
 	}
 
@@ -40,6 +50,16 @@ func TestCoordinatorEndToEndFindsAcrossThreeWorkers(t *testing.T) {
 	if !result.found || result.password != "zz" {
 		t.Fatalf("got %+v, want found=true password=zz", result)
 	}
+
+	participating := 0
+	for i := range counts {
+		if atomic.LoadInt64(&counts[i]) > 0 {
+			participating++
+		}
+	}
+	if participating < 2 {
+		t.Fatalf("got %d workers contacted (%v), want at least 2 -- distribution did not actually spread across workers", participating, counts)
+	}
 }
 
 // TestCoordinatorEndToEndWrongTokenWorkerIsSkippedButOthersSucceed proves
@@ -49,7 +69,13 @@ func TestCoordinatorEndToEndFindsAcrossThreeWorkers(t *testing.T) {
 func TestCoordinatorEndToEndWrongTokenWorkerIsSkippedButOthersSucceed(t *testing.T) {
 	srvRight := httptest.NewServer(chunkHandler("right-token"))
 	defer srvRight.Close()
-	srvWrong := httptest.NewServer(chunkHandler("different-token-on-this-one"))
+
+	var wrongCount int64
+	wrongHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&wrongCount, 1)
+		chunkHandler("different-token-on-this-one").ServeHTTP(w, r)
+	})
+	srvWrong := httptest.NewServer(wrongHandler)
 	defer srvWrong.Close()
 
 	target := md5hex("zz")
@@ -66,5 +92,9 @@ func TestCoordinatorEndToEndWrongTokenWorkerIsSkippedButOthersSucceed(t *testing
 	result := runCoordinatorLoop([]string{srvRight.URL, srvWrong.URL}, "right-token", base, queue)
 	if !result.found || result.password != "zz" {
 		t.Fatalf("got %+v, want found=true password=zz (via the correctly-tokened worker)", result)
+	}
+
+	if got := atomic.LoadInt64(&wrongCount); got != 1 {
+		t.Fatalf("got %d requests to the wrong-token worker, want exactly 1 -- it must be contacted once (proving it wasn't silently skipped) and never retried after its 401 (proving immediate-drop-on-401, not the N-retry path used for transient failures)", got)
 	}
 }
