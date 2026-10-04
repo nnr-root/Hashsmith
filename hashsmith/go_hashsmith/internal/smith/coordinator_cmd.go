@@ -27,7 +27,7 @@ func runCoordinate(args []string) error {
 	workersFlag := fs.String("workers", "", "comma-separated worker URLs, e.g. http://host1:8745,http://host2:8745")
 	token := fs.String("token", "", "shared-secret token (must match every worker's --token)")
 	chunkSize := fs.Int64("chunk-size", 0, "candidates per chunk; required, no default -- there is no safe universal size across hash types whose speed differs by many orders of magnitude. Run `hashsmith benchmark -t <type>` first and pick roughly (seconds per chunk you want) x (that rate)")
-	if err := fs.Parse(args); err != nil {
+	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
 
@@ -63,7 +63,7 @@ func runCoordinate(args []string) error {
 
 	chunks := splitKeyspace(total, *chunkSize)
 	if len(chunks) == 0 {
-		fmt.Println("Not found")
+		fmt.Fprintln(os.Stderr, "Not found")
 		exitCode = 1
 		return nil
 	}
@@ -71,13 +71,14 @@ func runCoordinate(args []string) error {
 	result := runCoordinatorLoop(workerURLs, *token, base, queue)
 	switch {
 	case result.found:
-		fmt.Printf("Found: %s\n", result.password)
+		emitStdoutResult(nil, target, result.password)
+		fmt.Fprintf(os.Stderr, "Found: %s\n", result.password)
 		exitCode = 0
 	case result.incomplete:
 		fmt.Fprintln(os.Stderr, "Error: every worker failed before the keyspace was fully covered -- this is NOT a confirmed \"not found\"")
 		exitCode = 2
 	default:
-		fmt.Println("Not found")
+		fmt.Fprintln(os.Stderr, "Not found")
 		exitCode = 1
 	}
 	return nil
