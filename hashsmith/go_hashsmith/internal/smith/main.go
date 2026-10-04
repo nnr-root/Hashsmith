@@ -138,6 +138,10 @@ func Main() {
 		if err := runGPUInfo(rest); err != nil {
 			fail(err.Error())
 		}
+	case "worker":
+		if err := runWorker(rest); err != nil {
+			fail(err.Error())
+		}
 	case "magic":
 		if err := runMagic(rest); err != nil {
 			fail(err.Error())
