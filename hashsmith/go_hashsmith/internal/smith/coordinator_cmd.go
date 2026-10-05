@@ -23,7 +23,7 @@ func runCoordinate(args []string) error {
 	maxLen := fs.Int("x", 4, "max length (mode brute)")
 	wordlist := fs.String("w", "", "wordlist path (mode dict; must exist at this exact path on every worker)")
 	salt := fs.String("s", "", "salt")
-	saltMode := fs.String("S", "prefix", "salt mode: prefix|suffix")
+	saltModeFlag := fs.String("S", "prefix", "salt mode: prefix|suffix")
 	workersFlag := fs.String("workers", "", "comma-separated worker URLs, e.g. http://host1:8745,http://host2:8745")
 	token := fs.String("token", "", "shared-secret token (must match every worker's --token)")
 	chunkSize := fs.Int64("chunk-size", 0, "candidates per chunk; required, no default -- there is no safe universal size across hash types whose speed differs by many orders of magnitude. Run `hashsmith benchmark -t <type>` first and pick roughly (seconds per chunk you want) x (that rate)")
@@ -55,8 +55,12 @@ func runCoordinate(args []string) error {
 		return err
 	}
 
+	saltMode := ""
+	if *salt != "" {
+		saltMode = *saltModeFlag
+	}
 	base := chunkRequest{
-		Type: *typ, Target: target, Salt: *salt, SaltMode: *saltMode, Mode: *mode,
+		Type: *typ, Target: target, Salt: *salt, SaltMode: saltMode, Mode: *mode,
 		Mask: *mask, Charset1: *cs1, Charset2: *cs2, Charset3: *cs3, Charset4: *cs4,
 		Charset: *charset, MinLen: *minLen, MaxLen: *maxLen, Wordlist: *wordlist,
 	}
@@ -74,6 +78,9 @@ func runCoordinate(args []string) error {
 		emitStdoutResult(nil, target, result.password)
 		fmt.Fprintf(os.Stderr, "Found: %s\n", result.password)
 		exitCode = 0
+	case result.aborted:
+		fmt.Fprintf(os.Stderr, "Error: %s\n", result.abortErr)
+		exitCode = 2
 	case result.incomplete:
 		fmt.Fprintln(os.Stderr, "Error: every worker failed before the keyspace was fully covered -- this is NOT a confirmed \"not found\"")
 		exitCode = 2

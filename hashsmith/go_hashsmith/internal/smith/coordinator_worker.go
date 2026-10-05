@@ -1,6 +1,7 @@
 package smith
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -66,7 +67,7 @@ func executeCrack(args []string, outFile string) (chunkResponse, error) {
 // shared-secret token every request must carry in X-Hashsmith-Token.
 func chunkHandler(token string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Hashsmith-Token") != token {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Hashsmith-Token")), []byte(token)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -104,7 +105,7 @@ func runWorker(args []string) error {
 	fs := flag.NewFlagSet("worker", flag.ContinueOnError)
 	listen := fs.String("listen", ":8745", "address to listen on")
 	token := fs.String("token", "", "shared-secret token required on every request (must match the coordinator's --token)")
-	if err := fs.Parse(args); err != nil {
+	if err := parseArgsFlexible(fs, args); err != nil {
 		return err
 	}
 	if *token == "" {

@@ -17,7 +17,9 @@ import (
 type coordResult struct {
 	found      bool
 	password   string
-	incomplete bool // true: the queue never fully drained because every worker assigned to its remaining chunks failed
+	incomplete bool   // true: the queue never fully drained because every worker assigned to its remaining chunks failed
+	aborted    bool   // true: the same chunk returned a 400/500 twice -- a protocol/crack-setup bug, not a normal not-found
+	abortErr   string // set when aborted is true, the human-readable reason
 }
 
 // maxWorkerFailures: after this many CONSECUTIVE failures (timeouts,
@@ -28,6 +30,20 @@ type coordResult struct {
 const maxWorkerFailures = 3
 
 var errUnauthorized = errors.New("worker rejected token (401)")
+
+// protocolError marks a 400/500 response as a deterministic protocol or
+// crack-setup failure (malformed request, bad -t, bad wordlist path) --
+// per the design spec, this is NOT a transient failure like a timeout; a
+// chunk that fails this way will fail identically on every worker, so
+// retrying it forever (the generic failure path) would hang the run.
+type protocolError struct {
+	status int
+	body   string
+}
+
+func (e *protocolError) Error() string {
+	return fmt.Sprintf("worker returned %d: %s", e.status, e.body)
+}
 
 // postChunk sends one chunk to one worker and returns its result, or an
 // error for anything that is not a clean 200 (including the 401 case,
@@ -54,7 +70,11 @@ func postChunk(client *http.Client, url, token string, req chunkRequest) (chunkR
 	}
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return chunkResponse{}, fmt.Errorf("worker returned %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		body := strings.TrimSpace(string(b))
+		if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusInternalServerError {
+			return chunkResponse{}, &protocolError{status: resp.StatusCode, body: body}
+		}
+		return chunkResponse{}, fmt.Errorf("worker returned %d: %s", resp.StatusCode, body)
 	}
 	var out chunkResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -71,10 +91,12 @@ func postChunk(client *http.Client, url, token string, req chunkRequest) (chunkR
 // chunk.
 func runCoordinatorLoop(workerURLs []string, token string, base chunkRequest, queue *chunkQueue) coordResult {
 	var (
-		mu     sync.Mutex
-		result coordResult
-		found  bool
-		wg     sync.WaitGroup
+		mu            sync.Mutex
+		result        coordResult
+		found         bool
+		aborted       bool
+		protocolTries = make(map[chunkRange]int)
+		wg            sync.WaitGroup
 	)
 	doneOnce := sync.Once{}
 	done := make(chan struct{})
@@ -99,6 +121,26 @@ func runCoordinatorLoop(workerURLs []string, token string, base chunkRequest, qu
 				req.Skip, req.Limit = chunk.skip, chunk.limit
 				resp, err := postChunk(client, url, token, req)
 				if err != nil {
+					var perr *protocolError
+					if errors.As(err, &perr) {
+						mu.Lock()
+						protocolTries[chunk]++
+						tries := protocolTries[chunk]
+						mu.Unlock()
+						if tries >= 2 {
+							mu.Lock()
+							if !found && !aborted {
+								aborted = true
+								result = coordResult{aborted: true, abortErr: fmt.Sprintf("chunk {skip:%d limit:%d} failed again with the same protocol/crack error (%v) -- this is a deterministic bug (malformed request or bad crack setup), not a transient failure, so the run is aborting rather than retrying forever", chunk.skip, chunk.limit, perr)}
+							}
+							mu.Unlock()
+							doneOnce.Do(func() { close(done) })
+							return
+						}
+						fmt.Fprintf(os.Stderr, "worker %s: chunk {skip:%d limit:%d} returned a protocol/crack error (%v) -- requeuing once\n", url, chunk.skip, chunk.limit, perr)
+						queue.requeue(chunk)
+						continue
+					}
 					queue.requeue(chunk)
 					if errors.Is(err, errUnauthorized) {
 						fmt.Fprintf(os.Stderr, "worker %s: rejected token, dropping this worker\n", url)
@@ -130,6 +172,9 @@ func runCoordinatorLoop(workerURLs []string, token string, base chunkRequest, qu
 	mu.Lock()
 	defer mu.Unlock()
 	if found {
+		return result
+	}
+	if aborted {
 		return result
 	}
 	if _, stillQueued := queue.next(); stillQueued {

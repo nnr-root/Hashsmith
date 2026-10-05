@@ -132,3 +132,27 @@ func TestRunCoordinateTargetFirstArgOrdering(t *testing.T) {
 		t.Fatalf("stdout = %q, want %q (target-first ordering must still parse and find it)", out, want)
 	}
 }
+
+// TestRunCoordinateAbortsOnRepeatedProtocolError confirms a worker that
+// keeps returning 400 (a deterministic protocol/crack-setup bug, not a
+// transient failure) makes coordinate abort with exit code 2 rather than
+// retrying forever or reporting a false "not found".
+func TestRunCoordinateAbortsOnRepeatedProtocolError(t *testing.T) {
+	preserveExitCode(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad mode", http.StatusBadRequest)
+	}))
+	t.Cleanup(srv.Close)
+
+	args := []string{
+		"-t", "md5", "-M", "mask", "--mask", "?l?l",
+		"--workers", srv.URL, "--token", "t", "--chunk-size", "1000",
+		"0000000000000000000000000000000000",
+	}
+	if err := runCoordinate(args); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if exitCode != 2 {
+		t.Fatalf("exitCode = %d, want 2 (aborted, not a confirmed not-found)", exitCode)
+	}
+}

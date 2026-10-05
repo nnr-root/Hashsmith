@@ -88,3 +88,21 @@ func TestRunCoordinatorLoopAllWorkersDeadIsIncomplete(t *testing.T) {
 		t.Fatalf("got %+v, want incomplete=true", result)
 	}
 }
+
+func TestRunCoordinatorLoopAbortsOnRepeatedProtocolError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad mode", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	queue := newChunkQueue([]chunkRange{{skip: 0, limit: 10}})
+	base := chunkRequest{Type: "md5", Target: "x", Mode: "mask", Mask: "?l"}
+
+	result := runCoordinatorLoop([]string{srv.URL}, "t", base, queue)
+	if !result.aborted {
+		t.Fatalf("got %+v, want aborted=true", result)
+	}
+	if result.abortErr == "" {
+		t.Fatal("want a non-empty abortErr message")
+	}
+}
